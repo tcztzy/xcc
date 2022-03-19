@@ -1,0 +1,7 @@
+[project]
+name = "xcc"
+version = "0.0.0"
+description = "XCC Compiler Collection"
+[build-system]
+requires = ["pyproject-toml == 0.0.10"]
+build-backend = "pyproject_toml.build_system.build_backend"
