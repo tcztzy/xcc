@@ -1,0 +1,14 @@
+FROM python:3.11-alpine
+
+RUN apk add --no-cache \
+        build-base \
+        ca-certificates \
+        clang \
+        mold \
+        musl-dev \
+        pkgconf \
+        py3-coverage
+
+WORKDIR /work
+
+CMD ["tail", "-f", "/dev/null"]

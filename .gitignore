@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local tool state
+.tox/
+.ruff_cache/
+.uv-cache/
+.coverage
+
+# MkDocs build output
+site/
+
+# Local cached specs (not versioned)
+docs/_sources/
+
+# macOS
+.DS_Store

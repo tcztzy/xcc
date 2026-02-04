@@ -1,0 +1,110 @@
+[project]
+name = "xcc"
+version = "0.1.0"
+description = "A C11 compiler in Python targeting CPython."
+readme = "README.md"
+authors = [
+    { name = "Tang Ziya", email = "tcztzy@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+xcc = "xcc:main"
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "coverage>=7.13.3",
+    "ruff>=0.14.14",
+    "tox>=4.34.1",
+    "tox-docker>=5.0.0",
+    "tox-uv>=1.29.0",
+    "ty>=0.0.14",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+extend-exclude = ["docs/_sources", "site"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.src]
+include = ["src"]
+exclude = [
+    ".tox/**",
+    ".venv/**",
+    "build/**",
+    "dist/**",
+    "docs/_sources/**",
+    "site/**",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+parallel = false
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100
+skip_covered = false
+omit = [
+    "tests/*",
+]
+
+[tool.tox]
+requires = ["tox>=4.34.1", "tox-docker>=5.0.0"]
+env_list = ["py311", "py312", "py313", "pypy311", "lint", "type"]
+skip_missing_interpreters = true
+
+[tool.tox.env_run_base]
+description = "Run unit tests"
+commands = [["coverage", "run", "-m", "unittest", "discover", "-v"], ["coverage", "report", "--fail-under=100"]]
+
+[tool.tox.env.lint]
+description = "Run Ruff lint and format checks"
+skip_install = true
+deps = ["ruff>=0.14.14"]
+commands = [["ruff", "check", "src"], ["ruff", "format", "--check", "src"]]
+
+[tool.tox.env.type]
+description = "Run ty type checks"
+skip_install = true
+deps = ["ty>=0.0.14"]
+commands = [["ty", "check", "src"]]
+
+[tool.tox.env.docker_glibc]
+description = "Run unit tests inside a glibc container via tox-docker"
+docker = ["glibc"]
+allowlist_externals = ["./scripts/tox-docker-exec.sh", "docker"]
+commands = [["./scripts/tox-docker-exec.sh", "glibc", "coverage", "run", "-m", "unittest", "discover", "-v"], ["./scripts/tox-docker-exec.sh", "glibc", "coverage", "report", "--fail-under=100"]]
+
+[tool.tox.env.docker_musl]
+description = "Run unit tests inside a musl container via tox-docker"
+docker = ["musl"]
+allowlist_externals = ["./scripts/tox-docker-exec.sh", "docker"]
+commands = [["./scripts/tox-docker-exec.sh", "musl", "coverage", "run", "-m", "unittest", "discover", "-v"], ["./scripts/tox-docker-exec.sh", "musl", "coverage", "report", "--fail-under=100"]]
+
+[tool.tox.docker.glibc]
+dockerfile = "{toxinidir}/docker/Dockerfile.glibc"
+volumes = ["bind:rw:{toxinidir}:/work"]
+
+[tool.tox.docker.musl]
+dockerfile = "{toxinidir}/docker/Dockerfile.musl"
+volumes = ["bind:rw:{toxinidir}:/work"]
