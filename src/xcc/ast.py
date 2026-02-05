@@ -20,9 +20,16 @@ class TypeSpec:
 
 
 @dataclass(frozen=True)
+class Param:
+    type_spec: TypeSpec
+    name: str
+
+
+@dataclass(frozen=True)
 class FunctionDef:
     return_type: TypeSpec
     name: str
+    params: list[Param]
     body: "CompoundStmt"
 
 
@@ -59,6 +66,12 @@ class AssignExpr(Expr):
 class UnaryExpr(Expr):
     op: str
     operand: Expr
+
+
+@dataclass(frozen=True)
+class CallExpr(Expr):
+    callee: Expr
+    args: list[Expr]
 
 
 @dataclass(frozen=True)

@@ -4,11 +4,13 @@ from tests import _bootstrap  # noqa: F401
 from xcc.ast import (
     AssignExpr,
     BinaryExpr,
+    CallExpr,
     DeclStmt,
     ExprStmt,
     Identifier,
     IntLiteral,
     NullStmt,
+    Param,
     ReturnStmt,
     TypeSpec,
     UnaryExpr,
@@ -25,6 +27,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(unit.functions), 1)
         func = unit.functions[0]
         self.assertEqual(func.name, "main")
+        self.assertEqual(func.params, [])
         stmt = func.body.statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
         expr = stmt.value
@@ -40,6 +43,55 @@ class ParserTests(unittest.TestCase):
         stmt = unit.functions[0].body.statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
         self.assertIsNone(stmt.value)
+
+    def test_function_parameters(self) -> None:
+        unit = parse(list(lex("int add(int a, int b){return a+b;}")))
+        func = unit.functions[0]
+        self.assertEqual(
+            func.params,
+            [Param(TypeSpec("int"), "a"), Param(TypeSpec("int"), "b")],
+        )
+
+    def test_void_parameter_list(self) -> None:
+        unit = parse(list(lex("int main(void){return 0;}")))
+        self.assertEqual(unit.functions[0].params, [])
+
+    def test_void_parameter_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int f(void x){return 0;}")))
+
+    def test_call_expression(self) -> None:
+        source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
+        unit = parse(list(lex(source)))
+        call = unit.functions[1].body.statements[0].value
+        self.assertIsInstance(call, CallExpr)
+        self.assertIsInstance(call.callee, Identifier)
+        self.assertEqual(call.callee.name, "add")
+        self.assertEqual(len(call.args), 2)
+
+    def test_call_with_no_arguments(self) -> None:
+        source = "int foo(){return 0;} int main(){return foo();}"
+        unit = parse(list(lex(source)))
+        call = unit.functions[1].body.statements[0].value
+        self.assertIsInstance(call, CallExpr)
+        self.assertEqual(call.args, [])
+
+    def test_relational_precedence(self) -> None:
+        unit = parse(list(lex("int main(){return 1==2<3;}")))
+        expr = unit.functions[0].body.statements[0].value
+        self.assertIsInstance(expr, BinaryExpr)
+        self.assertEqual(expr.op, "==")
+        self.assertIsInstance(expr.right, BinaryExpr)
+        self.assertEqual(expr.right.op, "<")
+
+    def test_logical_precedence(self) -> None:
+        source = "int main(){return 1==2||3==4&&5==6;}"
+        unit = parse(list(lex(source)))
+        expr = unit.functions[0].body.statements[0].value
+        self.assertIsInstance(expr, BinaryExpr)
+        self.assertEqual(expr.op, "||")
+        self.assertIsInstance(expr.right, BinaryExpr)
+        self.assertEqual(expr.right.op, "&&")
 
     def test_expression_statement(self) -> None:
         source = "int main(){x;return 0;}"

@@ -7,6 +7,8 @@ from xcc.ast import (
     Expr,
     ExprStmt,
     FunctionDef,
+    CallExpr,
+    Param,
     Stmt,
     TranslationUnit,
     TypeSpec,
@@ -44,6 +46,21 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("void main(){return;}")))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
+
+    def test_function_parameters(self) -> None:
+        unit = parse(list(lex("int add(int a, int b){return a+b;}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["add"]
+        self.assertIn("a", func_symbol.locals)
+        self.assertIn("b", func_symbol.locals)
+
+    def test_function_call_typemap(self) -> None:
+        source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        call_expr = unit.functions[1].body.statements[0].value
+        self.assertIsInstance(call_expr, CallExpr)
+        self.assertIs(sema.type_map.get(call_expr), INT)
 
     def test_null_statement(self) -> None:
         unit = parse(list(lex("int main(){; return 0;}")))
@@ -92,6 +109,7 @@ class SemaTests(unittest.TestCase):
                 FunctionDef(
                     TypeSpec("int"),
                     "main",
+                    [],
                     CompoundStmt([DeclStmt(TypeSpec("void"), "x", None)]),
                 )
             ]
@@ -100,12 +118,40 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Invalid object type: void")
 
+    def test_invalid_parameter_type(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [Param(TypeSpec("void"), "x")],
+                    CompoundStmt([]),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid parameter type: void")
+
+    def test_undeclared_function_call(self) -> None:
+        unit = parse(list(lex("int main(){return foo(1);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Undeclared function: foo")
+
+    def test_call_target_not_function(self) -> None:
+        unit = parse(list(lex("int main(){return 1(2);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Call target is not a function")
+
     def test_unsupported_expression(self) -> None:
         unit = TranslationUnit(
             [
                 FunctionDef(
                     TypeSpec("int"),
                     "main",
+                    [],
                     CompoundStmt([ExprStmt(Expr())]),
                 )
             ]
@@ -120,6 +166,7 @@ class SemaTests(unittest.TestCase):
                 FunctionDef(
                     TypeSpec("int"),
                     "main",
+                    [],
                     CompoundStmt([Stmt()]),
                 )
             ]

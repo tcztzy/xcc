@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from xcc.ast import (
     AssignExpr,
     BinaryExpr,
+    CallExpr,
     CompoundStmt,
     DeclStmt,
     Expr,
@@ -11,6 +12,7 @@ from xcc.ast import (
     Identifier,
     IntLiteral,
     NullStmt,
+    Param,
     ReturnStmt,
     Stmt,
     TranslationUnit,
@@ -79,19 +81,30 @@ class Analyzer:
     def __init__(self) -> None:
         self._functions: dict[str, FunctionSymbol] = {}
         self._type_map = TypeMap()
+        self._function_return_types: dict[str, Type] = {}
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
+        for func in unit.functions:
+            if func.name in self._function_return_types:
+                raise SemaError(f"Duplicate function definition: {func.name}")
+            self._function_return_types[func.name] = self._resolve_type(func.return_type)
         for func in unit.functions:
             self._analyze_function(func)
         return SemaUnit(self._functions, self._type_map)
 
     def _analyze_function(self, func: FunctionDef) -> None:
-        if func.name in self._functions:
-            raise SemaError(f"Duplicate function definition: {func.name}")
-        return_type = self._resolve_type(func.return_type)
+        return_type = self._function_return_types[func.name]
         scope = Scope()
+        self._define_params(func.params, scope)
         self._analyze_compound(func.body, scope, return_type)
         self._functions[func.name] = FunctionSymbol(func.name, return_type, scope.symbols)
+
+    def _define_params(self, params: list[Param], scope: Scope) -> None:
+        for param in params:
+            if param.type_spec.name == "void":
+                raise SemaError("Invalid parameter type: void")
+            param_type = self._resolve_type(param.type_spec)
+            scope.define(VarSymbol(param.name, param_type))
 
     def _resolve_type(self, type_spec: TypeSpec) -> Type:
         if type_spec.name == "int":
@@ -155,6 +168,16 @@ class Analyzer:
             self._analyze_expr(expr.value, scope)
             self._type_map.set(expr, INT)
             return INT
+        if isinstance(expr, CallExpr):
+            if not isinstance(expr.callee, Identifier):
+                raise SemaError("Call target is not a function")
+            if expr.callee.name not in self._function_return_types:
+                raise SemaError(f"Undeclared function: {expr.callee.name}")
+            for arg in expr.args:
+                self._analyze_expr(arg, scope)
+            return_type = self._function_return_types[expr.callee.name]
+            self._type_map.set(expr, return_type)
+            return return_type
         raise SemaError("Unsupported expression")
 
 

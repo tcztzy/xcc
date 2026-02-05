@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from xcc.ast import (
     AssignExpr,
     BinaryExpr,
+    CallExpr,
     CompoundStmt,
     DeclStmt,
     Expr,
@@ -11,6 +12,7 @@ from xcc.ast import (
     Identifier,
     IntLiteral,
     NullStmt,
+    Param,
     ReturnStmt,
     Stmt,
     TranslationUnit,
@@ -45,9 +47,29 @@ class Parser:
         return_type = self._parse_type_spec()
         name = self._expect(TokenKind.IDENT).lexeme
         self._expect_punct("(")
+        params = self._parse_params()
         self._expect_punct(")")
         body = self._parse_compound_stmt()
-        return FunctionDef(return_type, str(name), body)
+        return FunctionDef(return_type, str(name), params, body)
+
+    def _parse_params(self) -> list[Param]:
+        if self._check_punct(")"):
+            return []
+        if self._check_keyword("void") and self._peek_punct(")"):
+            self._advance()
+            return []
+        params = [self._parse_param()]
+        while self._check_punct(","):
+            self._advance()
+            params.append(self._parse_param())
+        return params
+
+    def _parse_param(self) -> Param:
+        type_spec = self._parse_type_spec()
+        if type_spec.name == "void":
+            raise ParserError("Invalid parameter type", self._previous())
+        name = self._expect(TokenKind.IDENT).lexeme
+        return Param(type_spec, str(name))
 
     def _parse_type_spec(self) -> TypeSpec:
         token = self._expect(TokenKind.KEYWORD)
@@ -100,11 +122,48 @@ class Parser:
         return self._parse_assignment()
 
     def _parse_assignment(self) -> Expr:
-        expr = self._parse_additive()
+        expr = self._parse_logical_or()
         if self._check_punct("="):
             op = self._advance().lexeme
             value = self._parse_assignment()
             return AssignExpr(str(op), expr, value)
+        return expr
+
+    def _parse_logical_or(self) -> Expr:
+        expr = self._parse_logical_and()
+        while self._check_punct("||"):
+            op = self._advance().lexeme
+            right = self._parse_logical_and()
+            expr = BinaryExpr(str(op), expr, right)
+        return expr
+
+    def _parse_logical_and(self) -> Expr:
+        expr = self._parse_equality()
+        while self._check_punct("&&"):
+            op = self._advance().lexeme
+            right = self._parse_equality()
+            expr = BinaryExpr(str(op), expr, right)
+        return expr
+
+    def _parse_equality(self) -> Expr:
+        expr = self._parse_relational()
+        while self._check_punct("==") or self._check_punct("!="):
+            op = self._advance().lexeme
+            right = self._parse_relational()
+            expr = BinaryExpr(str(op), expr, right)
+        return expr
+
+    def _parse_relational(self) -> Expr:
+        expr = self._parse_additive()
+        while (
+            self._check_punct("<")
+            or self._check_punct("<=")
+            or self._check_punct(">")
+            or self._check_punct(">=")
+        ):
+            op = self._advance().lexeme
+            right = self._parse_additive()
+            expr = BinaryExpr(str(op), expr, right)
         return expr
 
     def _parse_additive(self) -> Expr:
@@ -133,7 +192,25 @@ class Parser:
             op = self._advance().lexeme
             operand = self._parse_unary()
             return UnaryExpr(str(op), operand)
-        return self._parse_primary()
+        return self._parse_postfix()
+
+    def _parse_postfix(self) -> Expr:
+        expr = self._parse_primary()
+        while self._check_punct("("):
+            self._advance()
+            args = self._parse_arguments()
+            self._expect_punct(")")
+            expr = CallExpr(expr, args)
+        return expr
+
+    def _parse_arguments(self) -> list[Expr]:
+        if self._check_punct(")"):
+            return []
+        args = [self._parse_expression()]
+        while self._check_punct(","):
+            self._advance()
+            args.append(self._parse_expression())
+        return args
 
     def _parse_primary(self) -> Expr:
         token = self._current()
@@ -161,6 +238,9 @@ class Parser:
             self._index += 1
         return token
 
+    def _previous(self) -> Token:
+        return self._tokens[self._index - 1]
+
     def _expect(self, kind: TokenKind) -> Token:
         token = self._current()
         if token.kind != kind:
@@ -181,6 +261,14 @@ class Parser:
     def _check_keyword(self, value: str) -> bool:
         token = self._current()
         return token.kind == TokenKind.KEYWORD and token.lexeme == value
+
+    def _peek_punct(self, value: str) -> bool:
+        token = self._peek()
+        return token.kind == TokenKind.PUNCTUATOR and token.lexeme == value
+
+    def _peek(self) -> Token:
+        index = min(self._index + 1, len(self._tokens) - 1)
+        return self._tokens[index]
 
     def _match(self, kind: TokenKind) -> bool:
         return self._current().kind == kind
