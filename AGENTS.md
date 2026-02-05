@@ -7,6 +7,8 @@ This repository aims to become a C11 compiler written in modern Python (CPython 
 - **No GPL code**: do not copy, translate, or derive from GPL-licensed sources (including test suites). Prefer permissive licenses or official specifications.
 - **No third-party runtime dependencies**: `xcc` must run using the Python standard library only. Third-party tools are allowed for development (lint/type/test/docs).
 - **Python support**: must run on **CPython 3.11+** and **PyPy 3.11+**.
+- **Minimum supported Python policy**: the lowest supported CPython 3.x version tracks the newest 3.x supported by PyPy. As of now, PyPy supports 3.11 but not 3.12, so the minimum is 3.11+.
+- **No `from __future__ import annotations`**: do not use it in this codebase.
 - **Quality gates**:
   - Lint: `ruff` (no warnings).
   - Type check: `ty` (no warnings).
@@ -45,4 +47,3 @@ External specs (PDF/TXT/HTML) are cached under `docs/_sources/` for convenience,
 - `ruff` and `ty` are clean.
 - No new non-stdlib runtime dependency.
 - No license contamination (double-check any copied tables/grammar snippets).
-

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 
@@ -13,7 +11,7 @@ class Stmt:
 
 @dataclass(frozen=True)
 class TranslationUnit:
-    functions: list[FunctionDef]
+    functions: list["FunctionDef"]
 
 
 @dataclass(frozen=True)
@@ -25,7 +23,7 @@ class TypeSpec:
 class FunctionDef:
     return_type: TypeSpec
     name: str
-    body: CompoundStmt
+    body: "CompoundStmt"
 
 
 @dataclass(frozen=True)
@@ -51,6 +49,19 @@ class BinaryExpr(Expr):
 
 
 @dataclass(frozen=True)
+class AssignExpr(Expr):
+    op: str
+    target: Expr
+    value: Expr
+
+
+@dataclass(frozen=True)
+class UnaryExpr(Expr):
+    op: str
+    operand: Expr
+
+
+@dataclass(frozen=True)
 class IntLiteral(Expr):
     value: str
 
@@ -58,3 +69,15 @@ class IntLiteral(Expr):
 @dataclass(frozen=True)
 class Identifier(Expr):
     name: str
+
+
+@dataclass(frozen=True)
+class NullStmt(Stmt):
+    pass
+
+
+@dataclass(frozen=True)
+class DeclStmt(Stmt):
+    type_spec: TypeSpec
+    name: str
+    init: Expr | None

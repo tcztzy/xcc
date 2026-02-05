@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import unittest
 
 from tests import _bootstrap  # noqa: F401

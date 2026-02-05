@@ -1,19 +1,21 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from xcc.ast import (
+    AssignExpr,
     BinaryExpr,
     CompoundStmt,
+    DeclStmt,
     Expr,
     ExprStmt,
     FunctionDef,
     Identifier,
     IntLiteral,
+    NullStmt,
     ReturnStmt,
     Stmt,
     TranslationUnit,
     TypeSpec,
+    UnaryExpr,
 )
 from xcc.lexer import Token, TokenKind
 
@@ -61,12 +63,29 @@ class Parser:
         self._expect_punct("}")
         return CompoundStmt(statements)
 
-    def _parse_statement(self):
+    def _parse_statement(self) -> Stmt:
+        if self._check_punct(";"):
+            self._advance()
+            return NullStmt()
         if self._check_keyword("return"):
             return self._parse_return_stmt()
+        if self._check_keyword("int") or self._check_keyword("void"):
+            return self._parse_decl_stmt()
         expr = self._parse_expression()
         self._expect_punct(";")
         return ExprStmt(expr)
+
+    def _parse_decl_stmt(self) -> DeclStmt:
+        if self._check_keyword("void"):
+            raise ParserError("Invalid object type", self._current())
+        type_spec = self._parse_type_spec()
+        name = self._expect(TokenKind.IDENT).lexeme
+        init: Expr | None = None
+        if self._check_punct("="):
+            self._advance()
+            init = self._parse_expression()
+        self._expect_punct(";")
+        return DeclStmt(type_spec, str(name), init)
 
     def _parse_return_stmt(self) -> ReturnStmt:
         self._advance()
@@ -78,7 +97,15 @@ class Parser:
         return ReturnStmt(value)
 
     def _parse_expression(self) -> Expr:
-        return self._parse_additive()
+        return self._parse_assignment()
+
+    def _parse_assignment(self) -> Expr:
+        expr = self._parse_additive()
+        if self._check_punct("="):
+            op = self._advance().lexeme
+            value = self._parse_assignment()
+            return AssignExpr(str(op), expr, value)
+        return expr
 
     def _parse_additive(self) -> Expr:
         expr = self._parse_multiplicative()
@@ -89,12 +116,24 @@ class Parser:
         return expr
 
     def _parse_multiplicative(self) -> Expr:
-        expr = self._parse_primary()
+        expr = self._parse_unary()
         while self._check_punct("*") or self._check_punct("/"):
             op = self._advance().lexeme
-            right = self._parse_primary()
+            right = self._parse_unary()
             expr = BinaryExpr(str(op), expr, right)
         return expr
+
+    def _parse_unary(self) -> Expr:
+        if (
+            self._check_punct("+")
+            or self._check_punct("-")
+            or self._check_punct("!")
+            or self._check_punct("~")
+        ):
+            op = self._advance().lexeme
+            operand = self._parse_unary()
+            return UnaryExpr(str(op), operand)
+        return self._parse_primary()
 
     def _parse_primary(self) -> Expr:
         token = self._current()

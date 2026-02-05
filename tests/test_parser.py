@@ -1,9 +1,18 @@
-from __future__ import annotations
-
 import unittest
 
 from tests import _bootstrap  # noqa: F401
-from xcc.ast import BinaryExpr, ExprStmt, ReturnStmt
+from xcc.ast import (
+    AssignExpr,
+    BinaryExpr,
+    DeclStmt,
+    ExprStmt,
+    Identifier,
+    IntLiteral,
+    NullStmt,
+    ReturnStmt,
+    TypeSpec,
+    UnaryExpr,
+)
 from xcc.lexer import lex
 from xcc.parser import ParserError, parse
 
@@ -49,6 +58,57 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         stmt = unit.functions[0].body.statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
+
+    def test_unary_expression(self) -> None:
+        unit = parse(list(lex("int main(){return -1;}")))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, UnaryExpr)
+        self.assertEqual(expr.op, "-")
+        self.assertIsInstance(expr.operand, IntLiteral)
+
+    def test_assignment_expression(self) -> None:
+        unit = parse(list(lex("int main(){x=1+2*3;return 0;}")))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        expr = stmt.expr
+        self.assertIsInstance(expr, AssignExpr)
+        self.assertEqual(expr.op, "=")
+        self.assertIsInstance(expr.target, Identifier)
+        self.assertIsInstance(expr.value, BinaryExpr)
+
+    def test_assignment_is_right_associative(self) -> None:
+        unit = parse(list(lex("int main(){a=b=1;return 0;}")))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        expr = stmt.expr
+        self.assertIsInstance(expr, AssignExpr)
+        self.assertIsInstance(expr.target, Identifier)
+        self.assertIsInstance(expr.value, AssignExpr)
+
+    def test_empty_statement(self) -> None:
+        unit = parse(list(lex("int main(){;return 0;}")))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, NullStmt)
+
+    def test_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){int x;return x;}")))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int"))
+        self.assertEqual(stmt.name, "x")
+        self.assertIsNone(stmt.init)
+
+    def test_declaration_with_initializer(self) -> None:
+        unit = parse(list(lex("int main(){int x=1+2;return x;}")))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertIsInstance(stmt.init, BinaryExpr)
+
+    def test_void_declaration_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){void x;return 0;}")))
 
     def test_missing_semicolon(self) -> None:
         source = "int main(){return 1}"
