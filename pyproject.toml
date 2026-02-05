@@ -71,7 +71,7 @@ omit = [
 ]
 
 [tool.tox]
-requires = ["tox>=4.34.1", "tox-docker>=5.0.0"]
+requires = ["tox>=4.34.1", "tox-docker>=5.0.0", "tox-uv>=1.29.0"]
 env_list = ["py311", "py312", "py313", "pypy311", "lint", "type"]
 skip_missing_interpreters = true
 
@@ -81,14 +81,16 @@ commands = [["coverage", "run", "-m", "unittest", "discover", "-v"], ["coverage"
 
 [tool.tox.env.lint]
 description = "Run Ruff lint and format checks"
-skip_install = true
-deps = ["ruff>=0.14.14"]
+runner = "uv-venv-lock-runner"
+dependency_groups = ["dev"]
+package = "skip"
 commands = [["ruff", "check", "src"], ["ruff", "format", "--check", "src"]]
 
 [tool.tox.env.type]
 description = "Run ty type checks"
-skip_install = true
-deps = ["ty>=0.0.14"]
+runner = "uv-venv-lock-runner"
+dependency_groups = ["dev"]
+package = "skip"
 commands = [["ty", "check", "src"]]
 
 [tool.tox.env.docker_glibc]
