@@ -41,7 +41,7 @@ class Parser:
 
     def _parse_function(self) -> FunctionDef:
         return_type = self._parse_type_spec()
-        name = self._expect(TokenKind.IDENT).value
+        name = self._expect(TokenKind.IDENT).lexeme
         self._expect_punct("(")
         self._expect_punct(")")
         body = self._parse_compound_stmt()
@@ -49,9 +49,9 @@ class Parser:
 
     def _parse_type_spec(self) -> TypeSpec:
         token = self._expect(TokenKind.KEYWORD)
-        if token.value not in {"int", "void"}:
+        if token.lexeme not in {"int", "void"}:
             raise ParserError("Unsupported type", token)
-        return TypeSpec(str(token.value))
+        return TypeSpec(str(token.lexeme))
 
     def _parse_compound_stmt(self) -> CompoundStmt:
         self._expect_punct("{")
@@ -83,7 +83,7 @@ class Parser:
     def _parse_additive(self) -> Expr:
         expr = self._parse_multiplicative()
         while self._check_punct("+") or self._check_punct("-"):
-            op = self._advance().value
+            op = self._advance().lexeme
             right = self._parse_multiplicative()
             expr = BinaryExpr(str(op), expr, right)
         return expr
@@ -91,21 +91,21 @@ class Parser:
     def _parse_multiplicative(self) -> Expr:
         expr = self._parse_primary()
         while self._check_punct("*") or self._check_punct("/"):
-            op = self._advance().value
+            op = self._advance().lexeme
             right = self._parse_primary()
             expr = BinaryExpr(str(op), expr, right)
         return expr
 
     def _parse_primary(self) -> Expr:
         token = self._current()
-        if token.kind == TokenKind.INT:
+        if token.kind == TokenKind.INT_CONST:
             self._advance()
-            assert isinstance(token.value, int)
-            return IntLiteral(token.value)
+            assert isinstance(token.lexeme, str)
+            return IntLiteral(token.lexeme)
         if token.kind == TokenKind.IDENT:
             self._advance()
-            assert isinstance(token.value, str)
-            return Identifier(token.value)
+            assert isinstance(token.lexeme, str)
+            return Identifier(token.lexeme)
         if self._check_punct("("):
             self._advance()
             expr = self._parse_expression()
@@ -131,17 +131,17 @@ class Parser:
 
     def _expect_punct(self, value: str) -> None:
         token = self._current()
-        if token.kind != TokenKind.PUNCT or token.value != value:
+        if token.kind != TokenKind.PUNCTUATOR or token.lexeme != value:
             raise ParserError(f"Expected '{value}'", token)
         self._advance()
 
     def _check_punct(self, value: str) -> bool:
         token = self._current()
-        return token.kind == TokenKind.PUNCT and token.value == value
+        return token.kind == TokenKind.PUNCTUATOR and token.lexeme == value
 
     def _check_keyword(self, value: str) -> bool:
         token = self._current()
-        return token.kind == TokenKind.KEYWORD and token.value == value
+        return token.kind == TokenKind.KEYWORD and token.lexeme == value
 
     def _match(self, kind: TokenKind) -> bool:
         return self._current().kind == kind

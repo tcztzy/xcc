@@ -52,7 +52,7 @@ class BinaryExpr(Expr):
 
 @dataclass(frozen=True)
 class IntLiteral(Expr):
-    value: int
+    value: str
 
 
 @dataclass(frozen=True)

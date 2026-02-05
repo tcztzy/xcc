@@ -19,6 +19,8 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "coverage>=7.13.3",
+    "pdfplumber>=0.11.9",
+    "pypdf>=6.6.2",
     "ruff>=0.14.14",
     "tox>=4.34.1",
     "tox-docker>=5.0.0",
