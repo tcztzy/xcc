@@ -22,7 +22,7 @@ class TypeSpec:
 @dataclass(frozen=True)
 class Param:
     type_spec: TypeSpec
-    name: str
+    name: str | None
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class FunctionDef:
     return_type: TypeSpec
     name: str
     params: list[Param]
-    body: "CompoundStmt"
+    body: "CompoundStmt | None"
 
 
 @dataclass(frozen=True)

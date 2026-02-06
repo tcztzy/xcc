@@ -48,6 +48,12 @@ class FunctionSymbol:
     locals: dict[str, VarSymbol]
 
 
+@dataclass(frozen=True)
+class FunctionSignature:
+    return_type: Type
+    params: tuple[Type, ...]
+
+
 class TypeMap:
     def __init__(self) -> None:
         self._map: dict[int, Type] = {}
@@ -92,20 +98,31 @@ class Analyzer:
     def __init__(self) -> None:
         self._functions: dict[str, FunctionSymbol] = {}
         self._type_map = TypeMap()
-        self._function_return_types: dict[str, Type] = {}
+        self._function_signatures: dict[str, FunctionSignature] = {}
+        self._defined_functions: set[str] = set()
         self._loop_depth = 0
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         for func in unit.functions:
-            if func.name in self._function_return_types:
-                raise SemaError(f"Duplicate function definition: {func.name}")
-            self._function_return_types[func.name] = self._resolve_type(func.return_type)
+            signature = self._signature_from(func)
+            existing = self._function_signatures.get(func.name)
+            if existing is None:
+                self._function_signatures[func.name] = signature
+            elif existing != signature:
+                raise SemaError(f"Conflicting declaration: {func.name}")
+            if func.body is not None:
+                if func.name in self._defined_functions:
+                    raise SemaError(f"Duplicate function definition: {func.name}")
+                self._defined_functions.add(func.name)
         for func in unit.functions:
+            if func.body is None:
+                continue
             self._analyze_function(func)
         return SemaUnit(self._functions, self._type_map)
 
     def _analyze_function(self, func: FunctionDef) -> None:
-        return_type = self._function_return_types[func.name]
+        return_type = self._function_signatures[func.name].return_type
+        assert func.body is not None
         scope = Scope()
         self._define_params(func.params, scope)
         self._analyze_compound(func.body, scope, return_type)
@@ -113,10 +130,18 @@ class Analyzer:
 
     def _define_params(self, params: list[Param], scope: Scope) -> None:
         for param in params:
-            if param.type_spec.name == "void":
-                raise SemaError("Invalid parameter type: void")
+            if param.name is None:
+                raise SemaError("Missing parameter name")
             param_type = self._resolve_type(param.type_spec)
             scope.define(VarSymbol(param.name, param_type))
+
+    def _signature_from(self, func: FunctionDef) -> FunctionSignature:
+        params: list[Type] = []
+        for param in func.params:
+            if param.type_spec.name == "void":
+                raise SemaError("Invalid parameter type: void")
+            params.append(self._resolve_type(param.type_spec))
+        return FunctionSignature(self._resolve_type(func.return_type), tuple(params))
 
     def _resolve_type(self, type_spec: TypeSpec) -> Type:
         if type_spec.name == "int":
@@ -231,13 +256,15 @@ class Analyzer:
         if isinstance(expr, CallExpr):
             if not isinstance(expr.callee, Identifier):
                 raise SemaError("Call target is not a function")
-            if expr.callee.name not in self._function_return_types:
+            signature = self._function_signatures.get(expr.callee.name)
+            if signature is None:
                 raise SemaError(f"Undeclared function: {expr.callee.name}")
             for arg in expr.args:
                 self._analyze_expr(arg, scope)
-            return_type = self._function_return_types[expr.callee.name]
-            self._type_map.set(expr, return_type)
-            return return_type
+            if len(expr.args) != len(signature.params):
+                raise SemaError(f"Argument count mismatch: {expr.callee.name}")
+            self._type_map.set(expr, signature.return_type)
+            return signature.return_type
         raise SemaError("Unsupported expression")
 
 

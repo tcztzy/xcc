@@ -19,6 +19,11 @@ from xcc.sema import SemaError, analyze
 from xcc.types import INT
 
 
+def _body(func):
+    assert func.body is not None
+    return func.body
+
+
 class SemaTests(unittest.TestCase):
     def test_type_str(self) -> None:
         self.assertEqual(str(INT), "int")
@@ -29,7 +34,7 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
         self.assertIs(func_symbol.locals["x"].type_, INT)
-        assign_stmt = unit.functions[0].body.statements[1]
+        assign_stmt = _body(unit.functions[0]).statements[1]
         assign_expr = assign_stmt.expr
         binary_expr = assign_expr.value
         self.assertIs(sema.type_map.get(assign_expr), INT)
@@ -39,7 +44,7 @@ class SemaTests(unittest.TestCase):
         source = "int main(){int x=1; return -x;}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
-        return_expr = unit.functions[0].body.statements[1].value
+        return_expr = _body(unit.functions[0]).statements[1].value
         self.assertIs(sema.type_map.get(return_expr), INT)
 
     def test_void_return_ok(self) -> None:
@@ -53,6 +58,48 @@ class SemaTests(unittest.TestCase):
         func_symbol = sema.functions["add"]
         self.assertIn("a", func_symbol.locals)
         self.assertIn("b", func_symbol.locals)
+
+    def test_function_declaration_then_definition(self) -> None:
+        source = (
+            "int add(int a, int b);"
+            "int main(){return add(1,2);}"
+            "int add(int a, int b){return a+b;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("add", sema.functions)
+
+    def test_function_declaration_without_definition(self) -> None:
+        unit = parse(list(lex("int add(int a, int b);")))
+        sema = analyze(unit)
+        self.assertEqual(sema.functions, {})
+
+    def test_conflicting_function_declaration(self) -> None:
+        unit = parse(list(lex("int add(int a); int add(int a, int b);")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Conflicting declaration: add")
+
+    def test_argument_count_mismatch(self) -> None:
+        unit = parse(list(lex("int add(int a,int b){return a+b;} int main(){return add(1);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Argument count mismatch: add")
+
+    def test_missing_parameter_name_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [Param(TypeSpec("int"), None)],
+                    CompoundStmt([]),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Missing parameter name")
 
     def test_if_and_while_ok(self) -> None:
         source = (
@@ -89,7 +136,7 @@ class SemaTests(unittest.TestCase):
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
-        call_expr = unit.functions[1].body.statements[0].value
+        call_expr = _body(unit.functions[1]).statements[0].value
         self.assertIsInstance(call_expr, CallExpr)
         self.assertIs(sema.type_map.get(call_expr), INT)
 

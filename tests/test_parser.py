@@ -25,6 +25,11 @@ from xcc.lexer import lex
 from xcc.parser import ParserError, parse
 
 
+def _body(func):
+    assert func.body is not None
+    return func.body
+
+
 class ParserTests(unittest.TestCase):
     def test_parse_function(self) -> None:
         source = "int main(){return 1+2*3;}"
@@ -34,7 +39,7 @@ class ParserTests(unittest.TestCase):
         func = unit.functions[0]
         self.assertEqual(func.name, "main")
         self.assertEqual(func.params, [])
-        stmt = func.body.statements[0]
+        stmt = _body(func).statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
         expr = stmt.value
         self.assertIsInstance(expr, BinaryExpr)
@@ -46,7 +51,7 @@ class ParserTests(unittest.TestCase):
     def test_void_return(self) -> None:
         source = "void main(){return;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
         self.assertIsNone(stmt.value)
 
@@ -62,6 +67,31 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){return 0;}")))
         self.assertEqual(unit.functions[0].params, [])
 
+    def test_function_declaration(self) -> None:
+        unit = parse(list(lex("int add(int a, int b); int main(){return 0;}")))
+        decl = unit.functions[0]
+        self.assertIsNone(decl.body)
+        self.assertEqual(
+            decl.params,
+            [Param(TypeSpec("int"), "a"), Param(TypeSpec("int"), "b")],
+        )
+
+    def test_function_declaration_unnamed_params(self) -> None:
+        unit = parse(list(lex("int add(int, int);")))
+        decl = unit.functions[0]
+        self.assertIsNone(decl.body)
+        self.assertEqual([param.name for param in decl.params], [None, None])
+
+    def test_declaration_void_parameter_list(self) -> None:
+        unit = parse(list(lex("int ping(void);")))
+        decl = unit.functions[0]
+        self.assertIsNone(decl.body)
+        self.assertEqual(decl.params, [])
+
+    def test_definition_requires_parameter_names(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int add(int, int){return 0;}")))
+
     def test_void_parameter_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int f(void x){return 0;}")))
@@ -69,7 +99,7 @@ class ParserTests(unittest.TestCase):
     def test_call_expression(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
-        call = unit.functions[1].body.statements[0].value
+        call = _body(unit.functions[1]).statements[0].value
         self.assertIsInstance(call, CallExpr)
         self.assertIsInstance(call.callee, Identifier)
         self.assertEqual(call.callee.name, "add")
@@ -78,28 +108,28 @@ class ParserTests(unittest.TestCase):
     def test_call_with_no_arguments(self) -> None:
         source = "int foo(){return 0;} int main(){return foo();}"
         unit = parse(list(lex(source)))
-        call = unit.functions[1].body.statements[0].value
+        call = _body(unit.functions[1]).statements[0].value
         self.assertIsInstance(call, CallExpr)
         self.assertEqual(call.args, [])
 
     def test_if_else_statement(self) -> None:
         source = "int main(){if(1) return 1; else return 2;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, IfStmt)
         self.assertIsNotNone(stmt.else_body)
 
     def test_if_without_else(self) -> None:
         source = "int main(){if(1) return 1; return 0;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, IfStmt)
         self.assertIsNone(stmt.else_body)
 
     def test_dangling_else_binds_to_inner_if(self) -> None:
         source = "int main(){if(1) if(0) return 1; else return 2;}"
         unit = parse(list(lex(source)))
-        outer = unit.functions[0].body.statements[0]
+        outer = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(outer, IfStmt)
         self.assertIsNone(outer.else_body)
         self.assertIsInstance(outer.then_body, IfStmt)
@@ -108,20 +138,20 @@ class ParserTests(unittest.TestCase):
     def test_while_statement(self) -> None:
         source = "int main(){while(1) return 0;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, WhileStmt)
 
     def test_compound_statement_as_statement(self) -> None:
         source = "int main(){if(1){return 0;} return 1;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, IfStmt)
         self.assertIsInstance(stmt.then_body, CompoundStmt)
 
     def test_for_statement_with_expression_init(self) -> None:
         source = "int main(){for(i=0;i<3;i=i+1) ;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ForStmt)
         self.assertIsInstance(stmt.init, AssignExpr)
         self.assertIsInstance(stmt.condition, BinaryExpr)
@@ -130,13 +160,13 @@ class ParserTests(unittest.TestCase):
     def test_for_statement_with_declaration_init(self) -> None:
         source = "int main(){for(int i=0;i<3;i=i+1) ;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ForStmt)
         self.assertIsInstance(stmt.init, DeclStmt)
 
     def test_for_statement_empty_clauses(self) -> None:
         unit = parse(list(lex("int main(){for(;;) ;}")))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ForStmt)
         self.assertIsNone(stmt.init)
         self.assertIsNone(stmt.condition)
@@ -145,7 +175,7 @@ class ParserTests(unittest.TestCase):
     def test_break_and_continue_statements(self) -> None:
         source = "int main(){while(1){break;continue;}}"
         unit = parse(list(lex(source)))
-        while_stmt = unit.functions[0].body.statements[0]
+        while_stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(while_stmt, WhileStmt)
         body = while_stmt.body
         self.assertIsInstance(body, CompoundStmt)
@@ -154,7 +184,7 @@ class ParserTests(unittest.TestCase):
 
     def test_relational_precedence(self) -> None:
         unit = parse(list(lex("int main(){return 1==2<3;}")))
-        expr = unit.functions[0].body.statements[0].value
+        expr = _body(unit.functions[0]).statements[0].value
         self.assertIsInstance(expr, BinaryExpr)
         self.assertEqual(expr.op, "==")
         self.assertIsInstance(expr.right, BinaryExpr)
@@ -163,7 +193,7 @@ class ParserTests(unittest.TestCase):
     def test_logical_precedence(self) -> None:
         source = "int main(){return 1==2||3==4&&5==6;}"
         unit = parse(list(lex(source)))
-        expr = unit.functions[0].body.statements[0].value
+        expr = _body(unit.functions[0]).statements[0].value
         self.assertIsInstance(expr, BinaryExpr)
         self.assertEqual(expr.op, "||")
         self.assertIsInstance(expr.right, BinaryExpr)
@@ -172,24 +202,24 @@ class ParserTests(unittest.TestCase):
     def test_expression_statement(self) -> None:
         source = "int main(){x;return 0;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ExprStmt)
 
     def test_parenthesized_expression(self) -> None:
         source = "int main(){return (1+2)*3;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
 
     def test_subtraction_and_division(self) -> None:
         source = "int main(){return 4-2/1;}"
         unit = parse(list(lex(source)))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
 
     def test_unary_expression(self) -> None:
         unit = parse(list(lex("int main(){return -1;}")))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
         expr = stmt.value
         self.assertIsInstance(expr, UnaryExpr)
@@ -198,7 +228,7 @@ class ParserTests(unittest.TestCase):
 
     def test_assignment_expression(self) -> None:
         unit = parse(list(lex("int main(){x=1+2*3;return 0;}")))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ExprStmt)
         expr = stmt.expr
         self.assertIsInstance(expr, AssignExpr)
@@ -208,7 +238,7 @@ class ParserTests(unittest.TestCase):
 
     def test_assignment_is_right_associative(self) -> None:
         unit = parse(list(lex("int main(){a=b=1;return 0;}")))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ExprStmt)
         expr = stmt.expr
         self.assertIsInstance(expr, AssignExpr)
@@ -217,12 +247,12 @@ class ParserTests(unittest.TestCase):
 
     def test_empty_statement(self) -> None:
         unit = parse(list(lex("int main(){;return 0;}")))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, NullStmt)
 
     def test_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){int x;return x;}")))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int"))
         self.assertEqual(stmt.name, "x")
@@ -230,7 +260,7 @@ class ParserTests(unittest.TestCase):
 
     def test_declaration_with_initializer(self) -> None:
         unit = parse(list(lex("int main(){int x=1+2;return x;}")))
-        stmt = unit.functions[0].body.statements[0]
+        stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
         self.assertIsInstance(stmt.init, BinaryExpr)
 
@@ -262,7 +292,7 @@ class ParserTests(unittest.TestCase):
     def test_empty_function(self) -> None:
         source = "int main(){}"
         unit = parse(list(lex(source)))
-        self.assertEqual(len(unit.functions[0].body.statements), 0)
+        self.assertEqual(len(_body(unit.functions[0]).statements), 0)
 
     def test_empty_translation_unit(self) -> None:
         unit = parse(list(lex("")))

@@ -54,6 +54,11 @@ class Parser:
         self._expect_punct("(")
         params = self._parse_params()
         self._expect_punct(")")
+        if self._check_punct(";"):
+            self._advance()
+            return FunctionDef(return_type, str(name), params, None)
+        if any(param.name is None for param in params):
+            raise ParserError("Expected parameter name", self._current())
         body = self._parse_compound_stmt()
         return FunctionDef(return_type, str(name), params, body)
 
@@ -73,8 +78,11 @@ class Parser:
         type_spec = self._parse_type_spec()
         if type_spec.name == "void":
             raise ParserError("Invalid parameter type", self._previous())
-        name = self._expect(TokenKind.IDENT).lexeme
-        return Param(type_spec, str(name))
+        name: str | None = None
+        if self._current().kind == TokenKind.IDENT:
+            name_token = self._advance()
+            name = str(name_token.lexeme)
+        return Param(type_spec, name)
 
     def _parse_type_spec(self) -> TypeSpec:
         token = self._expect(TokenKind.KEYWORD)
