@@ -61,6 +61,12 @@ class SemaTests(unittest.TestCase):
         self.assertIn("a", func_symbol.locals)
         self.assertIn("b", func_symbol.locals)
 
+    def test_void_pointer_parameter_is_allowed(self) -> None:
+        unit = parse(list(lex("int f(void *p){return 0;}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["f"]
+        self.assertEqual(func_symbol.locals["p"].type_, Type("void", 1))
+
     def test_function_declaration_then_definition(self) -> None:
         source = (
             "int add(int a, int b);"
@@ -164,6 +170,22 @@ class SemaTests(unittest.TestCase):
         return_expr = _body(unit.functions[0]).statements[2].value
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_assignment_through_dereference(self) -> None:
+        source = "int main(){int x=1; int *p=&x; *p=2; return x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        assign_stmt = _body(unit.functions[0]).statements[2]
+        assign_expr = assign_stmt.expr
+        self.assertEqual(sema.type_map.get(assign_expr), INT)
+
+    def test_address_of_dereference_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; int *q=&*p; return *q;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        pointer_init = _body(unit.functions[0]).statements[2].init
+        assert pointer_init is not None
+        self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
 
     def test_null_statement(self) -> None:
         unit = parse(list(lex("int main(){; return 0;}")))

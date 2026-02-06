@@ -99,6 +99,10 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int f(void x){return 0;}")))
 
+    def test_void_pointer_parameter_is_allowed(self) -> None:
+        unit = parse(list(lex("int f(void *p){return 0;}")))
+        self.assertEqual(unit.functions[0].params, [Param(TypeSpec("void", 1), "p")])
+
     def test_call_expression(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
@@ -313,6 +317,12 @@ class ParserTests(unittest.TestCase):
         func = unit.functions[0]
         self.assertEqual(func.return_type, TypeSpec("int", 1))
         self.assertEqual(func.params, [Param(TypeSpec("int", 1), "p")])
+
+    def test_multiple_pointer_levels(self) -> None:
+        unit = parse(list(lex("int **id(int **pp){return pp;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("int", 2))
+        self.assertEqual(func.params, [Param(TypeSpec("int", 2), "pp")])
 
     def test_unary_address_of_expression(self) -> None:
         unit = parse(list(lex("int main(){int x;return &x;}")))

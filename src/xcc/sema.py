@@ -287,7 +287,7 @@ class Analyzer:
                 self._type_map.set(expr, INT)
                 return INT
             if expr.op == "&":
-                if not isinstance(expr.operand, Identifier):
+                if not self._is_assignable(expr.operand):
                     raise SemaError("Address-of operand is not assignable")
                 result = operand_type.pointer_to()
                 self._type_map.set(expr, result)
@@ -305,7 +305,7 @@ class Analyzer:
             self._type_map.set(expr, INT)
             return INT
         if isinstance(expr, AssignExpr):
-            if not isinstance(expr.target, Identifier):
+            if not self._is_assignable(expr.target):
                 raise SemaError("Assignment target is not assignable")
             target_type = self._analyze_expr(expr.target, scope)
             value_type = self._analyze_expr(expr.value, scope)
@@ -330,6 +330,9 @@ class Analyzer:
             self._type_map.set(expr, signature.return_type)
             return signature.return_type
         raise SemaError("Unsupported expression")
+
+    def _is_assignable(self, expr: Expr) -> bool:
+        return isinstance(expr, Identifier) or (isinstance(expr, UnaryExpr) and expr.op == "*")
 
 
 def analyze(unit: TranslationUnit) -> SemaUnit:

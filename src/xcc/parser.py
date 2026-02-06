@@ -79,7 +79,7 @@ class Parser:
 
     def _parse_param(self) -> Param:
         type_spec = self._parse_type_spec()
-        if type_spec.name == "void":
+        if type_spec.name == "void" and type_spec.pointer_depth == 0:
             raise ParserError("Invalid parameter type", self._previous())
         name: str | None = None
         if self._current().kind == TokenKind.IDENT:
