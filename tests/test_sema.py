@@ -29,6 +29,14 @@ def _body(func):
 class SemaTests(unittest.TestCase):
     def test_type_str(self) -> None:
         self.assertEqual(str(INT), "int")
+        array = Type("int").array_of(4)
+        self.assertEqual(str(array), "int[4]")
+        pointer = array.pointer_to()
+        self.assertEqual(pointer, Type("int", 1, (4,)))
+        self.assertEqual(pointer.pointee(), array)
+        self.assertEqual(array.element_type(), Type("int"))
+        self.assertIsNone(Type("int").pointee())
+        self.assertIsNone(Type("int").element_type())
 
     def test_analyze_success_and_typemap(self) -> None:
         source = "int main(){int x=1; x=2+3; return x;}"
@@ -186,6 +194,50 @@ class SemaTests(unittest.TestCase):
         pointer_init = _body(unit.functions[0]).statements[2].init
         assert pointer_init is not None
         self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
+
+    def test_array_subscript_typemap(self) -> None:
+        source = "int main(){int a[3]; a[0]=1; return a[0];}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        assign_expr = _body(unit.functions[0]).statements[1].expr
+        return_expr = _body(unit.functions[0]).statements[2].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(assign_expr), INT)
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_nested_array_subscript_typemap(self) -> None:
+        source = "int main(){int a[2][3]; return a[1][2];}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_address_of_subscript_typemap(self) -> None:
+        source = "int main(){int a[2]; int *p=&a[0]; return *p;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        pointer_init = _body(unit.functions[0]).statements[1].init
+        assert pointer_init is not None
+        self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
+
+    def test_subscript_non_integer_index_error(self) -> None:
+        unit = parse(list(lex("int main(){int a[2]; int *p=&a[0]; return a[p];}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Array subscript is not an integer")
+
+    def test_subscript_non_array_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; return x[0];}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Subscripted value is not an array or pointer")
+
+    def test_array_assignment_is_rejected(self) -> None:
+        unit = parse(list(lex("int main(){int a[2]; int b[2]; a=b; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
 
     def test_null_statement(self) -> None:
         unit = parse(list(lex("int main(){; return 0;}")))

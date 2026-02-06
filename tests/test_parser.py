@@ -19,6 +19,7 @@ from xcc.ast import (
     NullStmt,
     Param,
     ReturnStmt,
+    SubscriptExpr,
     SwitchStmt,
     TypeSpec,
     UnaryExpr,
@@ -102,6 +103,10 @@ class ParserTests(unittest.TestCase):
     def test_void_pointer_parameter_is_allowed(self) -> None:
         unit = parse(list(lex("int f(void *p){return 0;}")))
         self.assertEqual(unit.functions[0].params, [Param(TypeSpec("void", 1), "p")])
+
+    def test_array_parameter_is_allowed(self) -> None:
+        unit = parse(list(lex("int f(int a[4]){return a[0];}")))
+        self.assertEqual(unit.functions[0].params, [Param(TypeSpec("int", 0, (4,)), "a")])
 
     def test_call_expression(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
@@ -306,6 +311,18 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
 
+    def test_array_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){int a[4];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (4,)))
+
+    def test_multidimensional_array_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){int a[2][3];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (2, 3)))
+
     def test_void_pointer_declaration_is_allowed(self) -> None:
         unit = parse(list(lex("int main(){void *p;return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -340,9 +357,38 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr, UnaryExpr)
         self.assertEqual(expr.op, "*")
 
+    def test_subscript_expression(self) -> None:
+        unit = parse(list(lex("int main(){int a[4];return a[1];}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, SubscriptExpr)
+        self.assertIsInstance(expr.base, Identifier)
+        self.assertIsInstance(expr.index, IntLiteral)
+
+    def test_nested_subscript_expression(self) -> None:
+        unit = parse(list(lex("int main(){int a[2][3];return a[1][2];}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, SubscriptExpr)
+        self.assertIsInstance(expr.base, SubscriptExpr)
+
+    def test_array_size_must_be_positive(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int a[0];return 0;}")))
+
+    def test_array_size_must_be_decimal_literal(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int a[0x10];return 0;}")))
+
     def test_void_declaration_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){void x;return 0;}")))
+
+    def test_void_array_declaration_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){void x[1];return 0;}")))
 
     def test_missing_semicolon(self) -> None:
         source = "int main(){return 1}"

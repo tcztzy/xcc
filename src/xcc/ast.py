@@ -18,6 +18,7 @@ class TranslationUnit:
 class TypeSpec:
     name: str
     pointer_depth: int = 0
+    array_lengths: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,12 @@ class UnaryExpr(Expr):
 class CallExpr(Expr):
     callee: Expr
     args: list[Expr]
+
+
+@dataclass(frozen=True)
+class SubscriptExpr(Expr):
+    base: Expr
+    index: Expr
 
 
 @dataclass(frozen=True)

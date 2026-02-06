@@ -21,6 +21,7 @@ from xcc.ast import (
     Param,
     ReturnStmt,
     Stmt,
+    SubscriptExpr,
     SwitchStmt,
     TranslationUnit,
     TypeSpec,
@@ -158,6 +159,8 @@ class Analyzer:
         resolved = base
         for _ in range(type_spec.pointer_depth):
             resolved = resolved.pointer_to()
+        for length in type_spec.array_lengths:
+            resolved = resolved.array_of(length)
         return resolved
 
     def _analyze_compound(self, stmt: CompoundStmt, scope: Scope, return_type: Type) -> None:
@@ -281,6 +284,18 @@ class Analyzer:
                 raise SemaError(f"Undeclared identifier: {expr.name}")
             self._type_map.set(expr, symbol.type_)
             return symbol.type_
+        if isinstance(expr, SubscriptExpr):
+            base_type = self._analyze_expr(expr.base, scope)
+            index_type = self._analyze_expr(expr.index, scope)
+            if index_type != INT:
+                raise SemaError("Array subscript is not an integer")
+            element_type = base_type.element_type()
+            if element_type is None:
+                element_type = base_type.pointee()
+            if element_type is None:
+                raise SemaError("Subscripted value is not an array or pointer")
+            self._type_map.set(expr, element_type)
+            return element_type
         if isinstance(expr, UnaryExpr):
             operand_type = self._analyze_expr(expr.operand, scope)
             if expr.op in {"+", "-", "!", "~"}:
@@ -309,6 +324,8 @@ class Analyzer:
                 raise SemaError("Assignment target is not assignable")
             target_type = self._analyze_expr(expr.target, scope)
             value_type = self._analyze_expr(expr.value, scope)
+            if target_type.array_lengths:
+                raise SemaError("Assignment target is not assignable")
             if target_type != value_type:
                 raise SemaError("Assignment type mismatch")
             self._type_map.set(expr, target_type)
@@ -332,7 +349,11 @@ class Analyzer:
         raise SemaError("Unsupported expression")
 
     def _is_assignable(self, expr: Expr) -> bool:
-        return isinstance(expr, Identifier) or (isinstance(expr, UnaryExpr) and expr.op == "*")
+        return (
+            isinstance(expr, Identifier)
+            or (isinstance(expr, UnaryExpr) and expr.op == "*")
+            or isinstance(expr, SubscriptExpr)
+        )
 
 
 def analyze(unit: TranslationUnit) -> SemaUnit:

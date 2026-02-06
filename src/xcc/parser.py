@@ -21,6 +21,7 @@ from xcc.ast import (
     Param,
     ReturnStmt,
     Stmt,
+    SubscriptExpr,
     SwitchStmt,
     TranslationUnit,
     TypeSpec,
@@ -79,13 +80,16 @@ class Parser:
 
     def _parse_param(self) -> Param:
         type_spec = self._parse_type_spec()
-        if type_spec.name == "void" and type_spec.pointer_depth == 0:
-            raise ParserError("Invalid parameter type", self._previous())
         name: str | None = None
+        array_lengths: tuple[int, ...] = ()
         if self._current().kind == TokenKind.IDENT:
             name_token = self._advance()
             name = str(name_token.lexeme)
-        return Param(type_spec, name)
+            array_lengths = self._parse_array_suffixes()
+        declarator_type = TypeSpec(type_spec.name, type_spec.pointer_depth, array_lengths)
+        if declarator_type.name == "void" and declarator_type.pointer_depth == 0:
+            raise ParserError("Invalid parameter type", self._previous())
+        return Param(declarator_type, name)
 
     def _parse_type_spec(self) -> TypeSpec:
         token = self._expect(TokenKind.KEYWORD)
@@ -208,15 +212,17 @@ class Parser:
 
     def _parse_decl_stmt(self) -> DeclStmt:
         type_spec = self._parse_type_spec()
-        if type_spec.name == "void" and type_spec.pointer_depth == 0:
-            raise ParserError("Invalid object type", self._current())
         name = self._expect(TokenKind.IDENT).lexeme
+        array_lengths = self._parse_array_suffixes()
+        decl_type = TypeSpec(type_spec.name, type_spec.pointer_depth, array_lengths)
+        if decl_type.name == "void" and decl_type.pointer_depth == 0:
+            raise ParserError("Invalid object type", self._current())
         init: Expr | None = None
         if self._check_punct("="):
             self._advance()
             init = self._parse_expression()
         self._expect_punct(";")
-        return DeclStmt(type_spec, str(name), init)
+        return DeclStmt(decl_type, str(name), init)
 
     def _parse_return_stmt(self) -> ReturnStmt:
         self._advance()
@@ -307,12 +313,40 @@ class Parser:
 
     def _parse_postfix(self) -> Expr:
         expr = self._parse_primary()
-        while self._check_punct("("):
-            self._advance()
-            args = self._parse_arguments()
-            self._expect_punct(")")
-            expr = CallExpr(expr, args)
+        while True:
+            if self._check_punct("("):
+                self._advance()
+                args = self._parse_arguments()
+                self._expect_punct(")")
+                expr = CallExpr(expr, args)
+                continue
+            if self._check_punct("["):
+                self._advance()
+                index = self._parse_expression()
+                self._expect_punct("]")
+                expr = SubscriptExpr(expr, index)
+                continue
+            break
         return expr
+
+    def _parse_array_suffixes(self) -> tuple[int, ...]:
+        lengths: list[int] = []
+        while self._check_punct("["):
+            self._advance()
+            size_token = self._expect(TokenKind.INT_CONST)
+            size = self._parse_array_size(size_token)
+            lengths.append(size)
+            self._expect_punct("]")
+        return tuple(lengths)
+
+    def _parse_array_size(self, token: Token) -> int:
+        lexeme = token.lexeme
+        if not isinstance(lexeme, str) or not lexeme.isdigit():
+            raise ParserError("Unsupported array size", token)
+        size = int(lexeme)
+        if size <= 0:
+            raise ParserError("Array size must be positive", token)
+        return size
 
     def _parse_arguments(self) -> list[Expr]:
         if self._check_punct(")"):
