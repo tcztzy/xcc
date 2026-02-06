@@ -30,6 +30,9 @@ from xcc.ast import (
 )
 from xcc.lexer import Token, TokenKind
 
+DeclaratorOp = tuple[str, int]
+POINTER_OP: DeclaratorOp = ("ptr", 0)
+
 
 @dataclass(frozen=True)
 class ParserError(ValueError):
@@ -79,15 +82,10 @@ class Parser:
         return params
 
     def _parse_param(self) -> Param:
-        type_spec = self._parse_type_spec()
-        name: str | None = None
-        array_lengths: tuple[int, ...] = ()
-        if self._current().kind == TokenKind.IDENT:
-            name_token = self._advance()
-            name = str(name_token.lexeme)
-            array_lengths = self._parse_array_suffixes()
-        declarator_type = TypeSpec(type_spec.name, type_spec.pointer_depth, array_lengths)
-        if declarator_type.name == "void" and declarator_type.pointer_depth == 0:
+        base_type = self._parse_type_spec()
+        name, declarator_ops = self._parse_declarator(allow_abstract=True)
+        declarator_type = self._build_declarator_type(base_type, declarator_ops)
+        if self._is_invalid_void_object_type(declarator_type):
             raise ParserError("Invalid parameter type", self._previous())
         return Param(declarator_type, name)
 
@@ -211,18 +209,18 @@ class Parser:
         return DefaultStmt(body)
 
     def _parse_decl_stmt(self) -> DeclStmt:
-        type_spec = self._parse_type_spec()
-        name = self._expect(TokenKind.IDENT).lexeme
-        array_lengths = self._parse_array_suffixes()
-        decl_type = TypeSpec(type_spec.name, type_spec.pointer_depth, array_lengths)
-        if decl_type.name == "void" and decl_type.pointer_depth == 0:
+        base_type = self._parse_type_spec()
+        name, declarator_ops = self._parse_declarator(allow_abstract=False)
+        assert name is not None
+        decl_type = self._build_declarator_type(base_type, declarator_ops)
+        if self._is_invalid_void_object_type(decl_type):
             raise ParserError("Invalid object type", self._current())
         init: Expr | None = None
         if self._check_punct("="):
             self._advance()
             init = self._parse_expression()
         self._expect_punct(";")
-        return DeclStmt(decl_type, str(name), init)
+        return DeclStmt(decl_type, name, init)
 
     def _parse_return_stmt(self) -> ReturnStmt:
         self._advance()
@@ -329,15 +327,61 @@ class Parser:
             break
         return expr
 
-    def _parse_array_suffixes(self) -> tuple[int, ...]:
-        lengths: list[int] = []
+    def _build_declarator_type(
+        self,
+        base_type: TypeSpec,
+        declarator_ops: tuple[DeclaratorOp, ...],
+    ) -> TypeSpec:
+        combined_ops = declarator_ops + (POINTER_OP,) * base_type.pointer_depth
+        return TypeSpec(base_type.name, declarator_ops=combined_ops)
+
+    def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
+        if type_spec.name != "void":
+            return False
+        if not type_spec.declarator_ops:
+            return True
+        return type_spec.declarator_ops[-1][0] != "ptr"
+
+    def _parse_declarator(
+        self,
+        allow_abstract: bool,
+    ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
+        pointer_count = 0
+        while self._check_punct("*"):
+            self._advance()
+            pointer_count += 1
+        name, ops = self._parse_direct_declarator(allow_abstract)
+        if pointer_count:
+            ops = ops + (POINTER_OP,) * pointer_count
+        return name, ops
+
+    def _parse_direct_declarator(
+        self,
+        allow_abstract: bool,
+    ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
+        name: str | None
+        ops: tuple[DeclaratorOp, ...]
+        if self._current().kind == TokenKind.IDENT:
+            token = self._advance()
+            assert isinstance(token.lexeme, str)
+            name = token.lexeme
+            ops = ()
+        elif self._check_punct("("):
+            self._advance()
+            name, ops = self._parse_declarator(allow_abstract=True)
+            self._expect_punct(")")
+        elif allow_abstract:
+            name = None
+            ops = ()
+        else:
+            raise ParserError("Expected identifier", self._current())
         while self._check_punct("["):
             self._advance()
             size_token = self._expect(TokenKind.INT_CONST)
             size = self._parse_array_size(size_token)
-            lengths.append(size)
             self._expect_punct("]")
-        return tuple(lengths)
+            ops = ops + (("arr", size),)
+        return name, ops
 
     def _parse_array_size(self, token: Token) -> int:
         lexeme = token.lexeme

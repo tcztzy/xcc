@@ -68,6 +68,9 @@ class TypeMap:
     def get(self, node: Expr) -> Type | None:
         return self._map.get(id(node))
 
+    def require(self, node: Expr) -> Type:
+        return self._map[id(node)]
+
 
 @dataclass(frozen=True)
 class SemaUnit:
@@ -143,25 +146,34 @@ class Analyzer:
         for param in params:
             if param.name is None:
                 raise SemaError("Missing parameter name")
-            param_type = self._resolve_type(param.type_spec)
+            param_type = self._resolve_param_type(param.type_spec)
             scope.define(VarSymbol(param.name, param_type))
 
     def _signature_from(self, func: FunctionDef) -> FunctionSignature:
         params: list[Type] = []
         for param in func.params:
-            if param.type_spec.name == "void" and param.type_spec.pointer_depth == 0:
+            if self._is_invalid_void_type_spec(param.type_spec):
                 raise SemaError("Invalid parameter type: void")
-            params.append(self._resolve_type(param.type_spec))
+            params.append(self._resolve_param_type(param.type_spec))
         return FunctionSignature(self._resolve_type(func.return_type), tuple(params))
 
     def _resolve_type(self, type_spec: TypeSpec) -> Type:
-        base = INT if type_spec.name == "int" else VOID
-        resolved = base
-        for _ in range(type_spec.pointer_depth):
-            resolved = resolved.pointer_to()
-        for length in type_spec.array_lengths:
-            resolved = resolved.array_of(length)
-        return resolved
+        if type_spec.name == "int" and not type_spec.declarator_ops:
+            return INT
+        if type_spec.name == "void" and not type_spec.declarator_ops:
+            return VOID
+        return Type(type_spec.name, declarator_ops=type_spec.declarator_ops)
+
+    def _resolve_param_type(self, type_spec: TypeSpec) -> Type:
+        resolved = self._resolve_type(type_spec)
+        return resolved.decay_parameter_array()
+
+    def _is_invalid_void_type_spec(self, type_spec: TypeSpec) -> bool:
+        if type_spec.name != "void":
+            return False
+        if not type_spec.declarator_ops:
+            return True
+        return type_spec.declarator_ops[-1][0] != "ptr"
 
     def _analyze_compound(self, stmt: CompoundStmt, scope: Scope, return_type: Type) -> None:
         for item in stmt.statements:
@@ -169,12 +181,12 @@ class Analyzer:
 
     def _analyze_stmt(self, stmt: Stmt, scope: Scope, return_type: Type) -> None:
         if isinstance(stmt, DeclStmt):
-            if stmt.type_spec.name == "void" and stmt.type_spec.pointer_depth == 0:
+            if self._is_invalid_void_type_spec(stmt.type_spec):
                 raise SemaError("Invalid object type: void")
             var_type = self._resolve_type(stmt.type_spec)
             scope.define(VarSymbol(stmt.name, var_type))
             if stmt.init is not None:
-                init_type = self._analyze_expr(stmt.init, scope)
+                init_type = self._decay_array_value(self._analyze_expr(stmt.init, scope))
                 if init_type != var_type:
                     raise SemaError("Initializer type mismatch")
             return
@@ -188,7 +200,7 @@ class Analyzer:
                 return
             if return_type is VOID:
                 raise SemaError("Void function should not return a value")
-            value_type = self._analyze_expr(stmt.value, scope)
+            value_type = self._decay_array_value(self._analyze_expr(stmt.value, scope))
             if value_type != return_type:
                 raise SemaError("Return type mismatch")
             return
@@ -308,7 +320,8 @@ class Analyzer:
                 self._type_map.set(expr, result)
                 return result
             if expr.op == "*":
-                pointee = operand_type.pointee()
+                value_operand_type = self._decay_array_value(operand_type)
+                pointee = value_operand_type.pointee()
                 if pointee is None:
                     raise SemaError("Cannot dereference non-pointer")
                 self._type_map.set(expr, pointee)
@@ -323,8 +336,8 @@ class Analyzer:
             if not self._is_assignable(expr.target):
                 raise SemaError("Assignment target is not assignable")
             target_type = self._analyze_expr(expr.target, scope)
-            value_type = self._analyze_expr(expr.value, scope)
-            if target_type.array_lengths:
+            value_type = self._decay_array_value(self._analyze_expr(expr.value, scope))
+            if target_type.is_array():
                 raise SemaError("Assignment target is not assignable")
             if target_type != value_type:
                 raise SemaError("Assignment type mismatch")
@@ -341,8 +354,9 @@ class Analyzer:
             if len(expr.args) != len(signature.params):
                 raise SemaError(f"Argument count mismatch: {expr.callee.name}")
             for index, arg in enumerate(expr.args):
-                arg_type = self._type_map.get(arg)
-                if arg_type != signature.params[index]:
+                arg_type = self._type_map.require(arg)
+                value_arg_type = self._decay_array_value(arg_type)
+                if value_arg_type != signature.params[index]:
                     raise SemaError(f"Argument type mismatch: {expr.callee.name}")
             self._type_map.set(expr, signature.return_type)
             return signature.return_type
@@ -354,6 +368,9 @@ class Analyzer:
             or (isinstance(expr, UnaryExpr) and expr.op == "*")
             or isinstance(expr, SubscriptExpr)
         )
+
+    def _decay_array_value(self, type_: Type) -> Type:
+        return type_.decay_parameter_array()
 
 
 def analyze(unit: TranslationUnit) -> SemaUnit:

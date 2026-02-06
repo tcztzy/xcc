@@ -108,6 +108,13 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int f(int a[4]){return a[0];}")))
         self.assertEqual(unit.functions[0].params, [Param(TypeSpec("int", 0, (4,)), "a")])
 
+    def test_pointer_to_array_parameter(self) -> None:
+        unit = parse(list(lex("int f(int (*p)[4]){return (*p)[0];}")))
+        self.assertEqual(
+            unit.functions[0].params,
+            [Param(TypeSpec("int", declarator_ops=(("ptr", 0), ("arr", 4))), "p")],
+        )
+
     def test_call_expression(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
@@ -311,6 +318,21 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
 
+    def test_array_of_pointers_declaration(self) -> None:
+        unit = parse(list(lex("int main(){int *p[4];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, (4,)))
+
+    def test_pointer_to_array_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){int (*p)[4];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("arr", 4))),
+        )
+
     def test_array_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){int a[4];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -389,6 +411,10 @@ class ParserTests(unittest.TestCase):
     def test_void_array_declaration_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){void x[1];return 0;}")))
+
+    def test_missing_declarator_in_declaration(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int ;return 0;}")))
 
     def test_missing_semicolon(self) -> None:
         source = "int main(){return 1}"

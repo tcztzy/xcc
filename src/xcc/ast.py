@@ -1,5 +1,16 @@
 from dataclasses import dataclass
 
+DeclaratorOp = tuple[str, int]
+
+
+def _ops_from_legacy(
+    pointer_depth: int,
+    array_lengths: tuple[int, ...],
+) -> tuple[DeclaratorOp, ...]:
+    ops: list[DeclaratorOp] = [("arr", length) for length in array_lengths]
+    ops.extend(("ptr", 0) for _ in range(pointer_depth))
+    return tuple(ops)
+
 
 class Expr:
     pass
@@ -19,6 +30,20 @@ class TypeSpec:
     name: str
     pointer_depth: int = 0
     array_lengths: tuple[int, ...] = ()
+    declarator_ops: tuple[DeclaratorOp, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.declarator_ops:
+            pointer_depth = sum(1 for kind, _ in self.declarator_ops if kind == "ptr")
+            array_lengths = tuple(length for kind, length in self.declarator_ops if kind == "arr")
+            object.__setattr__(self, "pointer_depth", pointer_depth)
+            object.__setattr__(self, "array_lengths", array_lengths)
+            return
+        object.__setattr__(
+            self,
+            "declarator_ops",
+            _ops_from_legacy(self.pointer_depth, self.array_lengths),
+        )
 
 
 @dataclass(frozen=True)

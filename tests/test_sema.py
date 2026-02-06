@@ -32,7 +32,8 @@ class SemaTests(unittest.TestCase):
         array = Type("int").array_of(4)
         self.assertEqual(str(array), "int[4]")
         pointer = array.pointer_to()
-        self.assertEqual(pointer, Type("int", 1, (4,)))
+        self.assertEqual(str(Type("int", 1)), "int*")
+        self.assertEqual(pointer, Type("int", declarator_ops=(("ptr", 0), ("arr", 4))))
         self.assertEqual(pointer.pointee(), array)
         self.assertEqual(array.element_type(), Type("int"))
         self.assertIsNone(Type("int").pointee())
@@ -74,6 +75,18 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         func_symbol = sema.functions["f"]
         self.assertEqual(func_symbol.locals["p"].type_, Type("void", 1))
+
+    def test_array_parameter_decays_to_pointer(self) -> None:
+        unit = parse(list(lex("int f(int a[4]){return a[0];}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["f"]
+        self.assertEqual(func_symbol.locals["a"].type_, Type("int", 1))
+
+    def test_array_argument_decays_on_call(self) -> None:
+        source = "int f(int a[4]){return a[0];} int main(){int x[4]; return f(x);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_function_declaration_then_definition(self) -> None:
         source = (
@@ -220,6 +233,23 @@ class SemaTests(unittest.TestCase):
         pointer_init = _body(unit.functions[0]).statements[1].init
         assert pointer_init is not None
         self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
+
+    def test_parenthesized_pointer_to_array_typemap(self) -> None:
+        source = "int main(){int a[4]; int (*p)[4]=&a; return (*p)[1];}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        pointer_init = _body(unit.functions[0]).statements[1].init
+        assert pointer_init is not None
+        self.assertEqual(
+            sema.type_map.get(pointer_init),
+            Type("int", declarator_ops=(("ptr", 0), ("arr", 4))),
+        )
+
+    def test_pointer_to_array_assignment_is_allowed(self) -> None:
+        source = "int main(){int a[4]; int b[4]; int (*p)[4]=&a; int (*q)[4]=&b; p=q; return (*p)[0];}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_subscript_non_integer_index_error(self) -> None:
         unit = parse(list(lex("int main(){int a[2]; int *p=&a[0]; return a[p];}")))
