@@ -296,6 +296,40 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertIsInstance(stmt.init, BinaryExpr)
 
+    def test_pointer_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){int *p;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+
+    def test_void_pointer_declaration_is_allowed(self) -> None:
+        unit = parse(list(lex("int main(){void *p;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("void", 1))
+
+    def test_pointer_parameter_and_return_type(self) -> None:
+        unit = parse(list(lex("int *id(int *p){return p;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("int", 1))
+        self.assertEqual(func.params, [Param(TypeSpec("int", 1), "p")])
+
+    def test_unary_address_of_expression(self) -> None:
+        unit = parse(list(lex("int main(){int x;return &x;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, UnaryExpr)
+        self.assertEqual(expr.op, "&")
+
+    def test_unary_dereference_expression(self) -> None:
+        unit = parse(list(lex("int main(){int *p;return *p;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, UnaryExpr)
+        self.assertEqual(expr.op, "*")
+
     def test_void_declaration_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){void x;return 0;}")))

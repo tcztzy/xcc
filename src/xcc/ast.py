@@ -17,6 +17,7 @@ class TranslationUnit:
 @dataclass(frozen=True)
 class TypeSpec:
     name: str
+    pointer_depth: int = 0
 
 
 @dataclass(frozen=True)

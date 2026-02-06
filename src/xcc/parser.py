@@ -91,7 +91,11 @@ class Parser:
         token = self._expect(TokenKind.KEYWORD)
         if token.lexeme not in {"int", "void"}:
             raise ParserError("Unsupported type", token)
-        return TypeSpec(str(token.lexeme))
+        pointer_depth = 0
+        while self._check_punct("*"):
+            self._advance()
+            pointer_depth += 1
+        return TypeSpec(str(token.lexeme), pointer_depth)
 
     def _parse_compound_stmt(self) -> CompoundStmt:
         self._expect_punct("{")
@@ -203,9 +207,9 @@ class Parser:
         return DefaultStmt(body)
 
     def _parse_decl_stmt(self) -> DeclStmt:
-        if self._check_keyword("void"):
-            raise ParserError("Invalid object type", self._current())
         type_spec = self._parse_type_spec()
+        if type_spec.name == "void" and type_spec.pointer_depth == 0:
+            raise ParserError("Invalid object type", self._current())
         name = self._expect(TokenKind.IDENT).lexeme
         init: Expr | None = None
         if self._check_punct("="):
@@ -293,6 +297,8 @@ class Parser:
             or self._check_punct("-")
             or self._check_punct("!")
             or self._check_punct("~")
+            or self._check_punct("&")
+            or self._check_punct("*")
         ):
             op = self._advance().lexeme
             operand = self._parse_unary()

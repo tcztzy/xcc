@@ -148,15 +148,17 @@ class Analyzer:
     def _signature_from(self, func: FunctionDef) -> FunctionSignature:
         params: list[Type] = []
         for param in func.params:
-            if param.type_spec.name == "void":
+            if param.type_spec.name == "void" and param.type_spec.pointer_depth == 0:
                 raise SemaError("Invalid parameter type: void")
             params.append(self._resolve_type(param.type_spec))
         return FunctionSignature(self._resolve_type(func.return_type), tuple(params))
 
     def _resolve_type(self, type_spec: TypeSpec) -> Type:
-        if type_spec.name == "int":
-            return INT
-        return VOID
+        base = INT if type_spec.name == "int" else VOID
+        resolved = base
+        for _ in range(type_spec.pointer_depth):
+            resolved = resolved.pointer_to()
+        return resolved
 
     def _analyze_compound(self, stmt: CompoundStmt, scope: Scope, return_type: Type) -> None:
         for item in stmt.statements:
@@ -164,12 +166,14 @@ class Analyzer:
 
     def _analyze_stmt(self, stmt: Stmt, scope: Scope, return_type: Type) -> None:
         if isinstance(stmt, DeclStmt):
-            if stmt.type_spec.name == "void":
+            if stmt.type_spec.name == "void" and stmt.type_spec.pointer_depth == 0:
                 raise SemaError("Invalid object type: void")
             var_type = self._resolve_type(stmt.type_spec)
             scope.define(VarSymbol(stmt.name, var_type))
             if stmt.init is not None:
-                self._analyze_expr(stmt.init, scope)
+                init_type = self._analyze_expr(stmt.init, scope)
+                if init_type != var_type:
+                    raise SemaError("Initializer type mismatch")
             return
         if isinstance(stmt, ExprStmt):
             self._analyze_expr(stmt.expr, scope)
@@ -181,7 +185,9 @@ class Analyzer:
                 return
             if return_type is VOID:
                 raise SemaError("Void function should not return a value")
-            self._analyze_expr(stmt.value, scope)
+            value_type = self._analyze_expr(stmt.value, scope)
+            if value_type != return_type:
+                raise SemaError("Return type mismatch")
             return
         if isinstance(stmt, ForStmt):
             inner_scope = Scope(scope)
@@ -276,9 +282,23 @@ class Analyzer:
             self._type_map.set(expr, symbol.type_)
             return symbol.type_
         if isinstance(expr, UnaryExpr):
-            self._analyze_expr(expr.operand, scope)
-            self._type_map.set(expr, INT)
-            return INT
+            operand_type = self._analyze_expr(expr.operand, scope)
+            if expr.op in {"+", "-", "!", "~"}:
+                self._type_map.set(expr, INT)
+                return INT
+            if expr.op == "&":
+                if not isinstance(expr.operand, Identifier):
+                    raise SemaError("Address-of operand is not assignable")
+                result = operand_type.pointer_to()
+                self._type_map.set(expr, result)
+                return result
+            if expr.op == "*":
+                pointee = operand_type.pointee()
+                if pointee is None:
+                    raise SemaError("Cannot dereference non-pointer")
+                self._type_map.set(expr, pointee)
+                return pointee
+            raise SemaError("Unsupported expression")
         if isinstance(expr, BinaryExpr):
             self._analyze_expr(expr.left, scope)
             self._analyze_expr(expr.right, scope)
@@ -287,10 +307,12 @@ class Analyzer:
         if isinstance(expr, AssignExpr):
             if not isinstance(expr.target, Identifier):
                 raise SemaError("Assignment target is not assignable")
-            self._analyze_expr(expr.target, scope)
-            self._analyze_expr(expr.value, scope)
-            self._type_map.set(expr, INT)
-            return INT
+            target_type = self._analyze_expr(expr.target, scope)
+            value_type = self._analyze_expr(expr.value, scope)
+            if target_type != value_type:
+                raise SemaError("Assignment type mismatch")
+            self._type_map.set(expr, target_type)
+            return target_type
         if isinstance(expr, CallExpr):
             if not isinstance(expr.callee, Identifier):
                 raise SemaError("Call target is not a function")
@@ -301,6 +323,10 @@ class Analyzer:
                 self._analyze_expr(arg, scope)
             if len(expr.args) != len(signature.params):
                 raise SemaError(f"Argument count mismatch: {expr.callee.name}")
+            for index, arg in enumerate(expr.args):
+                arg_type = self._type_map.get(arg)
+                if arg_type != signature.params[index]:
+                    raise SemaError(f"Argument type mismatch: {expr.callee.name}")
             self._type_map.set(expr, signature.return_type)
             return signature.return_type
         raise SemaError("Unsupported expression")

@@ -8,15 +8,17 @@ from xcc.ast import (
     ExprStmt,
     FunctionDef,
     CallExpr,
+    IntLiteral,
     Param,
     Stmt,
     TranslationUnit,
     TypeSpec,
+    UnaryExpr,
 )
 from xcc.lexer import lex
 from xcc.parser import parse
 from xcc.sema import SemaError, analyze
-from xcc.types import INT
+from xcc.types import INT, Type
 
 
 def _body(func):
@@ -152,6 +154,17 @@ class SemaTests(unittest.TestCase):
         self.assertIsInstance(call_expr, CallExpr)
         self.assertIs(sema.type_map.get(call_expr), INT)
 
+    def test_pointer_address_of_and_dereference_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; return *p;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        pointer_init = _body(unit.functions[0]).statements[1].init
+        assert pointer_init is not None
+        self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
+        return_expr = _body(unit.functions[0]).statements[2].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
     def test_null_statement(self) -> None:
         unit = parse(list(lex("int main(){; return 0;}")))
         sema = analyze(unit)
@@ -162,6 +175,57 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Undeclared identifier: x")
+
+    def test_initializer_type_mismatch(self) -> None:
+        unit = parse(list(lex("int main(){int *p=1; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
+    def test_assignment_type_mismatch(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; x=p; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
+    def test_return_type_mismatch(self) -> None:
+        unit = parse(list(lex("int *f(int *p){return 1;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Return type mismatch")
+
+    def test_argument_type_mismatch(self) -> None:
+        unit = parse(list(lex("int *id(int *p){return p;} int main(){int x=1; return id(x);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Argument type mismatch: id")
+
+    def test_dereference_non_pointer_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; return *x;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Cannot dereference non-pointer")
+
+    def test_address_of_non_assignable_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; return &(x+1);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Address-of operand is not assignable")
+
+    def test_unsupported_unary_operator_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt([ExprStmt(UnaryExpr("?", IntLiteral(1)))]),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Unsupported expression")
 
     def test_duplicate_declaration(self) -> None:
         unit = parse(list(lex("int main(){int x; int x; return 0;}")))
