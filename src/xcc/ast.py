@@ -34,7 +34,7 @@ class FunctionDef:
 
 
 @dataclass(frozen=True)
-class CompoundStmt:
+class CompoundStmt(Stmt):
     statements: list[Stmt]
 
 
@@ -56,6 +56,23 @@ class ForStmt(Stmt):
     init: Stmt | Expr | None
     condition: Expr | None
     post: Expr | None
+    body: Stmt
+
+
+@dataclass(frozen=True)
+class SwitchStmt(Stmt):
+    condition: Expr
+    body: Stmt
+
+
+@dataclass(frozen=True)
+class CaseStmt(Stmt):
+    value: Expr
+    body: Stmt
+
+
+@dataclass(frozen=True)
+class DefaultStmt(Stmt):
     body: Stmt
 
 

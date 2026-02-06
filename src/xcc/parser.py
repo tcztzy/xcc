@@ -5,9 +5,11 @@ from xcc.ast import (
     BinaryExpr,
     BreakStmt,
     CallExpr,
+    CaseStmt,
     CompoundStmt,
     ContinueStmt,
     DeclStmt,
+    DefaultStmt,
     Expr,
     ExprStmt,
     ForStmt,
@@ -19,6 +21,7 @@ from xcc.ast import (
     Param,
     ReturnStmt,
     Stmt,
+    SwitchStmt,
     TranslationUnit,
     TypeSpec,
     UnaryExpr,
@@ -110,6 +113,12 @@ class Parser:
             return self._parse_while_stmt()
         if self._check_keyword("for"):
             return self._parse_for_stmt()
+        if self._check_keyword("switch"):
+            return self._parse_switch_stmt()
+        if self._check_keyword("case"):
+            return self._parse_case_stmt()
+        if self._check_keyword("default"):
+            return self._parse_default_stmt()
         if self._check_keyword("break"):
             self._advance()
             self._expect_punct(";")
@@ -171,6 +180,27 @@ class Parser:
         self._expect_punct(")")
         body = self._parse_statement()
         return ForStmt(init, condition, post, body)
+
+    def _parse_switch_stmt(self) -> SwitchStmt:
+        self._advance()
+        self._expect_punct("(")
+        condition = self._parse_expression()
+        self._expect_punct(")")
+        body = self._parse_statement()
+        return SwitchStmt(condition, body)
+
+    def _parse_case_stmt(self) -> CaseStmt:
+        self._advance()
+        value = self._parse_expression()
+        self._expect_punct(":")
+        body = self._parse_statement()
+        return CaseStmt(value, body)
+
+    def _parse_default_stmt(self) -> DefaultStmt:
+        self._advance()
+        self._expect_punct(":")
+        body = self._parse_statement()
+        return DefaultStmt(body)
 
     def _parse_decl_stmt(self) -> DeclStmt:
         if self._check_keyword("void"):

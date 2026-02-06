@@ -132,6 +132,18 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_switch_statement_ok(self) -> None:
+        source = (
+            "int main(){"
+            "int x=1;"
+            "switch(x){case 1: break; default: return 0;}"
+            "return 1;"
+            "}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_function_call_typemap(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
@@ -228,6 +240,44 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "continue not in loop")
+
+    def test_case_outside_switch_error(self) -> None:
+        unit = parse(list(lex("int main(){case 1:return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case not in switch")
+
+    def test_default_outside_switch_error(self) -> None:
+        unit = parse(list(lex("int main(){default:return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "default not in switch")
+
+    def test_duplicate_case_value_error(self) -> None:
+        unit = parse(list(lex("int main(){switch(1){case 1:return 0;case 1:return 1;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate case value")
+
+    def test_duplicate_default_label_error(self) -> None:
+        unit = parse(
+            list(lex("int main(){switch(1){default:return 0;default:return 1;}}"))
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate default label")
+
+    def test_non_integer_constant_case_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1;switch(x){case x:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
+    def test_switch_void_condition_error(self) -> None:
+        unit = parse(list(lex("void foo(){return;} int main(){switch(foo()){default:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be non-void")
 
     def test_for_scope_does_not_leak(self) -> None:
         unit = parse(list(lex("int main(){for(int i=0;i<1;i=i+1) ; return i;}")))

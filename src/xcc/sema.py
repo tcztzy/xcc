@@ -5,9 +5,11 @@ from xcc.ast import (
     BinaryExpr,
     BreakStmt,
     CallExpr,
+    CaseStmt,
     CompoundStmt,
     ContinueStmt,
     DeclStmt,
+    DefaultStmt,
     Expr,
     ExprStmt,
     ForStmt,
@@ -19,6 +21,7 @@ from xcc.ast import (
     Param,
     ReturnStmt,
     Stmt,
+    SwitchStmt,
     TranslationUnit,
     TypeSpec,
     UnaryExpr,
@@ -94,6 +97,12 @@ class Scope:
         return self._symbols
 
 
+class SwitchContext:
+    def __init__(self) -> None:
+        self.case_values: set[str] = set()
+        self.has_default = False
+
+
 class Analyzer:
     def __init__(self) -> None:
         self._functions: dict[str, FunctionSymbol] = {}
@@ -101,6 +110,7 @@ class Analyzer:
         self._function_signatures: dict[str, FunctionSignature] = {}
         self._defined_functions: set[str] = set()
         self._loop_depth = 0
+        self._switch_stack: list[SwitchContext] = []
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         for func in unit.functions:
@@ -148,9 +158,7 @@ class Analyzer:
             return INT
         return VOID
 
-    def _analyze_compound(
-        self, stmt: CompoundStmt, scope: Scope, return_type: Type
-    ) -> None:
+    def _analyze_compound(self, stmt: CompoundStmt, scope: Scope, return_type: Type) -> None:
         for item in stmt.statements:
             self._analyze_stmt(item, scope, return_type)
 
@@ -193,6 +201,36 @@ class Analyzer:
             finally:
                 self._loop_depth -= 1
             return
+        if isinstance(stmt, SwitchStmt):
+            condition_type = self._analyze_expr(stmt.condition, scope)
+            if condition_type is VOID:
+                raise SemaError("Condition must be non-void")
+            self._switch_stack.append(SwitchContext())
+            try:
+                self._analyze_stmt(stmt.body, scope, return_type)
+            finally:
+                self._switch_stack.pop()
+            return
+        if isinstance(stmt, CaseStmt):
+            if not self._switch_stack:
+                raise SemaError("case not in switch")
+            if not isinstance(stmt.value, IntLiteral):
+                raise SemaError("case value is not integer constant")
+            context = self._switch_stack[-1]
+            if stmt.value.value in context.case_values:
+                raise SemaError("Duplicate case value")
+            context.case_values.add(stmt.value.value)
+            self._analyze_stmt(stmt.body, scope, return_type)
+            return
+        if isinstance(stmt, DefaultStmt):
+            if not self._switch_stack:
+                raise SemaError("default not in switch")
+            context = self._switch_stack[-1]
+            if context.has_default:
+                raise SemaError("Duplicate default label")
+            context.has_default = True
+            self._analyze_stmt(stmt.body, scope, return_type)
+            return
         if isinstance(stmt, CompoundStmt):
             inner_scope = Scope(scope)
             self._analyze_compound(stmt, inner_scope, return_type)
@@ -216,7 +254,7 @@ class Analyzer:
                 self._loop_depth -= 1
             return
         if isinstance(stmt, BreakStmt):
-            if self._loop_depth == 0:
+            if self._loop_depth == 0 and not self._switch_stack:
                 raise SemaError("break not in loop")
             return
         if isinstance(stmt, ContinueStmt):

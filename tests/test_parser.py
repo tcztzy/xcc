@@ -5,10 +5,12 @@ from xcc.ast import (
     AssignExpr,
     BinaryExpr,
     BreakStmt,
+    CaseStmt,
     CallExpr,
     CompoundStmt,
     ContinueStmt,
     DeclStmt,
+    DefaultStmt,
     ExprStmt,
     ForStmt,
     Identifier,
@@ -17,6 +19,7 @@ from xcc.ast import (
     NullStmt,
     Param,
     ReturnStmt,
+    SwitchStmt,
     TypeSpec,
     UnaryExpr,
     WhileStmt,
@@ -181,6 +184,35 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(body, CompoundStmt)
         self.assertIsInstance(body.statements[0], BreakStmt)
         self.assertIsInstance(body.statements[1], ContinueStmt)
+
+    def test_switch_statement(self) -> None:
+        source = "int main(){switch(x){case 1:return 1;default:return 0;}}"
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, SwitchStmt)
+        body = stmt.body
+        self.assertIsInstance(body, CompoundStmt)
+        self.assertIsInstance(body.statements[0], CaseStmt)
+        self.assertIsInstance(body.statements[1], DefaultStmt)
+
+    def test_switch_consecutive_case_labels(self) -> None:
+        source = "int main(){switch(x){case 1:case 2:return 0;}}"
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, SwitchStmt)
+        body = stmt.body
+        self.assertIsInstance(body, CompoundStmt)
+        first = body.statements[0]
+        self.assertIsInstance(first, CaseStmt)
+        self.assertIsInstance(first.body, CaseStmt)
+
+    def test_case_missing_colon(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){switch(x){case 1 return 0;}}")))
+
+    def test_default_missing_colon(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){switch(x){default return 0;}}")))
 
     def test_relational_precedence(self) -> None:
         unit = parse(list(lex("int main(){return 1==2<3;}")))
