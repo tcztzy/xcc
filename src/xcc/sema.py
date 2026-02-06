@@ -152,7 +152,7 @@ class Analyzer:
     def _signature_from(self, func: FunctionDef) -> FunctionSignature:
         params: list[Type] = []
         for param in func.params:
-            if self._is_invalid_void_type_spec(param.type_spec):
+            if self._is_invalid_void_parameter_type(param.type_spec):
                 raise SemaError("Invalid parameter type: void")
             params.append(self._resolve_param_type(param.type_spec))
         return FunctionSignature(self._resolve_type(func.return_type), tuple(params))
@@ -166,14 +166,17 @@ class Analyzer:
 
     def _resolve_param_type(self, type_spec: TypeSpec) -> Type:
         resolved = self._resolve_type(type_spec)
-        return resolved.decay_parameter_array()
+        return resolved.decay_parameter_type()
 
-    def _is_invalid_void_type_spec(self, type_spec: TypeSpec) -> bool:
+    def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
         if type_spec.name != "void":
             return False
-        if not type_spec.declarator_ops:
-            return True
-        return type_spec.declarator_ops[-1][0] != "ptr"
+        return not any(kind == "ptr" for kind, _ in type_spec.declarator_ops)
+
+    def _is_invalid_void_parameter_type(self, type_spec: TypeSpec) -> bool:
+        if type_spec.name != "void":
+            return False
+        return not type_spec.declarator_ops
 
     def _analyze_compound(self, stmt: CompoundStmt, scope: Scope, return_type: Type) -> None:
         for item in stmt.statements:
@@ -181,7 +184,7 @@ class Analyzer:
 
     def _analyze_stmt(self, stmt: Stmt, scope: Scope, return_type: Type) -> None:
         if isinstance(stmt, DeclStmt):
-            if self._is_invalid_void_type_spec(stmt.type_spec):
+            if self._is_invalid_void_object_type(stmt.type_spec):
                 raise SemaError("Invalid object type: void")
             var_type = self._resolve_type(stmt.type_spec)
             scope.define(VarSymbol(stmt.name, var_type))
@@ -292,10 +295,15 @@ class Analyzer:
             return INT
         if isinstance(expr, Identifier):
             symbol = scope.lookup(expr.name)
-            if symbol is None:
+            if symbol is not None:
+                self._type_map.set(expr, symbol.type_)
+                return symbol.type_
+            signature = self._function_signatures.get(expr.name)
+            if signature is None:
                 raise SemaError(f"Undeclared identifier: {expr.name}")
-            self._type_map.set(expr, symbol.type_)
-            return symbol.type_
+            function_type = signature.return_type.function_of(len(signature.params))
+            self._type_map.set(expr, function_type)
+            return function_type
         if isinstance(expr, SubscriptExpr):
             base_type = self._analyze_expr(expr.base, scope)
             index_type = self._analyze_expr(expr.index, scope)
@@ -344,22 +352,36 @@ class Analyzer:
             self._type_map.set(expr, target_type)
             return target_type
         if isinstance(expr, CallExpr):
-            if not isinstance(expr.callee, Identifier):
+            if isinstance(expr.callee, Identifier):
+                signature = self._function_signatures.get(expr.callee.name)
+                if signature is not None:
+                    for arg in expr.args:
+                        self._analyze_expr(arg, scope)
+                    if len(expr.args) != len(signature.params):
+                        raise SemaError(f"Argument count mismatch: {expr.callee.name}")
+                    for index, arg in enumerate(expr.args):
+                        arg_type = self._type_map.require(arg)
+                        value_arg_type = self._decay_array_value(arg_type)
+                        if value_arg_type != signature.params[index]:
+                            raise SemaError(f"Argument type mismatch: {expr.callee.name}")
+                    self._type_map.set(expr, signature.return_type)
+                    return signature.return_type
+                symbol = scope.lookup(expr.callee.name)
+                if symbol is None:
+                    raise SemaError(f"Undeclared function: {expr.callee.name}")
+                callee_type = symbol.type_
+            else:
+                callee_type = self._analyze_expr(expr.callee, scope)
+            callable_signature = self._decay_array_value(callee_type).callable_signature()
+            if callable_signature is None:
                 raise SemaError("Call target is not a function")
-            signature = self._function_signatures.get(expr.callee.name)
-            if signature is None:
-                raise SemaError(f"Undeclared function: {expr.callee.name}")
+            return_type, param_count = callable_signature
             for arg in expr.args:
                 self._analyze_expr(arg, scope)
-            if len(expr.args) != len(signature.params):
-                raise SemaError(f"Argument count mismatch: {expr.callee.name}")
-            for index, arg in enumerate(expr.args):
-                arg_type = self._type_map.require(arg)
-                value_arg_type = self._decay_array_value(arg_type)
-                if value_arg_type != signature.params[index]:
-                    raise SemaError(f"Argument type mismatch: {expr.callee.name}")
-            self._type_map.set(expr, signature.return_type)
-            return signature.return_type
+            if len(expr.args) != param_count:
+                raise SemaError("Argument count mismatch")
+            self._type_map.set(expr, return_type)
+            return return_type
         raise SemaError("Unsupported expression")
 
     def _is_assignable(self, expr: Expr) -> bool:
@@ -370,7 +392,7 @@ class Analyzer:
         )
 
     def _decay_array_value(self, type_: Type) -> Type:
-        return type_.decay_parameter_array()
+        return type_.decay_parameter_type()
 
 
 def analyze(unit: TranslationUnit) -> SemaUnit:

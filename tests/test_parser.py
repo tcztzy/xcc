@@ -115,6 +115,16 @@ class ParserTests(unittest.TestCase):
             [Param(TypeSpec("int", declarator_ops=(("ptr", 0), ("arr", 4))), "p")],
         )
 
+    def test_function_pointer_parameter(self) -> None:
+        unit = parse(list(lex("int apply(int (*fn)(int), int x){return fn(x);}")))
+        self.assertEqual(
+            unit.functions[0].params,
+            [
+                Param(TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 1))), "fn"),
+                Param(TypeSpec("int"), "x"),
+            ],
+        )
+
     def test_call_expression(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
@@ -331,6 +341,42 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(
             stmt.type_spec,
             TypeSpec("int", declarator_ops=(("ptr", 0), ("arr", 4))),
+        )
+
+    def test_function_pointer_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){int (*fp)(int);return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 1))),
+        )
+
+    def test_function_pointer_declaration_with_two_params(self) -> None:
+        unit = parse(list(lex("int main(){int (*fp)(int, int);return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 2))),
+        )
+
+    def test_function_pointer_declaration_with_void_suffix(self) -> None:
+        unit = parse(list(lex("int main(){int (*fp)(void);return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 0))),
+        )
+
+    def test_function_pointer_declaration_with_empty_suffix(self) -> None:
+        unit = parse(list(lex("int main(){int (*fp)();return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 0))),
         )
 
     def test_array_declaration_statement(self) -> None:

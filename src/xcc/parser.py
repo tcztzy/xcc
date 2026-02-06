@@ -85,7 +85,7 @@ class Parser:
         base_type = self._parse_type_spec()
         name, declarator_ops = self._parse_declarator(allow_abstract=True)
         declarator_type = self._build_declarator_type(base_type, declarator_ops)
-        if self._is_invalid_void_object_type(declarator_type):
+        if self._is_invalid_void_parameter_type(declarator_type):
             raise ParserError("Invalid parameter type", self._previous())
         return Param(declarator_type, name)
 
@@ -338,9 +338,12 @@ class Parser:
     def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
         if type_spec.name != "void":
             return False
-        if not type_spec.declarator_ops:
-            return True
-        return type_spec.declarator_ops[-1][0] != "ptr"
+        return not any(kind == "ptr" for kind, _ in type_spec.declarator_ops)
+
+    def _is_invalid_void_parameter_type(self, type_spec: TypeSpec) -> bool:
+        if type_spec.name != "void":
+            return False
+        return not type_spec.declarator_ops
 
     def _parse_declarator(
         self,
@@ -375,12 +378,21 @@ class Parser:
             ops = ()
         else:
             raise ParserError("Expected identifier", self._current())
-        while self._check_punct("["):
-            self._advance()
-            size_token = self._expect(TokenKind.INT_CONST)
-            size = self._parse_array_size(size_token)
-            self._expect_punct("]")
-            ops = ops + (("arr", size),)
+        while True:
+            if self._check_punct("["):
+                self._advance()
+                size_token = self._expect(TokenKind.INT_CONST)
+                size = self._parse_array_size(size_token)
+                self._expect_punct("]")
+                ops = ops + (("arr", size),)
+                continue
+            if self._check_punct("("):
+                self._advance()
+                param_count = self._parse_function_suffix_params()
+                self._expect_punct(")")
+                ops = ops + (("fn", param_count),)
+                continue
+            break
         return name, ops
 
     def _parse_array_size(self, token: Token) -> int:
@@ -391,6 +403,20 @@ class Parser:
         if size <= 0:
             raise ParserError("Array size must be positive", token)
         return size
+
+    def _parse_function_suffix_params(self) -> int:
+        if self._check_punct(")"):
+            return 0
+        if self._check_keyword("void") and self._peek_punct(")"):
+            self._advance()
+            return 0
+        count = 1
+        self._parse_param()
+        while self._check_punct(","):
+            self._advance()
+            self._parse_param()
+            count += 1
+        return count
 
     def _parse_arguments(self) -> list[Expr]:
         if self._check_punct(")"):

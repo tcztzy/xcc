@@ -4,7 +4,10 @@ TypeOp = tuple[str, int]
 POINTER_OP: TypeOp = ("ptr", 0)
 
 
-def _ops_from_legacy(pointer_depth: int, array_lengths: tuple[int, ...]) -> tuple[TypeOp, ...]:
+def _ops_from_legacy(
+    pointer_depth: int,
+    array_lengths: tuple[int, ...],
+) -> tuple[TypeOp, ...]:
     ops: list[TypeOp] = [("arr", length) for length in array_lengths]
     ops.extend(POINTER_OP for _ in range(pointer_depth))
     return tuple(ops)
@@ -31,12 +34,14 @@ class Type:
         )
 
     def __str__(self) -> str:
-        suffix = []
+        suffix: list[str] = []
         for kind, value in reversed(self.declarator_ops):
             if kind == "ptr":
                 suffix.append("*")
-            else:
+            elif kind == "arr":
                 suffix.append(f"[{value}]")
+            else:
+                suffix.append(f"({value})")
         return f"{self.name}{''.join(suffix)}"
 
     def pointer_to(self) -> "Type":
@@ -55,10 +60,25 @@ class Type:
             return None
         return Type(self.name, declarator_ops=self.declarator_ops[1:])
 
-    def decay_parameter_array(self) -> "Type":
-        if not self.declarator_ops or self.declarator_ops[0][0] != "arr":
+    def function_of(self, param_count: int) -> "Type":
+        return Type(self.name, declarator_ops=(("fn", param_count),) + self.declarator_ops)
+
+    def callable_signature(self) -> "tuple[Type, int] | None":
+        ops = self.declarator_ops
+        if ops and ops[0][0] == "ptr":
+            ops = ops[1:]
+        if not ops or ops[0][0] != "fn":
+            return None
+        return Type(self.name, declarator_ops=ops[1:]), ops[0][1]
+
+    def decay_parameter_type(self) -> "Type":
+        if not self.declarator_ops:
             return self
-        return Type(self.name, declarator_ops=(POINTER_OP,) + self.declarator_ops[1:])
+        if self.declarator_ops[0][0] == "arr":
+            return Type(self.name, declarator_ops=(POINTER_OP,) + self.declarator_ops[1:])
+        if self.declarator_ops[0][0] == "fn":
+            return Type(self.name, declarator_ops=(POINTER_OP,) + self.declarator_ops)
+        return self
 
     def is_array(self) -> bool:
         return bool(self.declarator_ops) and self.declarator_ops[0][0] == "arr"

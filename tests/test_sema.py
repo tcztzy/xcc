@@ -36,6 +36,13 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(pointer, Type("int", declarator_ops=(("ptr", 0), ("arr", 4))))
         self.assertEqual(pointer.pointee(), array)
         self.assertEqual(array.element_type(), Type("int"))
+        func = Type("int").function_of(2)
+        self.assertEqual(str(func), "int(2)")
+        self.assertEqual(func.callable_signature(), (Type("int"), 2))
+        self.assertEqual(
+            func.decay_parameter_type(),
+            Type("int", declarator_ops=(("ptr", 0), ("fn", 2))),
+        )
         self.assertIsNone(Type("int").pointee())
         self.assertIsNone(Type("int").element_type())
 
@@ -87,6 +94,41 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
+
+    def test_function_parameter_decays_to_pointer(self) -> None:
+        source = "int apply(int fn(int), int x){return fn(x);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        func_symbol = sema.functions["apply"]
+        self.assertEqual(func_symbol.locals["fn"].type_, Type("int", declarator_ops=(("ptr", 0), ("fn", 1))))
+
+    def test_function_pointer_call_typemap(self) -> None:
+        source = "int inc(int x){return x;} int main(){int (*fp)(int)=inc; return fp(1);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[1]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_function_pointer_call_with_two_arguments(self) -> None:
+        source = "int add(int a,int b){return a+b;} int main(){int (*fp)(int, int)=add; return fp(1,2);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[1]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_function_pointer_call_argument_count_mismatch(self) -> None:
+        source = "int inc(int x){return x;} int main(){int (*fp)(int)=inc; return fp();}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Argument count mismatch")
+
+    def test_void_function_pointer_parameter_is_allowed(self) -> None:
+        unit = parse(list(lex("int f(void (*cb)(void)){return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
 
     def test_function_declaration_then_definition(self) -> None:
         source = (
