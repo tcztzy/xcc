@@ -10,6 +10,7 @@ from xcc.ast import (
     ExprStmt,
     FunctionDef,
     Identifier,
+    IfStmt,
     IntLiteral,
     NullStmt,
     Param,
@@ -18,6 +19,7 @@ from xcc.ast import (
     TranslationUnit,
     TypeSpec,
     UnaryExpr,
+    WhileStmt,
 )
 from xcc.lexer import Token, TokenKind
 
@@ -89,6 +91,12 @@ class Parser:
         if self._check_punct(";"):
             self._advance()
             return NullStmt()
+        if self._check_punct("{"):
+            return self._parse_compound_stmt()
+        if self._check_keyword("if"):
+            return self._parse_if_stmt()
+        if self._check_keyword("while"):
+            return self._parse_while_stmt()
         if self._check_keyword("return"):
             return self._parse_return_stmt()
         if self._check_keyword("int") or self._check_keyword("void"):
@@ -96,6 +104,26 @@ class Parser:
         expr = self._parse_expression()
         self._expect_punct(";")
         return ExprStmt(expr)
+
+    def _parse_if_stmt(self) -> IfStmt:
+        self._advance()
+        self._expect_punct("(")
+        condition = self._parse_expression()
+        self._expect_punct(")")
+        then_body = self._parse_statement()
+        else_body: Stmt | None = None
+        if self._check_keyword("else"):
+            self._advance()
+            else_body = self._parse_statement()
+        return IfStmt(condition, then_body, else_body)
+
+    def _parse_while_stmt(self) -> WhileStmt:
+        self._advance()
+        self._expect_punct("(")
+        condition = self._parse_expression()
+        self._expect_punct(")")
+        body = self._parse_statement()
+        return WhileStmt(condition, body)
 
     def _parse_decl_stmt(self) -> DeclStmt:
         if self._check_keyword("void"):

@@ -54,6 +54,25 @@ class SemaTests(unittest.TestCase):
         self.assertIn("a", func_symbol.locals)
         self.assertIn("b", func_symbol.locals)
 
+    def test_if_and_while_ok(self) -> None:
+        source = (
+            "int main(){"
+            "if(1) return 1;"
+            "if(1) return 2; else return 3;"
+            "while(1) ;"
+            "return 0;"
+            "}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_compound_statement_inherits_scope(self) -> None:
+        source = "int main(){int x=1; { return x; }}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_function_call_typemap(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
@@ -132,6 +151,20 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Invalid parameter type: void")
+
+    def test_if_void_condition_error(self) -> None:
+        unit = parse(list(lex("void foo(){return;} int main(){if(foo()) return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be non-void")
+
+    def test_while_void_condition_error(self) -> None:
+        unit = parse(
+            list(lex("void foo(){return;} int main(){while(foo()) return 0;}"))
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be non-void")
 
     def test_undeclared_function_call(self) -> None:
         unit = parse(list(lex("int main(){return foo(1);}")))

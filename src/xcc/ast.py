@@ -39,6 +39,19 @@ class CompoundStmt:
 
 
 @dataclass(frozen=True)
+class IfStmt(Stmt):
+    condition: Expr
+    then_body: Stmt
+    else_body: Stmt | None
+
+
+@dataclass(frozen=True)
+class WhileStmt(Stmt):
+    condition: Expr
+    body: Stmt
+
+
+@dataclass(frozen=True)
 class ReturnStmt(Stmt):
     value: Expr | None
 

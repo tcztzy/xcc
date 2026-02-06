@@ -10,6 +10,7 @@ from xcc.ast import (
     ExprStmt,
     FunctionDef,
     Identifier,
+    IfStmt,
     IntLiteral,
     NullStmt,
     Param,
@@ -18,6 +19,7 @@ from xcc.ast import (
     TranslationUnit,
     TypeSpec,
     UnaryExpr,
+    WhileStmt,
 )
 from xcc.types import INT, VOID, Type
 
@@ -61,8 +63,9 @@ class SemaUnit:
 
 
 class Scope:
-    def __init__(self) -> None:
+    def __init__(self, parent: "Scope | None" = None) -> None:
         self._symbols: dict[str, VarSymbol] = {}
+        self._parent = parent
 
     def define(self, symbol: VarSymbol) -> None:
         if symbol.name in self._symbols:
@@ -70,7 +73,12 @@ class Scope:
         self._symbols[symbol.name] = symbol
 
     def lookup(self, name: str) -> VarSymbol | None:
-        return self._symbols.get(name)
+        symbol = self._symbols.get(name)
+        if symbol is not None:
+            return symbol
+        if self._parent is None:
+            return None
+        return self._parent.lookup(name)
 
     @property
     def symbols(self) -> dict[str, VarSymbol]:
@@ -137,6 +145,24 @@ class Analyzer:
             if return_type is VOID:
                 raise SemaError("Void function should not return a value")
             self._analyze_expr(stmt.value, scope)
+            return
+        if isinstance(stmt, CompoundStmt):
+            inner_scope = Scope(scope)
+            self._analyze_compound(stmt, inner_scope, return_type)
+            return
+        if isinstance(stmt, IfStmt):
+            condition_type = self._analyze_expr(stmt.condition, scope)
+            if condition_type is VOID:
+                raise SemaError("Condition must be non-void")
+            self._analyze_stmt(stmt.then_body, scope, return_type)
+            if stmt.else_body is not None:
+                self._analyze_stmt(stmt.else_body, scope, return_type)
+            return
+        if isinstance(stmt, WhileStmt):
+            condition_type = self._analyze_expr(stmt.condition, scope)
+            if condition_type is VOID:
+                raise SemaError("Condition must be non-void")
+            self._analyze_stmt(stmt.body, scope, return_type)
             return
         if isinstance(stmt, NullStmt):
             return

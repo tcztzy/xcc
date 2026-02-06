@@ -5,15 +5,18 @@ from xcc.ast import (
     AssignExpr,
     BinaryExpr,
     CallExpr,
+    CompoundStmt,
     DeclStmt,
     ExprStmt,
     Identifier,
+    IfStmt,
     IntLiteral,
     NullStmt,
     Param,
     ReturnStmt,
     TypeSpec,
     UnaryExpr,
+    WhileStmt,
 )
 from xcc.lexer import lex
 from xcc.parser import ParserError, parse
@@ -75,6 +78,42 @@ class ParserTests(unittest.TestCase):
         call = unit.functions[1].body.statements[0].value
         self.assertIsInstance(call, CallExpr)
         self.assertEqual(call.args, [])
+
+    def test_if_else_statement(self) -> None:
+        source = "int main(){if(1) return 1; else return 2;}"
+        unit = parse(list(lex(source)))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, IfStmt)
+        self.assertIsNotNone(stmt.else_body)
+
+    def test_if_without_else(self) -> None:
+        source = "int main(){if(1) return 1; return 0;}"
+        unit = parse(list(lex(source)))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, IfStmt)
+        self.assertIsNone(stmt.else_body)
+
+    def test_dangling_else_binds_to_inner_if(self) -> None:
+        source = "int main(){if(1) if(0) return 1; else return 2;}"
+        unit = parse(list(lex(source)))
+        outer = unit.functions[0].body.statements[0]
+        self.assertIsInstance(outer, IfStmt)
+        self.assertIsNone(outer.else_body)
+        self.assertIsInstance(outer.then_body, IfStmt)
+        self.assertIsNotNone(outer.then_body.else_body)
+
+    def test_while_statement(self) -> None:
+        source = "int main(){while(1) return 0;}"
+        unit = parse(list(lex(source)))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, WhileStmt)
+
+    def test_compound_statement_as_statement(self) -> None:
+        source = "int main(){if(1){return 0;} return 1;}"
+        unit = parse(list(lex(source)))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, IfStmt)
+        self.assertIsInstance(stmt.then_body, CompoundStmt)
 
     def test_relational_precedence(self) -> None:
         unit = parse(list(lex("int main(){return 1==2<3;}")))
