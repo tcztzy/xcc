@@ -162,7 +162,29 @@ class Analyzer:
             return INT
         if type_spec.name == "void" and not type_spec.declarator_ops:
             return VOID
-        return Type(type_spec.name, declarator_ops=type_spec.declarator_ops)
+        resolved_ops: list[tuple[str, int | tuple[Type, ...] | None]] = []
+        for kind, value in type_spec.declarator_ops:
+            if kind != "fn":
+                assert isinstance(value, int)
+                resolved_ops.append((kind, value))
+                continue
+            resolved_params = self._resolve_function_param_types(value)
+            resolved_ops.append((kind, resolved_params))
+        return Type(type_spec.name, declarator_ops=tuple(resolved_ops))
+
+    def _resolve_function_param_types(
+        self,
+        declarator_value: int | tuple[TypeSpec, ...] | None,
+    ) -> tuple[Type, ...] | None:
+        if declarator_value is None:
+            return None
+        assert isinstance(declarator_value, tuple)
+        params: list[Type] = []
+        for param_spec in declarator_value:
+            if self._is_invalid_void_parameter_type(param_spec):
+                raise SemaError("Invalid parameter type: void")
+            params.append(self._resolve_param_type(param_spec))
+        return tuple(params)
 
     def _resolve_param_type(self, type_spec: TypeSpec) -> Type:
         resolved = self._resolve_type(type_spec)
@@ -301,7 +323,7 @@ class Analyzer:
             signature = self._function_signatures.get(expr.name)
             if signature is None:
                 raise SemaError(f"Undeclared identifier: {expr.name}")
-            function_type = signature.return_type.function_of(len(signature.params))
+            function_type = signature.return_type.function_of(signature.params)
             self._type_map.set(expr, function_type)
             return function_type
         if isinstance(expr, SubscriptExpr):
@@ -375,11 +397,17 @@ class Analyzer:
             callable_signature = self._decay_array_value(callee_type).callable_signature()
             if callable_signature is None:
                 raise SemaError("Call target is not a function")
-            return_type, param_count = callable_signature
+            return_type, param_types = callable_signature
             for arg in expr.args:
                 self._analyze_expr(arg, scope)
-            if len(expr.args) != param_count:
-                raise SemaError("Argument count mismatch")
+            if param_types is not None:
+                if len(expr.args) != len(param_types):
+                    raise SemaError("Argument count mismatch")
+                for index, arg in enumerate(expr.args):
+                    arg_type = self._type_map.require(arg)
+                    value_arg_type = self._decay_array_value(arg_type)
+                    if value_arg_type != param_types[index]:
+                        raise SemaError("Argument type mismatch")
             self._type_map.set(expr, return_type)
             return return_type
         raise SemaError("Unsupported expression")

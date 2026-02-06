@@ -120,7 +120,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(
             unit.functions[0].params,
             [
-                Param(TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 1))), "fn"),
+                Param(TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", (TypeSpec("int"),)))), "fn"),
                 Param(TypeSpec("int"), "x"),
             ],
         )
@@ -349,7 +349,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 1))),
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", (TypeSpec("int"),)))),
         )
 
     def test_function_pointer_declaration_with_two_params(self) -> None:
@@ -358,7 +358,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 2))),
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", (TypeSpec("int"), TypeSpec("int"))))),
         )
 
     def test_function_pointer_declaration_with_void_suffix(self) -> None:
@@ -367,7 +367,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 0))),
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", ()))),
         )
 
     def test_function_pointer_declaration_with_empty_suffix(self) -> None:
@@ -376,7 +376,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", 0))),
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", None))),
         )
 
     def test_array_declaration_statement(self) -> None:

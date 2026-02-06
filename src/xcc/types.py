@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
-TypeOp = tuple[str, int]
+FunctionParams = tuple["Type", ...] | None
+TypeOp = tuple[str, int | FunctionParams]
 POINTER_OP: TypeOp = ("ptr", 0)
 
 
@@ -11,6 +12,14 @@ def _ops_from_legacy(
     ops: list[TypeOp] = [("arr", length) for length in array_lengths]
     ops.extend(POINTER_OP for _ in range(pointer_depth))
     return tuple(ops)
+
+
+def _format_function_params(params: FunctionParams) -> str:
+    if params is None:
+        return "()"
+    if not params:
+        return "(void)"
+    return f"({','.join(str(param) for param in params)})"
 
 
 @dataclass(frozen=True)
@@ -39,9 +48,11 @@ class Type:
             if kind == "ptr":
                 suffix.append("*")
             elif kind == "arr":
+                assert isinstance(value, int)
                 suffix.append(f"[{value}]")
             else:
-                suffix.append(f"({value})")
+                assert value is None or isinstance(value, tuple)
+                suffix.append(_format_function_params(value))
         return f"{self.name}{''.join(suffix)}"
 
     def pointer_to(self) -> "Type":
@@ -60,16 +71,18 @@ class Type:
             return None
         return Type(self.name, declarator_ops=self.declarator_ops[1:])
 
-    def function_of(self, param_count: int) -> "Type":
-        return Type(self.name, declarator_ops=(("fn", param_count),) + self.declarator_ops)
+    def function_of(self, params: FunctionParams) -> "Type":
+        return Type(self.name, declarator_ops=(("fn", params),) + self.declarator_ops)
 
-    def callable_signature(self) -> "tuple[Type, int] | None":
+    def callable_signature(self) -> "tuple[Type, FunctionParams] | None":
         ops = self.declarator_ops
         if ops and ops[0][0] == "ptr":
             ops = ops[1:]
         if not ops or ops[0][0] != "fn":
             return None
-        return Type(self.name, declarator_ops=ops[1:]), ops[0][1]
+        params = ops[0][1]
+        assert params is None or isinstance(params, tuple)
+        return Type(self.name, declarator_ops=ops[1:]), params
 
     def decay_parameter_type(self) -> "Type":
         if not self.declarator_ops:

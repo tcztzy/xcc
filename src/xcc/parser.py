@@ -30,7 +30,7 @@ from xcc.ast import (
 )
 from xcc.lexer import Token, TokenKind
 
-DeclaratorOp = tuple[str, int]
+DeclaratorOp = tuple[str, int | tuple[TypeSpec, ...] | None]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
 
 
@@ -388,9 +388,9 @@ class Parser:
                 continue
             if self._check_punct("("):
                 self._advance()
-                param_count = self._parse_function_suffix_params()
+                param_types = self._parse_function_suffix_params()
                 self._expect_punct(")")
-                ops = ops + (("fn", param_count),)
+                ops = ops + (("fn", param_types),)
                 continue
             break
         return name, ops
@@ -404,19 +404,17 @@ class Parser:
             raise ParserError("Array size must be positive", token)
         return size
 
-    def _parse_function_suffix_params(self) -> int:
+    def _parse_function_suffix_params(self) -> tuple[TypeSpec, ...] | None:
         if self._check_punct(")"):
-            return 0
+            return None
         if self._check_keyword("void") and self._peek_punct(")"):
             self._advance()
-            return 0
-        count = 1
-        self._parse_param()
+            return ()
+        params = [self._parse_param().type_spec]
         while self._check_punct(","):
             self._advance()
-            self._parse_param()
-            count += 1
-        return count
+            params.append(self._parse_param().type_spec)
+        return tuple(params)
 
     def _parse_arguments(self) -> list[Expr]:
         if self._check_punct(")"):

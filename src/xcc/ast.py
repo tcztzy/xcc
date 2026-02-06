@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
-DeclaratorOp = tuple[str, int]
+DeclaratorValue = int | tuple["TypeSpec", ...] | None
+DeclaratorOp = tuple[str, DeclaratorValue]
 
 
 def _ops_from_legacy(
