@@ -3,11 +3,14 @@ from dataclasses import dataclass
 from xcc.ast import (
     AssignExpr,
     BinaryExpr,
+    BreakStmt,
     CallExpr,
     CompoundStmt,
+    ContinueStmt,
     DeclStmt,
     Expr,
     ExprStmt,
+    ForStmt,
     FunctionDef,
     Identifier,
     IfStmt,
@@ -97,6 +100,16 @@ class Parser:
             return self._parse_if_stmt()
         if self._check_keyword("while"):
             return self._parse_while_stmt()
+        if self._check_keyword("for"):
+            return self._parse_for_stmt()
+        if self._check_keyword("break"):
+            self._advance()
+            self._expect_punct(";")
+            return BreakStmt()
+        if self._check_keyword("continue"):
+            self._advance()
+            self._expect_punct(";")
+            return ContinueStmt()
         if self._check_keyword("return"):
             return self._parse_return_stmt()
         if self._check_keyword("int") or self._check_keyword("void"):
@@ -124,6 +137,32 @@ class Parser:
         self._expect_punct(")")
         body = self._parse_statement()
         return WhileStmt(condition, body)
+
+    def _parse_for_stmt(self) -> ForStmt:
+        self._advance()
+        self._expect_punct("(")
+        init: Stmt | Expr | None
+        if self._check_punct(";"):
+            self._advance()
+            init = None
+        elif self._check_keyword("int") or self._check_keyword("void"):
+            init = self._parse_decl_stmt()
+        else:
+            init = self._parse_expression()
+            self._expect_punct(";")
+        if self._check_punct(";"):
+            self._advance()
+            condition: Expr | None = None
+        else:
+            condition = self._parse_expression()
+            self._expect_punct(";")
+        if self._check_punct(")"):
+            post: Expr | None = None
+        else:
+            post = self._parse_expression()
+        self._expect_punct(")")
+        body = self._parse_statement()
+        return ForStmt(init, condition, post, body)
 
     def _parse_decl_stmt(self) -> DeclStmt:
         if self._check_keyword("void"):

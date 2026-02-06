@@ -3,11 +3,14 @@ from dataclasses import dataclass
 from xcc.ast import (
     AssignExpr,
     BinaryExpr,
+    BreakStmt,
     CallExpr,
     CompoundStmt,
+    ContinueStmt,
     DeclStmt,
     Expr,
     ExprStmt,
+    ForStmt,
     FunctionDef,
     Identifier,
     IfStmt,
@@ -90,6 +93,7 @@ class Analyzer:
         self._functions: dict[str, FunctionSymbol] = {}
         self._type_map = TypeMap()
         self._function_return_types: dict[str, Type] = {}
+        self._loop_depth = 0
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         for func in unit.functions:
@@ -146,6 +150,24 @@ class Analyzer:
                 raise SemaError("Void function should not return a value")
             self._analyze_expr(stmt.value, scope)
             return
+        if isinstance(stmt, ForStmt):
+            inner_scope = Scope(scope)
+            if isinstance(stmt.init, DeclStmt):
+                self._analyze_stmt(stmt.init, inner_scope, return_type)
+            elif isinstance(stmt.init, Expr):
+                self._analyze_expr(stmt.init, inner_scope)
+            if stmt.condition is not None:
+                condition_type = self._analyze_expr(stmt.condition, inner_scope)
+                if condition_type is VOID:
+                    raise SemaError("Condition must be non-void")
+            if stmt.post is not None:
+                self._analyze_expr(stmt.post, inner_scope)
+            self._loop_depth += 1
+            try:
+                self._analyze_stmt(stmt.body, inner_scope, return_type)
+            finally:
+                self._loop_depth -= 1
+            return
         if isinstance(stmt, CompoundStmt):
             inner_scope = Scope(scope)
             self._analyze_compound(stmt, inner_scope, return_type)
@@ -162,7 +184,19 @@ class Analyzer:
             condition_type = self._analyze_expr(stmt.condition, scope)
             if condition_type is VOID:
                 raise SemaError("Condition must be non-void")
-            self._analyze_stmt(stmt.body, scope, return_type)
+            self._loop_depth += 1
+            try:
+                self._analyze_stmt(stmt.body, scope, return_type)
+            finally:
+                self._loop_depth -= 1
+            return
+        if isinstance(stmt, BreakStmt):
+            if self._loop_depth == 0:
+                raise SemaError("break not in loop")
+            return
+        if isinstance(stmt, ContinueStmt):
+            if self._loop_depth == 0:
+                raise SemaError("continue not in loop")
             return
         if isinstance(stmt, NullStmt):
             return

@@ -73,6 +73,18 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_for_statement_ok(self) -> None:
+        source = "int main(){for(int i=0;i<3;i=i+1){break;} return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_for_expression_init_no_condition_or_post(self) -> None:
+        source = "int main(){int i=0; for(i=0;;) continue; return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_function_call_typemap(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
@@ -151,6 +163,30 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Invalid parameter type: void")
+
+    def test_for_void_condition_error(self) -> None:
+        unit = parse(list(lex("void foo(){return;} int main(){for(;foo(););}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be non-void")
+
+    def test_break_outside_loop_error(self) -> None:
+        unit = parse(list(lex("int main(){break;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "break not in loop")
+
+    def test_continue_outside_loop_error(self) -> None:
+        unit = parse(list(lex("int main(){continue;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "continue not in loop")
+
+    def test_for_scope_does_not_leak(self) -> None:
+        unit = parse(list(lex("int main(){for(int i=0;i<1;i=i+1) ; return i;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Undeclared identifier: i")
 
     def test_if_void_condition_error(self) -> None:
         unit = parse(list(lex("void foo(){return;} int main(){if(foo()) return 0;}")))

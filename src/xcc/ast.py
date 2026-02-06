@@ -52,6 +52,24 @@ class WhileStmt(Stmt):
 
 
 @dataclass(frozen=True)
+class ForStmt(Stmt):
+    init: Stmt | Expr | None
+    condition: Expr | None
+    post: Expr | None
+    body: Stmt
+
+
+@dataclass(frozen=True)
+class BreakStmt(Stmt):
+    pass
+
+
+@dataclass(frozen=True)
+class ContinueStmt(Stmt):
+    pass
+
+
+@dataclass(frozen=True)
 class ReturnStmt(Stmt):
     value: Expr | None
 

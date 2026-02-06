@@ -4,10 +4,13 @@ from tests import _bootstrap  # noqa: F401
 from xcc.ast import (
     AssignExpr,
     BinaryExpr,
+    BreakStmt,
     CallExpr,
     CompoundStmt,
+    ContinueStmt,
     DeclStmt,
     ExprStmt,
+    ForStmt,
     Identifier,
     IfStmt,
     IntLiteral,
@@ -114,6 +117,40 @@ class ParserTests(unittest.TestCase):
         stmt = unit.functions[0].body.statements[0]
         self.assertIsInstance(stmt, IfStmt)
         self.assertIsInstance(stmt.then_body, CompoundStmt)
+
+    def test_for_statement_with_expression_init(self) -> None:
+        source = "int main(){for(i=0;i<3;i=i+1) ;}"
+        unit = parse(list(lex(source)))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, ForStmt)
+        self.assertIsInstance(stmt.init, AssignExpr)
+        self.assertIsInstance(stmt.condition, BinaryExpr)
+        self.assertIsInstance(stmt.post, AssignExpr)
+
+    def test_for_statement_with_declaration_init(self) -> None:
+        source = "int main(){for(int i=0;i<3;i=i+1) ;}"
+        unit = parse(list(lex(source)))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, ForStmt)
+        self.assertIsInstance(stmt.init, DeclStmt)
+
+    def test_for_statement_empty_clauses(self) -> None:
+        unit = parse(list(lex("int main(){for(;;) ;}")))
+        stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(stmt, ForStmt)
+        self.assertIsNone(stmt.init)
+        self.assertIsNone(stmt.condition)
+        self.assertIsNone(stmt.post)
+
+    def test_break_and_continue_statements(self) -> None:
+        source = "int main(){while(1){break;continue;}}"
+        unit = parse(list(lex(source)))
+        while_stmt = unit.functions[0].body.statements[0]
+        self.assertIsInstance(while_stmt, WhileStmt)
+        body = while_stmt.body
+        self.assertIsInstance(body, CompoundStmt)
+        self.assertIsInstance(body.statements[0], BreakStmt)
+        self.assertIsInstance(body.statements[1], ContinueStmt)
 
     def test_relational_precedence(self) -> None:
         unit = parse(list(lex("int main(){return 1==2<3;}")))
