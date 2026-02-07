@@ -320,6 +320,48 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_struct_object_type_is_assignable(self) -> None:
+        source = (
+            "int main(){"
+            "struct Node { int value; } a;"
+            "struct Node b;"
+            "b=a;"
+            "return 0;"
+            "}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_union_object_type_is_assignable(self) -> None:
+        source = (
+            "int main(){"
+            "union Data { int x; int y; } a;"
+            "union Data b;"
+            "b=a;"
+            "return 0;"
+            "}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_anonymous_struct_object_type(self) -> None:
+        unit = parse(list(lex("int main(){struct { int x; } v; return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_forward_declare_then_define_struct_ok(self) -> None:
+        source = "int main(){struct S; struct S { int x; }; struct S value; return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_pointer_to_incomplete_struct_is_allowed(self) -> None:
+        unit = parse(list(lex("int main(){struct Node *next; return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_function_call_typemap(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
@@ -490,6 +532,119 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: A")
 
+    def test_duplicate_struct_definition_error(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; }; struct S { int y; }; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate definition: struct S")
+
+    def test_incomplete_struct_object_error(self) -> None:
+        unit = parse(list(lex("int main(){struct Node value; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid object type: incomplete")
+
+    def test_incomplete_union_object_error(self) -> None:
+        unit = parse(list(lex("int main(){union Data value; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid object type: incomplete")
+
+    def test_incomplete_anonymous_record_object_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt([DeclStmt(TypeSpec("struct"), "value", None)]),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid object type: incomplete")
+
+    def test_invalid_record_member_type_void_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            DeclStmt(
+                                TypeSpec(
+                                    "struct",
+                                    record_members=((TypeSpec("void"), "x"),),
+                                ),
+                                None,
+                                None,
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid member type")
+
+    def test_invalid_record_member_function_type_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            DeclStmt(
+                                TypeSpec(
+                                    "struct",
+                                    record_members=(
+                                        (TypeSpec("int", declarator_ops=(("fn", ((), False)),)), "call"),
+                                    ),
+                                ),
+                                None,
+                                None,
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid member type")
+
+    def test_invalid_record_member_incomplete_type_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            DeclStmt(
+                                TypeSpec(
+                                    "struct",
+                                    record_members=((TypeSpec("struct", record_tag="Node"), "next"),),
+                                ),
+                                None,
+                                None,
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid member type")
+
     def test_void_function_return_value_error(self) -> None:
         unit = parse(list(lex("void main(){return 1;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -549,6 +704,61 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Invalid parameter type: void")
+
+    def test_invalid_parameter_type_incomplete_record(self) -> None:
+        unit = parse(list(lex("int f(struct Node x){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid parameter type: incomplete")
+
+    def test_invalid_function_pointer_parameter_type_incomplete_record(self) -> None:
+        unit = parse(list(lex("int main(){int (*fp)(struct Node); return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid parameter type: incomplete")
+
+    def test_invalid_return_type_incomplete_record(self) -> None:
+        unit = parse(list(lex("struct Node f(void){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid return type: incomplete")
+
+    def test_invalid_return_type_incomplete_record_without_prototype(self) -> None:
+        unit = parse(list(lex("struct Node f();")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid return type: incomplete")
+
+    def test_pointer_parameter_to_incomplete_record_is_allowed(self) -> None:
+        unit = parse(list(lex("int f(struct Node *x){return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
+
+    def test_duplicate_record_member_name_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            DeclStmt(
+                                TypeSpec(
+                                    "struct",
+                                    record_members=((TypeSpec("int"), "x"), (TypeSpec("int"), "x")),
+                                ),
+                                None,
+                                None,
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: x")
 
     def test_invalid_function_declarator_parameter_type(self) -> None:
         unit = TranslationUnit(

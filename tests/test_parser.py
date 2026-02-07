@@ -393,6 +393,73 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("enum", 1, enum_tag="E"))
 
+    def test_tagged_struct_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){struct Node { int value; }; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec(
+                "struct",
+                record_tag="Node",
+                record_members=((TypeSpec("int"), "value"),),
+            ),
+        )
+        self.assertIsNone(stmt.name)
+        self.assertIsNone(stmt.init)
+
+    def test_tagged_struct_forward_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){struct Node;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("struct", record_tag="Node"))
+        self.assertIsNone(stmt.name)
+
+    def test_struct_object_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){struct Node { int value; } n; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec(
+                "struct",
+                record_tag="Node",
+                record_members=((TypeSpec("int"), "value"),),
+            ),
+        )
+        self.assertEqual(stmt.name, "n")
+
+    def test_unnamed_struct_object_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){struct { int x; } v; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("struct", record_members=((TypeSpec("int"), "x"),)),
+        )
+        self.assertEqual(stmt.name, "v")
+
+    def test_struct_pointer_to_incomplete_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){struct Node *next; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("struct", 1, record_tag="Node"))
+        self.assertEqual(stmt.name, "next")
+
+    def test_union_object_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){union Data { int x; int y; } d; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec(
+                "union",
+                record_tag="Data",
+                record_members=((TypeSpec("int"), "x"), (TypeSpec("int"), "y")),
+            ),
+        )
+        self.assertEqual(stmt.name, "d")
+
     def test_pointer_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){int *p;return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -565,6 +632,30 @@ class ParserTests(unittest.TestCase):
     def test_enum_value_must_be_decimal_literal(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){enum E { A=0x10 };return 0;}")))
+
+    def test_struct_requires_tag_or_definition(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){struct ;return 0;}")))
+
+    def test_union_requires_tag_or_definition(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){union ;return 0;}")))
+
+    def test_empty_struct_definition_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){struct S {};return 0;}")))
+
+    def test_empty_union_definition_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){union U {};return 0;}")))
+
+    def test_struct_without_declarator_rejects_initializer(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){struct S = 1;return 0;}")))
+
+    def test_invalid_void_struct_member_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){struct S { void x; };return 0;}")))
 
     def test_missing_semicolon(self) -> None:
         source = "int main(){return 1}"

@@ -125,6 +125,15 @@ class Parser:
                 enum_tag=enum_tag,
                 enum_members=enum_members,
             )
+        if token.lexeme in {"struct", "union"}:
+            record_tag, record_members = self._parse_record_spec(token, str(token.lexeme))
+            pointer_depth = self._parse_pointer_depth()
+            return TypeSpec(
+                str(token.lexeme),
+                pointer_depth,
+                record_tag=record_tag,
+                record_members=record_members,
+            )
         raise ParserError("Unsupported type", token)
 
     def _parse_pointer_depth(self) -> int:
@@ -187,6 +196,43 @@ class Parser:
             raise ParserError("Unsupported enum value", token)
         return sign * int(token.lexeme)
 
+    def _parse_record_spec(
+        self,
+        token: Token,
+        kind: str,
+    ) -> tuple[str | None, tuple[tuple[TypeSpec, str], ...]]:
+        record_tag: str | None = None
+        if self._current().kind == TokenKind.IDENT:
+            ident = self._advance()
+            assert isinstance(ident.lexeme, str)
+            record_tag = ident.lexeme
+        record_members: tuple[tuple[TypeSpec, str], ...] = ()
+        if self._check_punct("{"):
+            record_members = self._parse_record_members()
+        if record_tag is None and not record_members:
+            raise ParserError(f"Expected {kind} tag or definition", token)
+        return record_tag, record_members
+
+    def _parse_record_members(self) -> tuple[tuple[TypeSpec, str], ...]:
+        self._expect_punct("{")
+        if self._check_punct("}"):
+            raise ParserError("Expected member declaration", self._current())
+        members: list[tuple[TypeSpec, str]] = []
+        while not self._check_punct("}"):
+            members.append(self._parse_record_member())
+        self._expect_punct("}")
+        return tuple(members)
+
+    def _parse_record_member(self) -> tuple[TypeSpec, str]:
+        base_type = self._parse_type_spec()
+        name, declarator_ops = self._parse_declarator(allow_abstract=False)
+        assert name is not None
+        member_type = self._build_declarator_type(base_type, declarator_ops)
+        if self._is_invalid_void_object_type(member_type):
+            raise ParserError("Invalid member type", self._current())
+        self._expect_punct(";")
+        return member_type, name
+
     def _parse_compound_stmt(self) -> CompoundStmt:
         self._expect_punct("{")
         statements: list[Stmt] = []
@@ -231,7 +277,11 @@ class Parser:
 
     def _is_declaration_start(self) -> bool:
         return (
-            self._check_keyword("int") or self._check_keyword("void") or self._check_keyword("enum")
+            self._check_keyword("int")
+            or self._check_keyword("void")
+            or self._check_keyword("enum")
+            or self._check_keyword("struct")
+            or self._check_keyword("union")
         )
 
     def _parse_if_stmt(self) -> IfStmt:
@@ -303,15 +353,13 @@ class Parser:
 
     def _parse_decl_stmt(self) -> DeclStmt:
         base_type = self._parse_type_spec()
-        allow_abstract = base_type.name == "enum"
+        allow_abstract = base_type.name in {"enum", "struct", "union"}
         name, declarator_ops = self._parse_declarator(allow_abstract=allow_abstract)
         decl_type = self._build_declarator_type(base_type, declarator_ops)
         if name is None:
             if self._check_punct("="):
                 raise ParserError("Expected identifier", self._current())
-            if base_type.name != "enum" or (
-                base_type.enum_tag is None and not base_type.enum_members
-            ):
+            if not self._is_tag_or_definition_decl(base_type):
                 raise ParserError("Expected identifier", self._current())
             self._expect_punct(";")
             return DeclStmt(decl_type, None, None)
@@ -323,6 +371,13 @@ class Parser:
             init = self._parse_expression()
         self._expect_punct(";")
         return DeclStmt(decl_type, name, init)
+
+    def _is_tag_or_definition_decl(self, type_spec: TypeSpec) -> bool:
+        if type_spec.name == "enum":
+            return type_spec.enum_tag is not None or bool(type_spec.enum_members)
+        if type_spec.name in {"struct", "union"}:
+            return type_spec.record_tag is not None or bool(type_spec.record_members)
+        return False
 
     def _parse_return_stmt(self) -> ReturnStmt:
         self._advance()
@@ -440,6 +495,8 @@ class Parser:
             declarator_ops=combined_ops,
             enum_tag=base_type.enum_tag,
             enum_members=base_type.enum_members,
+            record_tag=base_type.record_tag,
+            record_members=base_type.record_members,
         )
 
     def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:

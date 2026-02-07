@@ -121,6 +121,8 @@ class Analyzer:
         self._type_map = TypeMap()
         self._function_signatures: dict[str, FunctionSignature] = {}
         self._defined_functions: set[str] = set()
+        self._record_definitions: dict[str, tuple[tuple[str, Type], ...]] = {}
+        self._seen_record_definitions: set[int] = set()
         self._loop_depth = 0
         self._switch_stack: list[SwitchContext] = []
 
@@ -185,25 +187,69 @@ class Analyzer:
         if not func.has_prototype:
             if func.is_variadic:
                 raise SemaError("Variadic function requires a prototype")
+            if self._is_invalid_incomplete_record_object_type(func.return_type):
+                raise SemaError("Invalid return type: incomplete")
             return FunctionSignature(self._resolve_type(func.return_type), None, False)
         params: list[Type] = []
         for param in func.params:
             if self._is_invalid_void_parameter_type(param.type_spec):
                 raise SemaError("Invalid parameter type: void")
+            if self._is_invalid_incomplete_record_object_type(param.type_spec):
+                raise SemaError("Invalid parameter type: incomplete")
             params.append(self._resolve_param_type(param.type_spec))
+        if self._is_invalid_incomplete_record_object_type(func.return_type):
+            raise SemaError("Invalid return type: incomplete")
         return FunctionSignature(
             self._resolve_type(func.return_type),
             tuple(params),
             func.is_variadic,
         )
 
+    def _record_key(self, kind: str, tag: str) -> str:
+        return f"{kind} {tag}"
+
+    def _record_type_name(self, type_spec: TypeSpec) -> str:
+        if type_spec.record_tag is not None:
+            return self._record_key(type_spec.name, type_spec.record_tag)
+        return f"{type_spec.name} <anon:{id(type_spec)}>"
+
+    def _register_type_spec(self, type_spec: TypeSpec) -> None:
+        if type_spec.name not in {"struct", "union"} or not type_spec.record_members:
+            return
+        spec_id = id(type_spec)
+        if spec_id in self._seen_record_definitions:
+            return
+        self._seen_record_definitions.add(spec_id)
+        seen_members: set[str] = set()
+        member_types: list[tuple[str, Type]] = []
+        for member_spec, member_name in type_spec.record_members:
+            if member_name in seen_members:
+                raise SemaError(f"Duplicate declaration: {member_name}")
+            seen_members.add(member_name)
+            if self._is_invalid_void_object_type(member_spec):
+                raise SemaError("Invalid member type")
+            if self._is_function_object_type(member_spec):
+                raise SemaError("Invalid member type")
+            if self._is_invalid_incomplete_record_object_type(member_spec):
+                raise SemaError("Invalid member type")
+            member_types.append((member_name, self._resolve_type(member_spec)))
+        if type_spec.record_tag is None:
+            return
+        key = self._record_key(type_spec.name, type_spec.record_tag)
+        if key in self._record_definitions:
+            raise SemaError(f"Duplicate definition: {key}")
+        self._record_definitions[key] = tuple(member_types)
+
     def _resolve_type(self, type_spec: TypeSpec) -> Type:
+        self._register_type_spec(type_spec)
         if type_spec.name == "int" and not type_spec.declarator_ops:
             return INT
         if type_spec.name == "void" and not type_spec.declarator_ops:
             return VOID
         if type_spec.name == "enum" and not type_spec.declarator_ops:
             return INT
+        if type_spec.name in {"struct", "union"} and not type_spec.declarator_ops:
+            return Type(self._record_type_name(type_spec))
         resolved_ops: list[tuple[str, int | tuple[tuple[Type, ...] | None, bool]]] = []
         for kind, value in type_spec.declarator_ops:
             if kind != "fn":
@@ -212,7 +258,12 @@ class Analyzer:
                 continue
             resolved_params = self._resolve_function_param_types(value)
             resolved_ops.append((kind, resolved_params))
-        base_name = "int" if type_spec.name == "enum" else type_spec.name
+        if type_spec.name == "enum":
+            base_name = "int"
+        elif type_spec.name in {"struct", "union"}:
+            base_name = self._record_type_name(type_spec)
+        else:
+            base_name = type_spec.name
         return Type(base_name, declarator_ops=tuple(resolved_ops))
 
     def _resolve_function_param_types(
@@ -229,6 +280,8 @@ class Analyzer:
         for param_spec in param_specs:
             if self._is_invalid_void_parameter_type(param_spec):
                 raise SemaError("Invalid parameter type: void")
+            if self._is_invalid_incomplete_record_object_type(param_spec):
+                raise SemaError("Invalid parameter type: incomplete")
             params.append(self._resolve_param_type(param_spec))
         return tuple(params), is_variadic
 
@@ -239,6 +292,21 @@ class Analyzer:
     def _define_enum_members(self, type_spec: TypeSpec, scope: Scope) -> None:
         for name, value in type_spec.enum_members:
             scope.define(EnumConstSymbol(name, value))
+
+    def _is_function_object_type(self, type_spec: TypeSpec) -> bool:
+        return bool(type_spec.declarator_ops) and type_spec.declarator_ops[0][0] == "fn"
+
+    def _is_invalid_incomplete_record_object_type(self, type_spec: TypeSpec) -> bool:
+        if type_spec.name not in {"struct", "union"}:
+            return False
+        if any(kind == "ptr" for kind, _ in type_spec.declarator_ops):
+            return False
+        if type_spec.record_members:
+            return False
+        if type_spec.record_tag is None:
+            return True
+        key = self._record_key(type_spec.name, type_spec.record_tag)
+        return key not in self._record_definitions
 
     def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
         if type_spec.name != "void":
@@ -256,11 +324,14 @@ class Analyzer:
 
     def _analyze_stmt(self, stmt: Stmt, scope: Scope, return_type: Type) -> None:
         if isinstance(stmt, DeclStmt):
+            self._register_type_spec(stmt.type_spec)
             self._define_enum_members(stmt.type_spec, scope)
             if stmt.name is None:
                 return
             if self._is_invalid_void_object_type(stmt.type_spec):
                 raise SemaError("Invalid object type: void")
+            if self._is_invalid_incomplete_record_object_type(stmt.type_spec):
+                raise SemaError("Invalid object type: incomplete")
             var_type = self._resolve_type(stmt.type_spec)
             scope.define(VarSymbol(stmt.name, var_type))
             if stmt.init is not None:

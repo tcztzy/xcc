@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 FunctionDeclarator = tuple[tuple["TypeSpec", ...] | None, bool]
 EnumMember = tuple[str, int]
+RecordMember = tuple["TypeSpec", str]
 DeclaratorValue = int | FunctionDeclarator
 DeclaratorOp = tuple[str, DeclaratorValue]
 
@@ -36,6 +37,8 @@ class TypeSpec:
     declarator_ops: tuple[DeclaratorOp, ...] = ()
     enum_tag: str | None = None
     enum_members: tuple[EnumMember, ...] = ()
+    record_tag: str | None = None
+    record_members: tuple[RecordMember, ...] = ()
 
     def __post_init__(self) -> None:
         if self.declarator_ops:
