@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 FunctionDeclarator = tuple[tuple["TypeSpec", ...] | None, bool]
+EnumMember = tuple[str, int]
 DeclaratorValue = int | FunctionDeclarator
 DeclaratorOp = tuple[str, DeclaratorValue]
 
@@ -33,6 +34,8 @@ class TypeSpec:
     pointer_depth: int = 0
     array_lengths: tuple[int, ...] = ()
     declarator_ops: tuple[DeclaratorOp, ...] = ()
+    enum_tag: str | None = None
+    enum_members: tuple[EnumMember, ...] = ()
 
     def __post_init__(self) -> None:
         if self.declarator_ops:
@@ -177,5 +180,5 @@ class NullStmt(Stmt):
 @dataclass(frozen=True)
 class DeclStmt(Stmt):
     type_spec: TypeSpec
-    name: str
+    name: str | None
     init: Expr | None

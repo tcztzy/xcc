@@ -288,6 +288,38 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_enum_constants_are_defined_in_scope(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A, B=3, C }; return C;}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertIs(func_symbol.locals["A"].type_, INT)
+        self.assertEqual(getattr(func_symbol.locals["B"], "value"), 3)
+        self.assertEqual(getattr(func_symbol.locals["C"], "value"), 4)
+
+    def test_enum_object_type_resolves_to_int(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A=1 } x=A; return x;}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertIs(func_symbol.locals["x"].type_, INT)
+
+    def test_pointer_to_enum_resolves_to_int_pointer(self) -> None:
+        unit = parse(list(lex("int main(){enum E *p; return 0;}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertEqual(func_symbol.locals["p"].type_, Type("int", 1))
+
+    def test_case_accepts_enum_constant_and_unary_sign(self) -> None:
+        source = (
+            "int main(){"
+            "enum E { A=1, B=2 };"
+            "switch(B){case A: break; case +2: break; case -1: break; default: return 0;}"
+            "return 1;"
+            "}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_function_call_typemap(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
@@ -452,6 +484,12 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: x")
 
+    def test_duplicate_enumerator_declaration(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A, A }; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: A")
+
     def test_void_function_return_value_error(self) -> None:
         unit = parse(list(lex("void main(){return 1;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -466,6 +504,12 @@ class SemaTests(unittest.TestCase):
 
     def test_assignment_target_not_assignable(self) -> None:
         unit = parse(list(lex("int main(){(1+2)=3; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
+
+    def test_assignment_to_enum_constant_is_rejected(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A=1 }; A=2; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
@@ -611,6 +655,12 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate case value")
 
+    def test_duplicate_case_value_from_enumerator_error(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A=1, B=1 }; switch(1){case A:return 0;case B:return 1;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate case value")
+
     def test_duplicate_default_label_error(self) -> None:
         unit = parse(
             list(lex("int main(){switch(1){default:return 0;default:return 1;}}"))
@@ -621,6 +671,24 @@ class SemaTests(unittest.TestCase):
 
     def test_non_integer_constant_case_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1;switch(x){case x:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
+    def test_unary_non_constant_case_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1;switch(x){case -x:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
+    def test_non_decimal_case_constant_error(self) -> None:
+        unit = parse(list(lex("int main(){switch(0){case 0x10:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
+    def test_binary_case_constant_error(self) -> None:
+        unit = parse(list(lex("int main(){switch(0){case 1+2:return 0;}}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "case value is not integer constant")

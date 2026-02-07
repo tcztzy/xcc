@@ -113,13 +113,79 @@ class Parser:
 
     def _parse_type_spec(self) -> TypeSpec:
         token = self._expect(TokenKind.KEYWORD)
-        if token.lexeme not in {"int", "void"}:
-            raise ParserError("Unsupported type", token)
+        if token.lexeme in {"int", "void"}:
+            pointer_depth = self._parse_pointer_depth()
+            return TypeSpec(str(token.lexeme), pointer_depth)
+        if token.lexeme == "enum":
+            enum_tag, enum_members = self._parse_enum_spec(token)
+            pointer_depth = self._parse_pointer_depth()
+            return TypeSpec(
+                "enum",
+                pointer_depth,
+                enum_tag=enum_tag,
+                enum_members=enum_members,
+            )
+        raise ParserError("Unsupported type", token)
+
+    def _parse_pointer_depth(self) -> int:
         pointer_depth = 0
         while self._check_punct("*"):
             self._advance()
             pointer_depth += 1
-        return TypeSpec(str(token.lexeme), pointer_depth)
+        return pointer_depth
+
+    def _parse_enum_spec(self, token: Token) -> tuple[str | None, tuple[tuple[str, int], ...]]:
+        enum_tag: str | None = None
+        if self._current().kind == TokenKind.IDENT:
+            ident = self._advance()
+            assert isinstance(ident.lexeme, str)
+            enum_tag = ident.lexeme
+        enum_members: tuple[tuple[str, int], ...] = ()
+        if self._check_punct("{"):
+            enum_members = self._parse_enum_members()
+        if enum_tag is None and not enum_members:
+            raise ParserError("Expected enum tag or definition", token)
+        return enum_tag, enum_members
+
+    def _parse_enum_members(self) -> tuple[tuple[str, int], ...]:
+        self._expect_punct("{")
+        if self._check_punct("}"):
+            raise ParserError("Expected enumerator", self._current())
+        members: list[tuple[str, int]] = []
+        next_value = 0
+        while True:
+            name, value = self._parse_enum_member(next_value)
+            members.append((name, value))
+            next_value = value + 1
+            if not self._check_punct(","):
+                break
+            self._advance()
+            if self._check_punct("}"):
+                break
+        self._expect_punct("}")
+        return tuple(members)
+
+    def _parse_enum_member(self, default_value: int) -> tuple[str, int]:
+        token = self._expect(TokenKind.IDENT)
+        assert isinstance(token.lexeme, str)
+        value = default_value
+        if self._check_punct("="):
+            self._advance()
+            value = self._parse_enum_value()
+        return token.lexeme, value
+
+    def _parse_enum_value(self) -> int:
+        sign = 1
+        if self._check_punct("+"):
+            self._advance()
+        elif self._check_punct("-"):
+            self._advance()
+            sign = -1
+        token = self._expect(TokenKind.INT_CONST)
+        assert isinstance(token.lexeme, str)
+        if not token.lexeme.isdigit():
+            raise ParserError("Unsupported enum value", token)
+        return sign * int(token.lexeme)
 
     def _parse_compound_stmt(self) -> CompoundStmt:
         self._expect_punct("{")
@@ -157,11 +223,16 @@ class Parser:
             return ContinueStmt()
         if self._check_keyword("return"):
             return self._parse_return_stmt()
-        if self._check_keyword("int") or self._check_keyword("void"):
+        if self._is_declaration_start():
             return self._parse_decl_stmt()
         expr = self._parse_expression()
         self._expect_punct(";")
         return ExprStmt(expr)
+
+    def _is_declaration_start(self) -> bool:
+        return (
+            self._check_keyword("int") or self._check_keyword("void") or self._check_keyword("enum")
+        )
 
     def _parse_if_stmt(self) -> IfStmt:
         self._advance()
@@ -190,7 +261,7 @@ class Parser:
         if self._check_punct(";"):
             self._advance()
             init = None
-        elif self._check_keyword("int") or self._check_keyword("void"):
+        elif self._is_declaration_start():
             init = self._parse_decl_stmt()
         else:
             init = self._parse_expression()
@@ -232,9 +303,18 @@ class Parser:
 
     def _parse_decl_stmt(self) -> DeclStmt:
         base_type = self._parse_type_spec()
-        name, declarator_ops = self._parse_declarator(allow_abstract=False)
-        assert name is not None
+        allow_abstract = base_type.name == "enum"
+        name, declarator_ops = self._parse_declarator(allow_abstract=allow_abstract)
         decl_type = self._build_declarator_type(base_type, declarator_ops)
+        if name is None:
+            if self._check_punct("="):
+                raise ParserError("Expected identifier", self._current())
+            if base_type.name != "enum" or (
+                base_type.enum_tag is None and not base_type.enum_members
+            ):
+                raise ParserError("Expected identifier", self._current())
+            self._expect_punct(";")
+            return DeclStmt(decl_type, None, None)
         if self._is_invalid_void_object_type(decl_type):
             raise ParserError("Invalid object type", self._current())
         init: Expr | None = None
@@ -355,7 +435,12 @@ class Parser:
         declarator_ops: tuple[DeclaratorOp, ...],
     ) -> TypeSpec:
         combined_ops = declarator_ops + (POINTER_OP,) * base_type.pointer_depth
-        return TypeSpec(base_type.name, declarator_ops=combined_ops)
+        return TypeSpec(
+            base_type.name,
+            declarator_ops=combined_ops,
+            enum_tag=base_type.enum_tag,
+            enum_members=base_type.enum_members,
+        )
 
     def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
         if type_spec.name != "void":

@@ -46,10 +46,17 @@ class VarSymbol:
 
 
 @dataclass(frozen=True)
+class EnumConstSymbol:
+    name: str
+    value: int
+    type_: Type = INT
+
+
+@dataclass(frozen=True)
 class FunctionSymbol:
     name: str
     return_type: Type
-    locals: dict[str, VarSymbol]
+    locals: dict[str, VarSymbol | EnumConstSymbol]
 
 
 @dataclass(frozen=True)
@@ -81,15 +88,15 @@ class SemaUnit:
 
 class Scope:
     def __init__(self, parent: "Scope | None" = None) -> None:
-        self._symbols: dict[str, VarSymbol] = {}
+        self._symbols: dict[str, VarSymbol | EnumConstSymbol] = {}
         self._parent = parent
 
-    def define(self, symbol: VarSymbol) -> None:
+    def define(self, symbol: VarSymbol | EnumConstSymbol) -> None:
         if symbol.name in self._symbols:
             raise SemaError(f"Duplicate declaration: {symbol.name}")
         self._symbols[symbol.name] = symbol
 
-    def lookup(self, name: str) -> VarSymbol | None:
+    def lookup(self, name: str) -> VarSymbol | EnumConstSymbol | None:
         symbol = self._symbols.get(name)
         if symbol is not None:
             return symbol
@@ -98,7 +105,7 @@ class Scope:
         return self._parent.lookup(name)
 
     @property
-    def symbols(self) -> dict[str, VarSymbol]:
+    def symbols(self) -> dict[str, VarSymbol | EnumConstSymbol]:
         return self._symbols
 
 
@@ -195,6 +202,8 @@ class Analyzer:
             return INT
         if type_spec.name == "void" and not type_spec.declarator_ops:
             return VOID
+        if type_spec.name == "enum" and not type_spec.declarator_ops:
+            return INT
         resolved_ops: list[tuple[str, int | tuple[tuple[Type, ...] | None, bool]]] = []
         for kind, value in type_spec.declarator_ops:
             if kind != "fn":
@@ -203,7 +212,8 @@ class Analyzer:
                 continue
             resolved_params = self._resolve_function_param_types(value)
             resolved_ops.append((kind, resolved_params))
-        return Type(type_spec.name, declarator_ops=tuple(resolved_ops))
+        base_name = "int" if type_spec.name == "enum" else type_spec.name
+        return Type(base_name, declarator_ops=tuple(resolved_ops))
 
     def _resolve_function_param_types(
         self,
@@ -226,6 +236,10 @@ class Analyzer:
         resolved = self._resolve_type(type_spec)
         return resolved.decay_parameter_type()
 
+    def _define_enum_members(self, type_spec: TypeSpec, scope: Scope) -> None:
+        for name, value in type_spec.enum_members:
+            scope.define(EnumConstSymbol(name, value))
+
     def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
         if type_spec.name != "void":
             return False
@@ -242,6 +256,9 @@ class Analyzer:
 
     def _analyze_stmt(self, stmt: Stmt, scope: Scope, return_type: Type) -> None:
         if isinstance(stmt, DeclStmt):
+            self._define_enum_members(stmt.type_spec, scope)
+            if stmt.name is None:
+                return
             if self._is_invalid_void_object_type(stmt.type_spec):
                 raise SemaError("Invalid object type: void")
             var_type = self._resolve_type(stmt.type_spec)
@@ -296,12 +313,14 @@ class Analyzer:
         if isinstance(stmt, CaseStmt):
             if not self._switch_stack:
                 raise SemaError("case not in switch")
-            if not isinstance(stmt.value, IntLiteral):
+            case_value = self._eval_int_constant_expr(stmt.value, scope)
+            if case_value is None:
                 raise SemaError("case value is not integer constant")
             context = self._switch_stack[-1]
-            if stmt.value.value in context.case_values:
+            case_key = str(case_value)
+            if case_key in context.case_values:
                 raise SemaError("Duplicate case value")
-            context.case_values.add(stmt.value.value)
+            context.case_values.add(case_key)
             self._analyze_stmt(stmt.body, scope, return_type)
             return
         if isinstance(stmt, DefaultStmt):
@@ -402,6 +421,10 @@ class Analyzer:
             self._type_map.set(expr, INT)
             return INT
         if isinstance(expr, AssignExpr):
+            if isinstance(expr.target, Identifier):
+                target_symbol = scope.lookup(expr.target.name)
+                if isinstance(target_symbol, EnumConstSymbol):
+                    raise SemaError("Assignment target is not assignable")
             if not self._is_assignable(expr.target):
                 raise SemaError("Assignment target is not assignable")
             target_type = self._analyze_expr(expr.target, scope)
@@ -447,6 +470,22 @@ class Analyzer:
             self._type_map.set(expr, return_type)
             return return_type
         raise SemaError("Unsupported expression")
+
+    def _eval_int_constant_expr(self, expr: Expr, scope: Scope) -> int | None:
+        if isinstance(expr, IntLiteral):
+            if not expr.value.isdigit():
+                return None
+            return int(expr.value)
+        if isinstance(expr, UnaryExpr) and expr.op in {"+", "-"}:
+            operand_value = self._eval_int_constant_expr(expr.operand, scope)
+            if operand_value is None:
+                return None
+            return operand_value if expr.op == "+" else -operand_value
+        if isinstance(expr, Identifier):
+            symbol = scope.lookup(expr.name)
+            if isinstance(symbol, EnumConstSymbol):
+                return symbol.value
+        return None
 
     def _check_call_arguments(
         self,

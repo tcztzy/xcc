@@ -340,6 +340,59 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertIsInstance(stmt.init, BinaryExpr)
 
+    def test_tagged_enum_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A, B=3, C }; return C;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("enum", enum_tag="E", enum_members=(("A", 0), ("B", 3), ("C", 4))),
+        )
+        self.assertIsNone(stmt.name)
+        self.assertIsNone(stmt.init)
+
+    def test_enum_object_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){enum E x;return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("enum", enum_tag="E"))
+        self.assertEqual(stmt.name, "x")
+        self.assertIsNone(stmt.init)
+
+    def test_unnamed_enum_object_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){enum { A=1, B } x;return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("enum", enum_members=(("A", 1), ("B", 2))),
+        )
+        self.assertEqual(stmt.name, "x")
+
+    def test_enum_declaration_allows_trailing_comma(self) -> None:
+        unit = parse(list(lex("int main(){enum { A, B, } x;return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("enum", enum_members=(("A", 0), ("B", 1))),
+        )
+
+    def test_enum_member_signed_value(self) -> None:
+        unit = parse(list(lex("int main(){enum { A=-1, B=+2 } x;return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("enum", enum_members=(("A", -1), ("B", 2))),
+        )
+
+    def test_pointer_to_enum_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){enum E *p;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("enum", 1, enum_tag="E"))
+
     def test_pointer_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){int *p;return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -492,6 +545,26 @@ class ParserTests(unittest.TestCase):
     def test_missing_declarator_in_declaration(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int ;return 0;}")))
+
+    def test_parenthesized_missing_declarator_in_declaration(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int ();return 0;}")))
+
+    def test_enum_requires_tag_or_definition(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){enum ;return 0;}")))
+
+    def test_empty_enum_definition_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){enum E {};return 0;}")))
+
+    def test_enum_without_declarator_rejects_initializer(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){enum E = 1;return 0;}")))
+
+    def test_enum_value_must_be_decimal_literal(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){enum E { A=0x10 };return 0;}")))
 
     def test_missing_semicolon(self) -> None:
         source = "int main(){return 1}"
