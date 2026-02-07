@@ -423,6 +423,36 @@ class SemaTests(unittest.TestCase):
         assert pointer_init is not None
         self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
 
+    def test_member_access_typemap(self) -> None:
+        source = "int main(){struct S { int x; } s; return s.x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_pointer_member_access_typemap(self) -> None:
+        source = "int main(){struct S { int x; } s; struct S *p=&s; return p->x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[2].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_member_assignment_is_allowed(self) -> None:
+        source = "int main(){struct S { int x; } s; s.x=1; return s.x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        assign_expr = _body(unit.functions[0]).statements[1].expr
+        self.assertEqual(sema.type_map.get(assign_expr), INT)
+
+    def test_pointer_member_assignment_is_allowed(self) -> None:
+        source = "int main(){struct S { int x; } s; struct S *p=&s; p->x=1; return p->x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        assign_expr = _body(unit.functions[0]).statements[2].expr
+        self.assertEqual(sema.type_map.get(assign_expr), INT)
+
     def test_parenthesized_pointer_to_array_typemap(self) -> None:
         source = "int main(){int a[4]; int (*p)[4]=&a; return (*p)[1];}"
         unit = parse(list(lex(source)))
@@ -940,6 +970,37 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Call target is not a function")
+
+    def test_member_access_on_non_record_type_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; return x.y;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Member access on non-record type")
+
+    def test_member_access_on_non_record_pointer_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; return p->y;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Member access on non-record pointer")
+
+    def test_member_access_on_incomplete_type_error(self) -> None:
+        unit = parse(list(lex("int main(){struct S *p; return p->x;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Member access on incomplete type")
+
+    def test_no_such_member_error(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; } s; return s.y;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "No such member: y")
+
+    def test_union_member_access_typemap(self) -> None:
+        unit = parse(list(lex("int main(){union U { int x; int y; } u; return u.y;}")))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
 
     def test_unsupported_expression(self) -> None:
         unit = TranslationUnit(

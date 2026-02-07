@@ -166,6 +166,13 @@ class SubscriptExpr(Expr):
 
 
 @dataclass(frozen=True)
+class MemberExpr(Expr):
+    base: Expr
+    member: str
+    through_pointer: bool
+
+
+@dataclass(frozen=True)
 class IntLiteral(Expr):
     value: str
 

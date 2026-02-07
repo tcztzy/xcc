@@ -17,6 +17,7 @@ from xcc.ast import (
     Identifier,
     IfStmt,
     IntLiteral,
+    MemberExpr,
     NullStmt,
     Param,
     ReturnStmt,
@@ -233,9 +234,7 @@ class Analyzer:
             if self._is_invalid_incomplete_record_object_type(member_spec):
                 raise SemaError("Invalid member type")
             member_types.append((member_name, self._resolve_type(member_spec)))
-        if type_spec.record_tag is None:
-            return
-        key = self._record_key(type_spec.name, type_spec.record_tag)
+        key = self._record_type_name(type_spec)
         if key in self._record_definitions:
             raise SemaError(f"Duplicate definition: {key}")
         self._record_definitions[key] = tuple(member_types)
@@ -307,6 +306,38 @@ class Analyzer:
             return True
         key = self._record_key(type_spec.name, type_spec.record_tag)
         return key not in self._record_definitions
+
+    def _is_record_name(self, name: str) -> bool:
+        return name.startswith("struct ") or name.startswith("union ")
+
+    def _lookup_record_member(self, record_type: Type, member_name: str) -> Type:
+        members = self._record_definitions.get(record_type.name)
+        if members is None:
+            raise SemaError("Member access on incomplete type")
+        for declared_name, declared_type in members:
+            if declared_name == member_name:
+                return declared_type
+        raise SemaError(f"No such member: {member_name}")
+
+    def _resolve_member_type(
+        self,
+        base_type: Type,
+        member_name: str,
+        through_pointer: bool,
+    ) -> Type:
+        if through_pointer:
+            base_value_type = self._decay_array_value(base_type)
+            record_type = base_value_type.pointee()
+            if (
+                record_type is None
+                or record_type.declarator_ops
+                or not self._is_record_name(record_type.name)
+            ):
+                raise SemaError("Member access on non-record pointer")
+            return self._lookup_record_member(record_type, member_name)
+        if base_type.declarator_ops or not self._is_record_name(base_type.name):
+            raise SemaError("Member access on non-record type")
+        return self._lookup_record_member(base_type, member_name)
 
     def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
         if type_spec.name != "void":
@@ -467,6 +498,11 @@ class Analyzer:
                 raise SemaError("Subscripted value is not an array or pointer")
             self._type_map.set(expr, element_type)
             return element_type
+        if isinstance(expr, MemberExpr):
+            base_type = self._analyze_expr(expr.base, scope)
+            member_type = self._resolve_member_type(base_type, expr.member, expr.through_pointer)
+            self._type_map.set(expr, member_type)
+            return member_type
         if isinstance(expr, UnaryExpr):
             operand_type = self._analyze_expr(expr.operand, scope)
             if expr.op in {"+", "-", "!", "~"}:
@@ -580,10 +616,8 @@ class Analyzer:
                 raise SemaError(f"Argument type mismatch{suffix}")
 
     def _is_assignable(self, expr: Expr) -> bool:
-        return (
-            isinstance(expr, Identifier)
-            or (isinstance(expr, UnaryExpr) and expr.op == "*")
-            or isinstance(expr, SubscriptExpr)
+        return isinstance(expr, (Identifier, SubscriptExpr, MemberExpr)) or (
+            isinstance(expr, UnaryExpr) and expr.op == "*"
         )
 
     def _decay_array_value(self, type_: Type) -> Type:

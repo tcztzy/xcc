@@ -16,6 +16,7 @@ from xcc.ast import (
     Identifier,
     IfStmt,
     IntLiteral,
+    MemberExpr,
     NullStmt,
     Param,
     ReturnStmt,
@@ -593,6 +594,24 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr, SubscriptExpr)
         self.assertIsInstance(expr.base, SubscriptExpr)
 
+    def test_member_expression(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; } s;return s.x;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, MemberExpr)
+        self.assertFalse(expr.through_pointer)
+        self.assertEqual(expr.member, "x")
+
+    def test_pointer_member_expression(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; } s;struct S *p=&s;return p->x;}")))
+        stmt = _body(unit.functions[0]).statements[2]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, MemberExpr)
+        self.assertTrue(expr.through_pointer)
+        self.assertEqual(expr.member, "x")
+
     def test_array_size_must_be_positive(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0];return 0;}")))
@@ -656,6 +675,14 @@ class ParserTests(unittest.TestCase):
     def test_invalid_void_struct_member_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){struct S { void x; };return 0;}")))
+
+    def test_member_expression_missing_identifier_after_dot(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){struct S { int x; } s;return s.;}")))
+
+    def test_member_expression_missing_identifier_after_arrow(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){struct S { int x; } s;struct S *p=&s;return p->;}")))
 
     def test_missing_semicolon(self) -> None:
         source = "int main(){return 1}"

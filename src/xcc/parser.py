@@ -17,6 +17,7 @@ from xcc.ast import (
     Identifier,
     IfStmt,
     IntLiteral,
+    MemberExpr,
     NullStmt,
     Param,
     ReturnStmt,
@@ -480,6 +481,18 @@ class Parser:
                 index = self._parse_expression()
                 self._expect_punct("]")
                 expr = SubscriptExpr(expr, index)
+                continue
+            if self._check_punct("."):
+                self._advance()
+                member_token = self._expect(TokenKind.IDENT)
+                assert isinstance(member_token.lexeme, str)
+                expr = MemberExpr(expr, member_token.lexeme, False)
+                continue
+            if self._check_punct("->"):
+                self._advance()
+                member_token = self._expect(TokenKind.IDENT)
+                assert isinstance(member_token.lexeme, str)
+                expr = MemberExpr(expr, member_token.lexeme, True)
                 continue
             break
         return expr
