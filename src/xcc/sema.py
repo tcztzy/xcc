@@ -55,7 +55,8 @@ class FunctionSymbol:
 @dataclass(frozen=True)
 class FunctionSignature:
     return_type: Type
-    params: tuple[Type, ...]
+    params: tuple[Type, ...] | None
+    is_variadic: bool
 
 
 class TypeMap:
@@ -122,8 +123,9 @@ class Analyzer:
             existing = self._function_signatures.get(func.name)
             if existing is None:
                 self._function_signatures[func.name] = signature
-            elif existing != signature:
-                raise SemaError(f"Conflicting declaration: {func.name}")
+            else:
+                merged_signature = self._merge_signature(existing, signature, func.name)
+                self._function_signatures[func.name] = merged_signature
             if func.body is not None:
                 if func.name in self._defined_functions:
                     raise SemaError(f"Duplicate function definition: {func.name}")
@@ -133,6 +135,29 @@ class Analyzer:
                 continue
             self._analyze_function(func)
         return SemaUnit(self._functions, self._type_map)
+
+    def _merge_signature(
+        self,
+        existing: FunctionSignature,
+        incoming: FunctionSignature,
+        name: str,
+    ) -> FunctionSignature:
+        if not self._signatures_compatible(existing, incoming):
+            raise SemaError(f"Conflicting declaration: {name}")
+        if existing.params is None and incoming.params is not None:
+            return incoming
+        return existing
+
+    def _signatures_compatible(
+        self,
+        existing: FunctionSignature,
+        incoming: FunctionSignature,
+    ) -> bool:
+        if existing.return_type != incoming.return_type:
+            return False
+        if existing.params is None or incoming.params is None:
+            return True
+        return existing.params == incoming.params and existing.is_variadic == incoming.is_variadic
 
     def _analyze_function(self, func: FunctionDef) -> None:
         return_type = self._function_signatures[func.name].return_type
@@ -150,19 +175,27 @@ class Analyzer:
             scope.define(VarSymbol(param.name, param_type))
 
     def _signature_from(self, func: FunctionDef) -> FunctionSignature:
+        if not func.has_prototype:
+            if func.is_variadic:
+                raise SemaError("Variadic function requires a prototype")
+            return FunctionSignature(self._resolve_type(func.return_type), None, False)
         params: list[Type] = []
         for param in func.params:
             if self._is_invalid_void_parameter_type(param.type_spec):
                 raise SemaError("Invalid parameter type: void")
             params.append(self._resolve_param_type(param.type_spec))
-        return FunctionSignature(self._resolve_type(func.return_type), tuple(params))
+        return FunctionSignature(
+            self._resolve_type(func.return_type),
+            tuple(params),
+            func.is_variadic,
+        )
 
     def _resolve_type(self, type_spec: TypeSpec) -> Type:
         if type_spec.name == "int" and not type_spec.declarator_ops:
             return INT
         if type_spec.name == "void" and not type_spec.declarator_ops:
             return VOID
-        resolved_ops: list[tuple[str, int | tuple[Type, ...] | None]] = []
+        resolved_ops: list[tuple[str, int | tuple[tuple[Type, ...] | None, bool]]] = []
         for kind, value in type_spec.declarator_ops:
             if kind != "fn":
                 assert isinstance(value, int)
@@ -174,17 +207,20 @@ class Analyzer:
 
     def _resolve_function_param_types(
         self,
-        declarator_value: int | tuple[TypeSpec, ...] | None,
-    ) -> tuple[Type, ...] | None:
-        if declarator_value is None:
-            return None
-        assert isinstance(declarator_value, tuple)
+        declarator_value: int | tuple[tuple[TypeSpec, ...] | None, bool],
+    ) -> tuple[tuple[Type, ...] | None, bool]:
+        assert isinstance(declarator_value, tuple) and len(declarator_value) == 2
+        param_specs, is_variadic = declarator_value
+        if param_specs is None:
+            if is_variadic:
+                raise SemaError("Variadic function requires a prototype")
+            return None, False
         params: list[Type] = []
-        for param_spec in declarator_value:
+        for param_spec in param_specs:
             if self._is_invalid_void_parameter_type(param_spec):
                 raise SemaError("Invalid parameter type: void")
             params.append(self._resolve_param_type(param_spec))
-        return tuple(params)
+        return tuple(params), is_variadic
 
     def _resolve_param_type(self, type_spec: TypeSpec) -> Type:
         resolved = self._resolve_type(type_spec)
@@ -323,7 +359,10 @@ class Analyzer:
             signature = self._function_signatures.get(expr.name)
             if signature is None:
                 raise SemaError(f"Undeclared identifier: {expr.name}")
-            function_type = signature.return_type.function_of(signature.params)
+            function_type = signature.return_type.function_of(
+                signature.params,
+                is_variadic=signature.is_variadic,
+            )
             self._type_map.set(expr, function_type)
             return function_type
         if isinstance(expr, SubscriptExpr):
@@ -379,13 +418,12 @@ class Analyzer:
                 if signature is not None:
                     for arg in expr.args:
                         self._analyze_expr(arg, scope)
-                    if len(expr.args) != len(signature.params):
-                        raise SemaError(f"Argument count mismatch: {expr.callee.name}")
-                    for index, arg in enumerate(expr.args):
-                        arg_type = self._type_map.require(arg)
-                        value_arg_type = self._decay_array_value(arg_type)
-                        if value_arg_type != signature.params[index]:
-                            raise SemaError(f"Argument type mismatch: {expr.callee.name}")
+                    self._check_call_arguments(
+                        expr.args,
+                        signature.params,
+                        signature.is_variadic,
+                        expr.callee.name,
+                    )
                     self._type_map.set(expr, signature.return_type)
                     return signature.return_type
                 symbol = scope.lookup(expr.callee.name)
@@ -397,20 +435,39 @@ class Analyzer:
             callable_signature = self._decay_array_value(callee_type).callable_signature()
             if callable_signature is None:
                 raise SemaError("Call target is not a function")
-            return_type, param_types = callable_signature
+            return_type, function_params = callable_signature
             for arg in expr.args:
                 self._analyze_expr(arg, scope)
-            if param_types is not None:
-                if len(expr.args) != len(param_types):
-                    raise SemaError("Argument count mismatch")
-                for index, arg in enumerate(expr.args):
-                    arg_type = self._type_map.require(arg)
-                    value_arg_type = self._decay_array_value(arg_type)
-                    if value_arg_type != param_types[index]:
-                        raise SemaError("Argument type mismatch")
+            self._check_call_arguments(
+                expr.args,
+                function_params[0],
+                function_params[1],
+                None,
+            )
             self._type_map.set(expr, return_type)
             return return_type
         raise SemaError("Unsupported expression")
+
+    def _check_call_arguments(
+        self,
+        args: list[Expr],
+        parameter_types: tuple[Type, ...] | None,
+        is_variadic: bool,
+        function_name: str | None,
+    ) -> None:
+        if parameter_types is None:
+            return
+        if (not is_variadic and len(args) != len(parameter_types)) or (
+            is_variadic and len(args) < len(parameter_types)
+        ):
+            suffix = f": {function_name}" if function_name is not None else ""
+            raise SemaError(f"Argument count mismatch{suffix}")
+        for index, arg in enumerate(args[: len(parameter_types)]):
+            arg_type = self._type_map.require(arg)
+            value_arg_type = self._decay_array_value(arg_type)
+            if value_arg_type != parameter_types[index]:
+                suffix = f": {function_name}" if function_name is not None else ""
+                raise SemaError(f"Argument type mismatch{suffix}")
 
     def _is_assignable(self, expr: Expr) -> bool:
         return (

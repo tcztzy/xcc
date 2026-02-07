@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-FunctionParams = tuple["Type", ...] | None
+FunctionParams = tuple[tuple["Type", ...] | None, bool]
 TypeOp = tuple[str, int | FunctionParams]
 POINTER_OP: TypeOp = ("ptr", 0)
 
@@ -15,11 +15,15 @@ def _ops_from_legacy(
 
 
 def _format_function_params(params: FunctionParams) -> str:
-    if params is None:
+    parameter_types, is_variadic = params
+    if parameter_types is None:
         return "()"
-    if not params:
+    if not parameter_types:
         return "(void)"
-    return f"({','.join(str(param) for param in params)})"
+    text = ",".join(str(param) for param in parameter_types)
+    if is_variadic:
+        return f"({text},...)"
+    return f"({text})"
 
 
 @dataclass(frozen=True)
@@ -51,7 +55,7 @@ class Type:
                 assert isinstance(value, int)
                 suffix.append(f"[{value}]")
             else:
-                assert value is None or isinstance(value, tuple)
+                assert isinstance(value, tuple) and len(value) == 2
                 suffix.append(_format_function_params(value))
         return f"{self.name}{''.join(suffix)}"
 
@@ -71,8 +75,16 @@ class Type:
             return None
         return Type(self.name, declarator_ops=self.declarator_ops[1:])
 
-    def function_of(self, params: FunctionParams) -> "Type":
-        return Type(self.name, declarator_ops=(("fn", params),) + self.declarator_ops)
+    def function_of(
+        self,
+        params: tuple["Type", ...] | None,
+        *,
+        is_variadic: bool = False,
+    ) -> "Type":
+        return Type(
+            self.name,
+            declarator_ops=(("fn", (params, is_variadic)),) + self.declarator_ops,
+        )
 
     def callable_signature(self) -> "tuple[Type, FunctionParams] | None":
         ops = self.declarator_ops
@@ -81,7 +93,7 @@ class Type:
         if not ops or ops[0][0] != "fn":
             return None
         params = ops[0][1]
-        assert params is None or isinstance(params, tuple)
+        assert isinstance(params, tuple) and len(params) == 2
         return Type(self.name, declarator_ops=ops[1:]), params
 
     def decay_parameter_type(self) -> "Type":

@@ -92,6 +92,24 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(decl.body)
         self.assertEqual(decl.params, [])
 
+    def test_declaration_without_prototype(self) -> None:
+        unit = parse(list(lex("int ping();")))
+        decl = unit.functions[0]
+        self.assertFalse(decl.has_prototype)
+        self.assertFalse(decl.is_variadic)
+        self.assertEqual(decl.params, [])
+
+    def test_variadic_function_declaration(self) -> None:
+        unit = parse(list(lex("int logf(int level, ...);")))
+        decl = unit.functions[0]
+        self.assertTrue(decl.has_prototype)
+        self.assertTrue(decl.is_variadic)
+        self.assertEqual(decl.params, [Param(TypeSpec("int"), "level")])
+
+    def test_variadic_requires_fixed_parameter(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int logf(...);")))
+
     def test_definition_requires_parameter_names(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int add(int, int){return 0;}")))
@@ -120,7 +138,7 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(
             unit.functions[0].params,
             [
-                Param(TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", (TypeSpec("int"),)))), "fn"),
+                Param(TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", ((TypeSpec("int"),), False)))), "fn"),
                 Param(TypeSpec("int"), "x"),
             ],
         )
@@ -349,7 +367,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", (TypeSpec("int"),)))),
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", ((TypeSpec("int"),), False)))),
         )
 
     def test_function_pointer_declaration_with_two_params(self) -> None:
@@ -358,8 +376,21 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", (TypeSpec("int"), TypeSpec("int"))))),
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", ((TypeSpec("int"), TypeSpec("int")), False)))),
         )
+
+    def test_variadic_function_pointer_declaration(self) -> None:
+        unit = parse(list(lex("int main(){int (*fp)(int, ...);return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", ((TypeSpec("int"),), True)))),
+        )
+
+    def test_variadic_function_pointer_requires_fixed_parameter(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int (*fp)(...);return 0;}")))
 
     def test_function_pointer_declaration_with_void_suffix(self) -> None:
         unit = parse(list(lex("int main(){int (*fp)(void);return 0;}")))
@@ -367,7 +398,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", ()))),
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", ((), False)))),
         )
 
     def test_function_pointer_declaration_with_empty_suffix(self) -> None:
@@ -376,7 +407,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", None))),
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", (None, False)))),
         )
 
     def test_array_declaration_statement(self) -> None:

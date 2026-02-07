@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
-DeclaratorValue = int | tuple["TypeSpec", ...] | None
+FunctionDeclarator = tuple[tuple["TypeSpec", ...] | None, bool]
+DeclaratorValue = int | FunctionDeclarator
 DeclaratorOp = tuple[str, DeclaratorValue]
 
 
@@ -59,6 +60,8 @@ class FunctionDef:
     name: str
     params: list[Param]
     body: "CompoundStmt | None"
+    has_prototype: bool = True
+    is_variadic: bool = False
 
 
 @dataclass(frozen=True)

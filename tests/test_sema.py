@@ -38,12 +38,13 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(array.element_type(), Type("int"))
         func = Type("int").function_of((INT, INT))
         self.assertEqual(str(func), "int(int,int)")
-        self.assertEqual(func.callable_signature(), (Type("int"), (INT, INT)))
+        self.assertEqual(func.callable_signature(), (Type("int"), ((INT, INT), False)))
         self.assertEqual(str(Type("int").function_of(None)), "int()")
         self.assertEqual(str(Type("int").function_of(())), "int(void)")
+        self.assertEqual(str(Type("int").function_of((INT,), is_variadic=True)), "int(int,...)")
         self.assertEqual(
             func.decay_parameter_type(),
-            Type("int", declarator_ops=(("ptr", 0), ("fn", (INT, INT)))),
+            Type("int", declarator_ops=(("ptr", 0), ("fn", ((INT, INT), False)))),
         )
         self.assertIsNone(Type("int").pointee())
         self.assertIsNone(Type("int").element_type())
@@ -102,7 +103,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         func_symbol = sema.functions["apply"]
-        self.assertEqual(func_symbol.locals["fn"].type_, Type("int", declarator_ops=(("ptr", 0), ("fn", (INT,)))))
+        self.assertEqual(func_symbol.locals["fn"].type_, Type("int", declarator_ops=(("ptr", 0), ("fn", ((INT,), False)))))
 
     def test_function_pointer_call_typemap(self) -> None:
         source = "int inc(int x){return x;} int main(){int (*fp)(int)=inc; return fp(1);}"
@@ -140,6 +141,19 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("apply", sema.functions)
 
+    def test_variadic_function_pointer_call(self) -> None:
+        source = "int apply(int (*fp)(int, ...), int x){return fp(x, x, x);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("apply", sema.functions)
+
+    def test_variadic_function_pointer_call_argument_count_mismatch(self) -> None:
+        source = "int apply(int (*fp)(int, ...)){return fp();}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Argument count mismatch")
+
     def test_void_function_pointer_parameter_is_allowed(self) -> None:
         unit = parse(list(lex("int f(void (*cb)(void)){return 0;}")))
         sema = analyze(unit)
@@ -155,6 +169,44 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("add", sema.functions)
 
+    def test_no_prototype_declaration_then_definition(self) -> None:
+        source = "int add(); int add(int a){return a;} int main(){return add(1);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("add", sema.functions)
+
+    def test_no_prototype_function_call_allows_any_arguments(self) -> None:
+        source = "int add(); int main(){return add(1,2,3);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_prototype_declaration_then_no_prototype_declaration(self) -> None:
+        source = "int add(int a); int add(); int main(){return add(1);} int add(int a){return a;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("add", sema.functions)
+
+    def test_variadic_function_call_allows_extra_arguments(self) -> None:
+        source = "int logf(int level, ...){return level;} int main(){return logf(1,2,3);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_variadic_function_call_requires_fixed_arguments(self) -> None:
+        source = "int logf(int level, ...){return level;} int main(){return logf();}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Argument count mismatch: logf")
+
+    def test_variadic_function_call_fixed_argument_type_mismatch(self) -> None:
+        source = "int logf(int level, ...){return level;} int main(){int *p; return logf(p, 1);}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Argument type mismatch: logf")
+
     def test_function_declaration_without_definition(self) -> None:
         unit = parse(list(lex("int add(int a, int b);")))
         sema = analyze(unit)
@@ -162,6 +214,12 @@ class SemaTests(unittest.TestCase):
 
     def test_conflicting_function_declaration(self) -> None:
         unit = parse(list(lex("int add(int a); int add(int a, int b);")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Conflicting declaration: add")
+
+    def test_conflicting_function_return_type_declaration(self) -> None:
+        unit = parse(list(lex("int add(); void add();")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Conflicting declaration: add")
@@ -460,7 +518,7 @@ class SemaTests(unittest.TestCase):
                             DeclStmt(
                                 TypeSpec(
                                     "int",
-                                    declarator_ops=(("ptr", 0), ("fn", (TypeSpec("void"),))),
+                                    declarator_ops=(("ptr", 0), ("fn", ((TypeSpec("void"),), False))),
                                 ),
                                 "fp",
                                 None,
@@ -473,6 +531,49 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Invalid parameter type: void")
+
+    def test_invalid_variadic_function_declarator_without_prototype(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            DeclStmt(
+                                TypeSpec(
+                                    "int",
+                                    declarator_ops=(("ptr", 0), ("fn", (None, True))),
+                                ),
+                                "fp",
+                                None,
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Variadic function requires a prototype")
+
+    def test_variadic_function_without_prototype_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt([]),
+                    has_prototype=False,
+                    is_variadic=True,
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Variadic function requires a prototype")
 
     def test_for_void_condition_error(self) -> None:
         unit = parse(list(lex("void foo(){return;} int main(){for(;foo(););}")))

@@ -30,7 +30,8 @@ from xcc.ast import (
 )
 from xcc.lexer import Token, TokenKind
 
-DeclaratorOp = tuple[str, int | tuple[TypeSpec, ...] | None]
+FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
+DeclaratorOp = tuple[str, int | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
 
 
@@ -59,27 +60,48 @@ class Parser:
         return_type = self._parse_type_spec()
         name = self._expect(TokenKind.IDENT).lexeme
         self._expect_punct("(")
-        params = self._parse_params()
+        params, has_prototype, is_variadic = self._parse_params()
         self._expect_punct(")")
         if self._check_punct(";"):
             self._advance()
-            return FunctionDef(return_type, str(name), params, None)
+            return FunctionDef(
+                return_type,
+                str(name),
+                params,
+                None,
+                has_prototype=has_prototype,
+                is_variadic=is_variadic,
+            )
         if any(param.name is None for param in params):
             raise ParserError("Expected parameter name", self._current())
         body = self._parse_compound_stmt()
-        return FunctionDef(return_type, str(name), params, body)
+        return FunctionDef(
+            return_type,
+            str(name),
+            params,
+            body,
+            has_prototype=has_prototype,
+            is_variadic=is_variadic,
+        )
 
-    def _parse_params(self) -> list[Param]:
+    def _parse_params(self) -> tuple[list[Param], bool, bool]:
         if self._check_punct(")"):
-            return []
+            return [], False, False
         if self._check_keyword("void") and self._peek_punct(")"):
             self._advance()
-            return []
+            return [], True, False
+        if self._check_punct("..."):
+            raise ParserError("Expected parameter before ...", self._current())
         params = [self._parse_param()]
+        is_variadic = False
         while self._check_punct(","):
             self._advance()
+            if self._check_punct("..."):
+                self._advance()
+                is_variadic = True
+                break
             params.append(self._parse_param())
-        return params
+        return params, True, is_variadic
 
     def _parse_param(self) -> Param:
         base_type = self._parse_type_spec()
@@ -388,9 +410,9 @@ class Parser:
                 continue
             if self._check_punct("("):
                 self._advance()
-                param_types = self._parse_function_suffix_params()
+                function_declarator = self._parse_function_suffix_params()
                 self._expect_punct(")")
-                ops = ops + (("fn", param_types),)
+                ops = ops + (("fn", function_declarator),)
                 continue
             break
         return name, ops
@@ -404,17 +426,24 @@ class Parser:
             raise ParserError("Array size must be positive", token)
         return size
 
-    def _parse_function_suffix_params(self) -> tuple[TypeSpec, ...] | None:
+    def _parse_function_suffix_params(self) -> FunctionDeclarator:
         if self._check_punct(")"):
-            return None
+            return None, False
         if self._check_keyword("void") and self._peek_punct(")"):
             self._advance()
-            return ()
+            return (), False
+        if self._check_punct("..."):
+            raise ParserError("Expected parameter before ...", self._current())
         params = [self._parse_param().type_spec]
+        is_variadic = False
         while self._check_punct(","):
             self._advance()
+            if self._check_punct("..."):
+                self._advance()
+                is_variadic = True
+                break
             params.append(self._parse_param().type_spec)
-        return tuple(params)
+        return tuple(params), is_variadic
 
     def _parse_arguments(self) -> list[Expr]:
         if self._check_punct(")"):
