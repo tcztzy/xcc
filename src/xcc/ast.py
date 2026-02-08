@@ -173,6 +173,18 @@ class MemberExpr(Expr):
 
 
 @dataclass(frozen=True)
+class SizeofExpr(Expr):
+    expr: Expr | None
+    type_spec: TypeSpec | None
+
+
+@dataclass(frozen=True)
+class CastExpr(Expr):
+    type_spec: TypeSpec
+    expr: Expr
+
+
+@dataclass(frozen=True)
 class IntLiteral(Expr):
     value: str
 

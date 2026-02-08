@@ -6,6 +6,7 @@ from xcc.ast import (
     BreakStmt,
     CallExpr,
     CaseStmt,
+    CastExpr,
     CompoundStmt,
     ContinueStmt,
     DeclStmt,
@@ -21,6 +22,7 @@ from xcc.ast import (
     NullStmt,
     Param,
     ReturnStmt,
+    SizeofExpr,
     Stmt,
     SubscriptExpr,
     SwitchStmt,
@@ -339,6 +341,45 @@ class Analyzer:
             raise SemaError("Member access on non-record type")
         return self._lookup_record_member(base_type, member_name)
 
+    def _is_invalid_sizeof_type_spec(self, type_spec: TypeSpec) -> bool:
+        if self._is_invalid_void_object_type(type_spec):
+            return True
+        if self._is_invalid_incomplete_record_object_type(type_spec):
+            return True
+        return self._is_function_object_type(type_spec)
+
+    def _is_invalid_sizeof_type(self, type_: Type) -> bool:
+        if type_ == VOID:
+            return True
+        if type_.declarator_ops and type_.declarator_ops[0][0] == "fn":
+            return True
+        if self._is_record_name(type_.name) and not any(
+            kind == "ptr" for kind, _ in type_.declarator_ops
+        ):
+            return type_.name not in self._record_definitions
+        return False
+
+    def _is_scalar_type(self, type_: Type) -> bool:
+        if type_ == INT:
+            return True
+        return bool(type_.declarator_ops) and type_.declarator_ops[0][0] == "ptr"
+
+    def _is_invalid_cast_target(self, type_spec: TypeSpec, target_type: Type) -> bool:
+        if self._is_function_object_type(type_spec):
+            return True
+        if self._is_invalid_incomplete_record_object_type(type_spec):
+            return True
+        if target_type == VOID:
+            return False
+        return not self._is_scalar_type(target_type)
+
+    def _is_invalid_cast_operand(self, operand_type: Type, target_type: Type) -> bool:
+        if target_type == VOID:
+            return False
+        if operand_type == VOID:
+            return True
+        return not self._is_scalar_type(operand_type)
+
     def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
         if type_spec.name != "void":
             return False
@@ -503,6 +544,29 @@ class Analyzer:
             member_type = self._resolve_member_type(base_type, expr.member, expr.through_pointer)
             self._type_map.set(expr, member_type)
             return member_type
+        if isinstance(expr, SizeofExpr):
+            if expr.type_spec is not None:
+                self._register_type_spec(expr.type_spec)
+                if self._is_invalid_sizeof_type_spec(expr.type_spec):
+                    raise SemaError("Invalid sizeof operand")
+                self._resolve_type(expr.type_spec)
+            else:
+                assert expr.expr is not None
+                operand_type = self._analyze_expr(expr.expr, scope)
+                if self._is_invalid_sizeof_type(operand_type):
+                    raise SemaError("Invalid sizeof operand")
+            self._type_map.set(expr, INT)
+            return INT
+        if isinstance(expr, CastExpr):
+            self._register_type_spec(expr.type_spec)
+            target_type = self._resolve_type(expr.type_spec)
+            if self._is_invalid_cast_target(expr.type_spec, target_type):
+                raise SemaError("Invalid cast")
+            operand_type = self._decay_array_value(self._analyze_expr(expr.expr, scope))
+            if self._is_invalid_cast_operand(operand_type, target_type):
+                raise SemaError("Invalid cast")
+            self._type_map.set(expr, target_type)
+            return target_type
         if isinstance(expr, UnaryExpr):
             operand_type = self._analyze_expr(expr.operand, scope)
             if expr.op in {"+", "-", "!", "~"}:

@@ -8,8 +8,11 @@ from xcc.ast import (
     ExprStmt,
     FunctionDef,
     CallExpr,
+    CastExpr,
     IntLiteral,
     Param,
+    ReturnStmt,
+    SizeofExpr,
     Stmt,
     TranslationUnit,
     TypeSpec,
@@ -452,6 +455,59 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         assign_expr = _body(unit.functions[0]).statements[2].expr
         self.assertEqual(sema.type_map.get(assign_expr), INT)
+
+    def test_sizeof_expression_typemap(self) -> None:
+        unit = parse(list(lex("int main(){int x; return sizeof x;}")))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_sizeof_type_name_typemap(self) -> None:
+        unit = parse(list(lex("int main(){return sizeof(int*);}")))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[0].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_sizeof_complete_record_expression_typemap(self) -> None:
+        source = "int main(){struct S { int x; } s; return sizeof(s);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_sizeof_pointer_to_incomplete_record_type_name_ok(self) -> None:
+        unit = parse(list(lex("int main(){return sizeof(struct S*);}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_sizeof_record_type_name_with_definition_ok(self) -> None:
+        unit = parse(list(lex("int main(){return sizeof(struct S { int x; });}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_cast_expression_typemap(self) -> None:
+        unit = parse(list(lex("int main(){int *p; return (int)p;}")))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_cast_to_pointer_typemap(self) -> None:
+        unit = parse(list(lex("int main(){int x; int *p=(int*)x; return p!=0;}")))
+        sema = analyze(unit)
+        init_expr = _body(unit.functions[0]).statements[1].init
+        assert init_expr is not None
+        self.assertEqual(sema.type_map.get(init_expr), Type("int", 1))
+
+    def test_void_cast_statement_ok(self) -> None:
+        unit = parse(list(lex("int f(void){return 0;} int main(){(void)f(); return 0;}")))
+        sema = analyze(unit)
+        expr_stmt = _body(unit.functions[1]).statements[0]
+        assert isinstance(expr_stmt, ExprStmt)
+        self.assertEqual(sema.type_map.get(expr_stmt.expr), Type("void"))
 
     def test_parenthesized_pointer_to_array_typemap(self) -> None:
         source = "int main(){int a[4]; int (*p)[4]=&a; return (*p)[1];}"
@@ -1001,6 +1057,109 @@ class SemaTests(unittest.TestCase):
         return_expr = _body(unit.functions[0]).statements[1].value
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_sizeof_void_type_error(self) -> None:
+        unit = parse(list(lex("int main(){return sizeof(void);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+
+    def test_sizeof_incomplete_record_type_error(self) -> None:
+        unit = parse(list(lex("int main(){return sizeof(struct S);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+
+    def test_sizeof_function_type_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            ReturnStmt(
+                                SizeofExpr(
+                                    None,
+                                    TypeSpec("int", declarator_ops=(("fn", ((TypeSpec("int"),), False)),)),
+                                )
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+
+    def test_sizeof_function_designator_error(self) -> None:
+        unit = parse(list(lex("int f(int x){return x;} int main(){return sizeof(f);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+
+    def test_sizeof_void_expression_error(self) -> None:
+        unit = parse(list(lex("void f(void){return;} int main(){return sizeof(f());}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+
+    def test_sizeof_incomplete_record_expression_error(self) -> None:
+        unit = parse(list(lex("int main(){struct S *p; return sizeof(*p);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+
+    def test_cast_void_expression_to_int_error(self) -> None:
+        unit = parse(list(lex("void f(void){return;} int main(){return (int)f();}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid cast")
+
+    def test_cast_struct_target_error(self) -> None:
+        source = "int main(){struct S { int x; } s; return (struct S)s;}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid cast")
+
+    def test_cast_incomplete_record_target_error(self) -> None:
+        unit = parse(list(lex("int main(){int x; return (struct S)x;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid cast")
+
+    def test_cast_array_target_error(self) -> None:
+        unit = parse(list(lex("int main(){int x; return (int[2])x;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid cast")
+
+    def test_cast_function_type_target_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            ReturnStmt(
+                                CastExpr(
+                                    TypeSpec("int", declarator_ops=(("fn", ((TypeSpec("int"),), False)),)),
+                                    IntLiteral("1"),
+                                )
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid cast")
 
     def test_unsupported_expression(self) -> None:
         unit = TranslationUnit(

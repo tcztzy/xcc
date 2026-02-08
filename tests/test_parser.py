@@ -7,6 +7,7 @@ from xcc.ast import (
     BreakStmt,
     CaseStmt,
     CallExpr,
+    CastExpr,
     CompoundStmt,
     ContinueStmt,
     DeclStmt,
@@ -20,6 +21,7 @@ from xcc.ast import (
     NullStmt,
     Param,
     ReturnStmt,
+    SizeofExpr,
     SubscriptExpr,
     SwitchStmt,
     TypeSpec,
@@ -612,6 +614,60 @@ class ParserTests(unittest.TestCase):
         self.assertTrue(expr.through_pointer)
         self.assertEqual(expr.member, "x")
 
+    def test_sizeof_expression(self) -> None:
+        unit = parse(list(lex("int main(){int x;return sizeof x;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, SizeofExpr)
+        self.assertIsNotNone(expr.expr)
+        self.assertIsNone(expr.type_spec)
+
+    def test_sizeof_parenthesized_expression(self) -> None:
+        unit = parse(list(lex("int main(){int x;return sizeof(x+1);}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, SizeofExpr)
+        self.assertIsNotNone(expr.expr)
+
+    def test_sizeof_type_name(self) -> None:
+        unit = parse(list(lex("int main(){return sizeof(int*);}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, SizeofExpr)
+        self.assertIsNone(expr.expr)
+        self.assertEqual(expr.type_spec, TypeSpec("int", 1))
+
+    def test_sizeof_struct_type_name(self) -> None:
+        unit = parse(list(lex("int main(){return sizeof(struct S { int x; });}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, SizeofExpr)
+        self.assertIsNone(expr.expr)
+        self.assertIsNotNone(expr.type_spec)
+
+    def test_cast_expression(self) -> None:
+        unit = parse(list(lex("int main(){int *p; return (int)p;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, CastExpr)
+        self.assertEqual(expr.type_spec, TypeSpec("int"))
+        self.assertIsInstance(expr.expr, Identifier)
+
+    def test_nested_cast_expression(self) -> None:
+        unit = parse(list(lex("int main(){int *p; return (int)(void*)p;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        outer_expr = stmt.value
+        self.assertIsInstance(outer_expr, CastExpr)
+        inner_expr = outer_expr.expr
+        self.assertIsInstance(inner_expr, CastExpr)
+        self.assertEqual(inner_expr.type_spec, TypeSpec("void", 1))
+
     def test_array_size_must_be_positive(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0];return 0;}")))
@@ -683,6 +739,14 @@ class ParserTests(unittest.TestCase):
     def test_member_expression_missing_identifier_after_arrow(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){struct S { int x; } s;struct S *p=&s;return p->;}")))
+
+    def test_sizeof_type_name_rejects_identifier(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){return sizeof(int x);}")))
+
+    def test_cast_type_name_rejects_identifier(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int x; return (int y)x;}")))
 
     def test_missing_semicolon(self) -> None:
         source = "int main(){return 1}"

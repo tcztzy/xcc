@@ -6,6 +6,7 @@ from xcc.ast import (
     BreakStmt,
     CallExpr,
     CaseStmt,
+    CastExpr,
     CompoundStmt,
     ContinueStmt,
     DeclStmt,
@@ -21,6 +22,7 @@ from xcc.ast import (
     NullStmt,
     Param,
     ReturnStmt,
+    SizeofExpr,
     Stmt,
     SubscriptExpr,
     SwitchStmt,
@@ -454,6 +456,10 @@ class Parser:
         return expr
 
     def _parse_unary(self) -> Expr:
+        if self._check_keyword("sizeof"):
+            return self._parse_sizeof_expr()
+        if self._is_parenthesized_type_name_start():
+            return self._parse_cast_expr()
         if (
             self._check_punct("+")
             or self._check_punct("-")
@@ -466,6 +472,36 @@ class Parser:
             operand = self._parse_unary()
             return UnaryExpr(str(op), operand)
         return self._parse_postfix()
+
+    def _parse_sizeof_expr(self) -> SizeofExpr:
+        self._advance()
+        if self._is_parenthesized_type_name_start():
+            type_spec = self._parse_parenthesized_type_name()
+            return SizeofExpr(None, type_spec)
+        operand = self._parse_unary()
+        return SizeofExpr(operand, None)
+
+    def _parse_cast_expr(self) -> CastExpr:
+        type_spec = self._parse_parenthesized_type_name()
+        operand = self._parse_unary()
+        return CastExpr(type_spec, operand)
+
+    def _parse_parenthesized_type_name(self) -> TypeSpec:
+        self._expect_punct("(")
+        base_type = self._parse_type_spec()
+        name, declarator_ops = self._parse_declarator(allow_abstract=True)
+        if name is not None:
+            raise ParserError("Expected type name", self._current())
+        self._expect_punct(")")
+        return self._build_declarator_type(base_type, declarator_ops)
+
+    def _is_parenthesized_type_name_start(self) -> bool:
+        if not self._check_punct("("):
+            return False
+        token = self._peek()
+        if token.kind != TokenKind.KEYWORD:
+            return False
+        return str(token.lexeme) in {"int", "void", "enum", "struct", "union"}
 
     def _parse_postfix(self) -> Expr:
         expr = self._parse_primary()
