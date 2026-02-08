@@ -27,6 +27,7 @@ from xcc.ast import (
     SubscriptExpr,
     SwitchStmt,
     TranslationUnit,
+    TypedefDecl,
     TypeSpec,
     UnaryExpr,
     WhileStmt,
@@ -51,6 +52,41 @@ class Parser:
     def __init__(self, tokens: list[Token]) -> None:
         self._tokens = tokens
         self._index = 0
+        self._typedef_scopes: list[dict[str, TypeSpec]] = [{}]
+        self._ordinary_name_scopes: list[set[str]] = [set()]
+
+    def _push_scope(self, names: set[str] | None = None) -> None:
+        self._typedef_scopes.append({})
+        if names is None:
+            self._ordinary_name_scopes.append(set())
+        else:
+            self._ordinary_name_scopes.append(set(names))
+
+    def _pop_scope(self) -> None:
+        self._typedef_scopes.pop()
+        self._ordinary_name_scopes.pop()
+
+    def _define_typedef(self, name: str, type_spec: TypeSpec) -> None:
+        self._typedef_scopes[-1][name] = type_spec
+
+    def _define_ordinary_name(self, name: str) -> None:
+        self._ordinary_name_scopes[-1].add(name)
+
+    def _lookup_typedef(self, name: str) -> TypeSpec | None:
+        for typedefs, ordinary_names in zip(
+            reversed(self._typedef_scopes),
+            reversed(self._ordinary_name_scopes),
+            strict=True,
+        ):
+            if name in ordinary_names:
+                return None
+            type_spec = typedefs.get(name)
+            if type_spec is not None:
+                return type_spec
+        return None
+
+    def _is_typedef_name(self, name: str) -> bool:
+        return self._lookup_typedef(name) is not None
 
     def parse(self) -> TranslationUnit:
         functions: list[FunctionDef] = []
@@ -77,7 +113,8 @@ class Parser:
             )
         if any(param.name is None for param in params):
             raise ParserError("Expected parameter name", self._current())
-        body = self._parse_compound_stmt()
+        parameter_names = {param.name for param in params if param.name is not None}
+        body = self._parse_compound_stmt(initial_names=parameter_names)
         return FunctionDef(
             return_type,
             str(name),
@@ -115,6 +152,14 @@ class Parser:
         return Param(declarator_type, name)
 
     def _parse_type_spec(self) -> TypeSpec:
+        token = self._current()
+        if token.kind == TokenKind.IDENT:
+            assert isinstance(token.lexeme, str)
+            type_spec = self._lookup_typedef(token.lexeme)
+            if type_spec is None:
+                raise ParserError("Unsupported type", token)
+            self._advance()
+            return type_spec
         token = self._expect(TokenKind.KEYWORD)
         if token.lexeme in {"int", "void"}:
             pointer_depth = self._parse_pointer_depth()
@@ -236,13 +281,17 @@ class Parser:
         self._expect_punct(";")
         return member_type, name
 
-    def _parse_compound_stmt(self) -> CompoundStmt:
+    def _parse_compound_stmt(self, initial_names: set[str] | None = None) -> CompoundStmt:
         self._expect_punct("{")
-        statements: list[Stmt] = []
-        while not self._check_punct("}"):
-            statements.append(self._parse_statement())
-        self._expect_punct("}")
-        return CompoundStmt(statements)
+        self._push_scope(initial_names)
+        try:
+            statements: list[Stmt] = []
+            while not self._check_punct("}"):
+                statements.append(self._parse_statement())
+            self._expect_punct("}")
+            return CompoundStmt(statements)
+        finally:
+            self._pop_scope()
 
     def _parse_statement(self) -> Stmt:
         if self._check_punct(";"):
@@ -279,13 +328,19 @@ class Parser:
         return ExprStmt(expr)
 
     def _is_declaration_start(self) -> bool:
-        return (
+        if (
             self._check_keyword("int")
             or self._check_keyword("void")
             or self._check_keyword("enum")
             or self._check_keyword("struct")
             or self._check_keyword("union")
-        )
+            or self._check_keyword("typedef")
+        ):
+            return True
+        token = self._current()
+        if token.kind != TokenKind.IDENT or not isinstance(token.lexeme, str):
+            return False
+        return self._is_typedef_name(token.lexeme)
 
     def _parse_if_stmt(self) -> IfStmt:
         self._advance()
@@ -310,28 +365,32 @@ class Parser:
     def _parse_for_stmt(self) -> ForStmt:
         self._advance()
         self._expect_punct("(")
-        init: Stmt | Expr | None
-        if self._check_punct(";"):
-            self._advance()
-            init = None
-        elif self._is_declaration_start():
-            init = self._parse_decl_stmt()
-        else:
-            init = self._parse_expression()
-            self._expect_punct(";")
-        if self._check_punct(";"):
-            self._advance()
-            condition: Expr | None = None
-        else:
-            condition = self._parse_expression()
-            self._expect_punct(";")
-        if self._check_punct(")"):
-            post: Expr | None = None
-        else:
-            post = self._parse_expression()
-        self._expect_punct(")")
-        body = self._parse_statement()
-        return ForStmt(init, condition, post, body)
+        self._push_scope()
+        try:
+            init: Stmt | Expr | None
+            if self._check_punct(";"):
+                self._advance()
+                init = None
+            elif self._is_declaration_start():
+                init = self._parse_decl_stmt()
+            else:
+                init = self._parse_expression()
+                self._expect_punct(";")
+            if self._check_punct(";"):
+                self._advance()
+                condition: Expr | None = None
+            else:
+                condition = self._parse_expression()
+                self._expect_punct(";")
+            if self._check_punct(")"):
+                post: Expr | None = None
+            else:
+                post = self._parse_expression()
+            self._expect_punct(")")
+            body = self._parse_statement()
+            return ForStmt(init, condition, post, body)
+        finally:
+            self._pop_scope()
 
     def _parse_switch_stmt(self) -> SwitchStmt:
         self._advance()
@@ -354,25 +413,38 @@ class Parser:
         body = self._parse_statement()
         return DefaultStmt(body)
 
-    def _parse_decl_stmt(self) -> DeclStmt:
+    def _parse_decl_stmt(self) -> Stmt:
+        is_typedef = False
+        if self._check_keyword("typedef"):
+            self._advance()
+            is_typedef = True
         base_type = self._parse_type_spec()
-        allow_abstract = base_type.name in {"enum", "struct", "union"}
+        allow_abstract = not is_typedef and base_type.name in {"enum", "struct", "union"}
         name, declarator_ops = self._parse_declarator(allow_abstract=allow_abstract)
         decl_type = self._build_declarator_type(base_type, declarator_ops)
         if name is None:
             if self._check_punct("="):
                 raise ParserError("Expected identifier", self._current())
-            if not self._is_tag_or_definition_decl(base_type):
+            if is_typedef or not self._is_tag_or_definition_decl(base_type):
                 raise ParserError("Expected identifier", self._current())
             self._expect_punct(";")
+            self._define_enum_member_names(base_type)
             return DeclStmt(decl_type, None, None)
+        if self._check_punct("="):
+            if is_typedef:
+                raise ParserError("Typedef cannot have initializer", self._current())
+            self._advance()
+            init: Expr | None = self._parse_expression()
+        else:
+            init = None
+        self._expect_punct(";")
+        self._define_enum_member_names(base_type)
+        if is_typedef:
+            self._define_typedef(name, decl_type)
+            return TypedefDecl(decl_type, name)
         if self._is_invalid_void_object_type(decl_type):
             raise ParserError("Invalid object type", self._current())
-        init: Expr | None = None
-        if self._check_punct("="):
-            self._advance()
-            init = self._parse_expression()
-        self._expect_punct(";")
+        self._define_ordinary_name(name)
         return DeclStmt(decl_type, name, init)
 
     def _is_tag_or_definition_decl(self, type_spec: TypeSpec) -> bool:
@@ -381,6 +453,10 @@ class Parser:
         if type_spec.name in {"struct", "union"}:
             return type_spec.record_tag is not None or bool(type_spec.record_members)
         return False
+
+    def _define_enum_member_names(self, type_spec: TypeSpec) -> None:
+        for member_name, _ in type_spec.enum_members:
+            self._define_ordinary_name(member_name)
 
     def _parse_return_stmt(self) -> ReturnStmt:
         self._advance()
@@ -499,9 +575,11 @@ class Parser:
         if not self._check_punct("("):
             return False
         token = self._peek()
-        if token.kind != TokenKind.KEYWORD:
-            return False
-        return str(token.lexeme) in {"int", "void", "enum", "struct", "union"}
+        if token.kind == TokenKind.KEYWORD:
+            return str(token.lexeme) in {"int", "void", "enum", "struct", "union"}
+        if token.kind == TokenKind.IDENT and isinstance(token.lexeme, str):
+            return self._is_typedef_name(token.lexeme)
+        return False
 
     def _parse_postfix(self) -> Expr:
         expr = self._parse_primary()
@@ -538,7 +616,7 @@ class Parser:
         base_type: TypeSpec,
         declarator_ops: tuple[DeclaratorOp, ...],
     ) -> TypeSpec:
-        combined_ops = declarator_ops + (POINTER_OP,) * base_type.pointer_depth
+        combined_ops = declarator_ops + base_type.declarator_ops
         return TypeSpec(
             base_type.name,
             declarator_ops=combined_ops,

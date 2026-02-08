@@ -27,6 +27,7 @@ from xcc.ast import (
     SubscriptExpr,
     SwitchStmt,
     TranslationUnit,
+    TypedefDecl,
     TypeSpec,
     UnaryExpr,
     WhileStmt,
@@ -92,12 +93,18 @@ class SemaUnit:
 class Scope:
     def __init__(self, parent: "Scope | None" = None) -> None:
         self._symbols: dict[str, VarSymbol | EnumConstSymbol] = {}
+        self._typedefs: dict[str, Type] = {}
         self._parent = parent
 
     def define(self, symbol: VarSymbol | EnumConstSymbol) -> None:
-        if symbol.name in self._symbols:
+        if symbol.name in self._symbols or symbol.name in self._typedefs:
             raise SemaError(f"Duplicate declaration: {symbol.name}")
         self._symbols[symbol.name] = symbol
+
+    def define_typedef(self, name: str, type_: Type) -> None:
+        if name in self._symbols or name in self._typedefs:
+            raise SemaError(f"Duplicate declaration: {name}")
+        self._typedefs[name] = type_
 
     def lookup(self, name: str) -> VarSymbol | EnumConstSymbol | None:
         symbol = self._symbols.get(name)
@@ -411,6 +418,12 @@ class Analyzer:
                 if init_type != var_type:
                     raise SemaError("Initializer type mismatch")
             return
+        if isinstance(stmt, TypedefDecl):
+            self._register_type_spec(stmt.type_spec)
+            self._define_enum_members(stmt.type_spec, scope)
+            typedef_type = self._resolve_type(stmt.type_spec)
+            scope.define_typedef(stmt.name, typedef_type)
+            return
         if isinstance(stmt, ExprStmt):
             self._analyze_expr(stmt.expr, scope)
             return
@@ -427,7 +440,7 @@ class Analyzer:
             return
         if isinstance(stmt, ForStmt):
             inner_scope = Scope(scope)
-            if isinstance(stmt.init, DeclStmt):
+            if isinstance(stmt.init, Stmt):
                 self._analyze_stmt(stmt.init, inner_scope, return_type)
             elif isinstance(stmt.init, Expr):
                 self._analyze_expr(stmt.init, inner_scope)

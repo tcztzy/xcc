@@ -509,6 +509,30 @@ class SemaTests(unittest.TestCase):
         assert isinstance(expr_stmt, ExprStmt)
         self.assertEqual(sema.type_map.get(expr_stmt.expr), Type("void"))
 
+    def test_typedef_alias_declaration_typemap(self) -> None:
+        unit = parse(list(lex("int main(){typedef int T; T x=1; return x;}")))
+        sema = analyze(unit)
+        self.assertEqual(sema.functions["main"].locals["x"].type_, INT)
+
+    def test_typedef_pointer_alias_typemap(self) -> None:
+        source = "int main(){typedef int *P; int x=1; P p=&x; return *p;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[3].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_typedef_inner_scope_shadowing(self) -> None:
+        source = "int main(){typedef int T; {typedef int* T; int x=1; T p=&x;} T y=2; return y;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertEqual(sema.functions["main"].locals["y"].type_, INT)
+
+    def test_typedef_in_for_init_ok(self) -> None:
+        unit = parse(list(lex("int main(){for(typedef int T;;) break; return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_parenthesized_pointer_to_array_typemap(self) -> None:
         source = "int main(){int a[4]; int (*p)[4]=&a; return (*p)[1];}"
         unit = parse(list(lex(source)))
@@ -611,6 +635,24 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: x")
+
+    def test_typedef_then_object_duplicate_declaration(self) -> None:
+        unit = parse(list(lex("int main(){typedef int T; int T; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: T")
+
+    def test_object_then_typedef_duplicate_declaration(self) -> None:
+        unit = parse(list(lex("int main(){int T; typedef int T; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: T")
+
+    def test_duplicate_typedef_declaration(self) -> None:
+        unit = parse(list(lex("int main(){typedef int T; typedef int T; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: T")
 
     def test_duplicate_enumerator_declaration(self) -> None:
         unit = parse(list(lex("int main(){enum E { A, A }; return 0;}")))

@@ -24,6 +24,7 @@ from xcc.ast import (
     SizeofExpr,
     SubscriptExpr,
     SwitchStmt,
+    TypedefDecl,
     TypeSpec,
     UnaryExpr,
     WhileStmt,
@@ -668,6 +669,37 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(inner_expr, CastExpr)
         self.assertEqual(inner_expr.type_spec, TypeSpec("void", 1))
 
+    def test_typedef_declaration_and_use(self) -> None:
+        unit = parse(list(lex("int main(){typedef int T; T x=1; return (T)x;}")))
+        typedef_stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(typedef_stmt, TypedefDecl)
+        self.assertEqual(typedef_stmt.type_spec, TypeSpec("int"))
+        self.assertEqual(typedef_stmt.name, "T")
+        decl_stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(decl_stmt, DeclStmt)
+        self.assertEqual(decl_stmt.type_spec, TypeSpec("int"))
+        return_stmt = _body(unit.functions[0]).statements[2]
+        self.assertIsInstance(return_stmt, ReturnStmt)
+        return_expr = return_stmt.value
+        self.assertIsInstance(return_expr, CastExpr)
+        self.assertEqual(return_expr.type_spec, TypeSpec("int"))
+
+    def test_typedef_name_in_sizeof_type_name(self) -> None:
+        unit = parse(list(lex("int main(){typedef int T; return sizeof(T*);}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, SizeofExpr)
+        self.assertEqual(expr.type_spec, TypeSpec("int", 1))
+
+    def test_typedef_name_shadowed_by_local_object(self) -> None:
+        unit = parse(list(lex("int main(){typedef int T; {int T=1; (T);} return 0;}")))
+        block_stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(block_stmt, CompoundStmt)
+        expr_stmt = block_stmt.statements[1]
+        self.assertIsInstance(expr_stmt, ExprStmt)
+        self.assertIsInstance(expr_stmt.expr, Identifier)
+
     def test_array_size_must_be_positive(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0];return 0;}")))
@@ -747,6 +779,14 @@ class ParserTests(unittest.TestCase):
     def test_cast_type_name_rejects_identifier(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int x; return (int y)x;}")))
+
+    def test_typedef_requires_identifier(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){typedef int;}")))
+
+    def test_typedef_initializer_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){typedef int T=1;}")))
 
     def test_missing_semicolon(self) -> None:
         source = "int main(){return 1}"

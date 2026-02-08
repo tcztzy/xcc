@@ -204,3 +204,9 @@ class DeclStmt(Stmt):
     type_spec: TypeSpec
     name: str | None
     init: Expr | None
+
+
+@dataclass(frozen=True)
+class TypedefDecl(Stmt):
+    type_spec: TypeSpec
+    name: str
