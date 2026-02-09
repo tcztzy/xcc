@@ -345,6 +345,14 @@ class ParserTests(unittest.TestCase):
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
 
+    def test_modulo_precedence(self) -> None:
+        unit = parse(list(lex("int main(){return 8%3+1;}")))
+        expr = _body(unit.functions[0]).statements[0].value
+        self.assertIsInstance(expr, BinaryExpr)
+        self.assertEqual(expr.op, "+")
+        self.assertIsInstance(expr.left, BinaryExpr)
+        self.assertEqual(expr.left.op, "%")
+
     def test_unary_expression(self) -> None:
         unit = parse(list(lex("int main(){return -1;}")))
         stmt = _body(unit.functions[0]).statements[0]

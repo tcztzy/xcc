@@ -633,7 +633,7 @@ class Parser:
 
     def _parse_multiplicative(self) -> Expr:
         expr = self._parse_unary()
-        while self._check_punct("*") or self._check_punct("/"):
+        while self._check_punct("*") or self._check_punct("/") or self._check_punct("%"):
             op = self._advance().lexeme
             right = self._parse_unary()
             expr = BinaryExpr(str(op), expr, right)

@@ -773,6 +773,10 @@ class Analyzer:
                 if right_value == 0:
                     return None
                 return left_value // right_value
+            if expr.op == "%":
+                if right_value == 0:
+                    return None
+                return left_value % right_value
             if expr.op == "<<":
                 if right_value < 0:
                     return None
@@ -781,12 +785,28 @@ class Analyzer:
                 if right_value < 0:
                     return None
                 return left_value >> right_value
+            if expr.op == "<":
+                return 1 if left_value < right_value else 0
+            if expr.op == "<=":
+                return 1 if left_value <= right_value else 0
+            if expr.op == ">":
+                return 1 if left_value > right_value else 0
+            if expr.op == ">=":
+                return 1 if left_value >= right_value else 0
+            if expr.op == "==":
+                return 1 if left_value == right_value else 0
+            if expr.op == "!=":
+                return 1 if left_value != right_value else 0
             if expr.op == "&":
                 return left_value & right_value
             if expr.op == "^":
                 return left_value ^ right_value
             if expr.op == "|":
                 return left_value | right_value
+            if expr.op == "&&":
+                return 1 if left_value and right_value else 0
+            if expr.op == "||":
+                return 1 if left_value or right_value else 0
             return None
         if isinstance(expr, ConditionalExpr):
             condition_value = self._eval_int_constant_expr(expr.condition, scope)
