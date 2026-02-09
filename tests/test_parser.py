@@ -19,9 +19,11 @@ from xcc.ast import (
     ExprStmt,
     ForStmt,
     FunctionDef,
+    GotoStmt,
     Identifier,
     IfStmt,
     IntLiteral,
+    LabelStmt,
     MemberExpr,
     NullStmt,
     Param,
@@ -271,6 +273,24 @@ class ParserTests(unittest.TestCase):
         first = body.statements[0]
         self.assertIsInstance(first, CaseStmt)
         self.assertIsInstance(first.body, CaseStmt)
+
+    def test_label_statement(self) -> None:
+        unit = parse(list(lex("int main(){entry: return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, LabelStmt)
+        self.assertEqual(stmt.name, "entry")
+        self.assertIsInstance(stmt.body, ReturnStmt)
+
+    def test_goto_statement(self) -> None:
+        unit = parse(list(lex("int main(){goto done; done: return 0;}")))
+        body = _body(unit.functions[0]).statements
+        self.assertIsInstance(body[0], GotoStmt)
+        self.assertEqual(body[0].label, "done")
+        self.assertIsInstance(body[1], LabelStmt)
+
+    def test_goto_requires_label_name(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){goto; return 0;}")))
 
     def test_case_missing_colon(self) -> None:
         with self.assertRaises(ParserError):

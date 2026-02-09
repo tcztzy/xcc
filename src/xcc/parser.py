@@ -19,9 +19,11 @@ from xcc.ast import (
     ExprStmt,
     ForStmt,
     FunctionDef,
+    GotoStmt,
     Identifier,
     IfStmt,
     IntLiteral,
+    LabelStmt,
     MemberExpr,
     NullStmt,
     Param,
@@ -355,6 +357,10 @@ class Parser:
             return self._parse_case_stmt()
         if self._check_keyword("default"):
             return self._parse_default_stmt()
+        if self._is_label_start():
+            return self._parse_label_stmt()
+        if self._check_keyword("goto"):
+            return self._parse_goto_stmt()
         if self._check_keyword("break"):
             self._advance()
             self._expect_punct(";")
@@ -468,6 +474,24 @@ class Parser:
         self._expect_punct(":")
         body = self._parse_statement()
         return DefaultStmt(body)
+
+    def _parse_label_stmt(self) -> LabelStmt:
+        token = self._expect(TokenKind.IDENT)
+        assert isinstance(token.lexeme, str)
+        self._expect_punct(":")
+        body = self._parse_statement()
+        return LabelStmt(token.lexeme, body)
+
+    def _parse_goto_stmt(self) -> GotoStmt:
+        self._advance()
+        label = self._expect(TokenKind.IDENT)
+        assert isinstance(label.lexeme, str)
+        self._expect_punct(";")
+        return GotoStmt(label.lexeme)
+
+    def _is_label_start(self) -> bool:
+        token = self._current()
+        return token.kind == TokenKind.IDENT and self._peek_punct(":")
 
     def _parse_decl_stmt(self) -> Stmt:
         is_typedef = False

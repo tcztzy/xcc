@@ -324,6 +324,30 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_goto_and_label_ok(self) -> None:
+        source = "int main(){goto done; return 1; done: return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_goto_label_shares_name_with_object(self) -> None:
+        source = "int main(){int x=0; goto x; x: return x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_goto_undefined_label_error(self) -> None:
+        unit = parse(list(lex("int main(){goto missing; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Undefined label: missing")
+
+    def test_duplicate_label_error(self) -> None:
+        unit = parse(list(lex("int main(){x: ; x: return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate label: x")
+
     def test_compound_statement_inherits_scope(self) -> None:
         source = "int main(){int x=1; { return x; }}"
         unit = parse(list(lex(source)))

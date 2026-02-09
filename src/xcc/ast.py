@@ -122,6 +122,17 @@ class DefaultStmt(Stmt):
 
 
 @dataclass(frozen=True)
+class LabelStmt(Stmt):
+    name: str
+    body: Stmt
+
+
+@dataclass(frozen=True)
+class GotoStmt(Stmt):
+    label: str
+
+
+@dataclass(frozen=True)
 class BreakStmt(Stmt):
     pass
 

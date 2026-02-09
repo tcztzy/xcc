@@ -19,9 +19,11 @@ from xcc.ast import (
     ExprStmt,
     ForStmt,
     FunctionDef,
+    GotoStmt,
     Identifier,
     IfStmt,
     IntLiteral,
+    LabelStmt,
     MemberExpr,
     NullStmt,
     Param,
@@ -149,6 +151,8 @@ class Analyzer:
         self._file_scope = Scope()
         self._loop_depth = 0
         self._switch_stack: list[SwitchContext] = []
+        self._function_labels: set[str] = set()
+        self._pending_goto_labels: list[str] = []
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]
@@ -206,8 +210,13 @@ class Analyzer:
         return_type = self._function_signatures[func.name].return_type
         assert func.body is not None
         scope = Scope(self._file_scope)
+        self._function_labels = set()
+        self._pending_goto_labels = []
         self._define_params(func.params, scope)
         self._analyze_compound(func.body, scope, return_type)
+        for label in self._pending_goto_labels:
+            if label not in self._function_labels:
+                raise SemaError(f"Undefined label: {label}")
         self._functions[func.name] = FunctionSymbol(func.name, return_type, scope.symbols)
 
     def _define_params(self, params: list[Param], scope: Scope) -> None:
@@ -550,6 +559,15 @@ class Analyzer:
                 raise SemaError("Duplicate default label")
             context.has_default = True
             self._analyze_stmt(stmt.body, scope, return_type)
+            return
+        if isinstance(stmt, LabelStmt):
+            if stmt.name in self._function_labels:
+                raise SemaError(f"Duplicate label: {stmt.name}")
+            self._function_labels.add(stmt.name)
+            self._analyze_stmt(stmt.body, scope, return_type)
+            return
+        if isinstance(stmt, GotoStmt):
+            self._pending_goto_labels.append(stmt.label)
             return
         if isinstance(stmt, CompoundStmt):
             inner_scope = Scope(scope)
