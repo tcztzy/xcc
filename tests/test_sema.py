@@ -285,6 +285,18 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_block_scope_multi_declarator_ok(self) -> None:
+        source = "int main(){int x=1, y=x; return y;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_block_scope_multi_typedef_ok(self) -> None:
+        source = "int main(){typedef int T, U; T x=1; U y=2; return x+y;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_for_expression_init_no_condition_or_post(self) -> None:
         source = "int main(){int i=0; for(i=0;;) continue; return 0;}"
         unit = parse(list(lex(source)))
@@ -637,6 +649,12 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_file_scope_multi_declarator_declaration_ok(self) -> None:
+        source = "int x=1, y=2; int main(){return x+y;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_file_scope_void_object_error(self) -> None:
         unit = TranslationUnit([], [DeclStmt(TypeSpec("void"), "g", None)])
         with self.assertRaises(SemaError) as ctx:
@@ -748,6 +766,12 @@ class SemaTests(unittest.TestCase):
 
     def test_duplicate_declaration(self) -> None:
         unit = parse(list(lex("int main(){int x; int x; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: x")
+
+    def test_duplicate_declaration_in_multi_declarator(self) -> None:
+        unit = parse(list(lex("int main(){int x=1, x=2; return x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: x")

@@ -208,6 +208,11 @@ class NullStmt(Stmt):
 
 
 @dataclass(frozen=True)
+class DeclGroupStmt(Stmt):
+    declarations: list["DeclStmt | TypedefDecl"]
+
+
+@dataclass(frozen=True)
 class DeclStmt(Stmt):
     type_spec: TypeSpec
     name: str | None

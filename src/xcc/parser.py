@@ -9,6 +9,7 @@ from xcc.ast import (
     CastExpr,
     CompoundStmt,
     ContinueStmt,
+    DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
     DoWhileStmt,
@@ -297,19 +298,26 @@ class Parser:
             raise ParserError("Expected member declaration", self._current())
         members: list[tuple[TypeSpec, str]] = []
         while not self._check_punct("}"):
-            members.append(self._parse_record_member())
+            members.extend(self._parse_record_member_declaration())
         self._expect_punct("}")
         return tuple(members)
 
-    def _parse_record_member(self) -> tuple[TypeSpec, str]:
+    def _parse_record_member_declaration(self) -> list[tuple[TypeSpec, str]]:
         base_type = self._parse_type_spec()
-        name, declarator_ops = self._parse_declarator(allow_abstract=False)
-        assert name is not None
-        member_type = self._build_declarator_type(base_type, declarator_ops)
-        if self._is_invalid_void_object_type(member_type):
-            raise ParserError("Invalid member type", self._current())
+        members: list[tuple[TypeSpec, str]] = []
+        while True:
+            name, declarator_ops = self._parse_declarator(allow_abstract=False)
+            if name is None:
+                raise ParserError("Expected identifier", self._current())
+            member_type = self._build_declarator_type(base_type, declarator_ops)
+            if self._is_invalid_void_object_type(member_type):
+                raise ParserError("Invalid member type", self._current())
+            members.append((member_type, name))
+            if not self._check_punct(","):
+                break
+            self._advance()
         self._expect_punct(";")
-        return member_type, name
+        return members
 
     def _parse_compound_stmt(self, initial_names: set[str] | None = None) -> CompoundStmt:
         self._expect_punct("{")
@@ -463,33 +471,40 @@ class Parser:
             self._advance()
             is_typedef = True
         base_type = self._parse_type_spec()
-        allow_abstract = not is_typedef and base_type.name in {"enum", "struct", "union"}
-        name, declarator_ops = self._parse_declarator(allow_abstract=allow_abstract)
-        decl_type = self._build_declarator_type(base_type, declarator_ops)
-        if name is None:
-            if self._check_punct("="):
-                raise ParserError("Expected identifier", self._current())
+        if self._check_punct(";"):
             if is_typedef or not self._is_tag_or_definition_decl(base_type):
                 raise ParserError("Expected identifier", self._current())
             self._expect_punct(";")
             self._define_enum_member_names(base_type)
-            return DeclStmt(decl_type, None, None)
-        if self._check_punct("="):
+            return DeclStmt(base_type, None, None)
+        declarations: list[DeclStmt | TypedefDecl] = []
+        while True:
+            name, declarator_ops = self._parse_declarator(allow_abstract=False)
+            if name is None:
+                raise ParserError("Expected identifier", self._current())
+            decl_type = self._build_declarator_type(base_type, declarator_ops)
             if is_typedef:
-                raise ParserError("Typedef cannot have initializer", self._current())
+                if self._check_punct("="):
+                    raise ParserError("Typedef cannot have initializer", self._current())
+                self._define_typedef(name, decl_type)
+                declarations.append(TypedefDecl(decl_type, name))
+            else:
+                if self._is_invalid_void_object_type(decl_type):
+                    raise ParserError("Invalid object type", self._current())
+                self._define_ordinary_name(name)
+                init: Expr | None = None
+                if self._check_punct("="):
+                    self._advance()
+                    init = self._parse_expression()
+                declarations.append(DeclStmt(decl_type, name, init))
+            if not self._check_punct(","):
+                break
             self._advance()
-            init: Expr | None = self._parse_expression()
-        else:
-            init = None
         self._expect_punct(";")
         self._define_enum_member_names(base_type)
-        if is_typedef:
-            self._define_typedef(name, decl_type)
-            return TypedefDecl(decl_type, name)
-        if self._is_invalid_void_object_type(decl_type):
-            raise ParserError("Invalid object type", self._current())
-        self._define_ordinary_name(name)
-        return DeclStmt(decl_type, name, init)
+        if len(declarations) == 1:
+            return declarations[0]
+        return DeclGroupStmt(declarations)
 
     def _is_tag_or_definition_decl(self, type_spec: TypeSpec) -> bool:
         if type_spec.name == "enum":

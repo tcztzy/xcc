@@ -9,6 +9,7 @@ from xcc.ast import (
     CastExpr,
     CompoundStmt,
     ContinueStmt,
+    DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
     DoWhileStmt,
@@ -214,6 +215,10 @@ class Analyzer:
             scope.define(VarSymbol(param.name, param_type))
 
     def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
+        if isinstance(declaration, DeclGroupStmt):
+            for grouped_decl in declaration.declarations:
+                self._analyze_file_scope_decl(grouped_decl)
+            return
         if isinstance(declaration, TypedefDecl):
             if declaration.name in self._function_signatures:
                 raise SemaError(f"Conflicting declaration: {declaration.name}")
@@ -453,6 +458,10 @@ class Analyzer:
             self._analyze_stmt(item, scope, return_type)
 
     def _analyze_stmt(self, stmt: Stmt, scope: Scope, return_type: Type) -> None:
+        if isinstance(stmt, DeclGroupStmt):
+            for grouped_decl in stmt.declarations:
+                self._analyze_stmt(grouped_decl, scope, return_type)
+            return
         if isinstance(stmt, DeclStmt):
             self._register_type_spec(stmt.type_spec)
             self._define_enum_members(stmt.type_spec, scope)

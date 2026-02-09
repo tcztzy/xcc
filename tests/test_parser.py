@@ -10,6 +10,7 @@ from xcc.ast import (
     CastExpr,
     CompoundStmt,
     ContinueStmt,
+    DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
     DoWhileStmt,
@@ -478,6 +479,19 @@ class ParserTests(unittest.TestCase):
         )
         self.assertEqual(stmt.name, "d")
 
+    def test_record_member_declaration_list(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x, y; } s; return s.x + s.y;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec(
+                "struct",
+                record_tag="S",
+                record_members=((TypeSpec("int"), "x"), (TypeSpec("int"), "y")),
+            ),
+        )
+
     def test_pointer_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){int *p;return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -553,6 +567,25 @@ class ParserTests(unittest.TestCase):
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (4,)))
+
+    def test_multi_declarator_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){int a=1,b=a;return b;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclGroupStmt)
+        first, second = stmt.declarations
+        self.assertEqual(first, DeclStmt(TypeSpec("int"), "a", IntLiteral("1")))
+        self.assertEqual(second.type_spec, TypeSpec("int"))
+        self.assertEqual(second.name, "b")
+        self.assertIsInstance(second.init, Identifier)
+
+    def test_multi_typedef_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){typedef int T, U; T x=1; U y=2;return x+y;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclGroupStmt)
+        self.assertEqual(
+            stmt.declarations,
+            [TypedefDecl(TypeSpec("int"), "T"), TypedefDecl(TypeSpec("int"), "U")],
+        )
 
     def test_multidimensional_array_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){int a[2][3];return 0;}")))
@@ -763,6 +796,12 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(unit.externals[1], FunctionDef)
         self.assertIsInstance(unit.externals[2], DeclStmt)
 
+    def test_translation_unit_groups_multi_declarator_external(self) -> None:
+        source = "int x=1, y=2; int main(){return x+y;}"
+        unit = parse(list(lex(source)))
+        self.assertEqual(len(unit.externals), 2)
+        self.assertIsInstance(unit.externals[0], DeclGroupStmt)
+
     def test_array_size_must_be_positive(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0];return 0;}")))
@@ -826,6 +865,10 @@ class ParserTests(unittest.TestCase):
     def test_invalid_void_struct_member_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){struct S { void x; };return 0;}")))
+
+    def test_parenthesized_missing_struct_member_declarator(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){struct S { int (); };return 0;}")))
 
     def test_member_expression_missing_identifier_after_dot(self) -> None:
         with self.assertRaises(ParserError):
