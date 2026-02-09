@@ -7,7 +7,9 @@ from xcc.ast import (
     CallExpr,
     CaseStmt,
     CastExpr,
+    CommaExpr,
     CompoundStmt,
+    ConditionalExpr,
     ContinueStmt,
     DeclGroupStmt,
     DeclStmt,
@@ -674,6 +676,21 @@ class Analyzer:
             self._analyze_expr(expr.right, scope)
             self._type_map.set(expr, INT)
             return INT
+        if isinstance(expr, ConditionalExpr):
+            condition_type = self._analyze_expr(expr.condition, scope)
+            if condition_type is VOID:
+                raise SemaError("Condition must be non-void")
+            then_type = self._decay_array_value(self._analyze_expr(expr.then_expr, scope))
+            else_type = self._decay_array_value(self._analyze_expr(expr.else_expr, scope))
+            if then_type != else_type:
+                raise SemaError("Conditional type mismatch")
+            self._type_map.set(expr, then_type)
+            return then_type
+        if isinstance(expr, CommaExpr):
+            self._analyze_expr(expr.left, scope)
+            right_type = self._analyze_expr(expr.right, scope)
+            self._type_map.set(expr, right_type)
+            return right_type
         if isinstance(expr, AssignExpr):
             if isinstance(expr.target, Identifier):
                 target_symbol = scope.lookup(expr.target.name)

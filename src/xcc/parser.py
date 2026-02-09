@@ -7,7 +7,9 @@ from xcc.ast import (
     CallExpr,
     CaseStmt,
     CastExpr,
+    CommaExpr,
     CompoundStmt,
+    ConditionalExpr,
     ContinueStmt,
     DeclGroupStmt,
     DeclStmt,
@@ -495,7 +497,7 @@ class Parser:
                 init: Expr | None = None
                 if self._check_punct("="):
                     self._advance()
-                    init = self._parse_expression()
+                    init = self._parse_assignment()
                 declarations.append(DeclStmt(decl_type, name, init))
             if not self._check_punct(","):
                 break
@@ -527,15 +529,30 @@ class Parser:
         return ReturnStmt(value)
 
     def _parse_expression(self) -> Expr:
-        return self._parse_assignment()
+        expr = self._parse_assignment()
+        while self._check_punct(","):
+            self._advance()
+            right = self._parse_assignment()
+            expr = CommaExpr(expr, right)
+        return expr
 
     def _parse_assignment(self) -> Expr:
-        expr = self._parse_logical_or()
+        expr = self._parse_conditional()
         if self._check_punct("="):
             op = self._advance().lexeme
             value = self._parse_assignment()
             return AssignExpr(str(op), expr, value)
         return expr
+
+    def _parse_conditional(self) -> Expr:
+        expr = self._parse_logical_or()
+        if not self._check_punct("?"):
+            return expr
+        self._advance()
+        then_expr = self._parse_expression()
+        self._expect_punct(":")
+        else_expr = self._parse_conditional()
+        return ConditionalExpr(expr, then_expr, else_expr)
 
     def _parse_logical_or(self) -> Expr:
         expr = self._parse_logical_and()
@@ -776,10 +793,10 @@ class Parser:
     def _parse_arguments(self) -> list[Expr]:
         if self._check_punct(")"):
             return []
-        args = [self._parse_expression()]
+        args = [self._parse_assignment()]
         while self._check_punct(","):
             self._advance()
-            args.append(self._parse_expression())
+            args.append(self._parse_assignment())
         return args
 
     def _parse_primary(self) -> Expr:

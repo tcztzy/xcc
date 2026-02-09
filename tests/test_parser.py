@@ -10,6 +10,8 @@ from xcc.ast import (
     CastExpr,
     CompoundStmt,
     ContinueStmt,
+    ConditionalExpr,
+    CommaExpr,
     DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
@@ -273,6 +275,10 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){switch(x){case 1 return 0;}}")))
 
+    def test_conditional_missing_colon(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){return 1?2;}")))
+
     def test_default_missing_colon(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){switch(x){default return 0;}}")))
@@ -339,6 +345,46 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr, AssignExpr)
         self.assertIsInstance(expr.target, Identifier)
         self.assertIsInstance(expr.value, AssignExpr)
+
+    def test_conditional_expression(self) -> None:
+        unit = parse(list(lex("int main(){return 1?2:3;}")))
+        expr = _body(unit.functions[0]).statements[0].value
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertIsInstance(expr.condition, IntLiteral)
+        self.assertIsInstance(expr.then_expr, IntLiteral)
+        self.assertIsInstance(expr.else_expr, IntLiteral)
+
+    def test_conditional_is_right_associative(self) -> None:
+        unit = parse(list(lex("int main(){return a?b:c?d:e;}")))
+        expr = _body(unit.functions[0]).statements[0].value
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertIsInstance(expr.else_expr, ConditionalExpr)
+
+    def test_comma_expression(self) -> None:
+        unit = parse(list(lex("int main(){x=1,2;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        expr = stmt.expr
+        self.assertIsInstance(expr, CommaExpr)
+        self.assertIsInstance(expr.left, AssignExpr)
+        self.assertIsInstance(expr.right, IntLiteral)
+
+    def test_comma_expression_precedence(self) -> None:
+        unit = parse(list(lex("int main(){a=b, c=d;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        expr = stmt.expr
+        self.assertIsInstance(expr, CommaExpr)
+        self.assertIsInstance(expr.left, AssignExpr)
+        self.assertIsInstance(expr.right, AssignExpr)
+
+    def test_comma_expression_in_argument_requires_parentheses(self) -> None:
+        source = "int f(int x,int y){return x+y;} int main(){return f((1,2),3);}"
+        unit = parse(list(lex(source)))
+        call = _body(unit.functions[1]).statements[0].value
+        self.assertIsInstance(call, CallExpr)
+        self.assertEqual(len(call.args), 2)
+        self.assertIsInstance(call.args[0], CommaExpr)
 
     def test_empty_statement(self) -> None:
         unit = parse(list(lex("int main(){;return 0;}")))

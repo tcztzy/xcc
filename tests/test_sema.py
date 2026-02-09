@@ -2,7 +2,9 @@ import unittest
 
 from tests import _bootstrap  # noqa: F401
 from xcc.ast import (
+    CommaExpr,
     CompoundStmt,
+    ConditionalExpr,
     DeclStmt,
     Expr,
     ExprStmt,
@@ -76,6 +78,24 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         return_expr = _body(unit.functions[0]).statements[1].value
         self.assertIs(sema.type_map.get(return_expr), INT)
+
+    def test_conditional_expression_typemap(self) -> None:
+        source = "int main(){int x=1; return x ? x : 2;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[1].value
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertIs(sema.type_map.get(expr), INT)
+
+    def test_comma_expression_typemap(self) -> None:
+        source = "int main(){int x=1; int y=2; return (x=3, y);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].value
+        assert expr is not None
+        self.assertIsInstance(expr, CommaExpr)
+        self.assertIs(sema.type_map.get(expr), INT)
 
     def test_void_return_ok(self) -> None:
         unit = parse(list(lex("void main(){return;}")))
@@ -1188,6 +1208,18 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be non-void")
+
+    def test_conditional_void_condition_error(self) -> None:
+        unit = parse(list(lex("void foo(){return;} int main(){return foo() ? 1 : 2;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be non-void")
+
+    def test_conditional_type_mismatch_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p; return x ? x : p;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Conditional type mismatch")
 
     def test_while_void_condition_error(self) -> None:
         unit = parse(

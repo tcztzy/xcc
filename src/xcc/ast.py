@@ -149,6 +149,19 @@ class BinaryExpr(Expr):
 
 
 @dataclass(frozen=True)
+class ConditionalExpr(Expr):
+    condition: Expr
+    then_expr: Expr
+    else_expr: Expr
+
+
+@dataclass(frozen=True)
+class CommaExpr(Expr):
+    left: Expr
+    right: Expr
+
+
+@dataclass(frozen=True)
 class AssignExpr(Expr):
     op: str
     target: Expr
