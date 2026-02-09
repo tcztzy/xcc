@@ -91,6 +91,12 @@ class WhileStmt(Stmt):
 
 
 @dataclass(frozen=True)
+class DoWhileStmt(Stmt):
+    body: Stmt
+    condition: Expr
+
+
+@dataclass(frozen=True)
 class ForStmt(Stmt):
     init: Stmt | Expr | None
     condition: Expr | None

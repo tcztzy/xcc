@@ -11,6 +11,7 @@ from xcc.ast import (
     ContinueStmt,
     DeclStmt,
     DefaultStmt,
+    DoWhileStmt,
     Expr,
     ExprStmt,
     ForStmt,
@@ -557,6 +558,16 @@ class Analyzer:
             self._loop_depth += 1
             try:
                 self._analyze_stmt(stmt.body, scope, return_type)
+            finally:
+                self._loop_depth -= 1
+            return
+        if isinstance(stmt, DoWhileStmt):
+            self._loop_depth += 1
+            try:
+                self._analyze_stmt(stmt.body, scope, return_type)
+                condition_type = self._analyze_expr(stmt.condition, scope)
+                if condition_type is VOID:
+                    raise SemaError("Condition must be non-void")
             finally:
                 self._loop_depth -= 1
             return

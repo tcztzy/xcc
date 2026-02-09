@@ -267,6 +267,12 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_do_while_ok(self) -> None:
+        source = "int main(){do {continue;} while(0); return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_compound_statement_inherits_scope(self) -> None:
         source = "int main(){int x=1; { return x; }}"
         unit = parse(list(lex(source)))
@@ -1162,6 +1168,14 @@ class SemaTests(unittest.TestCase):
     def test_while_void_condition_error(self) -> None:
         unit = parse(
             list(lex("void foo(){return;} int main(){while(foo()) return 0;}"))
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be non-void")
+
+    def test_do_while_void_condition_error(self) -> None:
+        unit = parse(
+            list(lex("void foo(){return;} int main(){do return 0; while(foo());}"))
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)

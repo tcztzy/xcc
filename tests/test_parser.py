@@ -12,6 +12,7 @@ from xcc.ast import (
     ContinueStmt,
     DeclStmt,
     DefaultStmt,
+    DoWhileStmt,
     ExprStmt,
     ForStmt,
     FunctionDef,
@@ -192,6 +193,18 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, WhileStmt)
+
+    def test_do_while_statement(self) -> None:
+        source = "int main(){do return 0; while(1);}"
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DoWhileStmt)
+        self.assertIsInstance(stmt.body, ReturnStmt)
+        self.assertIsInstance(stmt.condition, IntLiteral)
+
+    def test_do_while_requires_while_clause(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){do return 0;}")))
 
     def test_compound_statement_as_statement(self) -> None:
         source = "int main(){if(1){return 0;} return 1;}"

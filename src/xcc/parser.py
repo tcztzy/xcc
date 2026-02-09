@@ -11,6 +11,7 @@ from xcc.ast import (
     ContinueStmt,
     DeclStmt,
     DefaultStmt,
+    DoWhileStmt,
     Expr,
     ExprStmt,
     ForStmt,
@@ -332,6 +333,8 @@ class Parser:
             return self._parse_if_stmt()
         if self._check_keyword("while"):
             return self._parse_while_stmt()
+        if self._check_keyword("do"):
+            return self._parse_do_while_stmt()
         if self._check_keyword("for"):
             return self._parse_for_stmt()
         if self._check_keyword("switch"):
@@ -390,6 +393,18 @@ class Parser:
         self._expect_punct(")")
         body = self._parse_statement()
         return WhileStmt(condition, body)
+
+    def _parse_do_while_stmt(self) -> DoWhileStmt:
+        self._advance()
+        body = self._parse_statement()
+        if not self._check_keyword("while"):
+            raise ParserError("Expected while", self._current())
+        self._advance()
+        self._expect_punct("(")
+        condition = self._parse_expression()
+        self._expect_punct(")")
+        self._expect_punct(";")
+        return DoWhileStmt(body, condition)
 
     def _parse_for_stmt(self) -> ForStmt:
         self._advance()
