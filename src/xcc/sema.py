@@ -878,6 +878,13 @@ class Analyzer:
                     raise SemaError("Assignment type mismatch")
                 self._type_map.set(expr, target_type)
                 return target_type
+            if expr.op in {"+=", "-="}:
+                if (not self._is_integer_type(target_type) or not self._is_integer_type(value_type)) and (
+                    target_type.pointee() is None or not self._is_integer_type(value_type)
+                ):
+                    raise SemaError("Assignment type mismatch")
+                self._type_map.set(expr, target_type)
+                return target_type
             if not self._is_integer_type(target_type) or not self._is_integer_type(value_type):
                 raise SemaError("Assignment type mismatch")
             self._type_map.set(expr, target_type)

@@ -1068,8 +1068,20 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment type mismatch")
 
-    def test_compound_assignment_pointer_target_mismatch(self) -> None:
-        unit = parse(list(lex("int main(){int x=1; int *p=&x; p+=1; return x;}")))
+    def test_compound_assignment_pointer_plus_equals_int_ok(self) -> None:
+        unit = parse(list(lex("int main(){int a[3]; int *p=&a[0]; p+=1; return p-a;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].expr
+        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+
+    def test_compound_assignment_pointer_minus_equals_int_ok(self) -> None:
+        unit = parse(list(lex("int main(){int a[3]; int *p=&a[2]; p-=1; return p-a;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].expr
+        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+
+    def test_compound_assignment_pointer_plus_equals_pointer_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int y=2; int *p=&x; int *q=&y; p+=q; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment type mismatch")
