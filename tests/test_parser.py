@@ -79,6 +79,12 @@ class ParserTests(unittest.TestCase):
             [Param(TypeSpec("int"), "a"), Param(TypeSpec("int"), "b")],
         )
 
+    def test_char_function_signature(self) -> None:
+        unit = parse(list(lex("char id(char c){return c;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("char"))
+        self.assertEqual(func.params, [Param(TypeSpec("char"), "c")])
+
     def test_void_parameter_list(self) -> None:
         unit = parse(list(lex("int main(void){return 0;}")))
         self.assertEqual(unit.functions[0].params, [])
@@ -656,6 +662,12 @@ class ParserTests(unittest.TestCase):
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+
+    def test_char_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){char c;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("char"))
 
     def test_array_of_pointers_declaration(self) -> None:
         unit = parse(list(lex("int main(){int *p[4];return 0;}")))

@@ -39,7 +39,7 @@ from xcc.ast import (
     UpdateExpr,
     WhileStmt,
 )
-from xcc.types import INT, VOID, Type
+from xcc.types import CHAR, INT, VOID, Type
 
 
 @dataclass(frozen=True)
@@ -256,7 +256,7 @@ class Analyzer:
                 init_type = self._decay_array_value(
                     self._analyze_expr(declaration.init, self._file_scope)
                 )
-                if init_type != var_type:
+                if not self._is_assignment_compatible(var_type, init_type):
                     raise SemaError("Initializer type mismatch")
             return
         raise SemaError("Unsupported file-scope declaration")
@@ -320,6 +320,8 @@ class Analyzer:
         self._register_type_spec(type_spec)
         if type_spec.name == "int" and not type_spec.declarator_ops:
             return INT
+        if type_spec.name == "char" and not type_spec.declarator_ops:
+            return CHAR
         if type_spec.name == "void" and not type_spec.declarator_ops:
             return VOID
         if type_spec.name == "enum" and not type_spec.declarator_ops:
@@ -434,8 +436,16 @@ class Analyzer:
             return type_.name not in self._record_definitions
         return False
 
+    def _is_integer_type(self, type_: Type) -> bool:
+        return type_ in (INT, CHAR)
+
+    def _is_assignment_compatible(self, target_type: Type, value_type: Type) -> bool:
+        if target_type == value_type:
+            return True
+        return self._is_integer_type(target_type) and self._is_integer_type(value_type)
+
     def _is_scalar_type(self, type_: Type) -> bool:
-        if type_ == INT:
+        if self._is_integer_type(type_):
             return True
         return bool(type_.declarator_ops) and type_.declarator_ops[0][0] == "ptr"
 
@@ -487,7 +497,7 @@ class Analyzer:
             scope.define(VarSymbol(stmt.name, var_type))
             if stmt.init is not None:
                 init_type = self._decay_array_value(self._analyze_expr(stmt.init, scope))
-                if init_type != var_type:
+                if not self._is_assignment_compatible(var_type, init_type):
                     raise SemaError("Initializer type mismatch")
             return
         if isinstance(stmt, TypedefDecl):
@@ -507,7 +517,7 @@ class Analyzer:
             if return_type is VOID:
                 raise SemaError("Void function should not return a value")
             value_type = self._decay_array_value(self._analyze_expr(stmt.value, scope))
-            if value_type != return_type:
+            if not self._is_assignment_compatible(return_type, value_type):
                 raise SemaError("Return type mismatch")
             return
         if isinstance(stmt, ForStmt):
@@ -634,7 +644,7 @@ class Analyzer:
         if isinstance(expr, SubscriptExpr):
             base_type = self._analyze_expr(expr.base, scope)
             index_type = self._analyze_expr(expr.index, scope)
-            if index_type != INT:
+            if not self._is_integer_type(index_type):
                 raise SemaError("Array subscript is not an integer")
             element_type = base_type.element_type()
             if element_type is None:
@@ -701,7 +711,10 @@ class Analyzer:
             if operand_type.is_array():
                 raise SemaError("Assignment target is not assignable")
             value_operand_type = self._decay_array_value(operand_type)
-            if value_operand_type != INT and value_operand_type.pointee() is None:
+            if (
+                not self._is_integer_type(value_operand_type)
+                and value_operand_type.pointee() is None
+            ):
                 raise SemaError("Assignment type mismatch")
             self._type_map.set(expr, operand_type)
             return operand_type
@@ -716,10 +729,14 @@ class Analyzer:
                 raise SemaError("Condition must be non-void")
             then_type = self._decay_array_value(self._analyze_expr(expr.then_expr, scope))
             else_type = self._decay_array_value(self._analyze_expr(expr.else_expr, scope))
-            if then_type != else_type:
+            if then_type == else_type:
+                result_type = then_type
+            elif self._is_integer_type(then_type) and self._is_integer_type(else_type):
+                result_type = INT
+            else:
                 raise SemaError("Conditional type mismatch")
-            self._type_map.set(expr, then_type)
-            return then_type
+            self._type_map.set(expr, result_type)
+            return result_type
         if isinstance(expr, CommaExpr):
             self._analyze_expr(expr.left, scope)
             right_type = self._analyze_expr(expr.right, scope)
@@ -737,11 +754,11 @@ class Analyzer:
             if target_type.is_array():
                 raise SemaError("Assignment target is not assignable")
             if expr.op == "=":
-                if target_type != value_type:
+                if not self._is_assignment_compatible(target_type, value_type):
                     raise SemaError("Assignment type mismatch")
                 self._type_map.set(expr, target_type)
                 return target_type
-            if target_type != INT or value_type != INT:
+            if not self._is_integer_type(target_type) or not self._is_integer_type(value_type):
                 raise SemaError("Assignment type mismatch")
             self._type_map.set(expr, target_type)
             return target_type
@@ -877,7 +894,7 @@ class Analyzer:
         for index, arg in enumerate(args[: len(parameter_types)]):
             arg_type = self._type_map.require(arg)
             value_arg_type = self._decay_array_value(arg_type)
-            if value_arg_type != parameter_types[index]:
+            if not self._is_assignment_compatible(parameter_types[index], value_arg_type):
                 suffix = f": {function_name}" if function_name is not None else ""
                 raise SemaError(f"Argument type mismatch{suffix}")
 

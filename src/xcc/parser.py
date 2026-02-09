@@ -198,7 +198,7 @@ class Parser:
             self._advance()
             return type_spec
         token = self._expect(TokenKind.KEYWORD)
-        if token.lexeme in {"int", "void"}:
+        if token.lexeme in {"int", "char", "void"}:
             pointer_depth = self._parse_pointer_depth()
             return TypeSpec(str(token.lexeme), pointer_depth)
         if token.lexeme == "enum":
@@ -380,6 +380,7 @@ class Parser:
     def _is_declaration_start(self) -> bool:
         if (
             self._check_keyword("int")
+            or self._check_keyword("char")
             or self._check_keyword("void")
             or self._check_keyword("enum")
             or self._check_keyword("struct")
@@ -714,7 +715,7 @@ class Parser:
             return False
         token = self._peek()
         if token.kind == TokenKind.KEYWORD:
-            return str(token.lexeme) in {"int", "void", "enum", "struct", "union"}
+            return str(token.lexeme) in {"int", "char", "void", "enum", "struct", "union"}
         if token.kind == TokenKind.IDENT and isinstance(token.lexeme, str):
             return self._is_typedef_name(token.lexeme)
         return False

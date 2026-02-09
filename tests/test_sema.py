@@ -27,7 +27,7 @@ from xcc.ast import (
 from xcc.lexer import lex
 from xcc.parser import parse
 from xcc.sema import Scope, SemaError, analyze
-from xcc.types import INT, Type
+from xcc.types import CHAR, INT, Type
 
 
 def _body(func):
@@ -38,6 +38,7 @@ def _body(func):
 class SemaTests(unittest.TestCase):
     def test_type_str(self) -> None:
         self.assertEqual(str(INT), "int")
+        self.assertEqual(str(CHAR), "char")
         array = Type("int").array_of(4)
         self.assertEqual(str(array), "int[4]")
         pointer = array.pointer_to()
@@ -102,8 +103,42 @@ class SemaTests(unittest.TestCase):
         self.assertIsInstance(update_expr, UpdateExpr)
         self.assertEqual(sema.type_map.get(update_expr), Type("int", 1))
 
+    def test_char_declaration_and_update_typemap(self) -> None:
+        source = "int main(){char c=1; c++; return c;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertIs(func_symbol.locals["c"].type_, CHAR)
+        update_expr = _body(unit.functions[0]).statements[1].expr
+        self.assertIsInstance(update_expr, UpdateExpr)
+        self.assertIs(sema.type_map.get(update_expr), CHAR)
+
+    def test_integer_type_conversions_in_initializer_and_assignment(self) -> None:
+        source = "int main(){char c=1; int x=c; char d=x; x=d; return x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertIs(func_symbol.locals["c"].type_, CHAR)
+        self.assertIs(func_symbol.locals["x"].type_, INT)
+        self.assertIs(func_symbol.locals["d"].type_, CHAR)
+
+    def test_char_parameter_accepts_int_argument(self) -> None:
+        source = "char id(char x){return x;} int main(){return id(1);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_conditional_expression_typemap(self) -> None:
         source = "int main(){int x=1; return x ? x : 2;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[1].value
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertIs(sema.type_map.get(expr), INT)
+
+    def test_conditional_integer_promotion(self) -> None:
+        source = "int main(){char c=1; return c ? c : 2;}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         expr = _body(unit.functions[0]).statements[1].value

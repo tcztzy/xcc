@@ -110,4 +110,5 @@ class Type:
 
 
 INT = Type("int")
+CHAR = Type("char")
 VOID = Type("void")
