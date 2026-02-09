@@ -306,6 +306,33 @@ class SemaTests(unittest.TestCase):
         self.assertIsInstance(expr, ConditionalExpr)
         self.assertIs(sema.type_map.get(expr), INT)
 
+    def test_conditional_pointer_same_type_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; int *q=1 ? p : p; return q!=0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].init
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+
+    def test_conditional_pointer_and_null_constant_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; int *q=1 ? p : 0; return q!=0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].init
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+
+    def test_conditional_null_constant_and_pointer_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; int *q=1 ? 0 : p; return q!=0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].init
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+
     def test_comma_expression_typemap(self) -> None:
         source = "int main(){int x=1; int y=2; return (x=3, y);}"
         unit = parse(list(lex(source)))
@@ -1883,6 +1910,12 @@ class SemaTests(unittest.TestCase):
 
     def test_conditional_type_mismatch_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; int *p; return x ? x : p;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Conditional type mismatch")
+
+    def test_conditional_pointer_mismatch_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return 1 ? p : q;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Conditional type mismatch")

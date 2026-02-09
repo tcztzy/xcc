@@ -538,6 +538,24 @@ class Analyzer:
             return False
         return not (left_pointee.declarator_ops and left_pointee.declarator_ops[0][0] == "fn")
 
+    def _conditional_pointer_result(
+        self,
+        then_expr: Expr,
+        then_type: Type,
+        else_expr: Expr,
+        else_type: Type,
+        scope: Scope,
+    ) -> Type | None:
+        then_pointee = then_type.pointee()
+        else_pointee = else_type.pointee()
+        if then_pointee is not None and else_pointee is not None:
+            return then_type if then_type == else_type else None
+        if then_pointee is not None and self._eval_int_constant_expr(else_expr, scope) == 0:
+            return then_type
+        if else_pointee is not None and self._eval_int_constant_expr(then_expr, scope) == 0:
+            return else_type
+        return None
+
     def _is_invalid_cast_target(self, type_spec: TypeSpec, target_type: Type) -> bool:
         return (
             self._is_function_object_type(type_spec)
@@ -880,7 +898,15 @@ class Analyzer:
             elif self._is_integer_type(then_type) and self._is_integer_type(else_type):
                 result_type = INT
             else:
-                raise SemaError("Conditional type mismatch")
+                result_type = self._conditional_pointer_result(
+                    expr.then_expr,
+                    then_type,
+                    expr.else_expr,
+                    else_type,
+                    scope,
+                )
+                if result_type is None:
+                    raise SemaError("Conditional type mismatch")
             self._type_map.set(expr, result_type)
             return result_type
         if isinstance(expr, CommaExpr):
