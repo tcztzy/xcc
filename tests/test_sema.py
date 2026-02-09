@@ -533,6 +533,25 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_file_scope_typedef_function_signature_and_body(self) -> None:
+        unit = parse(list(lex("typedef int T; T main(){T x=1; return x;}")))
+        sema = analyze(unit)
+        self.assertEqual(sema.functions["main"].return_type, INT)
+        self.assertEqual(sema.functions["main"].locals["x"].type_, INT)
+
+    def test_file_scope_typedef_function_declaration_then_definition(self) -> None:
+        source = "typedef int T; T add(T a, T b); T main(){return add(1,2);} T add(T a, T b){return a+b;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("add", sema.functions)
+        self.assertIn("main", sema.functions)
+
+    def test_file_scope_typedef_incomplete_record_pointer_ok(self) -> None:
+        source = "typedef struct S S; int main(){S *p; return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_parenthesized_pointer_to_array_typemap(self) -> None:
         source = "int main(){int a[4]; int (*p)[4]=&a; return (*p)[1];}"
         unit = parse(list(lex(source)))

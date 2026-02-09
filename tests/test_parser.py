@@ -700,6 +700,24 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr_stmt, ExprStmt)
         self.assertIsInstance(expr_stmt.expr, Identifier)
 
+    def test_file_scope_typedef_only_translation_unit(self) -> None:
+        unit = parse(list(lex("typedef int T;")))
+        self.assertEqual(unit.functions, [])
+
+    def test_file_scope_typedef_function_uses_alias(self) -> None:
+        unit = parse(list(lex("typedef int T; T main(){T x=1; return x;}")))
+        self.assertEqual(len(unit.functions), 1)
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("int"))
+        decl_stmt = _body(func).statements[0]
+        self.assertIsInstance(decl_stmt, DeclStmt)
+        self.assertEqual(decl_stmt.type_spec, TypeSpec("int"))
+
+    def test_file_scope_typedef_chain(self) -> None:
+        unit = parse(list(lex("typedef int T; typedef T U; U main(){return 0;}")))
+        self.assertEqual(len(unit.functions), 1)
+        self.assertEqual(unit.functions[0].return_type, TypeSpec("int"))
+
     def test_array_size_must_be_positive(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0];return 0;}")))

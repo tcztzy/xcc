@@ -91,6 +91,9 @@ class Parser:
     def parse(self) -> TranslationUnit:
         functions: list[FunctionDef] = []
         while not self._match(TokenKind.EOF):
+            if self._check_keyword("typedef"):
+                self._parse_decl_stmt()
+                continue
             functions.append(self._parse_function())
         self._expect(TokenKind.EOF)
         return TranslationUnit(functions)
@@ -98,6 +101,8 @@ class Parser:
     def _parse_function(self) -> FunctionDef:
         return_type = self._parse_type_spec()
         name = self._expect(TokenKind.IDENT).lexeme
+        function_name = str(name)
+        self._define_ordinary_name(function_name)
         self._expect_punct("(")
         params, has_prototype, is_variadic = self._parse_params()
         self._expect_punct(")")
@@ -105,7 +110,7 @@ class Parser:
             self._advance()
             return FunctionDef(
                 return_type,
-                str(name),
+                function_name,
                 params,
                 None,
                 has_prototype=has_prototype,
@@ -117,7 +122,7 @@ class Parser:
         body = self._parse_compound_stmt(initial_names=parameter_names)
         return FunctionDef(
             return_type,
-            str(name),
+            function_name,
             params,
             body,
             has_prototype=has_prototype,
