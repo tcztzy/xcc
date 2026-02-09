@@ -715,6 +715,41 @@ class SemaTests(unittest.TestCase):
         assert pointer_init is not None
         self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
 
+    def test_pointer_plus_integer_typemap(self) -> None:
+        source = "int main(){int a[3]; int *p=&a[1]; int *q=p+1; return q-p;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        plus_expr = _body(unit.functions[0]).statements[2].init
+        assert plus_expr is not None
+        self.assertEqual(sema.type_map.get(plus_expr), Type("int", 1))
+        minus_expr = _body(unit.functions[0]).statements[3].value
+        assert minus_expr is not None
+        self.assertEqual(sema.type_map.get(minus_expr), INT)
+
+    def test_integer_plus_pointer_typemap(self) -> None:
+        source = "int main(){int a[3]; int *p=&a[1]; int *q=1+p; return q-p;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        plus_expr = _body(unit.functions[0]).statements[2].init
+        assert plus_expr is not None
+        self.assertEqual(sema.type_map.get(plus_expr), Type("int", 1))
+
+    def test_pointer_minus_integer_typemap(self) -> None:
+        source = "int main(){int a[3]; int *p=&a[2]; int *q=p-1; return q-p;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        minus_expr = _body(unit.functions[0]).statements[2].init
+        assert minus_expr is not None
+        self.assertEqual(sema.type_map.get(minus_expr), Type("int", 1))
+
+    def test_array_decay_pointer_subtraction_typemap(self) -> None:
+        source = "int main(){int a[3]; return &a[2]-a;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
     def test_array_subscript_typemap(self) -> None:
         source = "int main(){int a[3]; a[0]=1; return a[0];}"
         unit = parse(list(lex(source)))
@@ -1070,10 +1105,37 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Logical not requires scalar operand")
 
     def test_binary_integer_operands_error(self) -> None:
-        unit = parse(list(lex("int main(){int x=1; int *p=&x; return p+1;}")))
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; return p*1;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Binary operator requires integer operands")
+
+    def test_additive_pointer_plus_pointer_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int y=2; int *p=&x; int *q=&y; return p+q;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Additive operator requires integer and compatible pointer operands",
+        )
+
+    def test_additive_integer_minus_pointer_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; return 1-p;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Additive operator requires integer and compatible pointer operands",
+        )
+
+    def test_additive_pointer_mismatch_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return p-q;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Additive operator requires integer and compatible pointer operands",
+        )
 
     def test_equality_scalar_operands_error(self) -> None:
         unit = parse(list(lex("int main(){struct S { int x; } a; struct S b; return a==b;}")))

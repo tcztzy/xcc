@@ -514,6 +514,23 @@ class Analyzer:
             return True
         return bool(type_.declarator_ops) and type_.declarator_ops[0][0] == "ptr"
 
+    def _analyze_additive_types(self, left_type: Type, right_type: Type, op: str) -> Type | None:
+        if self._is_integer_type(left_type) and self._is_integer_type(right_type):
+            return INT
+        left_ptr = left_type.pointee()
+        right_ptr = right_type.pointee()
+        if op == "+":
+            if left_ptr is not None and self._is_integer_type(right_type):
+                return left_type
+            if right_ptr is not None and self._is_integer_type(left_type):
+                return right_type
+            return None
+        if left_ptr is not None and self._is_integer_type(right_type):
+            return left_type
+        if left_ptr is not None and right_ptr is not None and left_type == right_type:
+            return INT
+        return None
+
     def _is_invalid_cast_target(self, type_spec: TypeSpec, target_type: Type) -> bool:
         if self._is_function_object_type(type_spec):
             return True
@@ -804,22 +821,15 @@ class Analyzer:
         if isinstance(expr, BinaryExpr):
             left_type = self._decay_array_value(self._analyze_expr(expr.left, scope))
             right_type = self._decay_array_value(self._analyze_expr(expr.right, scope))
-            integer_ops = {
-                "+",
-                "-",
-                "*",
-                "/",
-                "%",
-                "<<",
-                ">>",
-                "<",
-                "<=",
-                ">",
-                ">=",
-                "&",
-                "^",
-                "|",
-            }
+            if expr.op in {"+", "-"}:
+                result_type = self._analyze_additive_types(left_type, right_type, expr.op)
+                if result_type is None:
+                    raise SemaError(
+                        "Additive operator requires integer and compatible pointer operands"
+                    )
+                self._type_map.set(expr, result_type)
+                return result_type
+            integer_ops = {"*", "/", "%", "<<", ">>", "<", "<=", ">", ">=", "&", "^", "|"}
             if expr.op in integer_ops:
                 if not self._is_integer_type(left_type) or not self._is_integer_type(right_type):
                     raise SemaError("Binary operator requires integer operands")
