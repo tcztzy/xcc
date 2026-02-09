@@ -1504,6 +1504,28 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "case value is not integer constant")
 
+    def test_logical_and_short_circuit_case_constant_ok(self) -> None:
+        unit = parse(list(lex("int main(){switch(0){case 0&&1/0:return 0;default:return 1;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_logical_or_short_circuit_case_constant_ok(self) -> None:
+        unit = parse(list(lex("int main(){switch(0){case 1||1/0:return 0;default:return 1;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_logical_and_rhs_non_constant_case_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1;switch(0){case 1&&x:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
+    def test_logical_or_rhs_non_constant_case_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1;switch(0){case 0||x:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
     def test_modulo_by_zero_case_constant_error(self) -> None:
         unit = parse(list(lex("int main(){switch(0){case 1%0:return 0;}}")))
         with self.assertRaises(SemaError) as ctx:
@@ -1536,6 +1558,17 @@ class SemaTests(unittest.TestCase):
 
     def test_conditional_non_constant_case_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1;switch(0){case 1?x:2:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
+    def test_conditional_short_circuit_case_constant_ok(self) -> None:
+        unit = parse(list(lex("int main(){switch(0){case 0?1/0:2:return 0;default:return 1;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_conditional_condition_non_constant_case_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1;switch(0){case x?1:2:return 0;}}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "case value is not integer constant")

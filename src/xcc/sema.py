@@ -887,8 +887,24 @@ class Analyzer:
             return ~operand_value
         if isinstance(expr, BinaryExpr):
             left_value = self._eval_int_constant_expr(expr.left, scope)
+            if left_value is None:
+                return None
+            if expr.op == "&&":
+                if not left_value:
+                    return 0
+                right_value = self._eval_int_constant_expr(expr.right, scope)
+                if right_value is None:
+                    return None
+                return 1 if right_value else 0
+            if expr.op == "||":
+                if left_value:
+                    return 1
+                right_value = self._eval_int_constant_expr(expr.right, scope)
+                if right_value is None:
+                    return None
+                return 1 if right_value else 0
             right_value = self._eval_int_constant_expr(expr.right, scope)
-            if left_value is None or right_value is None:
+            if right_value is None:
                 return None
             if expr.op == "+":
                 return left_value + right_value
@@ -930,18 +946,13 @@ class Analyzer:
                 return left_value ^ right_value
             if expr.op == "|":
                 return left_value | right_value
-            if expr.op == "&&":
-                return 1 if left_value and right_value else 0
-            if expr.op == "||":
-                return 1 if left_value or right_value else 0
             return None
         if isinstance(expr, ConditionalExpr):
             condition_value = self._eval_int_constant_expr(expr.condition, scope)
-            then_value = self._eval_int_constant_expr(expr.then_expr, scope)
-            else_value = self._eval_int_constant_expr(expr.else_expr, scope)
-            if condition_value is None or then_value is None or else_value is None:
+            if condition_value is None:
                 return None
-            return then_value if condition_value else else_value
+            branch = expr.then_expr if condition_value else expr.else_expr
+            return self._eval_int_constant_expr(branch, scope)
         if isinstance(expr, Identifier):
             symbol = scope.lookup(expr.name)
             if isinstance(symbol, EnumConstSymbol):
