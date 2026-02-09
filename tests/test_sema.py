@@ -3,13 +3,16 @@ import unittest
 from tests import _bootstrap  # noqa: F401
 from xcc.ast import (
     BinaryExpr,
+    BreakStmt,
     CallExpr,
     CaseStmt,
     CastExpr,
+    CharLiteral,
     CommaExpr,
     CompoundStmt,
     ConditionalExpr,
     DeclStmt,
+    DefaultStmt,
     Expr,
     ExprStmt,
     FunctionDef,
@@ -162,11 +165,15 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
 
-    def test_char_array_escape_string_initializer_error(self) -> None:
+    def test_char_array_escape_string_initializer_ok(self) -> None:
         unit = parse(list(lex(r'int main(){char s[2]="\n";return 0;}')))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_char_array_hex_escape_string_initializer_ok(self) -> None:
+        unit = parse(list(lex(r'int main(){char s[2]="\x41";return 0;}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_char_array_wide_string_initializer_error(self) -> None:
         unit = parse(list(lex('int main(){char s[2]=L"a";return 0;}')))
@@ -181,19 +188,80 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
 
     def test_case_char_literal_constant_ok(self) -> None:
-        source = "int main(){switch(1){case 'a': break; default: return 0;}}"
-        unit = parse(list(lex(source)))
+        unit = parse(list(lex("int main(){switch(1){case 'a': break; default: return 0;}}")))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
-    def test_case_escaped_char_literal_constant_error(self) -> None:
+    def test_case_escaped_char_literal_constant_ok(self) -> None:
         unit = parse(list(lex(r"int main(){switch(1){case '\n': break; default: return 0;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_hex_char_literal_constant_ok(self) -> None:
+        unit = parse(list(lex(r"int main(){switch(1){case '\x41': break; default: return 0;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_octal_char_literal_constant_ok(self) -> None:
+        unit = parse(list(lex(r"int main(){switch(1){case '\101': break; default: return 0;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_single_digit_octal_char_literal_constant_ok(self) -> None:
+        unit = parse(list(lex(r"int main(){switch(1){case '\1': break; default: return 0;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_two_digit_octal_char_literal_constant_ok(self) -> None:
+        unit = parse(list(lex(r"int main(){switch(1){case '\12': break; default: return 0;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_utf16_char_literal_constant_ok(self) -> None:
+        unit = parse(list(lex(r"int main(){switch(1){case u'\u00A9': break; default: return 0;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_utf32_char_literal_constant_ok(self) -> None:
+        unit = parse(list(lex(r"int main(){switch(1){case U'\U000000A9': break; default: return 0;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_wide_char_literal_constant_ok(self) -> None:
+        unit = parse(list(lex("int main(){switch(1){case L'a': break; default: return 0;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_multichar_literal_constant_error(self) -> None:
+        unit = parse(list(lex("int main(){switch(1){case 'ab': break; default: return 0;}}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "case value is not integer constant")
 
-    def test_case_wide_char_literal_constant_error(self) -> None:
-        unit = parse(list(lex("int main(){switch(1){case L'a': break; default: return 0;}}")))
+    def test_case_invalid_char_literal_constant_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            SwitchStmt(
+                                IntLiteral("1"),
+                                CompoundStmt(
+                                    [
+                                        CaseStmt(CharLiteral("bad"), BreakStmt()),
+                                        DefaultStmt(ReturnStmt(IntLiteral("0"))),
+                                    ]
+                                ),
+                            ),
+                            ReturnStmt(IntLiteral("0")),
+                        ]
+                    ),
+                )
+            ]
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "case value is not integer constant")

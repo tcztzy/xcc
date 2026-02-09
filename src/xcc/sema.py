@@ -43,6 +43,22 @@ from xcc.ast import (
 )
 from xcc.types import CHAR, INT, VOID, Type
 
+_HEX_DIGITS = "0123456789abcdefABCDEF"
+_OCTAL_DIGITS = "01234567"
+_SIMPLE_ESCAPES = {
+    "'": ord("'"),
+    '"': ord('"'),
+    "?": ord("?"),
+    "\\": ord("\\"),
+    "a": 7,
+    "b": 8,
+    "f": 12,
+    "n": 10,
+    "r": 13,
+    "t": 9,
+    "v": 11,
+}
+
 
 @dataclass(frozen=True)
 class SemaError(ValueError):
@@ -474,15 +490,17 @@ class Analyzer:
         return required_length <= value
 
     def _string_literal_required_length(self, lexeme: str) -> int | None:
+        body = self._string_literal_body(lexeme)
+        if body is None:
+            return None
+        return len(self._decode_escaped_units(body)) + 1
+
+    def _string_literal_body(self, lexeme: str) -> str | None:
         if lexeme.startswith('"') and lexeme.endswith('"'):
-            body = lexeme[1:-1]
-        elif lexeme.startswith('u8"') and lexeme.endswith('"'):
-            body = lexeme[3:-1]
-        else:
-            return None
-        if "\\" in body:
-            return None
-        return len(body) + 1
+            return lexeme[1:-1]
+        if lexeme.startswith('u8"') and lexeme.endswith('"'):
+            return lexeme[3:-1]
+        return None
 
     def _is_scalar_type(self, type_: Type) -> bool:
         if self._is_integer_type(type_):
@@ -931,12 +949,59 @@ class Analyzer:
         return None
 
     def _char_const_value(self, lexeme: str) -> int | None:
-        if not lexeme.startswith("'") or not lexeme.endswith("'"):
+        body = self._char_literal_body(lexeme)
+        if body is None:
             return None
-        body = lexeme[1:-1]
-        if len(body) != 1 or body[0] == "\\":
+        units = self._decode_escaped_units(body)
+        if len(units) != 1:
             return None
-        return ord(body)
+        return units[0]
+
+    def _char_literal_body(self, lexeme: str) -> str | None:
+        prefixless = lexeme
+        if lexeme[:1] in {"u", "U", "L"}:
+            prefixless = lexeme[1:]
+        if not prefixless.startswith("'") or not prefixless.endswith("'"):
+            return None
+        return prefixless[1:-1]
+
+    def _decode_escaped_units(self, body: str) -> list[int]:
+        units: list[int] = []
+        index = 0
+        while index < len(body):
+            ch = body[index]
+            if ch != "\\":
+                units.append(ord(ch))
+                index += 1
+                continue
+            index += 1
+            esc = body[index]
+            simple = _SIMPLE_ESCAPES.get(esc)
+            if simple is not None:
+                units.append(simple)
+                index += 1
+                continue
+            if esc == "x":
+                index += 1
+                start = index
+                while index < len(body) and body[index] in _HEX_DIGITS:
+                    index += 1
+                units.append(int(body[start:index], 16))
+                continue
+            if esc in _OCTAL_DIGITS:
+                start = index
+                index += 1
+                if index < len(body) and body[index] in _OCTAL_DIGITS:
+                    index += 1
+                if index < len(body) and body[index] in _OCTAL_DIGITS:
+                    index += 1
+                units.append(int(body[start:index], 8))
+                continue
+            width = 4 if esc == "u" else 8
+            index += 1
+            units.append(int(body[index : index + width], 16))
+            index += width
+        return units
 
     def _check_call_arguments(
         self,
