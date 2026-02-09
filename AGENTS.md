@@ -15,6 +15,7 @@ This repository aims to become a C11 compiler written in modern Python (CPython 
   - Tests: `tox` + `unittest`.
   - Coverage: **100% line + branch coverage**. Every diagnostic path must be exercised.
 - **Docs & comments**: keep them **concise and professional in English**.
+- **Implementation minimality**: when behavior is equivalent, prefer implementations with fewer lines, bytes, and tokens.
 
 ## Development Workflow
 
