@@ -128,6 +128,42 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_char_literal_typemap(self) -> None:
+        unit = parse(list(lex("int main(){return 'a';}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[0].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), INT)
+
+    def test_string_literal_typemap(self) -> None:
+        unit = parse(list(lex('int main(){"abc";return 0;}')))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[0].expr
+        self.assertEqual(sema.type_map.get(expr), Type("char", 1))
+
+    def test_string_literal_assign_to_char_pointer(self) -> None:
+        unit = parse(list(lex('int main(){char *s="abc";return 0;}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_char_literal_constant_ok(self) -> None:
+        source = "int main(){switch(1){case 'a': break; default: return 0;}}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_case_escaped_char_literal_constant_error(self) -> None:
+        unit = parse(list(lex(r"int main(){switch(1){case '\n': break; default: return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
+    def test_case_wide_char_literal_constant_error(self) -> None:
+        unit = parse(list(lex("int main(){switch(1){case L'a': break; default: return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
     def test_conditional_expression_typemap(self) -> None:
         source = "int main(){int x=1; return x ? x : 2;}"
         unit = parse(list(lex(source)))

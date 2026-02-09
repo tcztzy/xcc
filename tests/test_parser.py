@@ -8,6 +8,7 @@ from xcc.ast import (
     CaseStmt,
     CallExpr,
     CastExpr,
+    CharLiteral,
     CompoundStmt,
     ContinueStmt,
     ConditionalExpr,
@@ -29,6 +30,7 @@ from xcc.ast import (
     Param,
     ReturnStmt,
     SizeofExpr,
+    StringLiteral,
     SubscriptExpr,
     SwitchStmt,
     TypedefDecl,
@@ -388,6 +390,21 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr, UnaryExpr)
         self.assertEqual(expr.op, "-")
         self.assertIsInstance(expr.operand, IntLiteral)
+
+    def test_char_literal_expression(self) -> None:
+        unit = parse(list(lex("int main(){return 'a';}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, CharLiteral)
+        self.assertEqual(expr.value, "'a'")
+
+    def test_string_literal_expression(self) -> None:
+        unit = parse(list(lex('int main(){"hi";return 0;}')))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        self.assertIsInstance(stmt.expr, StringLiteral)
+        self.assertEqual(stmt.expr.value, '"hi"')
 
     def test_prefix_update_expression(self) -> None:
         unit = parse(list(lex("int main(){++x;return 0;}")))

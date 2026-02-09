@@ -7,6 +7,7 @@ from xcc.ast import (
     CallExpr,
     CaseStmt,
     CastExpr,
+    CharLiteral,
     CommaExpr,
     CompoundStmt,
     ConditionalExpr,
@@ -30,6 +31,7 @@ from xcc.ast import (
     ReturnStmt,
     SizeofExpr,
     Stmt,
+    StringLiteral,
     SubscriptExpr,
     SwitchStmt,
     TranslationUnit,
@@ -872,6 +874,14 @@ class Parser:
             self._advance()
             assert isinstance(token.lexeme, str)
             return IntLiteral(token.lexeme)
+        if token.kind == TokenKind.CHAR_CONST:
+            self._advance()
+            assert isinstance(token.lexeme, str)
+            return CharLiteral(token.lexeme)
+        if token.kind == TokenKind.STRING_LITERAL:
+            self._advance()
+            assert isinstance(token.lexeme, str)
+            return StringLiteral(token.lexeme)
         if token.kind == TokenKind.IDENT:
             self._advance()
             assert isinstance(token.lexeme, str)

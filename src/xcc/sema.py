@@ -7,6 +7,7 @@ from xcc.ast import (
     CallExpr,
     CaseStmt,
     CastExpr,
+    CharLiteral,
     CommaExpr,
     CompoundStmt,
     ConditionalExpr,
@@ -30,6 +31,7 @@ from xcc.ast import (
     ReturnStmt,
     SizeofExpr,
     Stmt,
+    StringLiteral,
     SubscriptExpr,
     SwitchStmt,
     TranslationUnit,
@@ -627,6 +629,13 @@ class Analyzer:
         if isinstance(expr, IntLiteral):
             self._type_map.set(expr, INT)
             return INT
+        if isinstance(expr, CharLiteral):
+            self._type_map.set(expr, INT)
+            return INT
+        if isinstance(expr, StringLiteral):
+            string_type = CHAR.pointer_to()
+            self._type_map.set(expr, string_type)
+            return string_type
         if isinstance(expr, Identifier):
             symbol = scope.lookup(expr.name)
             if symbol is not None:
@@ -803,6 +812,8 @@ class Analyzer:
             if not expr.value.isdigit():
                 return None
             return int(expr.value)
+        if isinstance(expr, CharLiteral):
+            return self._char_const_value(expr.value)
         if isinstance(expr, UnaryExpr) and expr.op in {"+", "-", "!", "~"}:
             operand_value = self._eval_int_constant_expr(expr.operand, scope)
             if operand_value is None:
@@ -876,6 +887,14 @@ class Analyzer:
             if isinstance(symbol, EnumConstSymbol):
                 return symbol.value
         return None
+
+    def _char_const_value(self, lexeme: str) -> int | None:
+        if not lexeme.startswith("'") or not lexeme.endswith("'"):
+            return None
+        body = lexeme[1:-1]
+        if len(body) != 1 or body[0] == "\\":
+            return None
+        return ord(body)
 
     def _check_call_arguments(
         self,

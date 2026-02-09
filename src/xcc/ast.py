@@ -229,6 +229,16 @@ class IntLiteral(Expr):
 
 
 @dataclass(frozen=True)
+class CharLiteral(Expr):
+    value: str
+
+
+@dataclass(frozen=True)
+class StringLiteral(Expr):
+    value: str
+
+
+@dataclass(frozen=True)
 class Identifier(Expr):
     name: str
 
