@@ -1589,6 +1589,23 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "case value is not integer constant")
 
+    def test_cast_case_constant_ok(self) -> None:
+        unit = parse(list(lex("int main(){switch(0){case (int)'a':return 0;default:return 1;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_cast_non_constant_operand_case_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1;switch(0){case (int)x:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
+    def test_cast_non_integer_target_case_error(self) -> None:
+        unit = parse(list(lex("int main(){switch(0){case (void)1:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+
     def test_unsupported_binary_case_constant_error(self) -> None:
         unit = TranslationUnit(
             [

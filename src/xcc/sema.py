@@ -953,6 +953,10 @@ class Analyzer:
                 return None
             branch = expr.then_expr if condition_value else expr.else_expr
             return self._eval_int_constant_expr(branch, scope)
+        if isinstance(expr, CastExpr):
+            if not self._is_integer_type(self._resolve_type(expr.type_spec)):
+                return None
+            return self._eval_int_constant_expr(expr.expr, scope)
         if isinstance(expr, Identifier):
             symbol = scope.lookup(expr.name)
             if isinstance(symbol, EnumConstSymbol):
