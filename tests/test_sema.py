@@ -87,6 +87,12 @@ class SemaTests(unittest.TestCase):
         return_expr = _body(unit.functions[0]).statements[1].value
         self.assertIs(sema.type_map.get(return_expr), INT)
 
+    def test_logical_not_expression_typemap(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; return !x;}")))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[1].value
+        self.assertIs(sema.type_map.get(return_expr), INT)
+
     def test_update_expression_typemap(self) -> None:
         source = "int main(){int x=1; ++x; x--; return x;}"
         unit = parse(list(lex(source)))
@@ -312,6 +318,13 @@ class SemaTests(unittest.TestCase):
     def test_shift_and_bitwise_expression_typemap(self) -> None:
         source = "int main(){return (1<<2) ^ (3|4) & 7;}"
         unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[0].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), INT)
+
+    def test_logical_expression_typemap(self) -> None:
+        unit = parse(list(lex("int main(){return (1&&2) || 0;}")))
         sema = analyze(unit)
         expr = _body(unit.functions[0]).statements[0].value
         assert expr is not None
@@ -586,6 +599,20 @@ class SemaTests(unittest.TestCase):
         self.assertIs(func_symbol.locals["A"].type_, INT)
         self.assertEqual(getattr(func_symbol.locals["B"], "value"), 3)
         self.assertEqual(getattr(func_symbol.locals["C"], "value"), 4)
+
+    def test_enum_member_constant_expression_values(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A=1, B=A+2, C=B<<1 }; return C;}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertEqual(getattr(func_symbol.locals["A"], "value"), 1)
+        self.assertEqual(getattr(func_symbol.locals["B"], "value"), 3)
+        self.assertEqual(getattr(func_symbol.locals["C"], "value"), 6)
+
+    def test_enum_member_non_constant_value_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; enum E { A=x }; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Enumerator value is not integer constant")
 
     def test_enum_object_type_resolves_to_int(self) -> None:
         unit = parse(list(lex("int main(){enum E { A=1 } x=A; return x;}")))
@@ -1029,6 +1056,36 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Cannot dereference non-pointer")
+
+    def test_unary_integer_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){int *p; return -p;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Unary operator requires integer operand")
+
+    def test_logical_not_scalar_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; } s; return !s;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Logical not requires scalar operand")
+
+    def test_binary_integer_operands_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; return p+1;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Binary operator requires integer operands")
+
+    def test_equality_scalar_operands_error(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; } a; struct S b; return a==b;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Equality operator requires scalar operands")
+
+    def test_logical_scalar_operands_error(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; } s; return s&&1;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Logical operator requires scalar operands")
 
     def test_address_of_non_assignable_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; return &(x+1);}")))
@@ -1835,6 +1892,21 @@ class SemaTests(unittest.TestCase):
                     "main",
                     [],
                     CompoundStmt([ExprStmt(Expr())]),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Unsupported expression")
+
+    def test_unsupported_binary_expression_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt([ExprStmt(BinaryExpr("?", IntLiteral("1"), IntLiteral("2")))]),
                 )
             ]
         )

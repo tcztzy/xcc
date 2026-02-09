@@ -390,8 +390,15 @@ class Analyzer:
         return resolved.decay_parameter_type()
 
     def _define_enum_members(self, type_spec: TypeSpec, scope: Scope) -> None:
-        for name, value in type_spec.enum_members:
+        next_value = 0
+        for name, expr in type_spec.enum_members:
+            value = next_value
+            if expr is not None:
+                value = self._eval_int_constant_expr(expr, scope)
+                if value is None:
+                    raise SemaError("Enumerator value is not integer constant")
             scope.define(EnumConstSymbol(name, value))
+            next_value = value + 1
 
     def _is_function_object_type(self, type_spec: TypeSpec) -> bool:
         return bool(type_spec.declarator_ops) and type_spec.declarator_ops[0][0] == "fn"
@@ -752,7 +759,15 @@ class Analyzer:
             return target_type
         if isinstance(expr, UnaryExpr):
             operand_type = self._analyze_expr(expr.operand, scope)
-            if expr.op in {"+", "-", "!", "~"}:
+            value_operand_type = self._decay_array_value(operand_type)
+            if expr.op in {"+", "-", "~"}:
+                if not self._is_integer_type(value_operand_type):
+                    raise SemaError("Unary operator requires integer operand")
+                self._type_map.set(expr, INT)
+                return INT
+            if expr.op == "!":
+                if not self._is_scalar_type(value_operand_type):
+                    raise SemaError("Logical not requires scalar operand")
                 self._type_map.set(expr, INT)
                 return INT
             if expr.op == "&":
@@ -762,7 +777,6 @@ class Analyzer:
                 self._type_map.set(expr, result)
                 return result
             if expr.op == "*":
-                value_operand_type = self._decay_array_value(operand_type)
                 pointee = value_operand_type.pointee()
                 if pointee is None:
                     raise SemaError("Cannot dereference non-pointer")
@@ -788,8 +802,35 @@ class Analyzer:
             self._type_map.set(expr, operand_type)
             return operand_type
         if isinstance(expr, BinaryExpr):
-            self._analyze_expr(expr.left, scope)
-            self._analyze_expr(expr.right, scope)
+            left_type = self._decay_array_value(self._analyze_expr(expr.left, scope))
+            right_type = self._decay_array_value(self._analyze_expr(expr.right, scope))
+            integer_ops = {
+                "+",
+                "-",
+                "*",
+                "/",
+                "%",
+                "<<",
+                ">>",
+                "<",
+                "<=",
+                ">",
+                ">=",
+                "&",
+                "^",
+                "|",
+            }
+            if expr.op in integer_ops:
+                if not self._is_integer_type(left_type) or not self._is_integer_type(right_type):
+                    raise SemaError("Binary operator requires integer operands")
+            elif expr.op in {"==", "!="}:
+                if not self._is_scalar_type(left_type) or not self._is_scalar_type(right_type):
+                    raise SemaError("Equality operator requires scalar operands")
+            elif expr.op in {"&&", "||"}:
+                if not self._is_scalar_type(left_type) or not self._is_scalar_type(right_type):
+                    raise SemaError("Logical operator requires scalar operands")
+            else:
+                raise SemaError("Unsupported expression")
             self._type_map.set(expr, INT)
             return INT
         if isinstance(expr, ConditionalExpr):

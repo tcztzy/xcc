@@ -230,29 +230,29 @@ class Parser:
             pointer_depth += 1
         return pointer_depth
 
-    def _parse_enum_spec(self, token: Token) -> tuple[str | None, tuple[tuple[str, int], ...]]:
+    def _parse_enum_spec(
+        self,
+        token: Token,
+    ) -> tuple[str | None, tuple[tuple[str, Expr | None], ...]]:
         enum_tag: str | None = None
         if self._current().kind == TokenKind.IDENT:
             ident = self._advance()
             assert isinstance(ident.lexeme, str)
             enum_tag = ident.lexeme
-        enum_members: tuple[tuple[str, int], ...] = ()
+        enum_members: tuple[tuple[str, Expr | None], ...] = ()
         if self._check_punct("{"):
             enum_members = self._parse_enum_members()
         if enum_tag is None and not enum_members:
             raise ParserError("Expected enum tag or definition", token)
         return enum_tag, enum_members
 
-    def _parse_enum_members(self) -> tuple[tuple[str, int], ...]:
+    def _parse_enum_members(self) -> tuple[tuple[str, Expr | None], ...]:
         self._expect_punct("{")
         if self._check_punct("}"):
             raise ParserError("Expected enumerator", self._current())
-        members: list[tuple[str, int]] = []
-        next_value = 0
+        members: list[tuple[str, Expr | None]] = []
         while True:
-            name, value = self._parse_enum_member(next_value)
-            members.append((name, value))
-            next_value = value + 1
+            members.append(self._parse_enum_member())
             if not self._check_punct(","):
                 break
             self._advance()
@@ -261,27 +261,13 @@ class Parser:
         self._expect_punct("}")
         return tuple(members)
 
-    def _parse_enum_member(self, default_value: int) -> tuple[str, int]:
+    def _parse_enum_member(self) -> tuple[str, Expr | None]:
         token = self._expect(TokenKind.IDENT)
         assert isinstance(token.lexeme, str)
-        value = default_value
-        if self._check_punct("="):
-            self._advance()
-            value = self._parse_enum_value()
-        return token.lexeme, value
-
-    def _parse_enum_value(self) -> int:
-        sign = 1
-        if self._check_punct("+"):
-            self._advance()
-        elif self._check_punct("-"):
-            self._advance()
-            sign = -1
-        token = self._expect(TokenKind.INT_CONST)
-        assert isinstance(token.lexeme, str)
-        if not token.lexeme.isdigit():
-            raise ParserError("Unsupported enum value", token)
-        return sign * int(token.lexeme)
+        if not self._check_punct("="):
+            return token.lexeme, None
+        self._advance()
+        return token.lexeme, self._parse_conditional()
 
     def _parse_record_spec(
         self,

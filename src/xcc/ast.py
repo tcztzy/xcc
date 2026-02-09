@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 FunctionDeclarator = tuple[tuple["TypeSpec", ...] | None, bool]
-EnumMember = tuple[str, int]
+EnumMember = tuple[str, "Expr | None"]
 RecordMember = tuple["TypeSpec", str]
 DeclaratorValue = int | FunctionDeclarator
 DeclaratorOp = tuple[str, DeclaratorValue]

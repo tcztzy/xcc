@@ -599,7 +599,11 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("enum", enum_tag="E", enum_members=(("A", 0), ("B", 3), ("C", 4))),
+            TypeSpec(
+                "enum",
+                enum_tag="E",
+                enum_members=(("A", None), ("B", IntLiteral("3")), ("C", None)),
+            ),
         )
         self.assertIsNone(stmt.name)
         self.assertIsNone(stmt.init)
@@ -618,7 +622,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("enum", enum_members=(("A", 1), ("B", 2))),
+            TypeSpec("enum", enum_members=(("A", IntLiteral("1")), ("B", None))),
         )
         self.assertEqual(stmt.name, "x")
 
@@ -628,7 +632,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("enum", enum_members=(("A", 0), ("B", 1))),
+            TypeSpec("enum", enum_members=(("A", None), ("B", None))),
         )
 
     def test_enum_member_signed_value(self) -> None:
@@ -637,7 +641,10 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("enum", enum_members=(("A", -1), ("B", 2))),
+            TypeSpec(
+                "enum",
+                enum_members=(("A", UnaryExpr("-", IntLiteral("1"))), ("B", UnaryExpr("+", IntLiteral("2")))),
+            ),
         )
 
     def test_pointer_to_enum_declaration_statement(self) -> None:
@@ -645,6 +652,22 @@ class ParserTests(unittest.TestCase):
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("enum", 1, enum_tag="E"))
+
+    def test_enum_member_value_constant_expression(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A=1<<2, B=A+1 } x;return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec(
+                "enum",
+                enum_tag="E",
+                enum_members=(
+                    ("A", BinaryExpr("<<", IntLiteral("1"), IntLiteral("2"))),
+                    ("B", BinaryExpr("+", Identifier("A"), IntLiteral("1"))),
+                ),
+            ),
+        )
 
     def test_tagged_struct_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){struct Node { int value; }; return 0;}")))
@@ -1078,9 +1101,11 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){enum E = 1;return 0;}")))
 
-    def test_enum_value_must_be_decimal_literal(self) -> None:
-        with self.assertRaises(ParserError):
-            parse(list(lex("int main(){enum E { A=0x10 };return 0;}")))
+    def test_enum_value_allows_non_decimal_constant_expression(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A=0x10 };return A;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("enum", enum_tag="E", enum_members=(("A", IntLiteral("0x10")),)))
 
     def test_struct_requires_tag_or_definition(self) -> None:
         with self.assertRaises(ParserError):
