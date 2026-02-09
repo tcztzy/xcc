@@ -973,6 +973,18 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
 
+    def test_file_scope_null_pointer_initializer_ok(self) -> None:
+        unit = parse(list(lex("int *g=0; int main(){return g==0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_file_scope_void_pointer_initializer_from_function_pointer_error(self) -> None:
+        source = "int f(void); void *g=f; int f(void){return 0;} int main(){return 0;}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
     def test_file_scope_char_array_string_initializer_ok(self) -> None:
         unit = parse(list(lex('char s[4]="abc"; int main(){return s[0];}')))
         sema = analyze(unit)
@@ -1150,8 +1162,65 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment type mismatch")
 
+    def test_assignment_pointer_null_constant_ok(self) -> None:
+        unit = parse(list(lex("int main(){int *p; p=0; return p==0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_assignment_non_constant_integer_to_pointer_error(self) -> None:
+        unit = parse(list(lex("int main(){int z=0; int *p; p=z; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
+    def test_assignment_void_pointer_conversion_ok(self) -> None:
+        source = "int main(){int x=1; int *p=&x; void *vp=0; vp=p; p=vp; return p!=0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_assignment_function_pointer_to_void_pointer_error(self) -> None:
+        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; vp=fp; return 0;}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
+    def test_assignment_void_pointer_to_function_pointer_error(self) -> None:
+        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; fp=vp; return 0;}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
+    def test_assignment_incompatible_object_pointers_error(self) -> None:
+        source = "int main(){int x=1; char y=97; int *p=&x; char *q=&y; p=q; return 0;}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
     def test_return_type_mismatch(self) -> None:
         unit = parse(list(lex("int *f(int *p){return 1;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Return type mismatch")
+
+    def test_return_null_pointer_constant_ok(self) -> None:
+        unit = parse(list(lex("int *f(void){return 0;} int main(){return f()==0;}")))
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
+        self.assertIn("main", sema.functions)
+
+    def test_return_void_pointer_from_object_pointer_ok(self) -> None:
+        source = "void *f(int *p){return p;} int main(){int x=1; int *p=&x; return f(p)!=0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
+
+    def test_return_void_pointer_from_function_pointer_error(self) -> None:
+        source = "void *f(int (*fp)(void)){return fp;} int g(void){return 0;} int main(){return 0;}"
+        unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Return type mismatch")
@@ -1161,6 +1230,30 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Argument type mismatch: id")
+
+    def test_argument_null_pointer_constant_ok(self) -> None:
+        unit = parse(list(lex("int *id(int *p){return p;} int main(){return id(0)==0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_argument_void_pointer_from_object_pointer_ok(self) -> None:
+        source = "int ok(void *p){return p!=0;} int main(){int x=1; int *p=&x; return ok(p);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("ok", sema.functions)
+
+    def test_argument_object_pointer_from_void_pointer_ok(self) -> None:
+        source = "int *id(int *p){return p;} int main(){void *vp=0; return id(vp)==0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_argument_void_pointer_from_function_pointer_error(self) -> None:
+        source = "int takes(void *p){return 0;} int f(void){return 0;} int main(){return takes(f);}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Argument type mismatch: takes")
 
     def test_dereference_non_pointer_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; return *x;}")))

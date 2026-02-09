@@ -278,6 +278,7 @@ class Analyzer:
                     var_type,
                     declaration.init,
                     init_type,
+                    self._file_scope,
                 ):
                     raise SemaError("Initializer type mismatch")
             return
@@ -468,9 +469,40 @@ class Analyzer:
     def _is_integer_type(self, type_: Type) -> bool:
         return type_ in (INT, CHAR)
 
+    def _is_void_pointer_type(self, type_: Type) -> bool:
+        return type_.pointee() == VOID
+
+    def _is_object_pointer_type(self, type_: Type) -> bool:
+        pointee = type_.pointee()
+        return pointee is not None and not (
+            pointee.declarator_ops and pointee.declarator_ops[0][0] == "fn"
+        )
+
     def _is_assignment_compatible(self, target_type: Type, value_type: Type) -> bool:
-        return target_type == value_type or (
-            self._is_integer_type(target_type) and self._is_integer_type(value_type)
+        if target_type == value_type:
+            return True
+        if self._is_integer_type(target_type) and self._is_integer_type(value_type):
+            return True
+        if target_type.pointee() is None or value_type.pointee() is None:
+            return False
+        if self._is_void_pointer_type(target_type):
+            return self._is_object_pointer_type(value_type)
+        if self._is_void_pointer_type(value_type):
+            return self._is_object_pointer_type(target_type)
+        return False
+
+    def _is_null_pointer_constant(self, expr: Expr, scope: Scope) -> bool:
+        return self._eval_int_constant_expr(expr, scope) == 0
+
+    def _is_assignment_expr_compatible(
+        self,
+        target_type: Type,
+        value_expr: Expr,
+        value_type: Type,
+        scope: Scope,
+    ) -> bool:
+        return self._is_assignment_compatible(target_type, value_type) or (
+            target_type.pointee() is not None and self._is_null_pointer_constant(value_expr, scope)
         )
 
     def _is_initializer_compatible(
@@ -478,9 +510,10 @@ class Analyzer:
         target_type: Type,
         init_expr: Expr,
         init_type: Type,
+        scope: Scope,
     ) -> bool:
         return self._is_char_array_string_initializer(target_type, init_expr) or (
-            self._is_assignment_compatible(target_type, init_type)
+            self._is_assignment_expr_compatible(target_type, init_expr, init_type, scope)
         )
 
     def _is_char_array_string_initializer(self, target_type: Type, init_expr: Expr) -> bool:
@@ -602,6 +635,7 @@ class Analyzer:
                     var_type,
                     stmt.init,
                     init_type,
+                    scope,
                 ):
                     raise SemaError("Initializer type mismatch")
             return
@@ -622,7 +656,12 @@ class Analyzer:
             if return_type is VOID:
                 raise SemaError("Void function should not return a value")
             value_type = self._decay_array_value(self._analyze_expr(stmt.value, scope))
-            if not self._is_assignment_compatible(return_type, value_type):
+            if not self._is_assignment_expr_compatible(
+                return_type,
+                stmt.value,
+                value_type,
+                scope,
+            ):
                 raise SemaError("Return type mismatch")
             return
         if isinstance(stmt, ForStmt):
@@ -926,7 +965,12 @@ class Analyzer:
             if target_type.is_array():
                 raise SemaError("Assignment target is not assignable")
             if expr.op == "=":
-                if not self._is_assignment_compatible(target_type, value_type):
+                if not self._is_assignment_expr_compatible(
+                    target_type,
+                    expr.value,
+                    value_type,
+                    scope,
+                ):
                     raise SemaError("Assignment type mismatch")
                 self._type_map.set(expr, target_type)
                 return target_type
@@ -952,6 +996,7 @@ class Analyzer:
                         signature.params,
                         signature.is_variadic,
                         expr.callee.name,
+                        scope,
                     )
                     self._type_map.set(expr, signature.return_type)
                     return signature.return_type
@@ -972,6 +1017,7 @@ class Analyzer:
                 function_params[0],
                 function_params[1],
                 None,
+                scope,
             )
             self._type_map.set(expr, return_type)
             return return_type
@@ -1134,6 +1180,7 @@ class Analyzer:
         parameter_types: tuple[Type, ...] | None,
         is_variadic: bool,
         function_name: str | None,
+        scope: Scope,
     ) -> None:
         if parameter_types is None:
             return
@@ -1145,7 +1192,12 @@ class Analyzer:
         for index, arg in enumerate(args[: len(parameter_types)]):
             arg_type = self._type_map.require(arg)
             value_arg_type = self._decay_array_value(arg_type)
-            if not self._is_assignment_compatible(parameter_types[index], value_arg_type):
+            if not self._is_assignment_expr_compatible(
+                parameter_types[index],
+                arg,
+                value_arg_type,
+                scope,
+            ):
                 suffix = f": {function_name}" if function_name is not None else ""
                 raise SemaError(f"Argument type mismatch{suffix}")
 
