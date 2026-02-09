@@ -300,6 +300,33 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr.right, BinaryExpr)
         self.assertEqual(expr.right.op, "&&")
 
+    def test_shift_precedence(self) -> None:
+        unit = parse(list(lex("int main(){return 1<<2+3;}")))
+        expr = _body(unit.functions[0]).statements[0].value
+        self.assertIsInstance(expr, BinaryExpr)
+        self.assertEqual(expr.op, "<<")
+        self.assertIsInstance(expr.right, BinaryExpr)
+        self.assertEqual(expr.right.op, "+")
+
+    def test_bitwise_precedence(self) -> None:
+        unit = parse(list(lex("int main(){return 1|2^3&4;}")))
+        expr = _body(unit.functions[0]).statements[0].value
+        self.assertIsInstance(expr, BinaryExpr)
+        self.assertEqual(expr.op, "|")
+        self.assertIsInstance(expr.right, BinaryExpr)
+        self.assertEqual(expr.right.op, "^")
+        and_expr = expr.right.right
+        self.assertIsInstance(and_expr, BinaryExpr)
+        self.assertEqual(and_expr.op, "&")
+
+    def test_logical_and_with_bitwise_or_precedence(self) -> None:
+        unit = parse(list(lex("int main(){return 1|2&&3;}")))
+        expr = _body(unit.functions[0]).statements[0].value
+        self.assertIsInstance(expr, BinaryExpr)
+        self.assertEqual(expr.op, "&&")
+        self.assertIsInstance(expr.left, BinaryExpr)
+        self.assertEqual(expr.left.op, "|")
+
     def test_expression_statement(self) -> None:
         source = "int main(){x;return 0;}"
         unit = parse(list(lex(source)))

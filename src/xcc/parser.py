@@ -563,8 +563,32 @@ class Parser:
         return expr
 
     def _parse_logical_and(self) -> Expr:
-        expr = self._parse_equality()
+        expr = self._parse_bitwise_or()
         while self._check_punct("&&"):
+            op = self._advance().lexeme
+            right = self._parse_bitwise_or()
+            expr = BinaryExpr(str(op), expr, right)
+        return expr
+
+    def _parse_bitwise_or(self) -> Expr:
+        expr = self._parse_bitwise_xor()
+        while self._check_punct("|"):
+            op = self._advance().lexeme
+            right = self._parse_bitwise_xor()
+            expr = BinaryExpr(str(op), expr, right)
+        return expr
+
+    def _parse_bitwise_xor(self) -> Expr:
+        expr = self._parse_bitwise_and()
+        while self._check_punct("^"):
+            op = self._advance().lexeme
+            right = self._parse_bitwise_and()
+            expr = BinaryExpr(str(op), expr, right)
+        return expr
+
+    def _parse_bitwise_and(self) -> Expr:
+        expr = self._parse_equality()
+        while self._check_punct("&"):
             op = self._advance().lexeme
             right = self._parse_equality()
             expr = BinaryExpr(str(op), expr, right)
@@ -579,13 +603,21 @@ class Parser:
         return expr
 
     def _parse_relational(self) -> Expr:
-        expr = self._parse_additive()
+        expr = self._parse_shift()
         while (
             self._check_punct("<")
             or self._check_punct("<=")
             or self._check_punct(">")
             or self._check_punct(">=")
         ):
+            op = self._advance().lexeme
+            right = self._parse_shift()
+            expr = BinaryExpr(str(op), expr, right)
+        return expr
+
+    def _parse_shift(self) -> Expr:
+        expr = self._parse_additive()
+        while self._check_punct("<<") or self._check_punct(">>"):
             op = self._advance().lexeme
             right = self._parse_additive()
             expr = BinaryExpr(str(op), expr, right)

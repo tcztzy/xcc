@@ -97,6 +97,14 @@ class SemaTests(unittest.TestCase):
         self.assertIsInstance(expr, CommaExpr)
         self.assertIs(sema.type_map.get(expr), INT)
 
+    def test_shift_and_bitwise_expression_typemap(self) -> None:
+        source = "int main(){return (1<<2) ^ (3|4) & 7;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[0].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), INT)
+
     def test_void_return_ok(self) -> None:
         unit = parse(list(lex("void main(){return;}")))
         sema = analyze(unit)
