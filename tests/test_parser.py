@@ -406,6 +406,14 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt.expr, StringLiteral)
         self.assertEqual(stmt.expr.value, '"hi"')
 
+    def test_string_literal_initializer(self) -> None:
+        unit = parse(list(lex('int main(){char s[4]="abc";return 0;}')))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        init = stmt.init
+        self.assertIsInstance(init, StringLiteral)
+        self.assertEqual(init.value, '"abc"')
+
     def test_prefix_update_expression(self) -> None:
         unit = parse(list(lex("int main(){++x;return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]

@@ -258,7 +258,11 @@ class Analyzer:
                 init_type = self._decay_array_value(
                     self._analyze_expr(declaration.init, self._file_scope)
                 )
-                if not self._is_assignment_compatible(var_type, init_type):
+                if not self._is_initializer_compatible(
+                    var_type,
+                    declaration.init,
+                    init_type,
+                ):
                     raise SemaError("Initializer type mismatch")
             return
         raise SemaError("Unsupported file-scope declaration")
@@ -446,6 +450,40 @@ class Analyzer:
             return True
         return self._is_integer_type(target_type) and self._is_integer_type(value_type)
 
+    def _is_initializer_compatible(
+        self,
+        target_type: Type,
+        init_expr: Expr,
+        init_type: Type,
+    ) -> bool:
+        if self._is_char_array_string_initializer(target_type, init_expr):
+            return True
+        return self._is_assignment_compatible(target_type, init_type)
+
+    def _is_char_array_string_initializer(self, target_type: Type, init_expr: Expr) -> bool:
+        if not target_type.is_array() or not isinstance(init_expr, StringLiteral):
+            return False
+        if target_type.element_type() != CHAR:
+            return False
+        required_length = self._string_literal_required_length(init_expr.value)
+        if required_length is None:
+            return False
+        assert target_type.declarator_ops
+        _, value = target_type.declarator_ops[0]
+        assert isinstance(value, int)
+        return required_length <= value
+
+    def _string_literal_required_length(self, lexeme: str) -> int | None:
+        if lexeme.startswith('"') and lexeme.endswith('"'):
+            body = lexeme[1:-1]
+        elif lexeme.startswith('u8"') and lexeme.endswith('"'):
+            body = lexeme[3:-1]
+        else:
+            return None
+        if "\\" in body:
+            return None
+        return len(body) + 1
+
     def _is_scalar_type(self, type_: Type) -> bool:
         if self._is_integer_type(type_):
             return True
@@ -499,7 +537,11 @@ class Analyzer:
             scope.define(VarSymbol(stmt.name, var_type))
             if stmt.init is not None:
                 init_type = self._decay_array_value(self._analyze_expr(stmt.init, scope))
-                if not self._is_assignment_compatible(var_type, init_type):
+                if not self._is_initializer_compatible(
+                    var_type,
+                    stmt.init,
+                    init_type,
+                ):
                     raise SemaError("Initializer type mismatch")
             return
         if isinstance(stmt, TypedefDecl):

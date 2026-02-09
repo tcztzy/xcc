@@ -146,6 +146,40 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_char_array_string_initializer_ok(self) -> None:
+        unit = parse(list(lex('int main(){char s[4]="abc";return 0;}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_char_array_u8_string_initializer_ok(self) -> None:
+        unit = parse(list(lex('int main(){char s[4]=u8"abc";return 0;}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_char_array_string_initializer_too_long_error(self) -> None:
+        unit = parse(list(lex('int main(){char s[3]="abc";return 0;}')))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
+    def test_char_array_escape_string_initializer_error(self) -> None:
+        unit = parse(list(lex(r'int main(){char s[2]="\n";return 0;}')))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
+    def test_char_array_wide_string_initializer_error(self) -> None:
+        unit = parse(list(lex('int main(){char s[2]=L"a";return 0;}')))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
+    def test_non_char_array_string_initializer_error(self) -> None:
+        unit = parse(list(lex('int main(){int s[4]="abc";return 0;}')))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
     def test_case_char_literal_constant_ok(self) -> None:
         source = "int main(){switch(1){case 'a': break; default: return 0;}}"
         unit = parse(list(lex(source)))
@@ -734,6 +768,11 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
+    def test_file_scope_char_array_string_initializer_ok(self) -> None:
+        unit = parse(list(lex('char s[4]="abc"; int main(){return s[0];}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_duplicate_file_scope_object_declaration(self) -> None:
         unit = parse(list(lex("int g; int g; int main(){return 0;}")))
