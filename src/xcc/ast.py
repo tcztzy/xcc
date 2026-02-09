@@ -175,6 +175,13 @@ class UnaryExpr(Expr):
 
 
 @dataclass(frozen=True)
+class UpdateExpr(Expr):
+    op: str
+    operand: Expr
+    is_postfix: bool
+
+
+@dataclass(frozen=True)
 class CallExpr(Expr):
     callee: Expr
     args: list[Expr]

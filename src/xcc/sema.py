@@ -34,6 +34,7 @@ from xcc.ast import (
     TypedefDecl,
     TypeSpec,
     UnaryExpr,
+    UpdateExpr,
     WhileStmt,
 )
 from xcc.types import INT, VOID, Type
@@ -671,6 +672,21 @@ class Analyzer:
                 self._type_map.set(expr, pointee)
                 return pointee
             raise SemaError("Unsupported expression")
+        if isinstance(expr, UpdateExpr):
+            if isinstance(expr.operand, Identifier):
+                target_symbol = scope.lookup(expr.operand.name)
+                if isinstance(target_symbol, EnumConstSymbol):
+                    raise SemaError("Assignment target is not assignable")
+            if not self._is_assignable(expr.operand):
+                raise SemaError("Assignment target is not assignable")
+            operand_type = self._analyze_expr(expr.operand, scope)
+            if operand_type.is_array():
+                raise SemaError("Assignment target is not assignable")
+            value_operand_type = self._decay_array_value(operand_type)
+            if value_operand_type != INT and value_operand_type.pointee() is None:
+                raise SemaError("Assignment type mismatch")
+            self._type_map.set(expr, operand_type)
+            return operand_type
         if isinstance(expr, BinaryExpr):
             self._analyze_expr(expr.left, scope)
             self._analyze_expr(expr.right, scope)

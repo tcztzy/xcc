@@ -34,6 +34,7 @@ from xcc.ast import (
     TypedefDecl,
     TypeSpec,
     UnaryExpr,
+    UpdateExpr,
     WhileStmt,
 )
 from xcc.lexer import Token, TokenKind
@@ -645,6 +646,10 @@ class Parser:
             return self._parse_sizeof_expr()
         if self._is_parenthesized_type_name_start():
             return self._parse_cast_expr()
+        if self._check_punct("++") or self._check_punct("--"):
+            op = str(self._advance().lexeme)
+            operand = self._parse_unary()
+            return UpdateExpr(op, operand, False)
         if (
             self._check_punct("+")
             or self._check_punct("-")
@@ -716,6 +721,10 @@ class Parser:
                 member_token = self._expect(TokenKind.IDENT)
                 assert isinstance(member_token.lexeme, str)
                 expr = MemberExpr(expr, member_token.lexeme, True)
+                continue
+            if self._check_punct("++") or self._check_punct("--"):
+                op = str(self._advance().lexeme)
+                expr = UpdateExpr(op, expr, True)
                 continue
             break
         return expr

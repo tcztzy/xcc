@@ -32,6 +32,7 @@ from xcc.ast import (
     TypedefDecl,
     TypeSpec,
     UnaryExpr,
+    UpdateExpr,
     WhileStmt,
 )
 from xcc.lexer import lex
@@ -361,6 +362,35 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr, UnaryExpr)
         self.assertEqual(expr.op, "-")
         self.assertIsInstance(expr.operand, IntLiteral)
+
+    def test_prefix_update_expression(self) -> None:
+        unit = parse(list(lex("int main(){++x;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        expr = stmt.expr
+        self.assertIsInstance(expr, UpdateExpr)
+        self.assertEqual(expr.op, "++")
+        self.assertFalse(expr.is_postfix)
+        self.assertIsInstance(expr.operand, Identifier)
+
+    def test_postfix_update_expression(self) -> None:
+        unit = parse(list(lex("int main(){x--;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        expr = stmt.expr
+        self.assertIsInstance(expr, UpdateExpr)
+        self.assertEqual(expr.op, "--")
+        self.assertTrue(expr.is_postfix)
+        self.assertIsInstance(expr.operand, Identifier)
+
+    def test_prefix_and_postfix_update_precedence(self) -> None:
+        unit = parse(list(lex("int main(){return ++x + y--; }")))
+        expr = _body(unit.functions[0]).statements[0].value
+        self.assertIsInstance(expr, BinaryExpr)
+        self.assertIsInstance(expr.left, UpdateExpr)
+        self.assertFalse(expr.left.is_postfix)
+        self.assertIsInstance(expr.right, UpdateExpr)
+        self.assertTrue(expr.right.is_postfix)
 
     def test_assignment_expression(self) -> None:
         unit = parse(list(lex("int main(){x=1+2*3;return 0;}")))

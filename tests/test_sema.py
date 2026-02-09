@@ -22,6 +22,7 @@ from xcc.ast import (
     TranslationUnit,
     TypeSpec,
     UnaryExpr,
+    UpdateExpr,
 )
 from xcc.lexer import lex
 from xcc.parser import parse
@@ -81,6 +82,25 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         return_expr = _body(unit.functions[0]).statements[1].value
         self.assertIs(sema.type_map.get(return_expr), INT)
+
+    def test_update_expression_typemap(self) -> None:
+        source = "int main(){int x=1; ++x; x--; return x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        prefix_expr = _body(unit.functions[0]).statements[1].expr
+        postfix_expr = _body(unit.functions[0]).statements[2].expr
+        self.assertIsInstance(prefix_expr, UpdateExpr)
+        self.assertIsInstance(postfix_expr, UpdateExpr)
+        self.assertIs(sema.type_map.get(prefix_expr), INT)
+        self.assertIs(sema.type_map.get(postfix_expr), INT)
+
+    def test_update_expression_pointer_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; p++; return x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        update_expr = _body(unit.functions[0]).statements[2].expr
+        self.assertIsInstance(update_expr, UpdateExpr)
+        self.assertEqual(sema.type_map.get(update_expr), Type("int", 1))
 
     def test_conditional_expression_typemap(self) -> None:
         source = "int main(){int x=1; return x ? x : 2;}"
@@ -980,8 +1000,32 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
 
+    def test_update_target_not_assignable(self) -> None:
+        unit = parse(list(lex("int main(){++(1+2); return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
+
+    def test_update_type_mismatch(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; } s; ++s; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
+    def test_update_array_target_not_assignable(self) -> None:
+        unit = parse(list(lex("int main(){int a[2]; a++; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
+
     def test_assignment_to_enum_constant_is_rejected(self) -> None:
         unit = parse(list(lex("int main(){enum E { A=1 }; A=2; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
+
+    def test_update_enum_constant_is_rejected(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A=1 }; ++A; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
