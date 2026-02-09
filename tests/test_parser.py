@@ -14,6 +14,7 @@ from xcc.ast import (
     DefaultStmt,
     ExprStmt,
     ForStmt,
+    FunctionDef,
     Identifier,
     IfStmt,
     IntLiteral,
@@ -740,6 +741,14 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         self.assertEqual(len(unit.functions), 2)
         self.assertEqual(len(unit.declarations), 1)
+
+    def test_translation_unit_tracks_external_order(self) -> None:
+        source = "struct S { int x; }; struct S f(void); int g;"
+        unit = parse(list(lex(source)))
+        self.assertEqual(len(unit.externals), 3)
+        self.assertIsInstance(unit.externals[0], DeclStmt)
+        self.assertIsInstance(unit.externals[1], FunctionDef)
+        self.assertIsInstance(unit.externals[2], DeclStmt)
 
     def test_array_size_must_be_positive(self) -> None:
         with self.assertRaises(ParserError):

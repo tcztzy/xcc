@@ -28,6 +28,7 @@ class Stmt:
 class TranslationUnit:
     functions: list["FunctionDef"]
     declarations: list["Stmt"] = field(default_factory=list)
+    externals: list["FunctionDef | Stmt"] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -91,13 +91,18 @@ class Parser:
     def parse(self) -> TranslationUnit:
         functions: list[FunctionDef] = []
         declarations: list[Stmt] = []
+        externals: list[FunctionDef | Stmt] = []
         while not self._match(TokenKind.EOF):
             if self._looks_like_function():
-                functions.append(self._parse_function())
+                function = self._parse_function()
+                functions.append(function)
+                externals.append(function)
                 continue
-            declarations.append(self._parse_decl_stmt())
+            declaration = self._parse_decl_stmt()
+            declarations.append(declaration)
+            externals.append(declaration)
         self._expect(TokenKind.EOF)
-        return TranslationUnit(functions, declarations)
+        return TranslationUnit(functions, declarations, externals)
 
     def _looks_like_function(self) -> bool:
         saved_index = self._index

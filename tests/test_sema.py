@@ -20,7 +20,7 @@ from xcc.ast import (
 )
 from xcc.lexer import lex
 from xcc.parser import parse
-from xcc.sema import SemaError, analyze
+from xcc.sema import Scope, SemaError, analyze
 from xcc.types import INT, Type
 
 
@@ -51,6 +51,12 @@ class SemaTests(unittest.TestCase):
         )
         self.assertIsNone(Type("int").pointee())
         self.assertIsNone(Type("int").element_type())
+
+    def test_scope_lookup_typedef_from_parent(self) -> None:
+        parent = Scope()
+        parent.define_typedef("T", INT)
+        child = Scope(parent)
+        self.assertEqual(child.lookup_typedef("T"), INT)
 
     def test_analyze_success_and_typemap(self) -> None:
         source = "int main(){int x=1; x=2+3; return x;}"
@@ -582,6 +588,43 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: T")
+
+    def test_struct_definition_before_function_declaration_ok(self) -> None:
+        source = "struct S { int x; }; struct S f(void); int main(){return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_function_declaration_before_struct_definition_error(self) -> None:
+        source = "struct S f(void); struct S { int x; }; int main(){return 0;}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid return type: incomplete")
+
+    def test_file_scope_object_then_function_conflict_error(self) -> None:
+        unit = parse(list(lex("int f; int f(void); int main(){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Conflicting declaration: f")
+
+    def test_function_then_file_scope_object_conflict_error(self) -> None:
+        unit = parse(list(lex("int f(void); int f; int main(){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Conflicting declaration: f")
+
+    def test_file_scope_typedef_then_function_conflict_error(self) -> None:
+        unit = parse(list(lex("typedef int f; int f(void); int main(){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Conflicting declaration: f")
+
+    def test_function_then_file_scope_typedef_conflict_error(self) -> None:
+        unit = parse(list(lex("int f(void); typedef int f; int main(){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Conflicting declaration: f")
 
     def test_file_scope_tag_declaration_ok(self) -> None:
         unit = parse(list(lex("struct S; int main(){return 0;}")))

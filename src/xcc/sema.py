@@ -114,6 +114,14 @@ class Scope:
             return None
         return self._parent.lookup(name)
 
+    def lookup_typedef(self, name: str) -> Type | None:
+        typedef_type = self._typedefs.get(name)
+        if typedef_type is not None:
+            return typedef_type
+        if self._parent is None:
+            return None
+        return self._parent.lookup_typedef(name)
+
     @property
     def symbols(self) -> dict[str, VarSymbol | EnumConstSymbol]:
         return self._symbols
@@ -138,25 +146,33 @@ class Analyzer:
         self._switch_stack: list[SwitchContext] = []
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
-        for func in unit.functions:
-            signature = self._signature_from(func)
-            existing = self._function_signatures.get(func.name)
-            if existing is None:
-                self._function_signatures[func.name] = signature
-            else:
-                merged_signature = self._merge_signature(existing, signature, func.name)
-                self._function_signatures[func.name] = merged_signature
-            if func.body is not None:
-                if func.name in self._defined_functions:
-                    raise SemaError(f"Duplicate function definition: {func.name}")
-                self._defined_functions.add(func.name)
-        for declaration in unit.declarations:
-            self._analyze_file_scope_decl(declaration)
-        for func in unit.functions:
-            if func.body is None:
+        externals = unit.externals or [*unit.declarations, *unit.functions]
+        for external in externals:
+            if isinstance(external, FunctionDef):
+                self._register_function_external(external)
                 continue
-            self._analyze_function(func)
+            self._analyze_file_scope_decl(external)
+        for external in externals:
+            if isinstance(external, FunctionDef) and external.body is not None:
+                self._analyze_function(external)
         return SemaUnit(self._functions, self._type_map)
+
+    def _register_function_external(self, func: FunctionDef) -> None:
+        if self._file_scope.lookup(func.name) is not None:
+            raise SemaError(f"Conflicting declaration: {func.name}")
+        if self._file_scope.lookup_typedef(func.name) is not None:
+            raise SemaError(f"Conflicting declaration: {func.name}")
+        signature = self._signature_from(func)
+        existing = self._function_signatures.get(func.name)
+        if existing is None:
+            self._function_signatures[func.name] = signature
+        else:
+            merged_signature = self._merge_signature(existing, signature, func.name)
+            self._function_signatures[func.name] = merged_signature
+        if func.body is not None:
+            if func.name in self._defined_functions:
+                raise SemaError(f"Duplicate function definition: {func.name}")
+            self._defined_functions.add(func.name)
 
     def _merge_signature(
         self,
@@ -198,6 +214,8 @@ class Analyzer:
 
     def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
         if isinstance(declaration, TypedefDecl):
+            if declaration.name in self._function_signatures:
+                raise SemaError(f"Conflicting declaration: {declaration.name}")
             self._register_type_spec(declaration.type_spec)
             self._define_enum_members(declaration.type_spec, self._file_scope)
             typedef_type = self._resolve_type(declaration.type_spec)
@@ -208,6 +226,8 @@ class Analyzer:
             self._define_enum_members(declaration.type_spec, self._file_scope)
             if declaration.name is None:
                 return
+            if declaration.name in self._function_signatures:
+                raise SemaError(f"Conflicting declaration: {declaration.name}")
             if self._is_invalid_void_object_type(declaration.type_spec):
                 raise SemaError("Invalid object type: void")
             if self._is_invalid_incomplete_record_object_type(declaration.type_spec):
