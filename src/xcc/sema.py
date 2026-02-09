@@ -529,6 +529,15 @@ class Analyzer:
             return INT
         return None
 
+    def _is_pointer_relational_compatible(self, left_type: Type, right_type: Type) -> bool:
+        left_pointee = left_type.pointee()
+        right_pointee = right_type.pointee()
+        if left_pointee is None or right_pointee is None or left_type != right_type:
+            return False
+        if left_pointee == VOID:
+            return False
+        return not (left_pointee.declarator_ops and left_pointee.declarator_ops[0][0] == "fn")
+
     def _is_invalid_cast_target(self, type_spec: TypeSpec, target_type: Type) -> bool:
         return (
             self._is_function_object_type(type_spec)
@@ -821,10 +830,17 @@ class Analyzer:
                     )
                 self._type_map.set(expr, result_type)
                 return result_type
-            integer_ops = {"*", "/", "%", "<<", ">>", "<", "<=", ">", ">=", "&", "^", "|"}
+            integer_ops = {"*", "/", "%", "<<", ">>", "&", "^", "|"}
             if expr.op in integer_ops:
                 if not self._is_integer_type(left_type) or not self._is_integer_type(right_type):
                     raise SemaError("Binary operator requires integer operands")
+            elif expr.op in {"<", "<=", ">", ">="}:
+                if (
+                    not self._is_integer_type(left_type) or not self._is_integer_type(right_type)
+                ) and not self._is_pointer_relational_compatible(left_type, right_type):
+                    raise SemaError(
+                        "Relational operator requires integer or compatible object pointer operands"
+                    )
             elif expr.op in {"==", "!="}:
                 if not self._is_scalar_type(left_type) or not self._is_scalar_type(right_type):
                     raise SemaError("Equality operator requires scalar operands")

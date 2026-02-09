@@ -750,6 +750,14 @@ class SemaTests(unittest.TestCase):
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
 
+    def test_relational_pointer_same_type_typemap(self) -> None:
+        source = "int main(){int a[2]; int *p=&a[0]; int *q=&a[1]; return p<q;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[3].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
     def test_array_subscript_typemap(self) -> None:
         source = "int main(){int a[3]; a[0]=1; return a[0];}"
         unit = parse(list(lex(source)))
@@ -1086,6 +1094,12 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment type mismatch")
 
+    def test_compound_assignment_shift_value_type_mismatch(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; x<<=p; return x;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
     def test_return_type_mismatch(self) -> None:
         unit = parse(list(lex("int *f(int *p){return 1;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -1147,6 +1161,33 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(
             str(ctx.exception),
             "Additive operator requires integer and compatible pointer operands",
+        )
+
+    def test_relational_pointer_mismatch_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return p<q;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Relational operator requires integer or compatible object pointer operands",
+        )
+
+    def test_relational_pointer_and_integer_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; return p<1;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Relational operator requires integer or compatible object pointer operands",
+        )
+
+    def test_relational_void_pointer_error(self) -> None:
+        unit = parse(list(lex("int main(){void *p; void *q; return p<q;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Relational operator requires integer or compatible object pointer operands",
         )
 
     def test_equality_scalar_operands_error(self) -> None:
