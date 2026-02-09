@@ -844,6 +844,24 @@ class Analyzer:
             elif expr.op in {"==", "!="}:
                 if not self._is_scalar_type(left_type) or not self._is_scalar_type(right_type):
                     raise SemaError("Equality operator requires scalar operands")
+                if not (self._is_integer_type(left_type) and self._is_integer_type(right_type)):
+                    if left_type.pointee() is not None and right_type.pointee() is not None:
+                        if left_type != right_type:
+                            raise SemaError(
+                                "Equality operator requires integer or compatible pointer operands"
+                            )
+                    elif left_type.pointee() is not None:
+                        if self._eval_int_constant_expr(expr.right, scope) != 0:
+                            raise SemaError(
+                                "Equality operator requires integer or compatible pointer operands"
+                            )
+                    elif (
+                        right_type.pointee() is not None
+                        and self._eval_int_constant_expr(expr.left, scope) != 0
+                    ):
+                        raise SemaError(
+                            "Equality operator requires integer or compatible pointer operands"
+                        )
             elif expr.op in {"&&", "||"}:
                 if not self._is_scalar_type(left_type) or not self._is_scalar_type(right_type):
                     raise SemaError("Logical operator requires scalar operands")
