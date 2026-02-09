@@ -756,6 +756,24 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment type mismatch")
 
+    def test_compound_assignment_int_ok(self) -> None:
+        source = "int main(){int x=8; x+=2; x<<=1; x%=3; return x;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_compound_assignment_type_mismatch(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; x+=p; return x;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
+    def test_compound_assignment_pointer_target_mismatch(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; p+=1; return x;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
     def test_return_type_mismatch(self) -> None:
         unit = parse(list(lex("int *f(int *p){return 1;}")))
         with self.assertRaises(SemaError) as ctx:

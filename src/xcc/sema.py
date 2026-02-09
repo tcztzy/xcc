@@ -702,7 +702,12 @@ class Analyzer:
             value_type = self._decay_array_value(self._analyze_expr(expr.value, scope))
             if target_type.is_array():
                 raise SemaError("Assignment target is not assignable")
-            if target_type != value_type:
+            if expr.op == "=":
+                if target_type != value_type:
+                    raise SemaError("Assignment type mismatch")
+                self._type_map.set(expr, target_type)
+                return target_type
+            if target_type != INT or value_type != INT:
                 raise SemaError("Assignment type mismatch")
             self._type_map.set(expr, target_type)
             return target_type

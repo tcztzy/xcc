@@ -381,6 +381,34 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr.target, Identifier)
         self.assertIsInstance(expr.value, AssignExpr)
 
+    def test_compound_assignment_expression(self) -> None:
+        unit = parse(list(lex("int main(){x+=1;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        expr = stmt.expr
+        self.assertIsInstance(expr, AssignExpr)
+        self.assertEqual(expr.op, "+=")
+        self.assertIsInstance(expr.target, Identifier)
+        self.assertIsInstance(expr.value, IntLiteral)
+
+    def test_compound_assignment_is_right_associative(self) -> None:
+        unit = parse(list(lex("int main(){a+=b+=1;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        expr = stmt.expr
+        self.assertIsInstance(expr, AssignExpr)
+        self.assertEqual(expr.op, "+=")
+        self.assertIsInstance(expr.value, AssignExpr)
+        self.assertEqual(expr.value.op, "+=")
+
+    def test_shift_compound_assignment_expression(self) -> None:
+        unit = parse(list(lex("int main(){x<<=1;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        expr = stmt.expr
+        self.assertIsInstance(expr, AssignExpr)
+        self.assertEqual(expr.op, "<<=")
+
     def test_conditional_expression(self) -> None:
         unit = parse(list(lex("int main(){return 1?2:3;}")))
         expr = _body(unit.functions[0]).statements[0].value

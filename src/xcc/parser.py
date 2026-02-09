@@ -41,6 +41,7 @@ from xcc.lexer import Token, TokenKind
 FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
+ASSIGNMENT_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|=")
 
 
 @dataclass(frozen=True)
@@ -538,10 +539,10 @@ class Parser:
 
     def _parse_assignment(self) -> Expr:
         expr = self._parse_conditional()
-        if self._check_punct("="):
-            op = self._advance().lexeme
+        if self._is_assignment_operator():
+            op = str(self._advance().lexeme)
             value = self._parse_assignment()
-            return AssignExpr(str(op), expr, value)
+            return AssignExpr(op, expr, value)
         return expr
 
     def _parse_conditional(self) -> Expr:
@@ -880,6 +881,10 @@ class Parser:
     def _check_keyword(self, value: str) -> bool:
         token = self._current()
         return token.kind == TokenKind.KEYWORD and token.lexeme == value
+
+    def _is_assignment_operator(self) -> bool:
+        token = self._current()
+        return token.kind == TokenKind.PUNCTUATOR and token.lexeme in ASSIGNMENT_OPERATORS
 
     def _peek_punct(self, value: str) -> bool:
         token = self._peek()
