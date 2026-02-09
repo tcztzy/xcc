@@ -39,7 +39,7 @@ from xcc.ast import (
     UpdateExpr,
     WhileStmt,
 )
-from xcc.lexer import lex
+from xcc.lexer import Token, TokenKind, lex
 from xcc.parser import ParserError, parse
 
 
@@ -413,6 +413,50 @@ class ParserTests(unittest.TestCase):
         init = stmt.init
         self.assertIsInstance(init, StringLiteral)
         self.assertEqual(init.value, '"abc"')
+
+    def test_adjacent_string_literals_are_concatenated(self) -> None:
+        unit = parse(list(lex('int main(){"a" "b";return 0;}')))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        self.assertIsInstance(stmt.expr, StringLiteral)
+        self.assertEqual(stmt.expr.value, '"ab"')
+
+    def test_adjacent_string_literals_keep_utf8_prefix(self) -> None:
+        unit = parse(list(lex('int main(){u8"a" "b";return 0;}')))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        self.assertIsInstance(stmt.expr, StringLiteral)
+        self.assertEqual(stmt.expr.value, 'u8"ab"')
+
+    def test_adjacent_string_literals_adopt_utf8_prefix(self) -> None:
+        unit = parse(list(lex('int main(){"a" u8"b";return 0;}')))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ExprStmt)
+        self.assertIsInstance(stmt.expr, StringLiteral)
+        self.assertEqual(stmt.expr.value, 'u8"ab"')
+
+    def test_adjacent_string_literals_incompatible_prefix_error(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex('int main(){u8"a" L"b";return 0;}')))
+
+    def test_invalid_string_literal_token_error(self) -> None:
+        tokens = [
+            Token(TokenKind.KEYWORD, "int", 1, 1),
+            Token(TokenKind.IDENT, "main", 1, 5),
+            Token(TokenKind.PUNCTUATOR, "(", 1, 9),
+            Token(TokenKind.PUNCTUATOR, ")", 1, 10),
+            Token(TokenKind.PUNCTUATOR, "{", 1, 11),
+            Token(TokenKind.STRING_LITERAL, "invalid", 1, 12),
+            Token(TokenKind.PUNCTUATOR, ";", 1, 19),
+            Token(TokenKind.KEYWORD, "return", 1, 20),
+            Token(TokenKind.INT_CONST, "0", 1, 27),
+            Token(TokenKind.PUNCTUATOR, ";", 1, 28),
+            Token(TokenKind.PUNCTUATOR, "}", 1, 29),
+            Token(TokenKind.EOF, None, 1, 30),
+        ]
+        with self.assertRaises(ParserError) as ctx:
+            parse(tokens)
+        self.assertEqual(str(ctx.exception), "Invalid string literal at 1:12")
 
     def test_prefix_update_expression(self) -> None:
         unit = parse(list(lex("int main(){++x;return 0;}")))

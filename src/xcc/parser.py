@@ -879,9 +879,7 @@ class Parser:
             assert isinstance(token.lexeme, str)
             return CharLiteral(token.lexeme)
         if token.kind == TokenKind.STRING_LITERAL:
-            self._advance()
-            assert isinstance(token.lexeme, str)
-            return StringLiteral(token.lexeme)
+            return self._parse_string_literal()
         if token.kind == TokenKind.IDENT:
             self._advance()
             assert isinstance(token.lexeme, str)
@@ -892,6 +890,39 @@ class Parser:
             self._expect_punct(")")
             return expr
         raise ParserError("Unexpected token", token)
+
+    def _parse_string_literal(self) -> StringLiteral:
+        token = self._expect(TokenKind.STRING_LITERAL)
+        assert isinstance(token.lexeme, str)
+        prefix, body = self._split_string_literal(token.lexeme, token)
+        while self._current().kind == TokenKind.STRING_LITERAL:
+            token = self._advance()
+            assert isinstance(token.lexeme, str)
+            next_prefix, next_body = self._split_string_literal(token.lexeme, token)
+            prefix = self._merge_string_prefix(prefix, next_prefix, token)
+            body += next_body
+        return StringLiteral(f'{prefix}"{body}"')
+
+    def _split_string_literal(self, lexeme: str, token: Token) -> tuple[str, str]:
+        if lexeme.startswith('"') and lexeme.endswith('"'):
+            return "", lexeme[1:-1]
+        if lexeme.startswith('u8"') and lexeme.endswith('"'):
+            return "u8", lexeme[3:-1]
+        if (
+            len(lexeme) >= 3
+            and lexeme[0] in {"u", "U", "L"}
+            and lexeme[1] == '"'
+            and lexeme.endswith('"')
+        ):
+            return lexeme[0], lexeme[2:-1]
+        raise ParserError("Invalid string literal", token)
+
+    def _merge_string_prefix(self, prefix: str, next_prefix: str, token: Token) -> str:
+        if prefix == next_prefix or not next_prefix:
+            return prefix
+        if not prefix:
+            return next_prefix
+        raise ParserError("Incompatible string literal prefixes", token)
 
     def _current(self) -> Token:
         return self._tokens[self._index]

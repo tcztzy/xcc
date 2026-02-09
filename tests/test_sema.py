@@ -159,8 +159,24 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_char_array_concatenated_string_initializer_ok(self) -> None:
+        unit = parse(list(lex('int main(){char s[3]="a""b";return 0;}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_char_array_concatenated_u8_string_initializer_ok(self) -> None:
+        unit = parse(list(lex('int main(){char s[3]=u8"a""b";return 0;}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_char_array_string_initializer_too_long_error(self) -> None:
         unit = parse(list(lex('int main(){char s[3]="abc";return 0;}')))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
+    def test_char_array_concatenated_string_initializer_too_long_error(self) -> None:
+        unit = parse(list(lex('int main(){char s[2]="a""b";return 0;}')))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
