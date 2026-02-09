@@ -90,13 +90,32 @@ class Parser:
 
     def parse(self) -> TranslationUnit:
         functions: list[FunctionDef] = []
+        declarations: list[Stmt] = []
         while not self._match(TokenKind.EOF):
-            if self._check_keyword("typedef"):
-                self._parse_decl_stmt()
+            if self._looks_like_function():
+                functions.append(self._parse_function())
                 continue
-            functions.append(self._parse_function())
+            declarations.append(self._parse_decl_stmt())
         self._expect(TokenKind.EOF)
-        return TranslationUnit(functions)
+        return TranslationUnit(functions, declarations)
+
+    def _looks_like_function(self) -> bool:
+        saved_index = self._index
+        try:
+            self._parse_type_spec()
+            if self._current().kind != TokenKind.IDENT:
+                return False
+            self._advance()
+            if not self._check_punct("("):
+                return False
+            self._advance()
+            self._parse_params()
+            self._expect_punct(")")
+            return self._check_punct("{") or self._check_punct(";")
+        except ParserError:
+            return False
+        finally:
+            self._index = saved_index
 
     def _parse_function(self) -> FunctionDef:
         return_type = self._parse_type_spec()

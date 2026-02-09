@@ -718,6 +718,29 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(unit.functions), 1)
         self.assertEqual(unit.functions[0].return_type, TypeSpec("int"))
 
+    def test_file_scope_object_declaration(self) -> None:
+        unit = parse(list(lex("int g; int main(){return g;}")))
+        self.assertEqual(len(unit.functions), 1)
+        self.assertEqual(len(unit.declarations), 1)
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.type_spec, TypeSpec("int"))
+        self.assertEqual(declaration.name, "g")
+        self.assertIsNone(declaration.init)
+
+    def test_file_scope_object_declaration_with_initializer(self) -> None:
+        unit = parse(list(lex("int g=1; int main(){return g;}")))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.name, "g")
+        self.assertIsNotNone(declaration.init)
+
+    def test_file_scope_declaration_between_functions(self) -> None:
+        source = "int f(void){return 0;} int g=1; int main(){return g+f();}"
+        unit = parse(list(lex(source)))
+        self.assertEqual(len(unit.functions), 2)
+        self.assertEqual(len(unit.declarations), 1)
+
     def test_array_size_must_be_positive(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0];return 0;}")))

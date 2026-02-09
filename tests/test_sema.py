@@ -552,6 +552,54 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_file_scope_object_access_typemap(self) -> None:
+        unit = parse(list(lex("int g=1; int main(){return g;}")))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[0].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_file_scope_object_initializer_type_mismatch(self) -> None:
+        unit = parse(list(lex("int *g=1; int main(){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
+    def test_duplicate_file_scope_object_declaration(self) -> None:
+        unit = parse(list(lex("int g; int g; int main(){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: g")
+
+    def test_file_scope_incomplete_object_error(self) -> None:
+        unit = parse(list(lex("struct S g; int main(){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid object type: incomplete")
+
+    def test_duplicate_file_scope_typedef_declaration(self) -> None:
+        unit = parse(list(lex("typedef int T; typedef int T; int main(){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: T")
+
+    def test_file_scope_tag_declaration_ok(self) -> None:
+        unit = parse(list(lex("struct S; int main(){return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_file_scope_void_object_error(self) -> None:
+        unit = TranslationUnit([], [DeclStmt(TypeSpec("void"), "g", None)])
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid object type: void")
+
+    def test_unsupported_file_scope_declaration_error(self) -> None:
+        unit = TranslationUnit([], [ExprStmt(IntLiteral("1"))])
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Unsupported file-scope declaration")
+
     def test_parenthesized_pointer_to_array_typemap(self) -> None:
         source = "int main(){int a[4]; int (*p)[4]=&a; return (*p)[1];}"
         unit = parse(list(lex(source)))

@@ -133,6 +133,7 @@ class Analyzer:
         self._defined_functions: set[str] = set()
         self._record_definitions: dict[str, tuple[tuple[str, Type], ...]] = {}
         self._seen_record_definitions: set[int] = set()
+        self._file_scope = Scope()
         self._loop_depth = 0
         self._switch_stack: list[SwitchContext] = []
 
@@ -149,6 +150,8 @@ class Analyzer:
                 if func.name in self._defined_functions:
                     raise SemaError(f"Duplicate function definition: {func.name}")
                 self._defined_functions.add(func.name)
+        for declaration in unit.declarations:
+            self._analyze_file_scope_decl(declaration)
         for func in unit.functions:
             if func.body is None:
                 continue
@@ -181,7 +184,7 @@ class Analyzer:
     def _analyze_function(self, func: FunctionDef) -> None:
         return_type = self._function_signatures[func.name].return_type
         assert func.body is not None
-        scope = Scope()
+        scope = Scope(self._file_scope)
         self._define_params(func.params, scope)
         self._analyze_compound(func.body, scope, return_type)
         self._functions[func.name] = FunctionSymbol(func.name, return_type, scope.symbols)
@@ -192,6 +195,33 @@ class Analyzer:
                 raise SemaError("Missing parameter name")
             param_type = self._resolve_param_type(param.type_spec)
             scope.define(VarSymbol(param.name, param_type))
+
+    def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
+        if isinstance(declaration, TypedefDecl):
+            self._register_type_spec(declaration.type_spec)
+            self._define_enum_members(declaration.type_spec, self._file_scope)
+            typedef_type = self._resolve_type(declaration.type_spec)
+            self._file_scope.define_typedef(declaration.name, typedef_type)
+            return
+        if isinstance(declaration, DeclStmt):
+            self._register_type_spec(declaration.type_spec)
+            self._define_enum_members(declaration.type_spec, self._file_scope)
+            if declaration.name is None:
+                return
+            if self._is_invalid_void_object_type(declaration.type_spec):
+                raise SemaError("Invalid object type: void")
+            if self._is_invalid_incomplete_record_object_type(declaration.type_spec):
+                raise SemaError("Invalid object type: incomplete")
+            var_type = self._resolve_type(declaration.type_spec)
+            self._file_scope.define(VarSymbol(declaration.name, var_type))
+            if declaration.init is not None:
+                init_type = self._decay_array_value(
+                    self._analyze_expr(declaration.init, self._file_scope)
+                )
+                if init_type != var_type:
+                    raise SemaError("Initializer type mismatch")
+            return
+        raise SemaError("Unsupported file-scope declaration")
 
     def _signature_from(self, func: FunctionDef) -> FunctionSignature:
         if not func.has_prototype:

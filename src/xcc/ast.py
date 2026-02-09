@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 FunctionDeclarator = tuple[tuple["TypeSpec", ...] | None, bool]
 EnumMember = tuple[str, int]
@@ -27,6 +27,7 @@ class Stmt:
 @dataclass(frozen=True)
 class TranslationUnit:
     functions: list["FunctionDef"]
+    declarations: list["Stmt"] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
