@@ -448,11 +448,11 @@ class Analyzer:
         return self._lookup_record_member(base_type, member_name)
 
     def _is_invalid_sizeof_type_spec(self, type_spec: TypeSpec) -> bool:
-        if self._is_invalid_void_object_type(type_spec):
-            return True
-        if self._is_invalid_incomplete_record_object_type(type_spec):
-            return True
-        return self._is_function_object_type(type_spec)
+        return (
+            self._is_invalid_void_object_type(type_spec)
+            or self._is_invalid_incomplete_record_object_type(type_spec)
+            or self._is_function_object_type(type_spec)
+        )
 
     def _is_invalid_sizeof_type(self, type_: Type) -> bool:
         if type_ == VOID:
@@ -469,9 +469,9 @@ class Analyzer:
         return type_ in (INT, CHAR)
 
     def _is_assignment_compatible(self, target_type: Type, value_type: Type) -> bool:
-        if target_type == value_type:
-            return True
-        return self._is_integer_type(target_type) and self._is_integer_type(value_type)
+        return target_type == value_type or (
+            self._is_integer_type(target_type) and self._is_integer_type(value_type)
+        )
 
     def _is_initializer_compatible(
         self,
@@ -479,9 +479,9 @@ class Analyzer:
         init_expr: Expr,
         init_type: Type,
     ) -> bool:
-        if self._is_char_array_string_initializer(target_type, init_expr):
-            return True
-        return self._is_assignment_compatible(target_type, init_type)
+        return self._is_char_array_string_initializer(target_type, init_expr) or (
+            self._is_assignment_compatible(target_type, init_type)
+        )
 
     def _is_char_array_string_initializer(self, target_type: Type, init_expr: Expr) -> bool:
         if not target_type.is_array() or not isinstance(init_expr, StringLiteral):
@@ -498,9 +498,7 @@ class Analyzer:
 
     def _string_literal_required_length(self, lexeme: str) -> int | None:
         body = self._string_literal_body(lexeme)
-        if body is None:
-            return None
-        return len(self._decode_escaped_units(body)) + 1
+        return None if body is None else len(self._decode_escaped_units(body)) + 1
 
     def _string_literal_body(self, lexeme: str) -> str | None:
         if lexeme.startswith('"') and lexeme.endswith('"'):
@@ -510,9 +508,9 @@ class Analyzer:
         return None
 
     def _is_scalar_type(self, type_: Type) -> bool:
-        if self._is_integer_type(type_):
-            return True
-        return bool(type_.declarator_ops) and type_.declarator_ops[0][0] == "ptr"
+        return self._is_integer_type(type_) or (
+            bool(type_.declarator_ops) and type_.declarator_ops[0][0] == "ptr"
+        )
 
     def _analyze_additive_types(self, left_type: Type, right_type: Type, op: str) -> Type | None:
         if self._is_integer_type(left_type) and self._is_integer_type(right_type):
@@ -532,30 +530,24 @@ class Analyzer:
         return None
 
     def _is_invalid_cast_target(self, type_spec: TypeSpec, target_type: Type) -> bool:
-        if self._is_function_object_type(type_spec):
-            return True
-        if self._is_invalid_incomplete_record_object_type(type_spec):
-            return True
-        if target_type == VOID:
-            return False
-        return not self._is_scalar_type(target_type)
+        return (
+            self._is_function_object_type(type_spec)
+            or self._is_invalid_incomplete_record_object_type(type_spec)
+            or (target_type != VOID and not self._is_scalar_type(target_type))
+        )
 
     def _is_invalid_cast_operand(self, operand_type: Type, target_type: Type) -> bool:
-        if target_type == VOID:
-            return False
-        if operand_type == VOID:
-            return True
-        return not self._is_scalar_type(operand_type)
+        return target_type != VOID and (
+            operand_type == VOID or not self._is_scalar_type(operand_type)
+        )
 
     def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
-        if type_spec.name != "void":
-            return False
-        return not any(kind == "ptr" for kind, _ in type_spec.declarator_ops)
+        return type_spec.name == "void" and not any(
+            kind == "ptr" for kind, _ in type_spec.declarator_ops
+        )
 
     def _is_invalid_void_parameter_type(self, type_spec: TypeSpec) -> bool:
-        if type_spec.name != "void":
-            return False
-        return not type_spec.declarator_ops
+        return type_spec.name == "void" and not type_spec.declarator_ops
 
     def _analyze_compound(self, stmt: CompoundStmt, scope: Scope, return_type: Type) -> None:
         for item in stmt.statements:
@@ -879,9 +871,9 @@ class Analyzer:
                 self._type_map.set(expr, target_type)
                 return target_type
             if expr.op in {"+=", "-="}:
-                if (not self._is_integer_type(target_type) or not self._is_integer_type(value_type)) and (
-                    target_type.pointee() is None or not self._is_integer_type(value_type)
-                ):
+                if (
+                    not self._is_integer_type(target_type) or not self._is_integer_type(value_type)
+                ) and (target_type.pointee() is None or not self._is_integer_type(value_type)):
                     raise SemaError("Assignment type mismatch")
                 self._type_map.set(expr, target_type)
                 return target_type
