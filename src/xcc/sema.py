@@ -747,11 +747,54 @@ class Analyzer:
             if not expr.value.isdigit():
                 return None
             return int(expr.value)
-        if isinstance(expr, UnaryExpr) and expr.op in {"+", "-"}:
+        if isinstance(expr, UnaryExpr) and expr.op in {"+", "-", "!", "~"}:
             operand_value = self._eval_int_constant_expr(expr.operand, scope)
             if operand_value is None:
                 return None
-            return operand_value if expr.op == "+" else -operand_value
+            if expr.op == "+":
+                return operand_value
+            if expr.op == "-":
+                return -operand_value
+            if expr.op == "!":
+                return 0 if operand_value else 1
+            return ~operand_value
+        if isinstance(expr, BinaryExpr):
+            left_value = self._eval_int_constant_expr(expr.left, scope)
+            right_value = self._eval_int_constant_expr(expr.right, scope)
+            if left_value is None or right_value is None:
+                return None
+            if expr.op == "+":
+                return left_value + right_value
+            if expr.op == "-":
+                return left_value - right_value
+            if expr.op == "*":
+                return left_value * right_value
+            if expr.op == "/":
+                if right_value == 0:
+                    return None
+                return left_value // right_value
+            if expr.op == "<<":
+                if right_value < 0:
+                    return None
+                return left_value << right_value
+            if expr.op == ">>":
+                if right_value < 0:
+                    return None
+                return left_value >> right_value
+            if expr.op == "&":
+                return left_value & right_value
+            if expr.op == "^":
+                return left_value ^ right_value
+            if expr.op == "|":
+                return left_value | right_value
+            return None
+        if isinstance(expr, ConditionalExpr):
+            condition_value = self._eval_int_constant_expr(expr.condition, scope)
+            then_value = self._eval_int_constant_expr(expr.then_expr, scope)
+            else_value = self._eval_int_constant_expr(expr.else_expr, scope)
+            if condition_value is None or then_value is None or else_value is None:
+                return None
+            return then_value if condition_value else else_value
         if isinstance(expr, Identifier):
             symbol = scope.lookup(expr.name)
             if isinstance(symbol, EnumConstSymbol):
