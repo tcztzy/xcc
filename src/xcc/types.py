@@ -110,5 +110,13 @@ class Type:
 
 
 INT = Type("int")
+UINT = Type("unsigned int")
+SHORT = Type("short")
+USHORT = Type("unsigned short")
+LONG = Type("long")
+ULONG = Type("unsigned long")
+LLONG = Type("long long")
+ULLONG = Type("unsigned long long")
 CHAR = Type("char")
+UCHAR = Type("unsigned char")
 VOID = Type("void")

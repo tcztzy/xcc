@@ -41,7 +41,7 @@ from xcc.ast import (
     UpdateExpr,
     WhileStmt,
 )
-from xcc.types import CHAR, INT, VOID, Type
+from xcc.types import CHAR, INT, LLONG, LONG, SHORT, UCHAR, UINT, ULLONG, ULONG, USHORT, VOID, Type
 
 _HEX_DIGITS = "0123456789abcdefABCDEF"
 _OCTAL_DIGITS = "01234567"
@@ -345,6 +345,22 @@ class Analyzer:
             return INT
         if type_spec.name == "char" and not type_spec.declarator_ops:
             return CHAR
+        if type_spec.name == "unsigned char" and not type_spec.declarator_ops:
+            return UCHAR
+        if type_spec.name == "short" and not type_spec.declarator_ops:
+            return SHORT
+        if type_spec.name == "unsigned short" and not type_spec.declarator_ops:
+            return USHORT
+        if type_spec.name == "long" and not type_spec.declarator_ops:
+            return LONG
+        if type_spec.name == "unsigned long" and not type_spec.declarator_ops:
+            return ULONG
+        if type_spec.name == "long long" and not type_spec.declarator_ops:
+            return LLONG
+        if type_spec.name == "unsigned long long" and not type_spec.declarator_ops:
+            return ULLONG
+        if type_spec.name == "unsigned int" and not type_spec.declarator_ops:
+            return UINT
         if type_spec.name == "void" and not type_spec.declarator_ops:
             return VOID
         if type_spec.name == "enum" and not type_spec.declarator_ops:
@@ -467,7 +483,7 @@ class Analyzer:
         return False
 
     def _is_integer_type(self, type_: Type) -> bool:
-        return type_ in (INT, CHAR)
+        return type_ in (INT, UINT, SHORT, USHORT, LONG, ULONG, LLONG, ULLONG, CHAR, UCHAR)
 
     def _is_void_pointer_type(self, type_: Type) -> bool:
         return type_.pointee() == VOID

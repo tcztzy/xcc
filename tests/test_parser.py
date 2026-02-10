@@ -87,6 +87,66 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(func.return_type, TypeSpec("char"))
         self.assertEqual(func.params, [Param(TypeSpec("char"), "c")])
 
+    def test_long_function_signature(self) -> None:
+        unit = parse(list(lex("long id(long x){return x;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("long"))
+        self.assertEqual(func.params, [Param(TypeSpec("long"), "x")])
+
+    def test_short_function_signature(self) -> None:
+        unit = parse(list(lex("short id(short x){return x;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("short"))
+        self.assertEqual(func.params, [Param(TypeSpec("short"), "x")])
+
+    def test_unsigned_function_signature(self) -> None:
+        unit = parse(list(lex("unsigned add(unsigned a, unsigned int b){return a+b;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("unsigned int"))
+        self.assertEqual(
+            func.params,
+            [Param(TypeSpec("unsigned int"), "a"), Param(TypeSpec("unsigned int"), "b")],
+        )
+
+    def test_unsigned_long_function_signature(self) -> None:
+        unit = parse(list(lex("unsigned long id(unsigned long x){return x;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("unsigned long"))
+        self.assertEqual(func.params, [Param(TypeSpec("unsigned long"), "x")])
+
+    def test_long_long_function_signature(self) -> None:
+        unit = parse(list(lex("long long id(long long x){return x;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("long long"))
+        self.assertEqual(func.params, [Param(TypeSpec("long long"), "x")])
+
+    def test_unsigned_long_long_function_signature(self) -> None:
+        unit = parse(list(lex("unsigned long long id(unsigned long long x){return x;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("unsigned long long"))
+        self.assertEqual(func.params, [Param(TypeSpec("unsigned long long"), "x")])
+
+    def test_unsigned_short_function_signature(self) -> None:
+        unit = parse(list(lex("unsigned short id(unsigned short x){return x;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("unsigned short"))
+        self.assertEqual(func.params, [Param(TypeSpec("unsigned short"), "x")])
+
+    def test_signed_int_parameter_is_canonicalized(self) -> None:
+        unit = parse(list(lex("int f(signed int value){return value;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.params, [Param(TypeSpec("int"), "value")])
+
+    def test_signed_short_parameter_is_canonicalized(self) -> None:
+        unit = parse(list(lex("int f(signed short value){return value;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.params, [Param(TypeSpec("short"), "value")])
+
+    def test_signed_long_long_parameter_is_canonicalized(self) -> None:
+        unit = parse(list(lex("int f(signed long long value){return value;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.params, [Param(TypeSpec("long long"), "value")])
+
     def test_void_parameter_list(self) -> None:
         unit = parse(list(lex("int main(void){return 0;}")))
         self.assertEqual(unit.functions[0].params, [])
@@ -761,6 +821,60 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("char"))
 
+    def test_long_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){long value;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("long"))
+
+    def test_short_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){short value;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("short"))
+
+    def test_unsigned_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){unsigned value;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("unsigned int"))
+
+    def test_unsigned_char_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){unsigned char c;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("unsigned char"))
+
+    def test_unsigned_short_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){unsigned short value;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("unsigned short"))
+
+    def test_long_int_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){long int value;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("long"))
+
+    def test_long_long_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){long long value;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("long long"))
+
+    def test_unsigned_long_long_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){unsigned long long value;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("unsigned long long"))
+
+    def test_int_short_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){int short value;return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("short"))
+
     def test_array_of_pointers_declaration(self) -> None:
         unit = parse(list(lex("int main(){int *p[4];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -951,6 +1065,14 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(expr.expr)
         self.assertEqual(expr.type_spec, TypeSpec("int", 1))
 
+    def test_sizeof_unsigned_short_type_name(self) -> None:
+        unit = parse(list(lex("int main(){return sizeof(unsigned short);}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, SizeofExpr)
+        self.assertEqual(expr.type_spec, TypeSpec("unsigned short"))
+
     def test_sizeof_struct_type_name(self) -> None:
         unit = parse(list(lex("int main(){return sizeof(struct S { int x; });}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -968,6 +1090,22 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr, CastExpr)
         self.assertEqual(expr.type_spec, TypeSpec("int"))
         self.assertIsInstance(expr.expr, Identifier)
+
+    def test_unsigned_long_cast_expression(self) -> None:
+        unit = parse(list(lex("int main(){int x; return (unsigned long)x;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, CastExpr)
+        self.assertEqual(expr.type_spec, TypeSpec("unsigned long"))
+
+    def test_unsigned_long_long_cast_expression(self) -> None:
+        unit = parse(list(lex("int main(){int x; return (unsigned long long)x;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, CastExpr)
+        self.assertEqual(expr.type_spec, TypeSpec("unsigned long long"))
 
     def test_nested_cast_expression(self) -> None:
         unit = parse(list(lex("int main(){int *p; return (int)(void*)p;}")))
@@ -1174,6 +1312,40 @@ class ParserTests(unittest.TestCase):
         source = "return main(){return 0;}"
         with self.assertRaises(ParserError):
             parse(list(lex(source)))
+
+    def test_statement_outside_function(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("while(1){}")))
+        self.assertEqual(ctx.exception.message, "while statement outside of a function")
+        self.assertEqual((ctx.exception.token.line, ctx.exception.token.column), (1, 1))
+
+    def test_long_long_long_type_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){long long long value;return 0;}")))
+
+    def test_short_long_type_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){short long value;return 0;}")))
+
+    def test_duplicate_signedness_type_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){unsigned signed value;return 0;}")))
+
+    def test_duplicate_short_type_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){short short value;return 0;}")))
+
+    def test_char_after_int_type_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int char value;return 0;}")))
+
+    def test_int_after_char_type_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){char int value;return 0;}")))
+
+    def test_non_type_keyword_after_type_spec_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int static value;return 0;}")))
 
     def test_missing_type(self) -> None:
         source = "main(){return 0;}"

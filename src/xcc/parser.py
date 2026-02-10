@@ -47,6 +47,22 @@ FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
 ASSIGNMENT_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|=")
+INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
+SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | {"void"}
+PAREN_TYPE_NAME_KEYWORDS = SIMPLE_TYPE_SPEC_KEYWORDS | {"enum", "struct", "union"}
+EXTERNAL_STATEMENT_KEYWORDS = {
+    "break",
+    "case",
+    "continue",
+    "default",
+    "do",
+    "for",
+    "goto",
+    "if",
+    "return",
+    "switch",
+    "while",
+}
 
 
 @dataclass(frozen=True)
@@ -108,11 +124,19 @@ class Parser:
                 functions.append(function)
                 externals.append(function)
                 continue
+            if self._is_external_statement_start():
+                token = self._current()
+                assert isinstance(token.lexeme, str)
+                raise ParserError(f"{token.lexeme} statement outside of a function", token)
             declaration = self._parse_decl_stmt()
             declarations.append(declaration)
             externals.append(declaration)
         self._expect(TokenKind.EOF)
         return TranslationUnit(functions, declarations, externals)
+
+    def _is_external_statement_start(self) -> bool:
+        token = self._current()
+        return token.kind == TokenKind.KEYWORD and token.lexeme in EXTERNAL_STATEMENT_KEYWORDS
 
     def _looks_like_function(self) -> bool:
         saved_index = self._index
@@ -200,9 +224,14 @@ class Parser:
             self._advance()
             return type_spec
         token = self._expect(TokenKind.KEYWORD)
-        if token.lexeme in {"int", "char", "void"}:
+        if token.lexeme in SIMPLE_TYPE_SPEC_KEYWORDS:
+            assert isinstance(token.lexeme, str)
+            if token.lexeme == "void":
+                pointer_depth = self._parse_pointer_depth()
+                return TypeSpec("void", pointer_depth)
+            type_name = self._parse_integer_type_spec(token.lexeme, token)
             pointer_depth = self._parse_pointer_depth()
-            return TypeSpec(str(token.lexeme), pointer_depth)
+            return TypeSpec(type_name, pointer_depth)
         if token.lexeme == "enum":
             enum_tag, enum_members = self._parse_enum_spec(token)
             pointer_depth = self._parse_pointer_depth()
@@ -222,6 +251,64 @@ class Parser:
                 record_members=record_members,
             )
         raise ParserError("Unsupported type", token)
+
+    def _parse_integer_type_spec(self, first_keyword: str, first_token: Token) -> str:
+        signedness: str | None = None
+        base: str | None = None
+
+        def consume(keyword: str, token: Token) -> None:
+            nonlocal signedness, base
+            if keyword in {"signed", "unsigned"}:
+                if signedness is not None:
+                    raise ParserError("Unsupported type", token)
+                signedness = keyword
+                return
+            if keyword == "char":
+                if base is not None:
+                    raise ParserError("Unsupported type", token)
+                base = keyword
+                return
+            if keyword == "short":
+                if base in {None, "int"}:
+                    base = keyword
+                    return
+                raise ParserError("Unsupported type", token)
+            if keyword == "long":
+                if base in {None, "int"}:
+                    base = keyword
+                    return
+                if base == "long":
+                    base = "long long"
+                    return
+                raise ParserError("Unsupported type", token)
+            assert keyword == "int"
+            if base is None:
+                base = keyword
+                return
+            if base in {"short", "long", "long long"}:
+                return
+            raise ParserError("Unsupported type", token)
+
+        consume(first_keyword, first_token)
+        while self._current().kind == TokenKind.KEYWORD:
+            token = self._current()
+            assert isinstance(token.lexeme, str)
+            if token.lexeme not in INTEGER_TYPE_KEYWORDS:
+                break
+            self._advance()
+            consume(token.lexeme, token)
+
+        if base is None:
+            base = "int"
+        if base == "char":
+            return "unsigned char" if signedness == "unsigned" else "char"
+        if base == "short":
+            return "unsigned short" if signedness == "unsigned" else "short"
+        if base == "long":
+            return "unsigned long" if signedness == "unsigned" else "long"
+        if base == "long long":
+            return "unsigned long long" if signedness == "unsigned" else "long long"
+        return "unsigned int" if signedness == "unsigned" else "int"
 
     def _parse_pointer_depth(self) -> int:
         pointer_depth = 0
@@ -370,6 +457,10 @@ class Parser:
             self._check_keyword("int")
             or self._check_keyword("char")
             or self._check_keyword("void")
+            or self._check_keyword("short")
+            or self._check_keyword("long")
+            or self._check_keyword("signed")
+            or self._check_keyword("unsigned")
             or self._check_keyword("enum")
             or self._check_keyword("struct")
             or self._check_keyword("union")
@@ -703,7 +794,7 @@ class Parser:
             return False
         token = self._peek()
         if token.kind == TokenKind.KEYWORD:
-            return str(token.lexeme) in {"int", "char", "void", "enum", "struct", "union"}
+            return str(token.lexeme) in PAREN_TYPE_NAME_KEYWORDS
         if token.kind == TokenKind.IDENT and isinstance(token.lexeme, str):
             return self._is_typedef_name(token.lexeme)
         return False
