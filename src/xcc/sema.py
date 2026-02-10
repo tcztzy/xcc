@@ -45,7 +45,20 @@ from xcc.types import CHAR, INT, LLONG, LONG, SHORT, UCHAR, UINT, ULLONG, ULONG,
 
 _HEX_DIGITS = "0123456789abcdefABCDEF"
 _OCTAL_DIGITS = "01234567"
-_MAX_ARRAY_OBJECT_ELEMENTS = (1 << 31) - 1
+_MAX_ARRAY_OBJECT_BYTES = (1 << 31) - 1
+_POINTER_SIZE = 8
+_BASE_TYPE_SIZES = {
+    "char": 1,
+    "unsigned char": 1,
+    "short": 2,
+    "unsigned short": 2,
+    "int": 4,
+    "unsigned int": 4,
+    "long": 8,
+    "unsigned long": 8,
+    "long long": 8,
+    "unsigned long long": 8,
+}
 _SIMPLE_ESCAPES = {
     "'": ord("'"),
     '"': ord('"'),
@@ -548,14 +561,60 @@ class Analyzer:
         )
 
     def _ensure_array_size_limit(self, type_: Type) -> None:
-        total = 1
-        for kind, value in type_.declarator_ops:
-            if kind != "arr":
-                break
-            assert isinstance(value, int)
-            if total > _MAX_ARRAY_OBJECT_ELEMENTS // value:
-                raise SemaError("array is too large")
-            total *= value
+        if not type_.is_array():
+            return
+        size = self._sizeof_type(type_, _MAX_ARRAY_OBJECT_BYTES)
+        if size is not None and size > _MAX_ARRAY_OBJECT_BYTES:
+            raise SemaError("array is too large")
+
+    def _sizeof_type(self, type_: Type, limit: int | None = None) -> int | None:
+        if not type_.declarator_ops:
+            return self._sizeof_object_base_type(type_, limit)
+        kind, value = type_.declarator_ops[0]
+        if kind == "ptr":
+            return _POINTER_SIZE
+        if kind == "fn":
+            return None
+        assert kind == "arr"
+        assert isinstance(value, int)
+        element_type = Type(type_.name, declarator_ops=type_.declarator_ops[1:])
+        element_size = self._sizeof_type(element_type, limit)
+        if element_size is None:
+            return None
+        if limit is not None and element_size > limit // value:
+            return limit + 1
+        return element_size * value
+
+    def _sizeof_object_base_type(self, type_: Type, limit: int | None) -> int | None:
+        base_size = _BASE_TYPE_SIZES.get(type_.name)
+        if base_size is not None:
+            return base_size
+        if not self._is_record_name(type_.name):
+            return None
+        members = self._record_definitions.get(type_.name)
+        if members is None:
+            return None
+        if type_.name.startswith("struct "):
+            total = 0
+            for _, member_type in members:
+                member_limit = None if limit is None else limit - total
+                member_size = self._sizeof_type(member_type, member_limit)
+                if member_size is None:
+                    return None
+                total += member_size
+                if limit is not None and total > limit:
+                    return limit + 1
+            return total
+        largest = 0
+        for _, member_type in members:
+            member_size = self._sizeof_type(member_type, limit)
+            if member_size is None:
+                return None
+            if member_size > largest:
+                largest = member_size
+            if limit is not None and largest > limit:
+                return limit + 1
+        return largest
 
     def _is_char_array_string_initializer(self, target_type: Type, init_expr: Expr) -> bool:
         if not target_type.is_array() or not isinstance(init_expr, StringLiteral):

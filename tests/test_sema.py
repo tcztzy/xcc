@@ -171,11 +171,11 @@ class SemaTests(unittest.TestCase):
         self.assertIs(sema.type_map.get(update_expr), USHORT)
 
     def test_array_size_additive_constant_expression_typemap(self) -> None:
-        source = "int main(){int a[1073741825U - 1U]; return a[0];}"
+        source = "int main(){int a[536870912U - 1U]; return a[0];}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
-        self.assertEqual(func_symbol.locals["a"].type_, Type("int", 0, (1073741824,)))
+        self.assertEqual(func_symbol.locals["a"].type_, Type("int", 0, (536870911,)))
 
     def test_array_size_shift_constant_expression_typemap(self) -> None:
         source = "int main(){int a[1LL<<4]; return a[0];}"
@@ -199,6 +199,18 @@ class SemaTests(unittest.TestCase):
 
     def test_typedef_array_size_too_large_error(self) -> None:
         unit = parse(list(lex("int main(){typedef char a[1LL<<61]; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "array is too large")
+
+    def test_array_size_too_large_due_to_int_element_width_error(self) -> None:
+        unit = parse(list(lex("int main(){int a[2147483647U]; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "array is too large")
+
+    def test_array_size_too_large_due_to_pointer_element_width_error(self) -> None:
+        unit = parse(list(lex("int main(){int *a[268435456]; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "array is too large")
@@ -1678,6 +1690,33 @@ class SemaTests(unittest.TestCase):
         self.assertIsNone(analyzer._parse_int_literal("0xU"))
         self.assertIsNone(analyzer._parse_int_literal("08"))
         self.assertIsNone(analyzer._parse_int_literal("abc"))
+
+    def test_sizeof_type_helpers_cover_non_object_and_record_paths(self) -> None:
+        analyzer = Analyzer()
+        function_type = Type("int", declarator_ops=(("fn", (None, False)),))
+        self.assertIsNone(analyzer._sizeof_type(function_type))
+        self.assertIsNone(
+            analyzer._sizeof_type(Type("int", declarator_ops=(("arr", 2), ("fn", (None, False)))))
+        )
+        self.assertIsNone(analyzer._sizeof_object_base_type(Type("_unknown"), None))
+        self.assertIsNone(analyzer._sizeof_object_base_type(Type("struct Missing"), None))
+
+        analyzer._record_definitions["struct S"] = (("x", INT), ("y", LONG))
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 12)
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), 8), 9)
+
+        analyzer._record_definitions["struct Bad"] = (("f", function_type),)
+        self.assertIsNone(analyzer._sizeof_object_base_type(Type("struct Bad"), None))
+
+        analyzer._record_definitions["union U"] = (("x", INT), ("y", LONG))
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("union U"), None), 8)
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("union U"), 4), 5)
+
+        analyzer._record_definitions["union V"] = (("x", LONG), ("y", INT))
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("union V"), None), 8)
+
+        analyzer._record_definitions["union Bad"] = (("f", function_type),)
+        self.assertIsNone(analyzer._sizeof_object_base_type(Type("union Bad"), None))
 
     def test_duplicate_declaration(self) -> None:
         unit = parse(list(lex("int main(){int x; int x; return 0;}")))

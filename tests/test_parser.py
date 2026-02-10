@@ -1244,6 +1244,20 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("char", 0, (2305843009213693951,)))
 
+    def test_array_size_accepts_sizeof_int_shift_expression(self) -> None:
+        source = "int main(){int a[(long long)sizeof(int)<<1]; return 0;}"
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (8,)))
+
+    def test_array_size_accepts_sizeof_pointer_expression(self) -> None:
+        source = "int main(){char a[(long long)sizeof(int*)]; return 0;}"
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("char", 0, (8,)))
+
     def test_array_size_must_be_positive_after_literal_conversion(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0x0u];return 0;}")))
@@ -1291,7 +1305,7 @@ class ParserTests(unittest.TestCase):
                 SizeofExpr(None, TypeSpec("struct", record_tag="S", record_members=((TypeSpec("int"), "x"),)))
             )
         )
-        self.assertEqual(parser._eval_array_size_expr(SizeofExpr(None, TypeSpec("int", 1))), 1)
+        self.assertEqual(parser._eval_array_size_expr(SizeofExpr(None, TypeSpec("int", 1))), 8)
         self.assertIsNone(
             parser._eval_array_size_expr(
                 SizeofExpr(None, TypeSpec("int", declarator_ops=(("fn", (None, False)),)))

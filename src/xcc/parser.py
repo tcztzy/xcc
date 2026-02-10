@@ -66,6 +66,20 @@ EXTERNAL_STATEMENT_KEYWORDS = {
 
 
 _INTEGER_LITERAL_SUFFIXES = {"", "u", "l", "ul", "lu", "ll", "ull", "llu"}
+_POINTER_SIZE = 8
+_BASE_TYPE_SIZES = {
+    "char": 1,
+    "unsigned char": 1,
+    "short": 2,
+    "unsigned short": 2,
+    "int": 4,
+    "unsigned int": 4,
+    "long": 8,
+    "unsigned long": 8,
+    "long long": 8,
+    "unsigned long long": 8,
+    "enum": 4,
+}
 
 
 def _parse_int_literal_value(lexeme: str) -> int | None:
@@ -982,18 +996,14 @@ class Parser:
     def _sizeof_type_spec(self, type_spec: TypeSpec) -> int | None:
         def eval_ops(index: int) -> int | None:
             if index >= len(type_spec.declarator_ops):
-                if type_spec.name == "void":
-                    return None
-                if type_spec.name in {"struct", "union"}:
-                    return None
-                return 1
+                return _BASE_TYPE_SIZES.get(type_spec.name)
             kind, value = type_spec.declarator_ops[index]
             if kind == "arr":
                 assert isinstance(value, int)
-                item = eval_ops(index + 1)
-                return None if item is None else item * value
+                item_size = eval_ops(index + 1)
+                return None if item_size is None else item_size * value
             if kind == "ptr":
-                return 1
+                return _POINTER_SIZE
             return None
 
         return eval_ops(0)
