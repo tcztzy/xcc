@@ -1,31 +1,51 @@
 # Front End
 
-## Preprocessor
+## Overview
 
-- Implement standard macro expansion and include search rules.
-- Track source locations through macro expansion for diagnostics.
-- Preserve comments only when required for line mapping and pragmas.
+The front end currently provides a deterministic check pipeline:
+
+1. Source loading (`file` or `stdin`).
+2. Lexing into C tokens.
+3. Parsing into the AST.
+4. Semantic analysis and type checking.
+
+The pipeline is exposed through `xcc.frontend.compile_source` and used by the CLI entrypoint.
+
+## Driver behavior
+
+The `xcc` CLI runs the front end and exits non-zero on diagnostics.
+
+- `xcc <path.c>`: run front-end checks and print a success marker.
+- `xcc -`: read source from standard input.
+- `xcc --dump-tokens <path.c>`: print token stream.
+- `xcc --dump-ast <path.c>`: print parsed AST.
+- `xcc --dump-sema <path.c>`: print semantic model.
+
+Diagnostics are stage-tagged (`lex`, `parse`, `sema`) and include source coordinates when available.
 
 ## Lexer
 
-- Follow the C11 tokenization rules, including preprocessing numbers and universal character names.
-- Maintain exact spelling for diagnostics and reproducible output.
+- Follows C11 tokenization with translation-phase newline normalization, trigraph replacement, and line splicing.
+- Supports comments, keywords, punctuators, numeric constants, character/string literals, and universal character names.
+- Supports preprocessing token mode (`PP_NUMBER`, header name tokenization).
 
 ## Parser
 
-- Implement a full C11 grammar with extensions explicitly gated and documented.
-- Favor a clear, testable recursive descent or Pratt style parser with explicit precedence.
+- Builds a typed AST using a recursive descent parser.
+- Covers declarations, function definitions/declarations, record/enum declarations, control flow statements, and expressions.
+- Supports declarator forms needed for pointers, arrays, and function/function-pointer declarations.
+- Supports canonical integer type-specifier combinations for `char`/`short`/`int`/`long`/`long long` with `signed` and `unsigned`.
 
 ## Semantic analysis
 
-- Implement full C11 type system rules, including integer promotions, usual arithmetic conversions, and composite types.
-- Build symbol tables with explicit lifetime and storage duration tracking.
-- Enforce constraints for declarations, initializers, and control flow.
+- Builds scopes for objects, typedef names, enums, and functions.
+- Resolves expression types and validates assignments, calls, control-flow contexts, and declaration constraints.
+- Evaluates integer constant expressions for enum values and `case` labels.
 
 ## Constant evaluation
 
-- Support C11 integer constant expressions and required arithmetic.
-- Provide deterministic evaluation with overflow rules matching the standard.
+- Supports deterministic integer constant expression evaluation for required semantic checks.
+- Handles unary, binary, conditional, cast, and enum-constant forms used by the current front-end checks.
 
 ## References
 
