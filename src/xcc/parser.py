@@ -917,8 +917,9 @@ class Parser:
         while True:
             if self._check_punct("["):
                 self._advance()
-                size_token = self._expect(TokenKind.INT_CONST)
-                size = self._parse_array_size(size_token)
+                size_token = self._current()
+                size_expr = self._parse_assignment()
+                size = self._parse_array_size_expr(size_expr, size_token)
                 self._expect_punct("]")
                 ops = ops + (("arr", size),)
                 continue
@@ -941,6 +942,36 @@ class Parser:
         if size <= 0:
             raise ParserError("Array size must be positive", token)
         return size
+
+    def _parse_array_size_expr(self, expr: Expr, token: Token) -> int:
+        size = self._eval_array_size_expr(expr)
+        if size is None:
+            raise ParserError("Unsupported array size", token)
+        if size <= 0:
+            raise ParserError("Array size must be positive", token)
+        return size
+
+    def _eval_array_size_expr(self, expr: Expr) -> int | None:
+        if isinstance(expr, IntLiteral):
+            assert isinstance(expr.value, str)
+            return _parse_int_literal_value(expr.value)
+        if isinstance(expr, UnaryExpr) and expr.op in {"+", "-"}:
+            operand = self._eval_array_size_expr(expr.operand)
+            if operand is None:
+                return None
+            return operand if expr.op == "+" else -operand
+        if isinstance(expr, BinaryExpr):
+            left = self._eval_array_size_expr(expr.left)
+            right = self._eval_array_size_expr(expr.right)
+            if left is None or right is None:
+                return None
+            if expr.op == "+":
+                return left + right
+            if expr.op == "-":
+                return left - right
+            if expr.op == "<<":
+                return None if right < 0 else left << right
+        return None
 
     def _parse_function_suffix_params(self) -> FunctionDeclarator:
         if self._check_punct(")"):

@@ -1225,6 +1225,18 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (10,)))
 
+    def test_array_size_accepts_additive_constant_expression(self) -> None:
+        unit = parse(list(lex("int main(){int a[1073741820U + 5U - 1U];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (1073741824,)))
+
+    def test_array_size_accepts_shift_constant_expression(self) -> None:
+        unit = parse(list(lex("int main(){int a[1LL<<4];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (16,)))
+
     def test_array_size_must_be_positive_after_literal_conversion(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0x0u];return 0;}")))
@@ -1236,10 +1248,29 @@ class ParserTests(unittest.TestCase):
 
     def test_array_size_rejects_non_string_or_invalid_literal_tokens(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._parse_array_size(Token(TokenKind.INT_CONST, "1", 1, 1)), 1)
+        with self.assertRaises(ParserError):
+            parser._parse_array_size(Token(TokenKind.INT_CONST, "0", 1, 1))
         with self.assertRaises(ParserError):
             parser._parse_array_size(Token(TokenKind.INT_CONST, None, 1, 1))
         with self.assertRaises(ParserError):
             parser._parse_array_size(Token(TokenKind.INT_CONST, "1uu", 1, 1))
+
+    def test_array_size_rejects_non_constant_expression(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int n=4;int a[n];return 0;}")))
+
+    def test_array_size_rejects_negative_shift_amount(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int a[1<<-1];return 0;}")))
+
+    def test_array_size_rejects_unary_non_constant_expression(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int n=4;int a[+n];return 0;}")))
+
+    def test_array_size_rejects_unsupported_binary_operator_expression(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int a[4/2];return 0;}")))
 
     def test_void_declaration_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
