@@ -955,6 +955,12 @@ class Parser:
         if isinstance(expr, IntLiteral):
             assert isinstance(expr.value, str)
             return _parse_int_literal_value(expr.value)
+        if isinstance(expr, CastExpr):
+            return self._eval_array_size_expr(expr.expr)
+        if isinstance(expr, SizeofExpr):
+            if expr.type_spec is not None:
+                return self._sizeof_type_spec(expr.type_spec)
+            return None
         if isinstance(expr, UnaryExpr) and expr.op in {"+", "-"}:
             operand = self._eval_array_size_expr(expr.operand)
             if operand is None:
@@ -972,6 +978,25 @@ class Parser:
             if expr.op == "<<":
                 return None if right < 0 else left << right
         return None
+
+    def _sizeof_type_spec(self, type_spec: TypeSpec) -> int | None:
+        def eval_ops(index: int) -> int | None:
+            if index >= len(type_spec.declarator_ops):
+                if type_spec.name == "void":
+                    return None
+                if type_spec.name in {"struct", "union"}:
+                    return None
+                return 1
+            kind, value = type_spec.declarator_ops[index]
+            if kind == "arr":
+                assert isinstance(value, int)
+                item = eval_ops(index + 1)
+                return None if item is None else item * value
+            if kind == "ptr":
+                return 1
+            return None
+
+        return eval_ops(0)
 
     def _parse_function_suffix_params(self) -> FunctionDeclarator:
         if self._check_punct(")"):

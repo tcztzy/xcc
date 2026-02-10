@@ -1237,6 +1237,13 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (16,)))
 
+    def test_array_size_accepts_sizeof_typedef_cast_expression(self) -> None:
+        source = "int main(){typedef char a[1LL<<61]; char b[(long long)sizeof(a)-1]; return 0;}"
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("char", 0, (2305843009213693951,)))
+
     def test_array_size_must_be_positive_after_literal_conversion(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0x0u];return 0;}")))
@@ -1271,6 +1278,30 @@ class ParserTests(unittest.TestCase):
     def test_array_size_rejects_unsupported_binary_operator_expression(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[4/2];return 0;}")))
+
+    def test_array_size_rejects_sizeof_void_expression(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int a[(long long)sizeof(void)];return 0;}")))
+
+    def test_array_size_helper_handles_sizeof_expression_forms(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertIsNone(parser._eval_array_size_expr(SizeofExpr(Identifier("x"), None)))
+        self.assertIsNone(
+            parser._eval_array_size_expr(
+                SizeofExpr(None, TypeSpec("struct", record_tag="S", record_members=((TypeSpec("int"), "x"),)))
+            )
+        )
+        self.assertEqual(parser._eval_array_size_expr(SizeofExpr(None, TypeSpec("int", 1))), 1)
+        self.assertIsNone(
+            parser._eval_array_size_expr(
+                SizeofExpr(None, TypeSpec("int", declarator_ops=(("fn", (None, False)),)))
+            )
+        )
+
+    def test_array_size_helper_binary_with_non_constant_operand(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        expr = BinaryExpr("+", Identifier("x"), IntLiteral("1"))
+        self.assertIsNone(parser._eval_array_size_expr(expr))
 
     def test_void_declaration_is_rejected(self) -> None:
         with self.assertRaises(ParserError):

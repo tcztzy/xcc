@@ -224,10 +224,7 @@
       "id": "sema-array-size-64",
       "upstream": "clang/test/Sema/array-size-64.c",
       "fixture": "tests/external/clang/fixtures/Sema/array-size-64.c",
-      "expect": "parse",
-      "message_contains": "Unsupported array size",
-      "line": 10,
-      "column": 18,
+      "expect": "ok",
       "sha256": "b007badfbc091875408475f8ead39a88dbd3f1a2215b65f77877c407e8992988"
     },
     {
