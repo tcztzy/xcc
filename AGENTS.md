@@ -23,6 +23,12 @@ This repository aims to become a C11 compiler written in modern Python (CPython 
 - Run local tests: `tox -e py311` (coverage is enforced).
 - Run lint/type checks: `tox -e lint` and `tox -e type`.
 
+## Feature Implementation Order
+
+- For every new feature, add or update tests before implementing production code.
+- If an equivalent LLVM/Clang test exists, add it to the curated fixture suite first.
+- If no LLVM/Clang test exists, explicitly note the gap and add local positive and negative tests before coding.
+
 ## Linux/ELF Testing (via tox-docker)
 
 On macOS, Linux/ELF validation happens in Docker via tox-docker:
@@ -40,6 +46,19 @@ Notes:
 ## Documentation Sources
 
 External specs (PDF/TXT/HTML) are cached under `docs/_sources/` for convenience, but **must not be committed** (the directory is gitignored).
+
+## Lessons Log
+
+- Review `LESSONS.md` before major compiler or testing changes.
+- Keep `LESSONS.md` concise, actionable, and in professional English.
+- When adding a lesson, include at least one concrete action for `xcc`.
+
+## LLVM/Clang Fixture Tests
+
+- Curated upstream fixtures live under `tests/external/clang/fixtures/`.
+- Keep fixture metadata and checksums in `tests/external/clang/manifest.json`.
+- Keep vendored fixture files byte-identical to upstream and pinned to a commit.
+- Use `python scripts/sync_clang_fixtures.py` to sync fixture bytes and checksums.
 
 ## Code Hygiene Checklist (before submitting changes)
 
