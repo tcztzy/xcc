@@ -184,6 +184,13 @@ class SemaTests(unittest.TestCase):
         func_symbol = sema.functions["main"]
         self.assertEqual(func_symbol.locals["a"].type_, Type("int", 0, (16,)))
 
+    def test_array_size_sizeof_typedef_cast_expression_typemap(self) -> None:
+        source = "int main(){typedef char a[1LL<<61]; char b[(long long)sizeof(a)-1]; return b[0];}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertEqual(func_symbol.locals["b"].type_, Type("char", 0, (2305843009213693951,)))
+
     def test_long_long_declaration_and_update_typemap(self) -> None:
         source = "int main(){long long value=1; value++; return value;}"
         unit = parse(list(lex(source)))
