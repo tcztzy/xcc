@@ -204,10 +204,7 @@
       "id": "parser-extension-long-long",
       "upstream": "clang/test/Parser/extension.c",
       "fixture": "tests/external/clang/fixtures/Parser/extension.c",
-      "expect": "parse",
-      "message_contains": "Unsupported type",
-      "line": 6,
-      "column": 1,
+      "expect": "ok",
       "sha256": "abdb07f0e44b5e34e37ff63f7ba548f532956da89bc73f44a47c29884bcfb0fa"
     },
     {
@@ -233,9 +230,9 @@
       "upstream": "clang/test/Sema/c89.c",
       "fixture": "tests/external/clang/fixtures/Sema/c89.c",
       "expect": "parse",
-      "message_contains": "Expected ';'",
-      "line": 10,
-      "column": 19,
+      "message_contains": "Unsupported array size",
+      "line": 25,
+      "column": 9,
       "sha256": "a1c5b865107b1237b66b9cabfb731c68905b8b0c98524827c4478be91e0ac09a"
     },
     {

@@ -80,6 +80,7 @@ _BASE_TYPE_SIZES = {
     "unsigned long long": 8,
     "enum": 4,
 }
+_EXTENSION_MARKER = "__extension__"
 
 
 def _parse_int_literal_value(lexeme: str) -> int | None:
@@ -156,6 +157,9 @@ class Parser:
         declarations: list[Stmt] = []
         externals: list[FunctionDef | Stmt] = []
         while not self._match(TokenKind.EOF):
+            self._skip_extension_markers()
+            if self._match(TokenKind.EOF):
+                break
             if self._looks_like_function():
                 function = self._parse_function()
                 functions.append(function)
@@ -450,6 +454,7 @@ class Parser:
             self._pop_scope()
 
     def _parse_statement(self) -> Stmt:
+        self._skip_extension_markers()
         if self._check_punct(";"):
             self._advance()
             return NullStmt()
@@ -490,6 +495,12 @@ class Parser:
         return ExprStmt(expr)
 
     def _is_declaration_start(self) -> bool:
+        if self._check_keyword(_EXTENSION_MARKER):
+            saved_index = self._index
+            self._skip_extension_markers()
+            is_decl = self._is_declaration_start()
+            self._index = saved_index
+            return is_decl
         if (
             self._check_keyword("int")
             or self._check_keyword("char")
@@ -611,6 +622,7 @@ class Parser:
         return token.kind == TokenKind.IDENT and self._peek_punct(":")
 
     def _parse_decl_stmt(self) -> Stmt:
+        self._skip_extension_markers()
         is_typedef = False
         if self._check_keyword("typedef"):
             self._advance()
@@ -783,6 +795,9 @@ class Parser:
         return expr
 
     def _parse_unary(self) -> Expr:
+        if self._check_keyword(_EXTENSION_MARKER):
+            self._advance()
+            return self._parse_unary()
         if self._check_keyword("sizeof"):
             return self._parse_sizeof_expr()
         if self._is_parenthesized_type_name_start():
@@ -1124,6 +1139,10 @@ class Parser:
     def _check_keyword(self, value: str) -> bool:
         token = self._current()
         return token.kind == TokenKind.KEYWORD and token.lexeme == value
+
+    def _skip_extension_markers(self) -> None:
+        while self._check_keyword(_EXTENSION_MARKER):
+            self._advance()
 
     def _is_assignment_operator(self) -> bool:
         token = self._current()

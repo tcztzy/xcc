@@ -126,6 +126,45 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(func.return_type, TypeSpec("unsigned long long"))
         self.assertEqual(func.params, [Param(TypeSpec("unsigned long long"), "x")])
 
+    def test_extension_marker_allows_file_scope_typedef(self) -> None:
+        source = "__extension__ typedef struct { long long int quot; long long int rem; } lldiv_t;"
+        unit = parse(list(lex(source)))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        self.assertEqual(declaration.name, "lldiv_t")
+        self.assertEqual(declaration.type_spec.name, "struct")
+        self.assertEqual(len(declaration.type_spec.record_members), 2)
+
+    def test_extension_marker_allows_block_declaration_and_expression(self) -> None:
+        source = "int main(void){__extension__ int i; int j; __extension__ (j = 10LL); __extension__ j = 10LL; return j;}"
+        unit = parse(list(lex(source)))
+        statements = _body(unit.functions[0]).statements
+        self.assertIsInstance(statements[0], DeclStmt)
+        self.assertIsInstance(statements[2], ExprStmt)
+        self.assertIsInstance(statements[3], ExprStmt)
+        self.assertIsInstance(statements[2].expr, AssignExpr)
+        self.assertIsInstance(statements[3].expr, AssignExpr)
+
+    def test_extension_marker_allows_empty_translation_unit(self) -> None:
+        unit = parse(list(lex("__extension__")))
+        self.assertEqual(unit.functions, [])
+        self.assertEqual(unit.declarations, [])
+
+    def test_extension_marker_allows_for_init_declaration(self) -> None:
+        source = "int main(void){for(__extension__ int i=0; i<1; i++){} return 0;}"
+        unit = parse(list(lex(source)))
+        for_stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(for_stmt, ForStmt)
+        self.assertIsInstance(for_stmt.init, DeclStmt)
+
+    def test_extension_marker_allowed_inside_expression(self) -> None:
+        source = "int main(void){int j=0; j = __extension__ (j + 1); return j;}"
+        unit = parse(list(lex(source)))
+        assign_stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(assign_stmt, ExprStmt)
+        self.assertIsInstance(assign_stmt.expr, AssignExpr)
+        self.assertIsInstance(assign_stmt.expr.value, BinaryExpr)
+
     def test_unsigned_short_function_signature(self) -> None:
         unit = parse(list(lex("unsigned short id(unsigned short x){return x;}")))
         func = unit.functions[0]
