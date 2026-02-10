@@ -571,6 +571,14 @@ class Analyzer:
             return False
         return not (left_pointee.declarator_ops and left_pointee.declarator_ops[0][0] == "fn")
 
+    def _is_pointer_equality_compatible(self, left_type: Type, right_type: Type) -> bool:
+        return self._is_assignment_compatible(
+            left_type, right_type
+        ) or self._is_assignment_compatible(
+            right_type,
+            left_type,
+        )
+
     def _conditional_pointer_result(
         self,
         then_expr: Expr,
@@ -582,7 +590,11 @@ class Analyzer:
         then_pointee = then_type.pointee()
         else_pointee = else_type.pointee()
         if then_pointee is not None and else_pointee is not None:
-            return then_type if then_type == else_type else None
+            if self._is_void_pointer_type(then_type) and self._is_object_pointer_type(else_type):
+                return then_type
+            if self._is_void_pointer_type(else_type) and self._is_object_pointer_type(then_type):
+                return else_type
+            return None
         if then_pointee is not None and self._eval_int_constant_expr(else_expr, scope) == 0:
             return then_type
         if else_pointee is not None and self._eval_int_constant_expr(then_expr, scope) == 0:
@@ -903,7 +915,7 @@ class Analyzer:
                     raise SemaError("Equality operator requires scalar operands")
                 if not (self._is_integer_type(left_type) and self._is_integer_type(right_type)):
                     if left_type.pointee() is not None and right_type.pointee() is not None:
-                        if left_type != right_type:
+                        if not self._is_pointer_equality_compatible(left_type, right_type):
                             raise SemaError(
                                 "Equality operator requires integer or compatible pointer operands"
                             )

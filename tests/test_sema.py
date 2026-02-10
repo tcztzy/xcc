@@ -333,6 +333,24 @@ class SemaTests(unittest.TestCase):
         self.assertIsInstance(expr, ConditionalExpr)
         self.assertEqual(sema.type_map.get(expr), Type("int", 1))
 
+    def test_conditional_void_pointer_and_object_pointer_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; void *vp=0; void *r=1 ? vp : p; return r!=0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[3].init
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertEqual(sema.type_map.get(expr), Type("void", 1))
+
+    def test_conditional_object_pointer_and_void_pointer_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; void *vp=0; void *r=1 ? p : vp; return r!=0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[3].init
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertEqual(sema.type_map.get(expr), Type("void", 1))
+
     def test_comma_expression_typemap(self) -> None:
         source = "int main(){int x=1; int y=2; return (x=3, y);}"
         unit = parse(list(lex(source)))
@@ -805,6 +823,14 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         return_expr = _body(unit.functions[0]).statements[2].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_equality_void_pointer_and_object_pointer_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; void *vp=p; return vp==p;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[3].value
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
 
@@ -1335,6 +1361,16 @@ class SemaTests(unittest.TestCase):
 
     def test_equality_pointer_mismatch_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return p==q;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Equality operator requires integer or compatible pointer operands",
+        )
+
+    def test_equality_void_pointer_and_function_pointer_error(self) -> None:
+        source = "int f(void){return 0;} int main(){void *vp=0; int (*fp)(void)=f; return vp==fp;}"
+        unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -2009,6 +2045,13 @@ class SemaTests(unittest.TestCase):
 
     def test_conditional_pointer_mismatch_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return 1 ? p : q;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Conditional type mismatch")
+
+    def test_conditional_void_pointer_and_function_pointer_error(self) -> None:
+        source = "int f(void){return 0;} int main(){void *vp=0; int (*fp)(void)=f; return 1 ? vp : fp;}"
+        unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Conditional type mismatch")
