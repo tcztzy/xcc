@@ -225,9 +225,9 @@
       "upstream": "clang/test/Sema/array-size-64.c",
       "fixture": "tests/external/clang/fixtures/Sema/array-size-64.c",
       "expect": "parse",
-      "message_contains": "Unsupported array size",
-      "line": 4,
-      "column": 9,
+      "message_contains": "Expected",
+      "line": 5,
+      "column": 21,
       "sha256": "b007badfbc091875408475f8ead39a88dbd3f1a2215b65f77877c407e8992988"
     },
     {

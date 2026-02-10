@@ -40,7 +40,7 @@ from xcc.ast import (
     WhileStmt,
 )
 from xcc.lexer import Token, TokenKind, lex
-from xcc.parser import ParserError, parse
+from xcc.parser import Parser, ParserError, _parse_int_literal_value, parse
 
 
 def _body(func):
@@ -1207,9 +1207,39 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0];return 0;}")))
 
-    def test_array_size_must_be_decimal_literal(self) -> None:
+    def test_array_size_accepts_hex_literal(self) -> None:
+        unit = parse(list(lex("int main(){int a[0x10];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (16,)))
+
+    def test_array_size_accepts_octal_literal(self) -> None:
+        unit = parse(list(lex("int main(){int a[012];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (10,)))
+
+    def test_array_size_accepts_unsigned_suffix(self) -> None:
+        unit = parse(list(lex("int main(){int a[10U];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (10,)))
+
+    def test_array_size_must_be_positive_after_literal_conversion(self) -> None:
         with self.assertRaises(ParserError):
-            parse(list(lex("int main(){int a[0x10];return 0;}")))
+            parse(list(lex("int main(){int a[0x0u];return 0;}")))
+
+    def test_array_size_helper_rejects_invalid_literals(self) -> None:
+        self.assertIsNone(_parse_int_literal_value("1uu"))
+        self.assertIsNone(_parse_int_literal_value("08"))
+        self.assertIsNone(_parse_int_literal_value("abc"))
+
+    def test_array_size_rejects_non_string_or_invalid_literal_tokens(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        with self.assertRaises(ParserError):
+            parser._parse_array_size(Token(TokenKind.INT_CONST, None, 1, 1))
+        with self.assertRaises(ParserError):
+            parser._parse_array_size(Token(TokenKind.INT_CONST, "1uu", 1, 1))
 
     def test_void_declaration_is_rejected(self) -> None:
         with self.assertRaises(ParserError):

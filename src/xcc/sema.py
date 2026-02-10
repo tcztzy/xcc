@@ -60,6 +60,18 @@ _SIMPLE_ESCAPES = {
 }
 
 
+_INTEGER_LITERAL_SUFFIX_TYPES = {
+    "": INT,
+    "u": UINT,
+    "l": LONG,
+    "ul": ULONG,
+    "lu": ULONG,
+    "ll": LLONG,
+    "ull": ULLONG,
+    "llu": ULLONG,
+}
+
+
 @dataclass(frozen=True)
 class SemaError(ValueError):
     message: str
@@ -797,8 +809,12 @@ class Analyzer:
 
     def _analyze_expr(self, expr: Expr, scope: Scope) -> Type:
         if isinstance(expr, IntLiteral):
-            self._type_map.set(expr, INT)
-            return INT
+            parsed = self._parse_int_literal(expr.value)
+            if parsed is None:
+                raise SemaError("Invalid integer literal")
+            literal_type = parsed[1]
+            self._type_map.set(expr, literal_type)
+            return literal_type
         if isinstance(expr, CharLiteral):
             self._type_map.set(expr, INT)
             return INT
@@ -1051,11 +1067,36 @@ class Analyzer:
             return return_type
         raise SemaError("Unsupported expression")
 
+    def _parse_int_literal(self, lexeme: str | int) -> tuple[int, Type] | None:
+        if isinstance(lexeme, int):
+            return lexeme, INT
+        if not isinstance(lexeme, str):
+            return None
+        suffix_start = len(lexeme)
+        while suffix_start > 0 and lexeme[suffix_start - 1] in "uUlL":
+            suffix_start -= 1
+        body = lexeme[:suffix_start]
+        suffix = lexeme[suffix_start:].lower()
+        literal_type = _INTEGER_LITERAL_SUFFIX_TYPES.get(suffix)
+        if literal_type is None:
+            return None
+        if body.startswith(("0x", "0X")):
+            digits = body[2:]
+            if not digits:
+                return None
+            return int(digits, 16), literal_type
+        if body.startswith("0") and len(body) > 1:
+            if any(ch not in "01234567" for ch in body):
+                return None
+            return int(body, 8), literal_type
+        if not body.isdigit():
+            return None
+        return int(body), literal_type
+
     def _eval_int_constant_expr(self, expr: Expr, scope: Scope) -> int | None:
         if isinstance(expr, IntLiteral):
-            if not expr.value.isdigit():
-                return None
-            return int(expr.value)
+            parsed = self._parse_int_literal(expr.value)
+            return None if parsed is None else parsed[0]
         if isinstance(expr, CharLiteral):
             return self._char_const_value(expr.value)
         if isinstance(expr, UnaryExpr) and expr.op in {"+", "-", "!", "~"}:

@@ -65,6 +65,29 @@ EXTERNAL_STATEMENT_KEYWORDS = {
 }
 
 
+_INTEGER_LITERAL_SUFFIXES = {"", "u", "l", "ul", "lu", "ll", "ull", "llu"}
+
+
+def _parse_int_literal_value(lexeme: str) -> int | None:
+    suffix_start = len(lexeme)
+    while suffix_start > 0 and lexeme[suffix_start - 1] in "uUlL":
+        suffix_start -= 1
+    body = lexeme[:suffix_start]
+    suffix = lexeme[suffix_start:].lower()
+    if suffix not in _INTEGER_LITERAL_SUFFIXES:
+        return None
+    if body.startswith(("0x", "0X")):
+        digits = body[2:]
+        return None if not digits else int(digits, 16)
+    if body.startswith("0") and len(body) > 1:
+        if any(ch not in "01234567" for ch in body):
+            return None
+        return int(body, 8)
+    if not body.isdigit():
+        return None
+    return int(body)
+
+
 @dataclass(frozen=True)
 class ParserError(ValueError):
     message: str
@@ -910,9 +933,11 @@ class Parser:
 
     def _parse_array_size(self, token: Token) -> int:
         lexeme = token.lexeme
-        if not isinstance(lexeme, str) or not lexeme.isdigit():
+        if not isinstance(lexeme, str):
             raise ParserError("Unsupported array size", token)
-        size = int(lexeme)
+        size = _parse_int_literal_value(lexeme)
+        if size is None:
+            raise ParserError("Unsupported array size", token)
         if size <= 0:
             raise ParserError("Array size must be positive", token)
         return size
