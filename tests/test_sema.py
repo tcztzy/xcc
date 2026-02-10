@@ -170,6 +170,20 @@ class SemaTests(unittest.TestCase):
         self.assertIsInstance(update_expr, UpdateExpr)
         self.assertIs(sema.type_map.get(update_expr), USHORT)
 
+    def test_array_size_additive_constant_expression_typemap(self) -> None:
+        source = "int main(){int a[1073741825U - 1U]; return a[0];}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertEqual(func_symbol.locals["a"].type_, Type("int", 0, (1073741824,)))
+
+    def test_array_size_shift_constant_expression_typemap(self) -> None:
+        source = "int main(){int a[1LL<<4]; return a[0];}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertEqual(func_symbol.locals["a"].type_, Type("int", 0, (16,)))
+
     def test_long_long_declaration_and_update_typemap(self) -> None:
         source = "int main(){long long value=1; value++; return value;}"
         unit = parse(list(lex(source)))
