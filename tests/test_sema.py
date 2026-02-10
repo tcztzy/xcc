@@ -185,11 +185,23 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(func_symbol.locals["a"].type_, Type("int", 0, (16,)))
 
     def test_array_size_sizeof_typedef_cast_expression_typemap(self) -> None:
-        source = "int main(){typedef char a[1LL<<61]; char b[(long long)sizeof(a)-1]; return b[0];}"
+        source = "int main(){typedef char a[1LL<<10]; char b[(long long)sizeof(a)-1]; return b[0];}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
-        self.assertEqual(func_symbol.locals["b"].type_, Type("char", 0, (2305843009213693951,)))
+        self.assertEqual(func_symbol.locals["b"].type_, Type("char", 0, (1023,)))
+
+    def test_array_size_too_large_error(self) -> None:
+        unit = parse(list(lex("int main(){int a[2147483647U][2147483647U];return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "array is too large")
+
+    def test_typedef_array_size_too_large_error(self) -> None:
+        unit = parse(list(lex("int main(){typedef char a[1LL<<61]; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "array is too large")
 
     def test_long_long_declaration_and_update_typemap(self) -> None:
         source = "int main(){long long value=1; value++; return value;}"

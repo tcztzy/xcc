@@ -45,6 +45,7 @@ from xcc.types import CHAR, INT, LLONG, LONG, SHORT, UCHAR, UINT, ULLONG, ULONG,
 
 _HEX_DIGITS = "0123456789abcdefABCDEF"
 _OCTAL_DIGITS = "01234567"
+_MAX_ARRAY_OBJECT_ELEMENTS = (1 << 31) - 1
 _SIMPLE_ESCAPES = {
     "'": ord("'"),
     '"': ord('"'),
@@ -267,6 +268,7 @@ class Analyzer:
             self._register_type_spec(declaration.type_spec)
             self._define_enum_members(declaration.type_spec, self._file_scope)
             typedef_type = self._resolve_type(declaration.type_spec)
+            self._ensure_array_size_limit(typedef_type)
             self._file_scope.define_typedef(declaration.name, typedef_type)
             return
         if isinstance(declaration, DeclStmt):
@@ -281,6 +283,7 @@ class Analyzer:
             if self._is_invalid_incomplete_record_object_type(declaration.type_spec):
                 raise SemaError("Invalid object type: incomplete")
             var_type = self._resolve_type(declaration.type_spec)
+            self._ensure_array_size_limit(var_type)
             self._file_scope.define(VarSymbol(declaration.name, var_type))
             if declaration.init is not None:
                 init_type = self._decay_array_value(
@@ -544,6 +547,16 @@ class Analyzer:
             self._is_assignment_expr_compatible(target_type, init_expr, init_type, scope)
         )
 
+    def _ensure_array_size_limit(self, type_: Type) -> None:
+        total = 1
+        for kind, value in type_.declarator_ops:
+            if kind != "arr":
+                break
+            assert isinstance(value, int)
+            if total > _MAX_ARRAY_OBJECT_ELEMENTS // value:
+                raise SemaError("array is too large")
+            total *= value
+
     def _is_char_array_string_initializer(self, target_type: Type, init_expr: Expr) -> bool:
         if not target_type.is_array() or not isinstance(init_expr, StringLiteral):
             return False
@@ -668,6 +681,7 @@ class Analyzer:
             if self._is_invalid_incomplete_record_object_type(stmt.type_spec):
                 raise SemaError("Invalid object type: incomplete")
             var_type = self._resolve_type(stmt.type_spec)
+            self._ensure_array_size_limit(var_type)
             scope.define(VarSymbol(stmt.name, var_type))
             if stmt.init is not None:
                 init_type = self._decay_array_value(self._analyze_expr(stmt.init, scope))
@@ -683,6 +697,7 @@ class Analyzer:
             self._register_type_spec(stmt.type_spec)
             self._define_enum_members(stmt.type_spec, scope)
             typedef_type = self._resolve_type(stmt.type_spec)
+            self._ensure_array_size_limit(typedef_type)
             scope.define_typedef(stmt.name, typedef_type)
             return
         if isinstance(stmt, ExprStmt):
