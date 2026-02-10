@@ -15,6 +15,9 @@ Local cached copies of external documents are stored in `docs/_sources/` and exc
 - musl manual (text): https://musl.libc.org/doc/1.1.24/manual.txt
 - Docker documentation: https://docs.docker.com/get-started/
 - ShivyC project metadata: https://pypi.org/project/shivyc/
+- LLVM project repository: https://github.com/llvm/llvm-project
+- LLVM release license (Apache-2.0 WITH LLVM-exception): https://github.com/llvm/llvm-project/blob/main/LICENSE.TXT
+- Clang testing infrastructure (`lit`): https://llvm.org/docs/CommandGuide/lit.html
 - MkDocs configuration and CLI: https://www.mkdocs.org/user-guide/configuration/
 - Ruff configuration: https://docs.astral.sh/ruff/configuration/
 - Ty type checker docs: https://docs.astral.sh/ty/

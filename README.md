@@ -82,6 +82,7 @@ This is a target list for the initial milestones. It will evolve as CPython comp
 - Run lint: `tox -e lint`
 - Run type checks: `tox -e type`
 - Run tests: `tox -e py311`
+- Run curated Clang fixtures: `tox -e clang_suite`
 - Run tests in Linux containers: `tox -e docker_glibc` or `tox -e docker_musl`
 - Build Linux/ELF image (glibc): `./scripts/docker-build.sh glibc`
 - Build Linux/ELF image (musl): `./scripts/docker-build.sh musl`

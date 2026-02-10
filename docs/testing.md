@@ -16,6 +16,16 @@
 - Golden tests for diagnostics and error messages.
 - End to end tests that compile CPython components and compare outputs.
 - Regression tests for reported bugs.
+- Curated upstream LLVM/Clang fixture tests for cross-checking accepted and rejected C inputs.
+
+## Curated LLVM/Clang fixtures
+
+- Fixtures are vendored under `tests/external/clang/fixtures/`.
+- Metadata, upstream commit pin, and checksums are stored in `tests/external/clang/manifest.json`.
+- The harness in `tests/test_clang_suite.py` validates fixture integrity, expected frontend stage (`ok`, `lex`, `parse`, `sema`), and selected diagnostic details.
+- Run only this subset with `python -m unittest -v tests.test_clang_suite`.
+- Or use tox: `tox -e clang_suite`.
+- Sync fixtures from upstream with `python scripts/sync_clang_fixtures.py`.
 
 ## Tooling
 
