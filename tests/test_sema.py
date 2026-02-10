@@ -29,7 +29,7 @@ from xcc.ast import (
 )
 from xcc.lexer import lex
 from xcc.parser import parse
-from xcc.sema import Scope, SemaError, analyze
+from xcc.sema import Analyzer, Scope, SemaError, analyze
 from xcc.types import CHAR, INT, LLONG, LONG, SHORT, UCHAR, UINT, ULLONG, ULONG, USHORT, Type
 
 
@@ -291,6 +291,31 @@ class SemaTests(unittest.TestCase):
         expr = _body(unit.functions[0]).statements[0].value
         assert expr is not None
         self.assertIs(sema.type_map.get(expr), INT)
+
+    def test_int_literal_suffix_typemap(self) -> None:
+        cases = [
+            ("1", INT),
+            ("1u", UINT),
+            ("1L", LONG),
+            ("1Ul", ULONG),
+            ("1ll", LLONG),
+            ("1LLU", ULLONG),
+        ]
+        for literal, expected in cases:
+            with self.subTest(literal=literal):
+                unit = parse(list(lex(f"int main(){{return {literal};}}")))
+                sema = analyze(unit)
+                expr = _body(unit.functions[0]).statements[0].value
+                assert expr is not None
+                self.assertIs(sema.type_map.get(expr), expected)
+
+    def test_enum_member_non_decimal_constant_expression_values(self) -> None:
+        unit = parse(list(lex("int main(){enum E { A=0x10, B=010, C=A+B }; return C;}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["main"]
+        self.assertEqual(getattr(func_symbol.locals["A"], "value"), 16)
+        self.assertEqual(getattr(func_symbol.locals["B"], "value"), 8)
+        self.assertEqual(getattr(func_symbol.locals["C"], "value"), 24)
 
     def test_string_literal_typemap(self) -> None:
         unit = parse(list(lex('int main(){"abc";return 0;}')))
@@ -1598,6 +1623,29 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Unsupported expression")
 
+    def test_invalid_integer_literal_expression_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt([ExprStmt(IntLiteral("1uu"))]),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid integer literal")
+
+    def test_parse_int_literal_helper_rejects_invalid_forms(self) -> None:
+        analyzer = Analyzer()
+        self.assertIsNone(analyzer._parse_int_literal(None))
+        self.assertIsNone(analyzer._parse_int_literal("1uu"))
+        self.assertIsNone(analyzer._parse_int_literal("0xU"))
+        self.assertIsNone(analyzer._parse_int_literal("08"))
+        self.assertIsNone(analyzer._parse_int_literal("abc"))
+
     def test_duplicate_declaration(self) -> None:
         unit = parse(list(lex("int main(){int x; int x; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -2017,11 +2065,15 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "case value is not integer constant")
 
-    def test_non_decimal_case_constant_error(self) -> None:
-        unit = parse(list(lex("int main(){switch(0){case 0x10:return 0;}}")))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "case value is not integer constant")
+    def test_non_decimal_case_constant_ok(self) -> None:
+        unit = parse(list(lex("int main(){switch(0){case 0x10:return 0;case 010:return 1;default:return 2;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_suffixed_case_constant_ok(self) -> None:
+        unit = parse(list(lex("int main(){switch(0){case 0x10u:return 0;case 077ULL:return 1;default:return 2;}}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_binary_case_constant_ok(self) -> None:
         source = (
