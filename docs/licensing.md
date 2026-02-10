@@ -16,6 +16,12 @@
 - Maintain a log of external sources used for design decisions.
 - Add explicit references in documentation when a specification is consulted.
 
+## LLVM/Clang test fixtures
+
+- Curated test fixtures copied from `llvm/llvm-project` are allowed under Apache-2.0 with LLVM exceptions.
+- Keep fixture provenance pinned by commit in `tests/external/clang/manifest.json`.
+- Keep vendored fixture files byte-identical to upstream and track checksums.
+
 ## References
 
 - ShivyC (PyPI metadata and project description).

@@ -72,7 +72,7 @@ omit = [
 
 [tool.tox]
 requires = ["tox>=4.34.1", "tox-docker>=5.0.0", "tox-uv>=1.29.0"]
-env_list = ["py311", "py312", "py313", "py313t", "py314", "py314t", "pypy311", "lint", "type"]
+env_list = ["py311", "py312", "py313", "py313t", "py314", "py314t", "pypy311", "clang_suite", "lint", "type"]
 skip_missing_interpreters = true
 
 [tool.tox.env_run_base]
@@ -92,6 +92,11 @@ runner = "uv-venv-lock-runner"
 dependency_groups = ["dev"]
 package = "skip"
 commands = [["ty", "check", "src"]]
+
+[tool.tox.env.clang_suite]
+description = "Run the curated LLVM/Clang fixture subset"
+package = "skip"
+commands = [["python", "-m", "unittest", "-v", "tests.test_clang_suite"]]
 
 [tool.tox.env.docker_glibc]
 description = "Run unit tests inside a glibc container via tox-docker"
