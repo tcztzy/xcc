@@ -265,8 +265,7 @@
       "id": "sema-warn-null-long-long-macro",
       "upstream": "clang/test/Sema/warn-null.c",
       "fixture": "tests/external/clang/fixtures/Sema/warn-null.c",
-      "expect": "sema",
-      "message_contains": "Undeclared identifier: SOME_ADDR",
+      "expect": "ok",
       "sha256": "6e0e9d9f9bfb7fd2712c15f415411da0269b36f92c6e1f065ba72263464cd74b"
     },
     {

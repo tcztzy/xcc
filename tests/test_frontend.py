@@ -44,6 +44,32 @@ class FrontendTests(unittest.TestCase):
         result = compile_source(source, filename="pp.c")
         self.assertEqual(result.unit.functions[0].name, "main")
 
+    def test_compile_source_expands_object_like_preprocessor_define(self) -> None:
+        source = (
+            "#define SOME_ADDR (unsigned long long)0\n"
+            "int *p = 0;\n"
+            "void f(void){p = SOME_ADDR;}\n"
+        )
+        result = compile_source(source, filename="pp.c")
+        self.assertEqual(result.unit.functions[0].name, "f")
+
+    def test_compile_source_function_like_preprocessor_define_is_not_expanded(self) -> None:
+        source = "#define ID(x) x\nint main(void){return ID(1);}\n"
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(source, filename="pp.c")
+        self.assertEqual(ctx.exception.diagnostic.stage, "sema")
+        self.assertIn("Undeclared function: ID", ctx.exception.diagnostic.message)
+
+    def test_compile_source_tolerates_empty_define_directive(self) -> None:
+        source = "#define\nint main(void){return 0;}\n"
+        result = compile_source(source, filename="pp.c")
+        self.assertEqual(result.unit.functions[0].name, "main")
+
+    def test_compile_source_tolerates_invalid_define_identifier(self) -> None:
+        source = "#define 1ZERO 0\nint main(void){return 0;}\n"
+        result = compile_source(source, filename="pp.c")
+        self.assertEqual(result.unit.functions[0].name, "main")
+
     def test_compile_source_ignores_gnu_asm_statements_and_labels(self) -> None:
         source = (
             'asm("INST r1, 0");\n'
