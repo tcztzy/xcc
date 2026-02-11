@@ -32,6 +32,7 @@ from xcc.ast import (
     Param,
     ReturnStmt,
     SizeofExpr,
+    StatementExpr,
     Stmt,
     StringLiteral,
     SubscriptExpr,
@@ -1093,11 +1094,19 @@ class Parser:
             assert isinstance(token.lexeme, str)
             return Identifier(token.lexeme)
         if self._check_punct("("):
+            if self._peek_punct("{"):
+                return self._parse_statement_expr()
             self._advance()
             expr = self._parse_expression()
             self._expect_punct(")")
             return expr
         raise ParserError("Unexpected token", token)
+
+    def _parse_statement_expr(self) -> StatementExpr:
+        self._expect_punct("(")
+        body = self._parse_compound_stmt()
+        self._expect_punct(")")
+        return StatementExpr(body)
 
     def _parse_string_literal(self) -> StringLiteral:
         token = self._expect(TokenKind.STRING_LITERAL)

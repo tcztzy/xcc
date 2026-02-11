@@ -32,6 +32,7 @@ from xcc.ast import (
     Param,
     ReturnStmt,
     SizeofExpr,
+    StatementExpr,
     Stmt,
     StringLiteral,
     SubscriptExpr,
@@ -199,6 +200,7 @@ class Analyzer:
         self._switch_stack: list[SwitchContext] = []
         self._function_labels: set[str] = set()
         self._pending_goto_labels: list[str] = []
+        self._current_return_type: Type | None = None
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]
@@ -258,12 +260,17 @@ class Analyzer:
         scope = Scope(self._file_scope)
         self._function_labels = set()
         self._pending_goto_labels = []
-        self._define_params(func.params, scope)
-        self._analyze_compound(func.body, scope, return_type)
-        for label in self._pending_goto_labels:
-            if label not in self._function_labels:
-                raise SemaError(f"Undefined label: {label}")
-        self._functions[func.name] = FunctionSymbol(func.name, return_type, scope.symbols)
+        previous_return_type = self._current_return_type
+        self._current_return_type = return_type
+        try:
+            self._define_params(func.params, scope)
+            self._analyze_compound(func.body, scope, return_type)
+            for label in self._pending_goto_labels:
+                if label not in self._function_labels:
+                    raise SemaError(f"Undefined label: {label}")
+            self._functions[func.name] = FunctionSymbol(func.name, return_type, scope.symbols)
+        finally:
+            self._current_return_type = previous_return_type
 
     def _define_params(self, params: list[Param], scope: Scope) -> None:
         for param in params:
@@ -921,6 +928,20 @@ class Analyzer:
             target_type = VOID.pointer_to()
             self._type_map.set(expr, target_type)
             return target_type
+        if isinstance(expr, StatementExpr):
+            if self._current_return_type is None:
+                raise SemaError("Statement expression outside of a function")
+            inner_scope = Scope(scope)
+            result_type: Type = VOID
+            for statement in expr.body.statements:
+                if isinstance(statement, ExprStmt):
+                    analyzed_type = self._analyze_expr(statement.expr, inner_scope)
+                    result_type = self._decay_array_value(analyzed_type)
+                    continue
+                self._analyze_stmt(statement, inner_scope, self._current_return_type)
+                result_type = VOID
+            self._type_map.set(expr, result_type)
+            return result_type
         if isinstance(expr, SubscriptExpr):
             base_type = self._analyze_expr(expr.base, scope)
             index_type = self._analyze_expr(expr.index, scope)

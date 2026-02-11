@@ -114,10 +114,8 @@
       "id": "parser-bad-control",
       "upstream": "clang/test/Parser/bad-control.c",
       "fixture": "tests/external/clang/fixtures/Parser/bad-control.c",
-      "expect": "parse",
-      "message_contains": "Unexpected token",
-      "line": 12,
-      "column": 11,
+      "expect": "sema",
+      "message_contains": "break not in loop",
       "sha256": "2bada42bcaded3ad1b56ac88ba4d96ffca79a35133e0cd4673ccce520f8649da"
     },
     {

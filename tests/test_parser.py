@@ -32,6 +32,7 @@ from xcc.ast import (
     Param,
     ReturnStmt,
     SizeofExpr,
+    StatementExpr,
     StringLiteral,
     SubscriptExpr,
     SwitchStmt,
@@ -425,6 +426,14 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(decl, DeclStmt)
         self.assertIsInstance(decl.init, LabelAddressExpr)
         self.assertEqual(decl.init.label, "done")
+
+    def test_statement_expression_in_for_init(self) -> None:
+        source = "int main(void){for(({int x=0; x;});;); return 0;}"
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ForStmt)
+        self.assertIsInstance(stmt.init, StatementExpr)
+        self.assertEqual(len(stmt.init.body.statements), 2)
 
     def test_goto_requires_label_name(self) -> None:
         with self.assertRaises(ParserError):
