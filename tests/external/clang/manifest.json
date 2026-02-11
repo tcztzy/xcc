@@ -239,10 +239,7 @@
       "id": "sema-warn-absolute-value-header",
       "upstream": "clang/test/Sema/warn-absolute-value-header.c",
       "fixture": "tests/external/clang/fixtures/Sema/warn-absolute-value-header.c",
-      "expect": "parse",
-      "message_contains": "Unsupported type",
-      "line": 11,
-      "column": 48,
+      "expect": "ok",
       "sha256": "54ebcc0d1ac88e89add0415130e4c810205332741a3830fb0059dbba8fe4eb53"
     },
     {
@@ -313,9 +310,9 @@
       "upstream": "clang/test/Sema/warn-absolute-value.c",
       "fixture": "tests/external/clang/fixtures/Sema/warn-absolute-value.c",
       "expect": "parse",
-      "message_contains": "Unsupported type",
-      "line": 8,
-      "column": 1,
+      "message_contains": "Unexpected token",
+      "line": 784,
+      "column": 27,
       "sha256": "4c1a85bf35e67df77a794374c136291fba89657a6b5729ec2f8e9b299f7e415b"
     },
     {

@@ -30,7 +30,22 @@ from xcc.ast import (
 from xcc.lexer import lex
 from xcc.parser import parse
 from xcc.sema import Analyzer, Scope, SemaError, analyze
-from xcc.types import CHAR, INT, LLONG, LONG, SHORT, UCHAR, UINT, ULLONG, ULONG, USHORT, Type
+from xcc.types import (
+    CHAR,
+    DOUBLE,
+    FLOAT,
+    INT,
+    LLONG,
+    LONG,
+    LONGDOUBLE,
+    SHORT,
+    UCHAR,
+    UINT,
+    ULLONG,
+    ULONG,
+    USHORT,
+    Type,
+)
 
 
 def _body(func):
@@ -50,6 +65,9 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ULLONG), "unsigned long long")
         self.assertEqual(str(CHAR), "char")
         self.assertEqual(str(UCHAR), "unsigned char")
+        self.assertEqual(str(FLOAT), "float")
+        self.assertEqual(str(DOUBLE), "double")
+        self.assertEqual(str(LONGDOUBLE), "long double")
         array = Type("int").array_of(4)
         self.assertEqual(str(array), "int[4]")
         pointer = array.pointer_to()
@@ -611,6 +629,26 @@ class SemaTests(unittest.TestCase):
         func_symbol = sema.functions["add"]
         self.assertIn("a", func_symbol.locals)
         self.assertIn("b", func_symbol.locals)
+
+    def test_floating_function_signature(self) -> None:
+        unit = parse(list(lex("float id(float x){return x;}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["id"]
+        self.assertEqual(func_symbol.return_type, FLOAT)
+        self.assertEqual(func_symbol.locals["x"].type_, FLOAT)
+
+    def test_integer_argument_converts_to_floating_parameter(self) -> None:
+        source = "float id(float x){return x;} int main(void){return (int)id(1);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_long_double_function_signature(self) -> None:
+        unit = parse(list(lex("long double id(long double x){return x;}")))
+        sema = analyze(unit)
+        func_symbol = sema.functions["id"]
+        self.assertEqual(func_symbol.return_type, LONGDOUBLE)
+        self.assertEqual(func_symbol.locals["x"].type_, LONGDOUBLE)
 
     def test_void_pointer_parameter_is_allowed(self) -> None:
         unit = parse(list(lex("int f(void *p){return 0;}")))

@@ -44,7 +44,23 @@ from xcc.ast import (
     UpdateExpr,
     WhileStmt,
 )
-from xcc.types import CHAR, INT, LLONG, LONG, SHORT, UCHAR, UINT, ULLONG, ULONG, USHORT, VOID, Type
+from xcc.types import (
+    CHAR,
+    DOUBLE,
+    FLOAT,
+    INT,
+    LLONG,
+    LONG,
+    LONGDOUBLE,
+    SHORT,
+    UCHAR,
+    UINT,
+    ULLONG,
+    ULONG,
+    USHORT,
+    VOID,
+    Type,
+)
 
 _HEX_DIGITS = "0123456789abcdefABCDEF"
 _OCTAL_DIGITS = "01234567"
@@ -61,6 +77,9 @@ _BASE_TYPE_SIZES = {
     "unsigned long": 8,
     "long long": 8,
     "unsigned long long": 8,
+    "float": 4,
+    "double": 8,
+    "long double": 16,
 }
 _SIMPLE_ESCAPES = {
     "'": ord("'"),
@@ -396,6 +415,12 @@ class Analyzer:
             return LLONG
         if type_spec.name == "unsigned long long" and not type_spec.declarator_ops:
             return ULLONG
+        if type_spec.name == "float" and not type_spec.declarator_ops:
+            return FLOAT
+        if type_spec.name == "double" and not type_spec.declarator_ops:
+            return DOUBLE
+        if type_spec.name == "long double" and not type_spec.declarator_ops:
+            return LONGDOUBLE
         if type_spec.name == "unsigned int" and not type_spec.declarator_ops:
             return UINT
         if type_spec.name == "void" and not type_spec.declarator_ops:
@@ -522,6 +547,12 @@ class Analyzer:
     def _is_integer_type(self, type_: Type) -> bool:
         return type_ in (INT, UINT, SHORT, USHORT, LONG, ULONG, LLONG, ULLONG, CHAR, UCHAR)
 
+    def _is_floating_type(self, type_: Type) -> bool:
+        return type_ in (FLOAT, DOUBLE, LONGDOUBLE)
+
+    def _is_arithmetic_type(self, type_: Type) -> bool:
+        return self._is_integer_type(type_) or self._is_floating_type(type_)
+
     def _is_void_pointer_type(self, type_: Type) -> bool:
         return type_.pointee() == VOID
 
@@ -534,7 +565,7 @@ class Analyzer:
     def _is_assignment_compatible(self, target_type: Type, value_type: Type) -> bool:
         if target_type == value_type:
             return True
-        if self._is_integer_type(target_type) and self._is_integer_type(value_type):
+        if self._is_arithmetic_type(target_type) and self._is_arithmetic_type(value_type):
             return True
         if target_type.pointee() is None or value_type.pointee() is None:
             return False
@@ -650,7 +681,7 @@ class Analyzer:
         return None
 
     def _is_scalar_type(self, type_: Type) -> bool:
-        return self._is_integer_type(type_) or (
+        return self._is_arithmetic_type(type_) or (
             bool(type_.declarator_ops) and type_.declarator_ops[0][0] == "ptr"
         )
 
