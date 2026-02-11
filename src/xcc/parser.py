@@ -51,8 +51,9 @@ DeclaratorOp = tuple[str, int | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
 ASSIGNMENT_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|=")
 INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
-SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | {"void"}
-PAREN_TYPE_NAME_KEYWORDS = SIMPLE_TYPE_SPEC_KEYWORDS | {"enum", "struct", "union"}
+FLOATING_TYPE_KEYWORDS = {"float", "double"}
+SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | FLOATING_TYPE_KEYWORDS | {"void"}
+PAREN_TYPE_NAME_KEYWORDS = SIMPLE_TYPE_SPEC_KEYWORDS | {"enum", "struct", "union", "_Complex"}
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 EXTERNAL_STATEMENT_KEYWORDS = {
     "break",
@@ -82,6 +83,9 @@ _BASE_TYPE_SIZES = {
     "unsigned long": 8,
     "long long": 8,
     "unsigned long long": 8,
+    "float": 4,
+    "double": 8,
+    "long double": 16,
     "enum": 4,
 }
 _EXTENSION_MARKER = "__extension__"
@@ -270,12 +274,38 @@ class Parser:
             self._advance()
             return type_spec
         token = self._expect(TokenKind.KEYWORD)
+        if token.lexeme == "_Complex":
+            if self._check_keyword("float") or self._check_keyword("double"):
+                complex_base = self._advance()
+                assert isinstance(complex_base.lexeme, str)
+                pointer_depth = self._parse_pointer_depth()
+                return TypeSpec(str(complex_base.lexeme), pointer_depth)
+            if (
+                self._check_keyword("long")
+                and self._peek().kind == TokenKind.KEYWORD
+                and self._peek().lexeme == "double"
+            ):
+                self._advance()
+                self._advance()
+                pointer_depth = self._parse_pointer_depth()
+                return TypeSpec("long double", pointer_depth)
+            raise ParserError("Unsupported type", token)
+        if token.lexeme in FLOATING_TYPE_KEYWORDS:
+            assert isinstance(token.lexeme, str)
+            type_name = str(token.lexeme)
+            self._consume_optional_complex_specifier()
+            pointer_depth = self._parse_pointer_depth()
+            return TypeSpec(type_name, pointer_depth)
         if token.lexeme in SIMPLE_TYPE_SPEC_KEYWORDS:
             assert isinstance(token.lexeme, str)
             if token.lexeme == "void":
                 pointer_depth = self._parse_pointer_depth()
                 return TypeSpec("void", pointer_depth)
             type_name = self._parse_integer_type_spec(token.lexeme, token)
+            if type_name == "long" and self._check_keyword("double"):
+                self._advance()
+                type_name = "long double"
+            self._consume_optional_complex_specifier()
             pointer_depth = self._parse_pointer_depth()
             return TypeSpec(type_name, pointer_depth)
         if token.lexeme == "enum":
@@ -297,6 +327,10 @@ class Parser:
                 record_members=record_members,
             )
         raise ParserError("Unsupported type", token)
+
+    def _consume_optional_complex_specifier(self) -> None:
+        if self._check_keyword("_Complex"):
+            self._advance()
 
     def _parse_integer_type_spec(self, first_keyword: str, first_token: Token) -> str:
         signedness: str | None = None
@@ -512,10 +546,13 @@ class Parser:
             self._check_keyword("int")
             or self._check_keyword("char")
             or self._check_keyword("void")
+            or self._check_keyword("float")
+            or self._check_keyword("double")
             or self._check_keyword("short")
             or self._check_keyword("long")
             or self._check_keyword("signed")
             or self._check_keyword("unsigned")
+            or self._check_keyword("_Complex")
             or self._check_keyword("enum")
             or self._check_keyword("struct")
             or self._check_keyword("union")

@@ -129,6 +129,22 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(func.return_type, TypeSpec("unsigned long long"))
         self.assertEqual(func.params, [Param(TypeSpec("unsigned long long"), "x")])
 
+    def test_floating_function_signature(self) -> None:
+        unit = parse(list(lex("double f(float x, long double y){return x;}")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("double"))
+        self.assertEqual(func.params, [Param(TypeSpec("float"), "x"), Param(TypeSpec("long double"), "y")])
+
+    def test_complex_specifier_is_ignored_in_type_spec(self) -> None:
+        unit = parse(list(lex("float _Complex cabsf(float _Complex x);")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("float"))
+        self.assertEqual(func.params, [Param(TypeSpec("float"), "x")])
+
+    def test_complex_specifier_requires_floating_base_type(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(void){_Complex int x; return 0;}")))
+
     def test_extension_marker_allows_file_scope_typedef(self) -> None:
         source = "__extension__ typedef struct { long long int quot; long long int rem; } lldiv_t;"
         unit = parse(list(lex(source)))
