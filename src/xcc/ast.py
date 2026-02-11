@@ -229,6 +229,11 @@ class CastExpr(Expr):
 
 
 @dataclass(frozen=True)
+class StatementExpr(Expr):
+    body: CompoundStmt
+
+
+@dataclass(frozen=True)
 class IntLiteral(Expr):
     value: str
 
