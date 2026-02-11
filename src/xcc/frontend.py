@@ -18,11 +18,42 @@ def _blank_line(line: str) -> str:
     return "\n" if line.endswith("\n") else ""
 
 
+_IDENT_RE = re.compile(r"[A-Za-z_]\w*")
+_DEFINE_RE = re.compile(r"^\s*#\s*define\b")
+
+
+def _parse_object_like_define(line: str) -> tuple[str, str] | None:
+    if _DEFINE_RE.match(line) is None:
+        return None
+    define_body = line.rstrip("\n")
+    define_body = define_body[define_body.find("define") + len("define") :].lstrip()
+    if not define_body:
+        return None
+    name_match = _IDENT_RE.match(define_body)
+    if name_match is None:
+        return None
+    name = name_match.group(0)
+    replacement = define_body[name_match.end() :]
+    if replacement.startswith("("):
+        return None
+    return name, replacement.strip()
+
+
+def _expand_object_like_macros(line: str, macros: dict[str, str]) -> str:
+    if not macros:
+        return line
+    names: list[str] = list(macros)
+    names.sort(key=len, reverse=True)
+    pattern = re.compile(r"\b(?:" + "|".join(re.escape(name) for name in names) + r")\b")
+    return pattern.sub(lambda match: macros[match.group(0)], line)
+
+
 def _strip_preprocessor_directives(source: str) -> str:
     lines = source.splitlines(keepends=True)
     if not lines:
         return source
     stripped_lines: list[str] = []
+    macros: dict[str, str] = {}
     in_directive_continuation = False
     for line in lines:
         if in_directive_continuation:
@@ -30,10 +61,13 @@ def _strip_preprocessor_directives(source: str) -> str:
             in_directive_continuation = line.rstrip().endswith("\\")
             continue
         if line.lstrip().startswith("#"):
+            define = _parse_object_like_define(line)
+            if define is not None:
+                macros[define[0]] = define[1]
             stripped_lines.append(_blank_line(line))
             in_directive_continuation = line.rstrip().endswith("\\")
             continue
-        stripped_lines.append(line)
+        stripped_lines.append(_expand_object_like_macros(line, macros))
     return "".join(stripped_lines)
 
 
