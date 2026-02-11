@@ -23,6 +23,46 @@ class FrontendTests(unittest.TestCase):
         self.assertEqual(result.unit.functions[0].name, "main")
         self.assertIn("main", result.sema.functions)
 
+    def test_compile_source_empty_translation_unit(self) -> None:
+        result = compile_source("", filename="empty.c")
+        self.assertEqual(result.filename, "empty.c")
+        self.assertEqual(len(result.tokens), 1)
+        self.assertEqual(result.tokens[0].kind, TokenKind.EOF)
+        self.assertEqual(result.unit.functions, [])
+
+    def test_compile_source_ignores_preprocessor_directives(self) -> None:
+        source = "#define ZERO 0\nint main(void){\n#if ZERO\nreturn 1;\n#endif\nreturn 0;\n}\n"
+        result = compile_source(source, filename="pp.c")
+        self.assertEqual(result.unit.functions[0].name, "main")
+
+    def test_compile_source_ignores_multiline_preprocessor_directive(self) -> None:
+        source = (
+            "#define SUM(a, b) \\\n"
+            "  ((a) + (b))\n"
+            "int main(void){return 0;}\n"
+        )
+        result = compile_source(source, filename="pp.c")
+        self.assertEqual(result.unit.functions[0].name, "main")
+
+    def test_compile_source_ignores_gnu_asm_statements_and_labels(self) -> None:
+        source = (
+            'asm("INST r1, 0");\n'
+            'void foo(void) __asm("__foo_func");\n'
+            'int foo1 asm("bar1") = 0;\n'
+            "void f(void) {\n"
+            "  long long x = 0, y = 1;\n"
+            "  asm volatile(\n"
+            '    "INST %0, %1"\n'
+            '    : "=r"(x)\n'
+            '    : "r"(y)\n'
+            "  );\n"
+            '  asm ("");\n'
+            "}\n"
+        )
+        result = compile_source(source, filename="asm.c")
+        self.assertEqual(result.unit.functions[0].name, "foo")
+        self.assertEqual(result.unit.functions[1].name, "f")
+
     def test_compile_source_lex_error(self) -> None:
         with self.assertRaises(FrontendError) as ctx:
             compile_source("@", filename="bad.c")

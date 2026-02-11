@@ -1,3 +1,4 @@
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,53 @@ from xcc.sema import SemaError, SemaUnit, analyze
 
 def _trim_location_suffix(message: str, line: int, column: int) -> str:
     return message.removesuffix(f" at {line}:{column}")
+
+
+def _blank_line(line: str) -> str:
+    return "\n" if line.endswith("\n") else ""
+
+
+def _strip_preprocessor_directives(source: str) -> str:
+    lines = source.splitlines(keepends=True)
+    if not lines:
+        return source
+    stripped_lines: list[str] = []
+    in_directive_continuation = False
+    for line in lines:
+        if in_directive_continuation:
+            stripped_lines.append(_blank_line(line))
+            in_directive_continuation = line.rstrip().endswith("\\")
+            continue
+        if line.lstrip().startswith("#"):
+            stripped_lines.append(_blank_line(line))
+            in_directive_continuation = line.rstrip().endswith("\\")
+            continue
+        stripped_lines.append(line)
+    return "".join(stripped_lines)
+
+
+_ASM_PREFIX_RE = re.compile(r"^\s*(?:__asm__|__asm|asm)\b")
+_ASM_LABEL_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\s*\([^;\n]*\)")
+
+
+def _strip_gnu_asm_extensions(source: str) -> str:
+    lines = source.splitlines(keepends=True)
+    if not lines:
+        return source
+    stripped_lines: list[str] = []
+    in_asm_statement = False
+    for line in lines:
+        if in_asm_statement:
+            stripped_lines.append(_blank_line(line))
+            if ";" in line:
+                in_asm_statement = False
+            continue
+        if _ASM_PREFIX_RE.match(line):
+            stripped_lines.append(_blank_line(line))
+            in_asm_statement = ";" not in line
+            continue
+        stripped_lines.append(_ASM_LABEL_RE.sub("", line))
+    return "".join(stripped_lines)
 
 
 @dataclass(frozen=True)
@@ -51,8 +99,9 @@ def read_source(path: str, *, stdin: TextIO | None = None) -> tuple[str, str]:
 
 
 def compile_source(source: str, *, filename: str = "<input>") -> FrontendResult:
+    normalized_source = _strip_gnu_asm_extensions(_strip_preprocessor_directives(source))
     try:
-        tokens = lex(source)
+        tokens = lex(normalized_source)
     except LexerError as error:
         message = _trim_location_suffix(str(error), error.line, error.column)
         diagnostic = Diagnostic("lex", filename, message, error.line, error.column)
