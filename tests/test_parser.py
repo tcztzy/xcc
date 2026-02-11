@@ -22,8 +22,10 @@ from xcc.ast import (
     FunctionDef,
     GotoStmt,
     Identifier,
+    IndirectGotoStmt,
     IfStmt,
     IntLiteral,
+    LabelAddressExpr,
     LabelStmt,
     MemberExpr,
     NullStmt,
@@ -185,6 +187,21 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int f(signed long long value){return value;}")))
         func = unit.functions[0]
         self.assertEqual(func.params, [Param(TypeSpec("long long"), "value")])
+
+    def test_type_qualifiers_are_ignored_in_declarations(self) -> None:
+        unit = parse(list(lex("int main(void){void const* p; int *const q; return 0;}")))
+        statements = _body(unit.functions[0]).statements
+        self.assertIsInstance(statements[0], DeclStmt)
+        self.assertIsInstance(statements[1], DeclStmt)
+        self.assertEqual(statements[0].type_spec, TypeSpec("void", pointer_depth=1))
+        self.assertEqual(statements[1].type_spec, TypeSpec("int", pointer_depth=1))
+
+    def test_sizeof_parenthesized_type_name_allows_type_qualifier(self) -> None:
+        unit = parse(list(lex("int main(void){return sizeof(const int*);}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        self.assertIsInstance(stmt.value, SizeofExpr)
+        self.assertEqual(stmt.value.type_spec, TypeSpec("int", pointer_depth=1))
 
     def test_void_parameter_list(self) -> None:
         unit = parse(list(lex("int main(void){return 0;}")))
@@ -394,6 +411,20 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(body[0], GotoStmt)
         self.assertEqual(body[0].label, "done")
         self.assertIsInstance(body[1], LabelStmt)
+
+    def test_indirect_goto_statement(self) -> None:
+        unit = parse(list(lex("int main(void){void *target=0; goto *target; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, IndirectGotoStmt)
+        self.assertIsInstance(stmt.target, Identifier)
+        self.assertEqual(stmt.target.name, "target")
+
+    def test_label_address_expression(self) -> None:
+        unit = parse(list(lex("int main(void){void *target = &&done; goto *target; done: return 0;}")))
+        decl = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(decl, DeclStmt)
+        self.assertIsInstance(decl.init, LabelAddressExpr)
+        self.assertEqual(decl.init.label, "done")
 
     def test_goto_requires_label_name(self) -> None:
         with self.assertRaises(ParserError):

@@ -23,7 +23,9 @@ from xcc.ast import (
     GotoStmt,
     Identifier,
     IfStmt,
+    IndirectGotoStmt,
     IntLiteral,
+    LabelAddressExpr,
     LabelStmt,
     MemberExpr,
     NullStmt,
@@ -837,6 +839,11 @@ class Analyzer:
         if isinstance(stmt, GotoStmt):
             self._pending_goto_labels.append(stmt.label)
             return
+        if isinstance(stmt, IndirectGotoStmt):
+            target_type = self._analyze_expr(stmt.target, scope)
+            if target_type.pointee() is None:
+                raise SemaError("Indirect goto target must be pointer")
+            return
         if isinstance(stmt, CompoundStmt):
             inner_scope = Scope(scope)
             self._analyze_compound(stmt, inner_scope, return_type)
@@ -910,6 +917,10 @@ class Analyzer:
             )
             self._type_map.set(expr, function_type)
             return function_type
+        if isinstance(expr, LabelAddressExpr):
+            target_type = VOID.pointer_to()
+            self._type_map.set(expr, target_type)
+            return target_type
         if isinstance(expr, SubscriptExpr):
             base_type = self._analyze_expr(expr.base, scope)
             index_type = self._analyze_expr(expr.index, scope)

@@ -23,7 +23,9 @@ from xcc.ast import (
     GotoStmt,
     Identifier,
     IfStmt,
+    IndirectGotoStmt,
     IntLiteral,
+    LabelAddressExpr,
     LabelStmt,
     MemberExpr,
     NullStmt,
@@ -50,6 +52,7 @@ ASSIGNMENT_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "
 INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
 SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | {"void"}
 PAREN_TYPE_NAME_KEYWORDS = SIMPLE_TYPE_SPEC_KEYWORDS | {"enum", "struct", "union"}
+TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 EXTERNAL_STATEMENT_KEYWORDS = {
     "break",
     "case",
@@ -256,6 +259,7 @@ class Parser:
         return Param(declarator_type, name)
 
     def _parse_type_spec(self) -> TypeSpec:
+        self._skip_type_qualifiers()
         token = self._current()
         if token.kind == TokenKind.IDENT:
             assert isinstance(token.lexeme, str)
@@ -352,9 +356,11 @@ class Parser:
         return "unsigned int" if signedness == "unsigned" else "int"
 
     def _parse_pointer_depth(self) -> int:
+        self._skip_type_qualifiers()
         pointer_depth = 0
         while self._check_punct("*"):
             self._advance()
+            self._skip_type_qualifiers()
             pointer_depth += 1
         return pointer_depth
 
@@ -512,6 +518,9 @@ class Parser:
             or self._check_keyword("enum")
             or self._check_keyword("struct")
             or self._check_keyword("union")
+            or self._check_keyword("const")
+            or self._check_keyword("volatile")
+            or self._check_keyword("restrict")
             or self._check_keyword("typedef")
         ):
             return True
@@ -610,8 +619,13 @@ class Parser:
         body = self._parse_statement()
         return LabelStmt(token.lexeme, body)
 
-    def _parse_goto_stmt(self) -> GotoStmt:
+    def _parse_goto_stmt(self) -> Stmt:
         self._advance()
+        if self._check_punct("*"):
+            self._advance()
+            target = self._parse_expression()
+            self._expect_punct(";")
+            return IndirectGotoStmt(target)
         label = self._expect(TokenKind.IDENT)
         assert isinstance(label.lexeme, str)
         self._expect_punct(";")
@@ -806,6 +820,11 @@ class Parser:
             op = str(self._advance().lexeme)
             operand = self._parse_unary()
             return UpdateExpr(op, operand, False)
+        if self._check_punct("&&"):
+            self._advance()
+            label = self._expect(TokenKind.IDENT)
+            assert isinstance(label.lexeme, str)
+            return LabelAddressExpr(label.lexeme)
         if (
             self._check_punct("+")
             or self._check_punct("-")
@@ -844,7 +863,11 @@ class Parser:
     def _is_parenthesized_type_name_start(self) -> bool:
         if not self._check_punct("("):
             return False
-        token = self._peek()
+        index = self._index + 1
+        token = self._tokens[min(index, len(self._tokens) - 1)]
+        while token.kind == TokenKind.KEYWORD and token.lexeme in TYPE_QUALIFIER_KEYWORDS:
+            index += 1
+            token = self._tokens[min(index, len(self._tokens) - 1)]
         if token.kind == TokenKind.KEYWORD:
             return str(token.lexeme) in PAREN_TYPE_NAME_KEYWORDS
         if token.kind == TokenKind.IDENT and isinstance(token.lexeme, str):
@@ -914,9 +937,11 @@ class Parser:
         self,
         allow_abstract: bool,
     ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
+        self._skip_type_qualifiers()
         pointer_count = 0
         while self._check_punct("*"):
             self._advance()
+            self._skip_type_qualifiers()
             pointer_count += 1
         name, ops = self._parse_direct_declarator(allow_abstract)
         if pointer_count:
@@ -1142,6 +1167,13 @@ class Parser:
 
     def _skip_extension_markers(self) -> None:
         while self._check_keyword(_EXTENSION_MARKER):
+            self._advance()
+
+    def _skip_type_qualifiers(self) -> None:
+        while (
+            self._current().kind == TokenKind.KEYWORD
+            and self._current().lexeme in TYPE_QUALIFIER_KEYWORDS
+        ):
             self._advance()
 
     def _is_assignment_operator(self) -> bool:
