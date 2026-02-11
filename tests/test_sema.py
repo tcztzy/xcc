@@ -808,6 +808,24 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_indirect_goto_pointer_operand_ok(self) -> None:
+        source = "int main(void){void const *target=0; goto *target; return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_indirect_goto_label_address_operand_ok(self) -> None:
+        source = "int main(void){void *target = &&done; goto *target; done: return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_indirect_goto_requires_pointer_operand(self) -> None:
+        unit = parse(list(lex("int main(void){long long x=0; goto *x; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Indirect goto target must be pointer")
+
     def test_goto_undefined_label_error(self) -> None:
         unit = parse(list(lex("int main(){goto missing; return 0;}")))
         with self.assertRaises(SemaError) as ctx:

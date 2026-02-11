@@ -133,6 +133,11 @@ class GotoStmt(Stmt):
 
 
 @dataclass(frozen=True)
+class IndirectGotoStmt(Stmt):
+    target: "Expr"
+
+
+@dataclass(frozen=True)
 class BreakStmt(Stmt):
     pass
 
@@ -241,6 +246,11 @@ class StringLiteral(Expr):
 @dataclass(frozen=True)
 class Identifier(Expr):
     name: str
+
+
+@dataclass(frozen=True)
+class LabelAddressExpr(Expr):
+    label: str
 
 
 @dataclass(frozen=True)
