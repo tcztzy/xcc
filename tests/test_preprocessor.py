@@ -382,6 +382,30 @@ class PreprocessorTests(unittest.TestCase):
             preprocess_source("#line 0\n", filename="main.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0104")
 
+    def test_predefined_standard_macros(self) -> None:
+        result = preprocess_source(
+            "int s = __STDC__;\nlong v = __STDC_VERSION__;\n",
+            filename="main.c",
+        )
+        self.assertIn("int s = 1 ;", result.source)
+        self.assertIn("long v = 201112L ;", result.source)
+
+    def test_predefined_file_and_line_macros(self) -> None:
+        result = preprocess_source(
+            'const char *f = __FILE__;\nint l = __LINE__;\n#line 42 "mapped.c"\nint m = __LINE__;\n',
+            filename="main.c",
+        )
+        self.assertIn('const char * f = "main.c" ;', result.source)
+        self.assertIn("int l = 2 ;", result.source)
+        self.assertIn("int m = 42 ;", result.source)
+        self.assertEqual(result.line_map[-1], ("mapped.c", 42))
+
+    def test_c11_rejects_gnu_asm_extensions(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source('asm("inst");\n', filename="main.c", options=FrontendOptions(std="c11"))
+        self.assertEqual(ctx.exception.code, "XCC-PP-0105")
+        self.assertEqual(str(ctx.exception), "GNU asm extension is not allowed in c11 at main.c:1:1")
+
     def test_include_trace_and_macro_table(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -563,6 +587,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "XCC-PP-0201")
 
     def test_strip_gnu_asm_extensions(self) -> None:
+        self.assertEqual(_strip_gnu_asm_extensions(""), "")
         source = (
             'asm("inst");\n'
             'int x __asm("foo") = 0;\n'

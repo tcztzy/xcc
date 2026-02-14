@@ -23,6 +23,12 @@ The `xcc` CLI runs the front end and exits non-zero on diagnostics.
 
 Diagnostics are stage-tagged (`lex`, `parse`, `sema`) and include source coordinates when available.
 
+## Language modes
+
+- `c11` is strict mode. GNU-only constructs are rejected, including statement expressions,
+  computed goto (`goto *expr`, `&&label`), and GNU asm forms.
+- `gnu11` keeps GNU extensions that are currently supported by the front end.
+
 ## Lexer
 
 - Follows C11 tokenization with translation-phase newline normalization, trigraph replacement, and line splicing.

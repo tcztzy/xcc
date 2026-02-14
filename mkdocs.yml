@@ -12,6 +12,7 @@ nav:
   - CPython Compatibility: cpython.md
   - Architecture: architecture.md
   - Front End: frontend.md
+  - Front End C11 Coverage: frontend_c11_coverage.md
   - Back End: backend.md
   - Testing: testing.md
   - Quality: quality.md

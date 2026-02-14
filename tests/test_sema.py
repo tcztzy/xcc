@@ -1701,9 +1701,10 @@ class SemaTests(unittest.TestCase):
                     "double __attribute__((overloadable)) test(double);"
                     "int main(void){double d=({test;})(1.0); return 0;}"
                 )
-            )
+            ),
+            std="gnu11",
         )
-        sema = analyze(unit)
+        sema = analyze(unit, std="gnu11")
         stmt = _body(next(func for func in unit.functions if func.name == "main")).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
         assert stmt.init is not None
@@ -1717,10 +1718,11 @@ class SemaTests(unittest.TestCase):
                     "int __attribute__((overloadable)) test(unsigned long);"
                     "int main(void){return ({test;})(1);}"
                 )
-            )
+            ),
+            std="gnu11",
         )
         with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
+            analyze(unit, std="gnu11")
         self.assertEqual(str(ctx.exception), "Ambiguous overloaded call: test")
 
     def test_conflicting_function_return_type_declaration(self) -> None:
@@ -1783,46 +1785,46 @@ class SemaTests(unittest.TestCase):
 
     def test_indirect_goto_pointer_operand_ok(self) -> None:
         source = "int main(void){void const *target=0; goto *target; return 0;}"
-        unit = parse(list(lex(source)))
-        sema = analyze(unit)
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
         self.assertIn("main", sema.functions)
 
     def test_indirect_goto_label_address_operand_ok(self) -> None:
         source = "int main(void){void *target = &&done; goto *target; done: return 0;}"
-        unit = parse(list(lex(source)))
-        sema = analyze(unit)
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
         self.assertIn("main", sema.functions)
 
     def test_indirect_goto_requires_pointer_operand(self) -> None:
-        unit = parse(list(lex("int main(void){long long x=0; goto *x; return 0;}")))
+        unit = parse(list(lex("int main(void){long long x=0; goto *x; return 0;}")), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
+            analyze(unit, std="gnu11")
         self.assertEqual(str(ctx.exception), "Indirect goto target must be pointer")
 
     def test_statement_expression_break_reports_outside_loop(self) -> None:
         source = "int main(int first){switch(({ if(first){ first=0; break; } 1; })){case 2:return 2;default:return 0;}}"
-        unit = parse(list(lex(source)))
+        unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
+            analyze(unit, std="gnu11")
         self.assertEqual(str(ctx.exception), "break not in loop")
 
     def test_statement_expression_continue_reports_outside_loop(self) -> None:
         source = "int main(void){for(({continue;});;);}"
-        unit = parse(list(lex(source)))
+        unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
+            analyze(unit, std="gnu11")
         self.assertEqual(str(ctx.exception), "continue not in loop")
 
     def test_statement_expression_with_decl_and_value_ok(self) -> None:
         source = "int main(void){int x = ({int y=1; y;}); return x;}"
-        unit = parse(list(lex(source)))
-        sema = analyze(unit)
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
         self.assertIn("main", sema.functions)
 
     def test_statement_expression_outside_function_error(self) -> None:
-        unit = parse(list(lex("int x = ({1;});")))
+        unit = parse(list(lex("int x = ({1;});")), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
+            analyze(unit, std="gnu11")
         self.assertEqual(str(ctx.exception), "Statement expression outside of a function")
 
     def test_goto_undefined_label_error(self) -> None:

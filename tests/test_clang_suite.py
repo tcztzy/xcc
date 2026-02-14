@@ -9,7 +9,7 @@ from xcc.frontend import FrontendError, compile_source
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "tests/external/clang/manifest.json"
-ALLOWED_EXPECTATIONS = {"ok", "lex", "parse", "sema"}
+ALLOWED_EXPECTATIONS = {"ok", "pp", "lex", "parse", "sema"}
 REQUIRED_CASE_KEYS = {"id", "upstream", "fixture", "expect", "sha256"}
 OPTIONAL_CASE_KEYS = {"message_contains", "line", "column"}
 
