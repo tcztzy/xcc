@@ -2,6 +2,8 @@ import unittest
 
 from tests import _bootstrap  # noqa: F401
 from xcc.ast import (
+    AlignofExpr,
+    ArrayDecl,
     AssignExpr,
     BinaryExpr,
     BreakStmt,
@@ -10,6 +12,7 @@ from xcc.ast import (
     CastExpr,
     CharLiteral,
     CompoundStmt,
+    CompoundLiteralExpr,
     ContinueStmt,
     ConditionalExpr,
     CommaExpr,
@@ -18,11 +21,14 @@ from xcc.ast import (
     DefaultStmt,
     DoWhileStmt,
     ExprStmt,
+    FloatLiteral,
     ForStmt,
     FunctionDef,
     GotoStmt,
     Identifier,
     IndirectGotoStmt,
+    InitItem,
+    InitList,
     IfStmt,
     IntLiteral,
     LabelAddressExpr,
@@ -30,12 +36,15 @@ from xcc.ast import (
     MemberExpr,
     NullStmt,
     Param,
+    RecordMemberDecl,
     ReturnStmt,
     SizeofExpr,
+    StaticAssertDecl,
     StatementExpr,
     StringLiteral,
     SubscriptExpr,
     SwitchStmt,
+    GenericExpr,
     TypedefDecl,
     TypeSpec,
     UnaryExpr,
@@ -554,6 +563,14 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr, CharLiteral)
         self.assertEqual(expr.value, "'a'")
 
+    def test_float_literal_expression(self) -> None:
+        unit = parse(list(lex("double main(){return 1.0f;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, FloatLiteral)
+        self.assertEqual(expr.value, "1.0f")
+
     def test_string_literal_expression(self) -> None:
         unit = parse(list(lex('int main(){"hi";return 0;}')))
         stmt = _body(unit.functions[0]).statements[0]
@@ -748,6 +765,47 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertIsInstance(stmt.init, BinaryExpr)
 
+    def test_designated_array_initializer(self) -> None:
+        unit = parse(list(lex("int main(){int a[4] = {[2] = 3}; return a[2];}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        init = stmt.init
+        self.assertIsInstance(init, InitList)
+        self.assertEqual(len(init.items), 1)
+        item = init.items[0]
+        self.assertIsInstance(item, InitItem)
+        self.assertEqual(item.designators, (("index", IntLiteral("2")),))
+        self.assertIsInstance(item.initializer, IntLiteral)
+
+    def test_designated_struct_initializer(self) -> None:
+        source = "int main(){struct S { int x; int y; } s = { .y = 2, .x = 1 }; return s.x + s.y;}"
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        init = stmt.init
+        self.assertIsInstance(init, InitList)
+        self.assertEqual(len(init.items), 2)
+        self.assertEqual(init.items[0].designators, (("member", "y"),))
+        self.assertEqual(init.items[1].designators, (("member", "x"),))
+
+    def test_initializer_list_without_designator(self) -> None:
+        unit = parse(list(lex("int main(){int a[2] = {1, 2}; return a[0];}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        init = stmt.init
+        self.assertIsInstance(init, InitList)
+        self.assertEqual(init.items[0].designators, ())
+
+    def test_initializer_list_allows_trailing_comma(self) -> None:
+        unit = parse(list(lex("int main(){int a[2] = {1,}; return a[0];}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertIsInstance(stmt.init, InitList)
+
+    def test_empty_initializer_list_is_rejected(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){int a[1] = {}; return 0;}")))
+
     def test_tagged_enum_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){enum E { A, B=3, C }; return C;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -915,6 +973,389 @@ class ParserTests(unittest.TestCase):
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("char"))
+
+    def test_bool_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){_Bool flag; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("_Bool"))
+
+    def test_noreturn_function_definition(self) -> None:
+        unit = parse(list(lex("_Noreturn int f(void){return 1;}")))
+        function = unit.functions[0]
+        self.assertEqual(function.name, "f")
+        self.assertEqual(function.return_type, TypeSpec("int"))
+
+    def test_thread_local_file_scope_declaration(self) -> None:
+        unit = parse(list(lex("_Thread_local int g;")))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.type_spec, TypeSpec("int"))
+        self.assertEqual(declaration.name, "g")
+
+    def test_alignas_constant_expression_declaration(self) -> None:
+        unit = parse(list(lex("int main(void){_Alignas(16) int x; return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int"))
+        self.assertEqual(stmt.name, "x")
+        self.assertEqual(stmt.alignment, 16)
+
+    def test_alignas_type_name_declaration(self) -> None:
+        unit = parse(list(lex("int main(void){_Alignas(int) int x; return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int"))
+        self.assertEqual(stmt.name, "x")
+        self.assertEqual(stmt.alignment, 4)
+
+    def test_alignas_rejects_function_definition(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("_Alignas(16) int f(void){return 1;}")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_rejects_function_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("_Alignas(16) int f(void);")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_rejects_typedef_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef _Alignas(16) int I;")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_rejects_parameter_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int f(_Alignas(8) int x){return x;}")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_rejects_file_scope_tag_only_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("_Alignas(16) struct S; int main(void){return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_rejects_block_scope_tag_only_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){_Alignas(16) struct S; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_rejects_named_type_name(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(void){_Alignas(int x) int y; return y;}")))
+
+    def test_alignas_rejects_non_power_of_two_constant(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){_Alignas(3) int x; return x;}")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_rejects_non_positive_constant(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){_Alignas(0) int x; return x;}")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_rejects_void_type_name(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){_Alignas(void) int x; return x;}")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_accepts_constant_expression(self) -> None:
+        unit = parse(list(lex("int main(void){_Alignas(1<<4) int x; return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int"))
+        self.assertEqual(stmt.alignment, 16)
+
+    def test_alignas_uses_stricter_alignment_from_multiple_specifiers(self) -> None:
+        unit = parse(list(lex("int main(void){_Alignas(8) _Alignas(16) int x; return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.alignment, 16)
+
+    def test_alignas_keeps_existing_stricter_alignment(self) -> None:
+        unit = parse(list(lex("int main(void){_Alignas(16) _Alignas(8) int x; return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.alignment, 16)
+
+    def test_alignas_record_member_declaration(self) -> None:
+        unit = parse(list(lex("struct S {_Alignas(16) int x;};")))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.type_spec.record_members[0].name, "x")
+        self.assertEqual(declaration.type_spec.record_members[0].alignment, 16)
+
+    def test_alignas_record_member_uses_stricter_alignment(self) -> None:
+        unit = parse(list(lex("struct S {_Alignas(8) _Alignas(16) int x;};")))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.type_spec.record_members[0].alignment, 16)
+
+    def test_alignas_rejects_member_tag_only_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("struct S {_Alignas(16) struct T;};")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_alignas_rejects_member_function_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("struct S {_Alignas(16) int f(void);};")))
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+
+    def test_record_member_rejects_typedef_specifier(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("struct S { typedef int T; };")))
+        self.assertEqual(ctx.exception.message, "Expected type specifier")
+
+    def test_record_member_rejects_missing_declarator(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("struct S { int; };")))
+        self.assertEqual(ctx.exception.message, "Expected identifier")
+
+    def test_typespec_normalizes_legacy_record_member_with_alignment(self) -> None:
+        record_type = TypeSpec("struct", record_members=((TypeSpec("int"), "x", 16),))
+        self.assertEqual(record_type.record_members[0], RecordMemberDecl(TypeSpec("int"), "x", 16))
+
+    def test_typespec_rejects_invalid_record_member_tuple(self) -> None:
+        with self.assertRaises(TypeError):
+            TypeSpec("struct", record_members=(("x",),))  # type: ignore[arg-type]
+
+    def test_atomic_qualified_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic int value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", is_atomic=True))
+
+    def test_atomic_type_specifier_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic(int) value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", is_atomic=True))
+
+    def test_atomic_type_specifier_pointer_declaration_statement(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic(int) *value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+
+    def test_atomic_qualified_declaration_statement_idempotent(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic _Atomic int value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", is_atomic=True))
+
+    def test_atomic_qualified_over_atomic_type_specifier_is_idempotent(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic _Atomic(int) value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", is_atomic=True))
+
+    def test_atomic_qualified_array_of_atomic_elements_is_allowed(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic int values[2]; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", array_lengths=(2,), is_atomic=True))
+
+    def test_atomic_qualified_typedef_array_is_rejected(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef int Arr[2]; int main(){_Atomic Arr values; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: array")
+
+    def test_atomic_qualified_typedef_function_is_rejected(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef int Fn(void); int main(){_Atomic Fn value; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: function")
+
+    def test_atomic_type_specifier_rejects_typedef_array(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef int Arr[2]; int main(){_Atomic(Arr) values; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: array")
+
+    def test_atomic_type_specifier_rejects_typedef_function(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef int Fn(void); int main(){_Atomic(Fn) value; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: function")
+
+    def test_atomic_type_specifier_rejects_named_type_name(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){_Atomic(int value) x; return 0;}")))
+
+    def test_atomic_type_specifier_rejects_array_type_name(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){_Atomic(int [2]) value; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: array")
+
+    def test_atomic_type_specifier_accepts_pointer_to_function_type_name(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic(int (*)(void)) value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0), ("fn", ((), False))), is_atomic=True),
+        )
+
+    def test_atomic_type_specifier_rejects_atomic_typedef(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef _Atomic(int) A; int main(){_Atomic(A) value; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: atomic")
+
+    def test_atomic_type_specifier_rejects_qualified_typedef_alias(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef const int CI; int main(){_Atomic(CI) value; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: qualified")
+
+    def test_atomic_type_specifier_rejects_transitive_qualified_typedef_alias(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(
+                list(
+                    lex(
+                        "typedef const int CI; typedef CI C2;"
+                        "int main(){_Atomic(C2) value; return 0;}"
+                    )
+                )
+            )
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: qualified")
+
+    def test_atomic_type_specifier_rejects_pointer_qualified_typedef_alias(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef int *const CP; int main(){_Atomic(CP) value; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: qualified")
+
+    def test_atomic_type_specifier_rejects_transitive_pointer_qualified_typedef_alias(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(
+                list(
+                    lex(
+                        "typedef int *const CP; typedef CP C2;"
+                        "int main(){_Atomic(C2) value; return 0;}"
+                    )
+                )
+            )
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: qualified")
+
+    def test_atomic_type_specifier_accepts_pointer_to_qualified_typedef_alias(self) -> None:
+        unit = parse(list(lex("typedef const int CI; int main(){_Atomic(CI *) value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+
+    def test_atomic_type_specifier_accepts_unqualified_pointer_typedef_alias(self) -> None:
+        unit = parse(list(lex("typedef const int *PCI; int main(){_Atomic(PCI) value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+
+    def test_atomic_qualified_pointer_typedef_declaration(self) -> None:
+        unit = parse(list(lex("typedef int *_Atomic AtomicIntPtr;")))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        self.assertEqual(declaration.type_spec, TypeSpec("int", 1))
+
+    def test_atomic_qualified_parenthesized_pointer_typedef_declaration(self) -> None:
+        unit = parse(list(lex("typedef int (*_Atomic AtomicIntPtr);")))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        self.assertEqual(declaration.type_spec, TypeSpec("int", 1))
+
+    def test_atomic_qualified_before_pointer_typedef_declaration(self) -> None:
+        unit = parse(list(lex("typedef int _Atomic *AtomicIntPtr;")))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        self.assertEqual(declaration.type_spec, TypeSpec("int", 1))
+
+    def test_atomic_type_specifier_accepts_transitive_unqualified_pointer_typedef_alias(self) -> None:
+        unit = parse(
+            list(
+                lex("typedef const int CI; typedef CI *PCI; int main(){_Atomic(PCI) value; return 0;}")
+            )
+        )
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+
+    def test_atomic_type_specifier_rejects_shadowed_typedef_name(self) -> None:
+        source = "typedef const int CI; int main(){int CI=0; _Atomic(CI) value; return value;}"
+        with self.assertRaises(ParserError):
+            parse(list(lex(source)))
+
+    def test_atomic_type_specifier_rejects_unknown_identifier_type_name(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){_Atomic(UnknownType) value; return 0;}")))
+
+    def test_atomic_type_specifier_rejects_qualified_scalar_type(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){_Atomic(const int) value; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: qualified")
+
+    def test_atomic_type_specifier_rejects_trailing_qualified_scalar_type(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){_Atomic(int const) value; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: qualified")
+
+    def test_atomic_type_specifier_rejects_qualified_pointer_type(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){_Atomic(int *const) value; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Invalid atomic type: qualified")
+
+    def test_atomic_type_specifier_accepts_pointer_to_qualified_type(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic(const int *) value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+
+    def test_atomic_type_specifier_accepts_pointer_to_qualified_pointer_type(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic(int *const *) value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 2, is_atomic=True))
+
+    def test_atomic_type_specifier_rejects_atomic_qualified_pointer_type(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){_Atomic(int *_Atomic) value; return 0;}")))
+
+    def test_atomic_type_specifier_accepts_pointer_to_atomic_qualified_pointer_type(self) -> None:
+        unit = parse(list(lex("int main(){_Atomic(int *_Atomic *) value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 2, is_atomic=True))
+
+    def test_atomic_typedef_ignores_gnu_attribute_before_name(self) -> None:
+        unit = parse(
+            list(lex("typedef _Atomic int __attribute__((address_space(1))) AtomicAddrInt;"))
+        )
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        self.assertEqual(declaration.type_spec, TypeSpec("int", is_atomic=True))
+
+    def test_atomic_typedef_ignores_gnu_attribute_inside_type_name(self) -> None:
+        unit = parse(
+            list(lex("typedef _Atomic(int __attribute__((vector_size(16)))) AtomicVectorInt;"))
+        )
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        self.assertEqual(declaration.type_spec, TypeSpec("int", is_atomic=True))
+
+    def test_atomic_typedef_ignores_gnu_attribute_after_name(self) -> None:
+        unit = parse(
+            list(lex("typedef _Atomic(int) AtomicInt __attribute__((address_space(1)));"))
+        )
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        self.assertEqual(declaration.type_spec, TypeSpec("int", is_atomic=True))
+
+    def test_function_declaration_marks_overloadable_attribute_before_name(self) -> None:
+        unit = parse(list(lex("int __attribute__((overloadable)) test(int);")))
+        self.assertTrue(unit.functions[0].is_overloadable)
+
+    def test_function_declaration_marks_overloadable_attribute_after_name(self) -> None:
+        unit = parse(list(lex("int test __attribute__((overloadable))(int);")))
+        self.assertTrue(unit.functions[0].is_overloadable)
+
+    def test_unterminated_gnu_attribute_reports_parser_error(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("typedef _Atomic int __attribute__((address_space(1)) Ptr;")))
+
+    def test_atomic_keyword_requires_following_type(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(void){_Atomic; return 0;}")))
 
     def test_long_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){long value;return 0;}")))
@@ -1177,6 +1618,68 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(expr.expr)
         self.assertIsNotNone(expr.type_spec)
 
+    def test_alignof_type_name(self) -> None:
+        unit = parse(list(lex("int main(){return _Alignof(int*);}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, AlignofExpr)
+        self.assertIsNone(expr.expr)
+        self.assertEqual(expr.type_spec, TypeSpec("int", 1))
+
+    def test_alignof_expression(self) -> None:
+        unit = parse(list(lex("int main(){int x; return _Alignof(x);}")), std="gnu11")
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, AlignofExpr)
+        self.assertIsNotNone(expr.expr)
+        self.assertIsNone(expr.type_spec)
+
+    def test_alignof_expression_rejected_in_c11(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){int x; return _Alignof(x);}")), std="c11")
+        self.assertEqual(ctx.exception.message, "Invalid alignof operand")
+
+    def test_generic_selection_expression(self) -> None:
+        unit = parse(list(lex("int main(){int x=0; return _Generic(x, int: 1, default: 2);}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, GenericExpr)
+        self.assertEqual(len(expr.associations), 2)
+        self.assertEqual(expr.associations[0][0], TypeSpec("int"))
+        self.assertIsNone(expr.associations[1][0])
+
+    def test_generic_selection_function_pointer_association(self) -> None:
+        source = "int f(void){return 0;} int main(void){return _Generic(f, int(*)(void): 1, default: 2);}"
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[1]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, GenericExpr)
+        assoc_type = expr.associations[0][0]
+        self.assertIsNotNone(assoc_type)
+        assert assoc_type is not None
+        self.assertEqual(assoc_type.name, "int")
+        self.assertEqual(assoc_type.declarator_ops[0], ("ptr", 0))
+        self.assertEqual(assoc_type.declarator_ops[1], ("fn", ((), False)))
+        self.assertIsNone(expr.associations[1][0])
+
+    def test_generic_selection_allows_vla_type_name_in_parser(self) -> None:
+        unit = parse(list(lex("int f(int n){return _Generic(0, int[n]: 1, default: 2);}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, GenericExpr)
+        assoc_type = expr.associations[0][0]
+        self.assertIsNotNone(assoc_type)
+        assert assoc_type is not None
+        self.assertEqual(
+            assoc_type.declarator_ops,
+            (("arr", ArrayDecl(Identifier("n"))),),
+        )
+
     def test_cast_expression(self) -> None:
         unit = parse(list(lex("int main(){int *p; return (int)p;}")))
         stmt = _body(unit.functions[0]).statements[1]
@@ -1185,6 +1688,132 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr, CastExpr)
         self.assertEqual(expr.type_spec, TypeSpec("int"))
         self.assertIsInstance(expr.expr, Identifier)
+
+    def test_function_specifiers_and_storage_are_recorded(self) -> None:
+        unit = parse(list(lex("static inline _Noreturn int f(void);")))
+        func = unit.functions[0]
+        self.assertEqual(func.storage_class, "static")
+        self.assertTrue(func.is_inline)
+        self.assertTrue(func.is_noreturn)
+
+    def test_decl_stmt_storage_class_is_recorded(self) -> None:
+        unit = parse(list(lex("extern int g;")))
+        decl = unit.declarations[0]
+        self.assertIsInstance(decl, DeclStmt)
+        self.assertEqual(decl.storage_class, "extern")
+
+    def test_parameter_array_static_qualifier(self) -> None:
+        unit = parse(list(lex("int f(int a[static const 4]){return a[0];}")))
+        param_type = unit.functions[0].params[0].type_spec
+        self.assertEqual(
+            param_type.declarator_ops,
+            (("arr", ArrayDecl(IntLiteral("4"), ("const",), True)),),
+        )
+
+    def test_compound_literal_expression(self) -> None:
+        unit = parse(list(lex("int main(void){return ((int){1});}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, CompoundLiteralExpr)
+        self.assertEqual(expr.type_spec, TypeSpec("int"))
+
+    def test_bit_field_member_declaration(self) -> None:
+        unit = parse(list(lex("struct S { unsigned x:3; unsigned :0; };")))
+        decl = unit.declarations[0]
+        self.assertIsInstance(decl, DeclStmt)
+        member0 = decl.type_spec.record_members[0]
+        member1 = decl.type_spec.record_members[1]
+        self.assertEqual(member0.name, "x")
+        self.assertEqual(member0.bit_width_expr, IntLiteral("3"))
+        self.assertIsNone(member1.name)
+        self.assertEqual(member1.bit_width_expr, IntLiteral("0"))
+
+    def test_parameter_rejects_non_register_storage_class(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int f(static int x){return x;}")))
+
+    def test_parameter_rejects_thread_local_specifier(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int f(_Thread_local int x){return x;}")))
+
+    def test_record_member_rejects_function_specifier(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("struct S { inline int x; };")))
+
+    def test_typedef_rejects_function_specifier(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("typedef inline int T;")))
+
+    def test_array_declarator_rejects_missing_static_bound(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int f(int a[static]){return 0;}")))
+
+    def test_array_parameter_allows_unsized_declarator(self) -> None:
+        unit = parse(list(lex("int f(int a[]){return 0;}")))
+        self.assertEqual(unit.functions[0].params[0].type_spec.declarator_ops, (("arr", ArrayDecl(None)),))
+        unit = parse(list(lex("int f(int a[const const 4]){return 0;}")))
+        self.assertEqual(
+            unit.functions[0].params[0].type_spec.declarator_ops,
+            (("arr", ArrayDecl(IntLiteral("4"), ("const",), False)),),
+        )
+
+    def test_array_size_helpers_cover_error_paths(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        with self.assertRaises(ParserError):
+            parser._parse_array_size_expr(Identifier("n"), Token(TokenKind.IDENT, "n", 1, 1))
+        with self.assertRaises(ParserError):
+            parser._parse_array_size_expr(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1))
+        self.assertEqual(parser._parse_array_size_expr_or_vla(Identifier("n"), Token(TokenKind.IDENT, "n", 1, 1)), -1)
+
+    def test_sizeof_type_spec_handles_array_decl_forms(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertIsNone(parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", object()),))))
+        self.assertIsNone(
+            parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", ArrayDecl(None)),)))
+        )
+        self.assertIsNone(
+            parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", ArrayDecl(IntLiteral("n"))),)))
+        )
+        self.assertIsNone(
+            parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", ArrayDecl(IntLiteral("0"))),)))
+        )
+        self.assertEqual(
+            parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", ArrayDecl(2)),))),
+            8,
+        )
+        self.assertEqual(
+            parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", ArrayDecl(IntLiteral("2"))),))),
+            8,
+        )
+
+    def test_decl_specifier_duplicate_errors(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("static extern int x;")))
+        with self.assertRaises(ParserError):
+            parse(list(lex("_Thread_local _Thread_local int x;")))
+        with self.assertRaises(ParserError):
+            parse(list(lex("inline inline int f(void);")))
+        with self.assertRaises(ParserError):
+            parse(list(lex("_Noreturn _Noreturn int f(void);")))
+
+    def test_compound_literal_helper_errors(self) -> None:
+        parser = Parser(list(lex("1")))
+        self.assertFalse(parser._looks_like_compound_literal())
+        parser = Parser(list(lex("(int)1")))
+        with self.assertRaises(ParserError):
+            parser._parse_compound_literal_expr()
+
+    def test_array_declarator_helper_unsupported_paths(self) -> None:
+        parser = Parser(list(lex("]")))
+        with self.assertRaises(ParserError):
+            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
+        parser = Parser(list(lex("n]")))
+        with self.assertRaises(ParserError):
+            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
+        parser = Parser(list(lex("int]")))
+        with self.assertRaises(ParserError):
+            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=True)
 
     def test_unsigned_long_cast_expression(self) -> None:
         unit = parse(list(lex("int main(){int x; return (unsigned long)x;}")))
@@ -1298,6 +1927,31 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(unit.externals), 2)
         self.assertIsInstance(unit.externals[0], DeclGroupStmt)
 
+    def test_file_scope_static_assert_declaration(self) -> None:
+        unit = parse(list(lex('_Static_assert(1, "ok"); int main(void){return 0;}')))
+        self.assertIsInstance(unit.declarations[0], StaticAssertDecl)
+        self.assertIsInstance(unit.externals[0], StaticAssertDecl)
+        self.assertEqual(unit.functions[0].name, "main")
+
+    def test_block_scope_static_assert_declaration(self) -> None:
+        unit = parse(list(lex('int main(void){_Static_assert(1, "ok"); return 0;}')))
+        statement = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(statement, StaticAssertDecl)
+
+    def test_static_assert_requires_string_literal_message(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(void){_Static_assert(1, 2); return 0;}")))
+
+    def test_parse_decl_stmt_static_assert_dispatch(self) -> None:
+        parser = Parser(list(lex('_Static_assert(1, "ok");')))
+        stmt = parser._parse_decl_stmt()
+        self.assertIsInstance(stmt, StaticAssertDecl)
+
+    def test_parse_static_assert_decl_requires_keyword(self) -> None:
+        parser = Parser(list(lex("int value;")))
+        with self.assertRaises(ParserError):
+            parser._parse_static_assert_decl()
+
     def test_array_size_must_be_positive(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[0];return 0;}")))
@@ -1372,29 +2026,60 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parser._parse_array_size(Token(TokenKind.INT_CONST, "1uu", 1, 1))
 
-    def test_array_size_rejects_non_constant_expression(self) -> None:
-        with self.assertRaises(ParserError):
-            parse(list(lex("int main(){int n=4;int a[n];return 0;}")))
+    def test_array_size_accepts_vla_non_constant_expression(self) -> None:
+        unit = parse(list(lex("int main(){int n=4;int a[n];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec.declarator_ops, (("arr", ArrayDecl(Identifier("n"))),))
 
-    def test_array_size_rejects_negative_shift_amount(self) -> None:
-        with self.assertRaises(ParserError):
-            parse(list(lex("int main(){int a[1<<-1];return 0;}")))
+    def test_array_size_accepts_vla_negative_shift_amount_expression(self) -> None:
+        unit = parse(list(lex("int main(){int a[1<<-1];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec.declarator_ops,
+            (("arr", ArrayDecl(BinaryExpr("<<", IntLiteral("1"), UnaryExpr("-", IntLiteral("1"))))),),
+        )
 
-    def test_array_size_rejects_unary_non_constant_expression(self) -> None:
-        with self.assertRaises(ParserError):
-            parse(list(lex("int main(){int n=4;int a[+n];return 0;}")))
+    def test_array_size_accepts_vla_unary_non_constant_expression(self) -> None:
+        unit = parse(list(lex("int main(){int n=4;int a[+n];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec.declarator_ops,
+            (("arr", ArrayDecl(UnaryExpr("+", Identifier("n")))),),
+        )
 
-    def test_array_size_rejects_unsupported_binary_operator_expression(self) -> None:
-        with self.assertRaises(ParserError):
-            parse(list(lex("int main(){int a[4/2];return 0;}")))
+    def test_array_size_accepts_vla_binary_operator_expression(self) -> None:
+        unit = parse(list(lex("int main(){int a[4/2];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec.declarator_ops,
+            (("arr", ArrayDecl(BinaryExpr("/", IntLiteral("4"), IntLiteral("2")))),),
+        )
 
-    def test_array_size_rejects_sizeof_void_expression(self) -> None:
-        with self.assertRaises(ParserError):
-            parse(list(lex("int main(){int a[(long long)sizeof(void)];return 0;}")))
+    def test_array_size_accepts_vla_sizeof_void_expression(self) -> None:
+        unit = parse(list(lex("int main(){int a[(long long)sizeof(void)];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(
+            stmt.type_spec.declarator_ops,
+            (
+                (
+                    "arr",
+                    ArrayDecl(
+                        CastExpr(TypeSpec("long long"), SizeofExpr(None, TypeSpec("void"))),
+                    ),
+                ),
+            ),
+        )
 
     def test_array_size_helper_handles_sizeof_expression_forms(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
         self.assertIsNone(parser._eval_array_size_expr(SizeofExpr(Identifier("x"), None)))
+        self.assertEqual(parser._eval_array_size_expr(AlignofExpr(None, TypeSpec("int"))), 4)
+        self.assertIsNone(parser._eval_array_size_expr(AlignofExpr(Identifier("x"), None)))
         self.assertIsNone(
             parser._eval_array_size_expr(
                 SizeofExpr(None, TypeSpec("struct", record_tag="S", record_members=((TypeSpec("int"), "x"),)))
@@ -1407,10 +2092,84 @@ class ParserTests(unittest.TestCase):
             )
         )
 
+    def test_array_size_accepts_conditional_generic_expression(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "void g(void); int main(){int a[_Generic(0,int:1,default:2)==1?1:-1];"
+                    "int b[_Generic(\"x\",char*:1,default:2)==1?1:-1];"
+                    "int c[_Generic(g,void(*)(void):1,default:2)==1?1:-1];return 0;}"
+                )
+            )
+        )
+        statements = _body(unit.functions[1]).statements
+        self.assertIsInstance(statements[0], DeclStmt)
+        self.assertEqual(statements[0].type_spec, TypeSpec("int", 0, (1,)))
+        self.assertIsInstance(statements[1], DeclStmt)
+        self.assertEqual(statements[1].type_spec, TypeSpec("int", 0, (1,)))
+        self.assertIsInstance(statements[2], DeclStmt)
+        self.assertEqual(statements[2].type_spec, TypeSpec("int", 0, (1,)))
+
+    def test_array_size_accepts_generic_identifier_control_with_declared_int(self) -> None:
+        unit = parse(
+            list(lex("int main(){int i=12;int a[_Generic(i,int:1,default:2)==1?1:-1];return 0;}"))
+        )
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (1,)))
+
+    def test_int_literal_type_spec_helper_suffixes(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._int_literal_type_spec("1"), TypeSpec("int"))
+        self.assertEqual(parser._int_literal_type_spec("1u"), TypeSpec("unsigned int"))
+        self.assertEqual(parser._int_literal_type_spec("1L"), TypeSpec("long"))
+        self.assertEqual(parser._int_literal_type_spec("1ll"), TypeSpec("long long"))
+        self.assertEqual(parser._int_literal_type_spec("1ull"), TypeSpec("unsigned long long"))
+
+    def test_array_size_generic_helpers_cover_unmatched_and_unknown_control(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertIsNone(parser._lookup_ordinary_type("missing"))
+        self.assertEqual(
+            parser._eval_array_size_expr(BinaryExpr("!=", IntLiteral("1"), IntLiteral("2"))),
+            1,
+        )
+        self.assertIsNone(
+            parser._eval_array_size_expr(
+                ConditionalExpr(Identifier("x"), IntLiteral("1"), IntLiteral("2"))
+            )
+        )
+        self.assertIsNone(
+            parser._eval_array_size_expr(
+                GenericExpr(IntLiteral("0"), ((TypeSpec("long"), IntLiteral("1")),))
+            )
+        )
+        self.assertIsNone(parser._array_size_generic_control_type(Identifier("x")))
+        self.assertIsNone(parser._array_size_generic_control_type(FloatLiteral("1.0")))
+        self.assertEqual(
+            parser._decay_type_spec(TypeSpec("int", declarator_ops=(("arr", 2),))),
+            TypeSpec("int", declarator_ops=(("ptr", 0),)),
+        )
+        self.assertEqual(parser._alignof_type_spec(TypeSpec("int", pointer_depth=1)), 8)
+        self.assertEqual(parser._alignof_type_spec(TypeSpec("int", array_lengths=(2,))), 4)
+        self.assertIsNone(
+            parser._alignof_type_spec(TypeSpec("int", declarator_ops=(("fn", (None, False)),)))
+        )
+
     def test_array_size_helper_binary_with_non_constant_operand(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
         expr = BinaryExpr("+", Identifier("x"), IntLiteral("1"))
         self.assertIsNone(parser._eval_array_size_expr(expr))
+
+    def test_array_size_helper_or_vla_accepts_constant_size(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        token = Token(TokenKind.INT_CONST, "4", 1, 1)
+        self.assertEqual(parser._parse_array_size_expr_or_vla(IntLiteral("4"), token), 4)
+
+    def test_array_size_helper_or_vla_rejects_non_positive_size(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        token = Token(TokenKind.INT_CONST, "0", 1, 1)
+        with self.assertRaises(ParserError):
+            parser._parse_array_size_expr_or_vla(IntLiteral("0"), token)
 
     def test_void_declaration_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
@@ -1490,6 +2249,14 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int x; return (int y)x;}")))
 
+    def test_generic_selection_rejects_duplicate_default(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(void){return _Generic(0, default:1, default:2);}")))
+
+    def test_generic_selection_requires_type_name_association(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(void){return _Generic(0, int x:1);}")))
+
     def test_typedef_requires_identifier(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){typedef int;}")))
@@ -1497,6 +2264,10 @@ class ParserTests(unittest.TestCase):
     def test_typedef_initializer_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){typedef int T=1;}")))
+
+    def test_typedef_pointer_requires_identifier(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int main(){typedef int *;}")))
 
     def test_missing_semicolon(self) -> None:
         source = "int main(){return 1}"
