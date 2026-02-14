@@ -959,6 +959,15 @@ class Analyzer:
         pointee = type_.pointee()
         return pointee is not None and pointee.declarator_ops == () and pointee.name == VOID.name
 
+    def _is_compatible_pointee_type(self, left_type: Type, right_type: Type) -> bool:
+        return (
+            left_type.name == right_type.name
+            and left_type.declarator_ops == right_type.declarator_ops
+        )
+
+    def _merged_qualifiers(self, left_type: Type, right_type: Type) -> tuple[str, ...]:
+        return tuple(dict.fromkeys((*left_type.qualifiers, *right_type.qualifiers)))
+
     def _qualifiers_contain(self, target_type: Type, value_type: Type) -> bool:
         return set(value_type.qualifiers).issubset(target_type.qualifiers)
 
@@ -995,7 +1004,16 @@ class Analyzer:
         return False
 
     def _is_null_pointer_constant(self, expr: Expr, scope: Scope) -> bool:
-        return self._eval_int_constant_expr(expr, scope) == 0
+        if self._eval_int_constant_expr(expr, scope) == 0:
+            return True
+        if not isinstance(expr, CastExpr):
+            return False
+        cast_type = self._type_map.get(expr)
+        if cast_type is None:
+            cast_type = self._resolve_type(expr.type_spec)
+        return self._is_void_pointer_type(cast_type) and self._is_null_pointer_constant(
+            expr.expr, scope
+        )
 
     def _is_assignment_expr_compatible(
         self,
@@ -1357,16 +1375,30 @@ class Analyzer:
     ) -> Type | None:
         then_pointee = then_type.pointee()
         else_pointee = else_type.pointee()
-        if then_pointee is not None and else_pointee is not None:
-            if self._is_void_pointer_type(then_type) and self._is_object_pointer_type(else_type):
-                return then_type
-            if self._is_void_pointer_type(else_type) and self._is_object_pointer_type(then_type):
-                return else_type
-            return None
-        if then_pointee is not None and self._eval_int_constant_expr(else_expr, scope) == 0:
+        if then_pointee is not None and self._is_null_pointer_constant(else_expr, scope):
             return then_type
-        if else_pointee is not None and self._eval_int_constant_expr(then_expr, scope) == 0:
+        if else_pointee is not None and self._is_null_pointer_constant(then_expr, scope):
             return else_type
+        if then_pointee is not None and else_pointee is not None:
+            if self._is_compatible_pointee_type(then_pointee, else_pointee):
+                return Type(
+                    then_type.name,
+                    declarator_ops=then_type.declarator_ops,
+                    qualifiers=self._merged_qualifiers(then_pointee, else_pointee),
+                )
+            if self._is_void_pointer_type(then_type) and self._is_object_pointer_type(else_type):
+                return Type(
+                    VOID.name,
+                    declarator_ops=then_type.declarator_ops,
+                    qualifiers=self._merged_qualifiers(then_pointee, else_pointee),
+                )
+            if self._is_void_pointer_type(else_type) and self._is_object_pointer_type(then_type):
+                return Type(
+                    VOID.name,
+                    declarator_ops=else_type.declarator_ops,
+                    qualifiers=self._merged_qualifiers(then_pointee, else_pointee),
+                )
+            return None
         return None
 
     def _is_invalid_cast_target(self, type_spec: TypeSpec, target_type: Type) -> bool:
