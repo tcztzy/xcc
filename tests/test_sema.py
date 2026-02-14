@@ -2634,6 +2634,19 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_initializer_pointer_adds_const_qualifier_ok(self) -> None:
+        source = "int main(){int x=1; int *p=&x; const int *cp=p; return *cp;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_assignment_pointer_drops_const_qualifier_error(self) -> None:
+        source = "int main(){int x=1; const int *cp=&x; int *p=0; p=cp; return *p;}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+
     def test_assignment_function_pointer_to_void_pointer_error(self) -> None:
         source = "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; vp=fp; return 0;}"
         unit = parse(list(lex(source)))
@@ -2702,6 +2715,19 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
+
+    def test_argument_pointer_adds_const_qualifier_ok(self) -> None:
+        source = "int f(const int *p){return *p;} int main(){int x=1; int *p=&x; return f(p);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
+
+    def test_argument_pointer_drops_const_qualifier_error(self) -> None:
+        source = "int f(int *p){return *p;} int main(){int x=1; const int *p=&x; return f(p);}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Argument type mismatch: f")
 
     def test_argument_void_pointer_from_function_pointer_error(self) -> None:
         source = "int takes(void *p){return 0;} int f(void){return 0;} int main(){return takes(f);}"
