@@ -986,11 +986,8 @@ class Analyzer:
         value_pointee = value_type.pointee()
         if target_pointee is None or value_pointee is None:
             return False
-        if (
-            target_pointee.name == value_pointee.name
-            and target_pointee.declarator_ops == value_pointee.declarator_ops
-        ):
-            return self._qualifiers_contain(target_pointee, value_pointee)
+        if self._is_pointer_conversion_compatible(target_type, value_type):
+            return True
         if self._is_void_pointer_type(target_type):
             return self._is_object_pointer_type(value_type) and self._qualifiers_contain(
                 target_pointee,
@@ -1002,6 +999,22 @@ class Analyzer:
                 value_pointee,
             )
         return False
+
+    def _is_pointer_conversion_compatible(self, target_type: Type, value_type: Type) -> bool:
+        target_pointee = target_type.pointee()
+        value_pointee = value_type.pointee()
+        if target_pointee is None or value_pointee is None:
+            return False
+        if not self._is_compatible_pointee_type(target_pointee, value_pointee):
+            return False
+        if not self._qualifiers_contain(target_pointee, value_pointee):
+            return False
+        return not self._has_nested_pointer_qualifier_mismatch(target_pointee, value_pointee)
+
+    def _has_nested_pointer_qualifier_mismatch(self, left_type: Type, right_type: Type) -> bool:
+        # Qualifier addition on nested pointers is rejected until pointer-level
+        # qualifiers are modeled structurally.
+        return left_type.pointee() is not None and left_type.qualifiers != right_type.qualifiers
 
     def _is_null_pointer_constant(self, expr: Expr, scope: Scope) -> bool:
         if self._eval_int_constant_expr(expr, scope) == 0:
@@ -1344,18 +1357,27 @@ class Analyzer:
             return None
         if left_ptr is not None and self._is_integer_type(right_type):
             return left_type
-        if left_ptr is not None and right_ptr is not None and left_type == right_type:
+        if self._is_compatible_nonvoid_object_pointer_pair(left_type, right_type):
             return INT
         return None
 
-    def _is_pointer_relational_compatible(self, left_type: Type, right_type: Type) -> bool:
+    def _is_compatible_nonvoid_object_pointer_pair(self, left_type: Type, right_type: Type) -> bool:
         left_pointee = left_type.pointee()
         right_pointee = right_type.pointee()
-        if left_pointee is None or right_pointee is None or left_type != right_type:
+        if left_pointee is None or right_pointee is None:
             return False
-        if left_pointee == VOID:
+        if left_pointee.name == VOID.name or right_pointee.name == VOID.name:
             return False
-        return not (left_pointee.declarator_ops and left_pointee.declarator_ops[0][0] == "fn")
+        if left_pointee.declarator_ops and left_pointee.declarator_ops[0][0] == "fn":
+            return False
+        if right_pointee.declarator_ops and right_pointee.declarator_ops[0][0] == "fn":
+            return False
+        if self._has_nested_pointer_qualifier_mismatch(left_pointee, right_pointee):
+            return False
+        return self._is_compatible_pointee_type(left_pointee, right_pointee)
+
+    def _is_pointer_relational_compatible(self, left_type: Type, right_type: Type) -> bool:
+        return self._is_compatible_nonvoid_object_pointer_pair(left_type, right_type)
 
     def _is_pointer_equality_compatible(self, left_type: Type, right_type: Type) -> bool:
         return self._is_assignment_compatible(
@@ -1380,7 +1402,10 @@ class Analyzer:
         if else_pointee is not None and self._is_null_pointer_constant(then_expr, scope):
             return else_type
         if then_pointee is not None and else_pointee is not None:
-            if self._is_compatible_pointee_type(then_pointee, else_pointee):
+            if self._is_compatible_pointee_type(
+                then_pointee,
+                else_pointee,
+            ) and not self._has_nested_pointer_qualifier_mismatch(then_pointee, else_pointee):
                 return Type(
                     then_type.name,
                     declarator_ops=then_type.declarator_ops,
@@ -1874,7 +1899,7 @@ class Analyzer:
                 if not self._is_scalar_type(left_type) or not self._is_scalar_type(right_type):
                     raise SemaError("Logical operator requires scalar operands")
             else:
-                raise SemaError("Unsupported expression")
+                raise SemaError(f"Unsupported binary operator: {expr.op}")
             self._type_map.set(expr, INT)
             return INT
         if isinstance(expr, ConditionalExpr):
@@ -1974,14 +1999,24 @@ class Analyzer:
                     raise SemaError("Assignment type mismatch")
                 self._type_map.set(expr, target_type)
                 return target_type
-            if expr.op in {"+=", "-="}:
-                if (
-                    not self._is_integer_type(target_type) or not self._is_integer_type(value_type)
-                ) and (target_type.pointee() is None or not self._is_integer_type(value_type)):
+            if expr.op in {"*=", "/="}:
+                if not self._is_arithmetic_type(target_type) or not self._is_arithmetic_type(
+                    value_type
+                ):
                     raise SemaError("Assignment type mismatch")
                 self._type_map.set(expr, target_type)
                 return target_type
-            if not self._is_integer_type(target_type) or not self._is_integer_type(value_type):
+            if expr.op in {"+=", "-="}:
+                if self._is_arithmetic_type(target_type) and self._is_arithmetic_type(value_type):
+                    self._type_map.set(expr, target_type)
+                    return target_type
+                if target_type.pointee() is not None and self._is_integer_type(value_type):
+                    self._type_map.set(expr, target_type)
+                    return target_type
+                raise SemaError("Assignment type mismatch")
+            if expr.op in {"<<=", ">>=", "%=", "&=", "^=", "|="} and (
+                not self._is_integer_type(target_type) or not self._is_integer_type(value_type)
+            ):
                 raise SemaError("Assignment type mismatch")
             self._type_map.set(expr, target_type)
             return target_type
