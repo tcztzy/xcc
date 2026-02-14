@@ -214,20 +214,24 @@ class ParserTests(unittest.TestCase):
         func = unit.functions[0]
         self.assertEqual(func.params, [Param(TypeSpec("long long"), "value")])
 
-    def test_type_qualifiers_are_ignored_in_declarations(self) -> None:
-        unit = parse(list(lex("int main(void){void const* p; int *const q; return 0;}")))
+    def test_leading_type_qualifiers_are_recorded_in_declarations(self) -> None:
+        unit = parse(list(lex("int main(void){const int x=0; return x;}")))
         statements = _body(unit.functions[0]).statements
         self.assertIsInstance(statements[0], DeclStmt)
-        self.assertIsInstance(statements[1], DeclStmt)
-        self.assertEqual(statements[0].type_spec, TypeSpec("void", pointer_depth=1))
-        self.assertEqual(statements[1].type_spec, TypeSpec("int", pointer_depth=1))
+        self.assertEqual(statements[0].type_spec, TypeSpec("int", qualifiers=("const",)))
+
+    def test_duplicate_leading_type_qualifiers_are_deduplicated(self) -> None:
+        unit = parse(list(lex("int main(void){const const int x=0; return x;}")))
+        statements = _body(unit.functions[0]).statements
+        self.assertIsInstance(statements[0], DeclStmt)
+        self.assertEqual(statements[0].type_spec, TypeSpec("int", qualifiers=("const",)))
 
     def test_sizeof_parenthesized_type_name_allows_type_qualifier(self) -> None:
         unit = parse(list(lex("int main(void){return sizeof(const int*);}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
         self.assertIsInstance(stmt.value, SizeofExpr)
-        self.assertEqual(stmt.value.type_spec, TypeSpec("int", pointer_depth=1))
+        self.assertEqual(stmt.value.type_spec, TypeSpec("int", pointer_depth=1, qualifiers=("const",)))
 
     def test_void_parameter_list(self) -> None:
         unit = parse(list(lex("int main(void){return 0;}")))
@@ -1260,13 +1264,13 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("typedef const int CI; int main(){_Atomic(CI *) value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, qualifiers=("const",), is_atomic=True))
 
     def test_atomic_type_specifier_accepts_unqualified_pointer_typedef_alias(self) -> None:
         unit = parse(list(lex("typedef const int *PCI; int main(){_Atomic(PCI) value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, qualifiers=("const",), is_atomic=True))
 
     def test_atomic_qualified_pointer_typedef_declaration(self) -> None:
         unit = parse(list(lex("typedef int *_Atomic AtomicIntPtr;")))
@@ -1294,7 +1298,7 @@ class ParserTests(unittest.TestCase):
         )
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, qualifiers=("const",), is_atomic=True))
 
     def test_atomic_type_specifier_rejects_shadowed_typedef_name(self) -> None:
         source = "typedef const int CI; int main(){int CI=0; _Atomic(CI) value; return value;}"
@@ -1324,7 +1328,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){_Atomic(const int *) value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, qualifiers=("const",), is_atomic=True))
 
     def test_atomic_type_specifier_accepts_pointer_to_qualified_pointer_type(self) -> None:
         unit = parse(list(lex("int main(){_Atomic(int *const *) value; return 0;}")))

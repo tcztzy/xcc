@@ -57,6 +57,7 @@ class TypeSpec:
     pointer_depth: int = 0
     array_lengths: tuple[int, ...] = ()
     declarator_ops: tuple[DeclaratorOp, ...] = ()
+    qualifiers: tuple[str, ...] = ()
     is_atomic: bool = False
     atomic_target: "TypeSpec | None" = field(default=None, compare=False)
     enum_tag: str | None = None

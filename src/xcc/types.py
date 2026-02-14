@@ -32,6 +32,7 @@ class Type:
     pointer_depth: int = 0
     array_lengths: tuple[int, ...] = ()
     declarator_ops: tuple[TypeOp, ...] = ()
+    qualifiers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.declarator_ops:
@@ -47,6 +48,7 @@ class Type:
         )
 
     def __str__(self) -> str:
+        prefix = "" if not self.qualifiers else f"{' '.join(self.qualifiers)} "
         suffix: list[str] = []
         for kind, value in reversed(self.declarator_ops):
             if kind == "ptr":
@@ -57,23 +59,31 @@ class Type:
             else:
                 assert isinstance(value, tuple) and len(value) == 2
                 suffix.append(_format_function_params(value))
-        return f"{self.name}{''.join(suffix)}"
+        return f"{prefix}{self.name}{''.join(suffix)}"
 
     def pointer_to(self) -> "Type":
-        return Type(self.name, declarator_ops=(POINTER_OP,) + self.declarator_ops)
+        return Type(
+            self.name,
+            declarator_ops=(POINTER_OP,) + self.declarator_ops,
+            qualifiers=self.qualifiers,
+        )
 
     def pointee(self) -> "Type | None":
         if not self.declarator_ops or self.declarator_ops[0][0] != "ptr":
             return None
-        return Type(self.name, declarator_ops=self.declarator_ops[1:])
+        return Type(self.name, declarator_ops=self.declarator_ops[1:], qualifiers=self.qualifiers)
 
     def array_of(self, length: int) -> "Type":
-        return Type(self.name, declarator_ops=(("arr", length),) + self.declarator_ops)
+        return Type(
+            self.name,
+            declarator_ops=(("arr", length),) + self.declarator_ops,
+            qualifiers=self.qualifiers,
+        )
 
     def element_type(self) -> "Type | None":
         if not self.declarator_ops or self.declarator_ops[0][0] != "arr":
             return None
-        return Type(self.name, declarator_ops=self.declarator_ops[1:])
+        return Type(self.name, declarator_ops=self.declarator_ops[1:], qualifiers=self.qualifiers)
 
     def function_of(
         self,
@@ -84,6 +94,7 @@ class Type:
         return Type(
             self.name,
             declarator_ops=(("fn", (params, is_variadic)),) + self.declarator_ops,
+            qualifiers=self.qualifiers,
         )
 
     def callable_signature(self) -> "tuple[Type, FunctionParams] | None":
@@ -94,15 +105,23 @@ class Type:
             return None
         params = ops[0][1]
         assert isinstance(params, tuple) and len(params) == 2
-        return Type(self.name, declarator_ops=ops[1:]), params
+        return Type(self.name, declarator_ops=ops[1:], qualifiers=self.qualifiers), params
 
     def decay_parameter_type(self) -> "Type":
         if not self.declarator_ops:
             return self
         if self.declarator_ops[0][0] == "arr":
-            return Type(self.name, declarator_ops=(POINTER_OP,) + self.declarator_ops[1:])
+            return Type(
+                self.name,
+                declarator_ops=(POINTER_OP,) + self.declarator_ops[1:],
+                qualifiers=self.qualifiers,
+            )
         if self.declarator_ops[0][0] == "fn":
-            return Type(self.name, declarator_ops=(POINTER_OP,) + self.declarator_ops)
+            return Type(
+                self.name,
+                declarator_ops=(POINTER_OP,) + self.declarator_ops,
+                qualifiers=self.qualifiers,
+            )
         return self
 
     def is_array(self) -> bool:
