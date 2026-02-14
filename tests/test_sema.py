@@ -1095,6 +1095,36 @@ class SemaTests(unittest.TestCase):
         self.assertIsInstance(expr, ConditionalExpr)
         self.assertEqual(sema.type_map.get(expr), Type("void", 1))
 
+    def test_conditional_pointer_compatible_pointee_qualifier_union_typemap(self) -> None:
+        source = (
+            "int main(){int x=1; const int *cp=&x; volatile int *vp=&x; "
+            "const volatile int *rp=1 ? cp : vp; return rp!=0;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[3].init
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertEqual(sema.type_map.get(expr), Type("int", 1, qualifiers=("const", "volatile")))
+
+    def test_conditional_void_pointer_qualifier_union_typemap(self) -> None:
+        source = "int main(){int x=1; const int *cp=&x; void *vp=0; const void *rp=1 ? vp : cp; return rp!=0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[3].init
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertEqual(sema.type_map.get(expr), Type("void", 1, qualifiers=("const",)))
+
+    def test_conditional_pointer_and_casted_void_null_pointer_constant_typemap(self) -> None:
+        source = "int main(){int x=1; int *p=&x; int *q=1 ? p : (void *)0; return q!=0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].init
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+
     def test_generic_selection_typemap(self) -> None:
         unit = parse(list(lex("int main(void){int x=0; return _Generic(x, int: 1, default: 2);}")))
         sema = analyze(unit)
@@ -3119,6 +3149,16 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(analyzer._eval_int_constant_expr(generic_cached, scope), 7)
         generic_no_match = GenericExpr(IntLiteral("1u"), ((TypeSpec("int"), IntLiteral("3")),))
         self.assertIsNone(analyzer._eval_int_constant_expr(generic_no_match, scope))
+
+    def test_null_pointer_constant_helper_accepts_casted_void_zero(self) -> None:
+        analyzer = Analyzer()
+        scope = Scope()
+        self.assertTrue(
+            analyzer._is_null_pointer_constant(CastExpr(TypeSpec("void", 1), IntLiteral("0")), scope)
+        )
+        self.assertFalse(
+            analyzer._is_null_pointer_constant(CastExpr(TypeSpec("void", 1), IntLiteral("1")), scope)
+        )
 
     def test_duplicate_declaration(self) -> None:
         unit = parse(list(lex("int main(){int x; int x; return 0;}")))
