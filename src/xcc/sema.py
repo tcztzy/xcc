@@ -857,6 +857,9 @@ class Analyzer:
         pointee = type_.pointee()
         return pointee is not None and pointee.declarator_ops == () and pointee.name == VOID.name
 
+    def _qualifiers_contain(self, target_type: Type, value_type: Type) -> bool:
+        return set(value_type.qualifiers).issubset(target_type.qualifiers)
+
     def _is_object_pointer_type(self, type_: Type) -> bool:
         pointee = type_.pointee()
         return pointee is not None and not (
@@ -868,12 +871,25 @@ class Analyzer:
             return True
         if self._is_arithmetic_type(target_type) and self._is_arithmetic_type(value_type):
             return True
-        if target_type.pointee() is None or value_type.pointee() is None:
+        target_pointee = target_type.pointee()
+        value_pointee = value_type.pointee()
+        if target_pointee is None or value_pointee is None:
             return False
+        if (
+            target_pointee.name == value_pointee.name
+            and target_pointee.declarator_ops == value_pointee.declarator_ops
+        ):
+            return self._qualifiers_contain(target_pointee, value_pointee)
         if self._is_void_pointer_type(target_type):
-            return self._is_object_pointer_type(value_type)
+            return self._is_object_pointer_type(value_type) and self._qualifiers_contain(
+                target_pointee,
+                value_pointee,
+            )
         if self._is_void_pointer_type(value_type):
-            return self._is_object_pointer_type(target_type)
+            return self._is_object_pointer_type(target_type) and self._qualifiers_contain(
+                target_pointee,
+                value_pointee,
+            )
         return False
 
     def _is_null_pointer_constant(self, expr: Expr, scope: Scope) -> bool:
