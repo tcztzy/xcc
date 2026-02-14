@@ -118,6 +118,45 @@ _UNSIGNED_INTEGER_TYPE_LIMITS = {
     ULONG: (1 << 64) - 1,
     ULLONG: (1 << 64) - 1,
 }
+_INTEGER_PROMOTION_TYPES = {
+    BOOL.name: INT,
+    CHAR.name: INT,
+    UCHAR.name: INT,
+    SHORT.name: INT,
+    USHORT.name: INT,
+}
+_INTEGER_TYPE_RANKS = {
+    BOOL.name: 1,
+    CHAR.name: 2,
+    UCHAR.name: 2,
+    SHORT.name: 3,
+    USHORT.name: 3,
+    INT.name: 4,
+    UINT.name: 4,
+    LONG.name: 5,
+    ULONG.name: 5,
+    LLONG.name: 6,
+    ULLONG.name: 6,
+}
+_SIGNED_INTEGER_NAMES = {CHAR.name, SHORT.name, INT.name, LONG.name, LLONG.name}
+_UNSIGNED_COUNTERPARTS = {
+    INT.name: UINT,
+    LONG.name: ULONG,
+    LLONG.name: ULLONG,
+}
+_CANONICAL_INTEGER_TYPES = {
+    BOOL.name: BOOL,
+    CHAR.name: CHAR,
+    UCHAR.name: UCHAR,
+    SHORT.name: SHORT,
+    USHORT.name: USHORT,
+    INT.name: INT,
+    UINT.name: UINT,
+    LONG.name: LONG,
+    ULONG.name: ULONG,
+    LLONG.name: LLONG,
+    ULLONG.name: ULLONG,
+}
 _DECIMAL_LITERAL_CANDIDATES: dict[str, tuple[Type, ...]] = {
     "": (INT, LONG, LLONG),
     "u": (UINT, ULONG, ULLONG),
@@ -853,6 +892,69 @@ class Analyzer:
     def _is_arithmetic_type(self, type_: Type) -> bool:
         return self._is_integer_type(type_) or self._is_floating_type(type_)
 
+    def _unqualified_type(self, type_: Type) -> Type:
+        if not type_.qualifiers:
+            return type_
+        return Type(type_.name, declarator_ops=type_.declarator_ops)
+
+    def _integer_rank(self, type_: Type) -> int:
+        return _INTEGER_TYPE_RANKS[self._unqualified_type(type_).name]
+
+    def _is_signed_integer_type(self, type_: Type) -> bool:
+        unqualified = self._unqualified_type(type_)
+        return self._is_integer_type(unqualified) and unqualified.name in _SIGNED_INTEGER_NAMES
+
+    def _integer_promotion(self, type_: Type) -> Type:
+        unqualified = self._unqualified_type(type_)
+        if not self._is_integer_type(unqualified):
+            return unqualified
+        promoted = _INTEGER_PROMOTION_TYPES.get(unqualified.name)
+        if promoted is not None:
+            return promoted
+        return _CANONICAL_INTEGER_TYPES[unqualified.name]
+
+    def _signed_range(self, type_: Type) -> tuple[int, int] | None:
+        return _SIGNED_INTEGER_TYPE_LIMITS.get(self._unqualified_type(type_))
+
+    def _unsigned_max(self, type_: Type) -> int | None:
+        return _UNSIGNED_INTEGER_TYPE_LIMITS.get(self._unqualified_type(type_))
+
+    def _signed_can_represent_unsigned(self, signed: Type, unsigned: Type) -> bool:
+        signed_range = self._signed_range(signed)
+        unsigned_max = self._unsigned_max(unsigned)
+        return (
+            signed_range is not None
+            and unsigned_max is not None
+            and signed_range[1] >= unsigned_max
+        )
+
+    def _usual_arithmetic_conversion(self, left_type: Type, right_type: Type) -> Type | None:
+        left_type = self._unqualified_type(left_type)
+        right_type = self._unqualified_type(right_type)
+        if self._is_floating_type(left_type) or self._is_floating_type(right_type):
+            if left_type.name == LONGDOUBLE.name or right_type.name == LONGDOUBLE.name:
+                return LONGDOUBLE
+            if left_type.name == DOUBLE.name or right_type.name == DOUBLE.name:
+                return DOUBLE
+            return FLOAT
+        if not self._is_integer_type(left_type) or not self._is_integer_type(right_type):
+            return None
+        left = self._integer_promotion(left_type)
+        right = self._integer_promotion(right_type)
+        if left == right:
+            return left
+        left_signed = self._is_signed_integer_type(left)
+        right_signed = self._is_signed_integer_type(right)
+        if left_signed == right_signed:
+            return left if self._integer_rank(left) >= self._integer_rank(right) else right
+        signed_type = left if left_signed else right
+        unsigned_type = right if left_signed else left
+        if self._integer_rank(unsigned_type) >= self._integer_rank(signed_type):
+            return unsigned_type
+        if self._signed_can_represent_unsigned(signed_type, unsigned_type):
+            return signed_type
+        return _UNSIGNED_COUNTERPARTS[signed_type.name]
+
     def _is_void_pointer_type(self, type_: Type) -> bool:
         pointee = type_.pointee()
         return pointee is not None and pointee.declarator_ops == () and pointee.name == VOID.name
@@ -1211,8 +1313,9 @@ class Analyzer:
         )
 
     def _analyze_additive_types(self, left_type: Type, right_type: Type, op: str) -> Type | None:
-        if self._is_integer_type(left_type) and self._is_integer_type(right_type):
-            return INT
+        arithmetic_result = self._usual_arithmetic_conversion(left_type, right_type)
+        if arithmetic_result is not None:
+            return arithmetic_result
         left_ptr = left_type.pointee()
         right_ptr = right_type.pointee()
         if op == "+":
@@ -1631,8 +1734,9 @@ class Analyzer:
             if expr.op in {"+", "-", "~"}:
                 if not self._is_integer_type(value_operand_type):
                     raise SemaError("Unary operator requires integer operand")
-                self._type_map.set(expr, INT)
-                return INT
+                result_type = self._integer_promotion(value_operand_type)
+                self._type_map.set(expr, result_type)
+                return result_type
             if expr.op == "!":
                 if not self._is_scalar_type(value_operand_type):
                     raise SemaError("Logical not requires scalar operand")
@@ -1682,13 +1786,33 @@ class Analyzer:
                     )
                 self._type_map.set(expr, result_type)
                 return result_type
-            integer_ops = {"*", "/", "%", "<<", ">>", "&", "^", "|"}
-            if expr.op in integer_ops:
+            if expr.op in {"*", "/"}:
+                result_type = self._usual_arithmetic_conversion(left_type, right_type)
+                if result_type is None:
+                    raise SemaError("Binary operator requires integer operands")
+                self._type_map.set(expr, result_type)
+                return result_type
+            if expr.op == "%":
+                result_type = self._usual_arithmetic_conversion(left_type, right_type)
+                if result_type is None or not self._is_integer_type(result_type):
+                    raise SemaError("Binary operator requires integer operands")
+                self._type_map.set(expr, result_type)
+                return result_type
+            if expr.op in {"<<", ">>"}:
                 if not self._is_integer_type(left_type) or not self._is_integer_type(right_type):
                     raise SemaError("Binary operator requires integer operands")
-            elif expr.op in {"<", "<=", ">", ">="}:
+                result_type = self._integer_promotion(left_type)
+                self._type_map.set(expr, result_type)
+                return result_type
+            if expr.op in {"&", "^", "|"}:
+                result_type = self._usual_arithmetic_conversion(left_type, right_type)
+                if result_type is None or not self._is_integer_type(result_type):
+                    raise SemaError("Binary operator requires integer operands")
+                self._type_map.set(expr, result_type)
+                return result_type
+            if expr.op in {"<", "<=", ">", ">="}:
                 if (
-                    not self._is_integer_type(left_type) or not self._is_integer_type(right_type)
+                    self._usual_arithmetic_conversion(left_type, right_type) is None
                 ) and not self._is_pointer_relational_compatible(left_type, right_type):
                     raise SemaError(
                         "Relational operator requires integer or compatible object pointer operands"
@@ -1696,7 +1820,7 @@ class Analyzer:
             elif expr.op in {"==", "!="}:
                 if not self._is_scalar_type(left_type) or not self._is_scalar_type(right_type):
                     raise SemaError("Equality operator requires scalar operands")
-                if not (self._is_integer_type(left_type) and self._is_integer_type(right_type)):
+                if self._usual_arithmetic_conversion(left_type, right_type) is None:
                     if left_type.pointee() is not None and right_type.pointee() is not None:
                         if not self._is_pointer_equality_compatible(left_type, right_type):
                             raise SemaError(
@@ -1729,18 +1853,20 @@ class Analyzer:
             else_type = self._decay_array_value(self._analyze_expr(expr.else_expr, scope))
             if then_type == else_type:
                 result_type = then_type
-            elif self._is_integer_type(then_type) and self._is_integer_type(else_type):
-                result_type = INT
             else:
-                result_type = self._conditional_pointer_result(
-                    expr.then_expr,
-                    then_type,
-                    expr.else_expr,
-                    else_type,
-                    scope,
-                )
-                if result_type is None:
-                    raise SemaError("Conditional type mismatch")
+                arithmetic_result = self._usual_arithmetic_conversion(then_type, else_type)
+                if arithmetic_result is not None:
+                    result_type = arithmetic_result
+                else:
+                    result_type = self._conditional_pointer_result(
+                        expr.then_expr,
+                        then_type,
+                        expr.else_expr,
+                        else_type,
+                        scope,
+                    )
+                    if result_type is None:
+                        raise SemaError("Conditional type mismatch")
             then_overload = self._get_overload_expr_name(expr.then_expr)
             else_overload = self._get_overload_expr_name(expr.else_expr)
             if then_overload is not None and then_overload == else_overload:

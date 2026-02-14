@@ -274,6 +274,7 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(member.bit_width_expr, IntLiteral("1"))
 
     def test_type_helper_methods(self) -> None:
+        analyzer = Analyzer()
         array = Type("int").array_of(4)
         pointer = array.pointer_to()
         self.assertEqual(str(Type("int", 1)), "int*")
@@ -292,6 +293,7 @@ class SemaTests(unittest.TestCase):
         )
         self.assertIsNone(Type("int").pointee())
         self.assertIsNone(Type("int").element_type())
+        self.assertIs(analyzer._integer_promotion(FLOAT), FLOAT)
 
     def test_scope_lookup_typedef_from_parent(self) -> None:
         parent = Scope()
@@ -1030,6 +1032,24 @@ class SemaTests(unittest.TestCase):
         self.assertIsInstance(expr, ConditionalExpr)
         self.assertIs(sema.type_map.get(expr), INT)
 
+    def test_conditional_usual_arithmetic_conversion_typemap(self) -> None:
+        source = "int main(){unsigned long a=1; int b=2; return 1 ? a : b;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].value
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertIs(sema.type_map.get(expr), ULONG)
+
+    def test_conditional_floating_usual_arithmetic_conversion_typemap(self) -> None:
+        source = "int main(){float a=1.0f; double b=2.0; return 1 ? a : b;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].value
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertIs(sema.type_map.get(expr), DOUBLE)
+
     def test_conditional_pointer_same_type_typemap(self) -> None:
         source = "int main(){int x=1; int *p=&x; int *q=1 ? p : p; return q!=0;}"
         unit = parse(list(lex(source)))
@@ -1201,6 +1221,66 @@ class SemaTests(unittest.TestCase):
         assert expr is not None
         self.assertIs(sema.type_map.get(expr), INT)
 
+    def test_multiplicative_usual_arithmetic_conversion_typemap(self) -> None:
+        unit = parse(list(lex("int main(){float f=1.0f; return f*2;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[1].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), FLOAT)
+
+    def test_multiplicative_long_double_typemap(self) -> None:
+        unit = parse(list(lex("int main(){long double f=1.0L; return f*2.0;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[1].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), LONGDOUBLE)
+
+    def test_additive_unsigned_long_and_long_long_typemap(self) -> None:
+        unit = parse(list(lex("int main(){unsigned long a=1; long long b=2; return a+b;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), ULLONG)
+
+    def test_bitwise_usual_arithmetic_conversion_typemap(self) -> None:
+        unit = parse(list(lex("int main(){long a=1; unsigned b=2; return a|b;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), LONG)
+
+    def test_shift_uses_left_integer_promotion_typemap(self) -> None:
+        unit = parse(list(lex("int main(){unsigned short s=1; return s<<1;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[1].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), INT)
+
+    def test_shift_requires_integer_operands_error(self) -> None:
+        unit = parse(list(lex("int main(){float f=1.0f; return f<<1;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Binary operator requires integer operands")
+
+    def test_modulo_usual_arithmetic_conversion_typemap(self) -> None:
+        unit = parse(list(lex("int main(){unsigned long a=7; int b=3; return a%b;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), ULONG)
+
+    def test_modulo_requires_integer_operands_error(self) -> None:
+        unit = parse(list(lex("int main(){float f=1.0f; return f%2;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Binary operator requires integer operands")
+
+    def test_bitwise_requires_integer_operands_error(self) -> None:
+        unit = parse(list(lex("int main(){float f=1.0f; return f|1;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Binary operator requires integer operands")
+
     def test_logical_expression_typemap(self) -> None:
         unit = parse(list(lex("int main(){return (1&&2) || 0;}")))
         sema = analyze(unit)
@@ -1210,6 +1290,13 @@ class SemaTests(unittest.TestCase):
 
     def test_equality_integer_expression_typemap(self) -> None:
         unit = parse(list(lex("int main(){int x=1; return x==1;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[1].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), INT)
+
+    def test_additive_ignores_const_qualifier_typemap(self) -> None:
+        unit = parse(list(lex("int main(){const int x=1; return x+2;}")))
         sema = analyze(unit)
         expr = _body(unit.functions[0]).statements[1].value
         assert expr is not None
