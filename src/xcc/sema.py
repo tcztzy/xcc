@@ -1,6 +1,10 @@
+from contextlib import suppress
 from dataclasses import dataclass
+from typing import Literal, cast
 
 from xcc.ast import (
+    AlignofExpr,
+    ArrayDecl,
     AssignExpr,
     BinaryExpr,
     BreakStmt,
@@ -9,6 +13,7 @@ from xcc.ast import (
     CastExpr,
     CharLiteral,
     CommaExpr,
+    CompoundLiteralExpr,
     CompoundStmt,
     ConditionalExpr,
     ContinueStmt,
@@ -18,12 +23,15 @@ from xcc.ast import (
     DoWhileStmt,
     Expr,
     ExprStmt,
+    FloatLiteral,
     ForStmt,
     FunctionDef,
+    GenericExpr,
     GotoStmt,
     Identifier,
     IfStmt,
     IndirectGotoStmt,
+    InitList,
     IntLiteral,
     LabelAddressExpr,
     LabelStmt,
@@ -33,6 +41,7 @@ from xcc.ast import (
     ReturnStmt,
     SizeofExpr,
     StatementExpr,
+    StaticAssertDecl,
     Stmt,
     StringLiteral,
     SubscriptExpr,
@@ -45,6 +54,7 @@ from xcc.ast import (
     WhileStmt,
 )
 from xcc.types import (
+    BOOL,
     CHAR,
     DOUBLE,
     FLOAT,
@@ -67,6 +77,7 @@ _OCTAL_DIGITS = "01234567"
 _MAX_ARRAY_OBJECT_BYTES = (1 << 31) - 1
 _POINTER_SIZE = 8
 _BASE_TYPE_SIZES = {
+    "_Bool": 1,
     "char": 1,
     "unsigned char": 1,
     "short": 2,
@@ -81,6 +92,7 @@ _BASE_TYPE_SIZES = {
     "double": 8,
     "long double": 16,
 }
+_BASE_TYPE_ALIGNMENTS = dict(_BASE_TYPE_SIZES)
 _SIMPLE_ESCAPES = {
     "'": ord("'"),
     '"': ord('"'),
@@ -96,16 +108,37 @@ _SIMPLE_ESCAPES = {
 }
 
 
-_INTEGER_LITERAL_SUFFIX_TYPES = {
-    "": INT,
-    "u": UINT,
-    "l": LONG,
-    "ul": ULONG,
-    "lu": ULONG,
-    "ll": LLONG,
-    "ull": ULLONG,
-    "llu": ULLONG,
+_SIGNED_INTEGER_TYPE_LIMITS = {
+    INT: (-(1 << 31), (1 << 31) - 1),
+    LONG: (-(1 << 63), (1 << 63) - 1),
+    LLONG: (-(1 << 63), (1 << 63) - 1),
 }
+_UNSIGNED_INTEGER_TYPE_LIMITS = {
+    UINT: (1 << 32) - 1,
+    ULONG: (1 << 64) - 1,
+    ULLONG: (1 << 64) - 1,
+}
+_DECIMAL_LITERAL_CANDIDATES: dict[str, tuple[Type, ...]] = {
+    "": (INT, LONG, LLONG),
+    "u": (UINT, ULONG, ULLONG),
+    "l": (LONG, LLONG),
+    "ul": (ULONG, ULLONG),
+    "lu": (ULONG, ULLONG),
+    "ll": (LLONG,),
+    "ull": (ULLONG,),
+    "llu": (ULLONG,),
+}
+_NON_DECIMAL_LITERAL_CANDIDATES: dict[str, tuple[Type, ...]] = {
+    "": (INT, UINT, LONG, ULONG, LLONG, ULLONG),
+    "u": (UINT, ULONG, ULLONG),
+    "l": (LONG, ULONG, LLONG, ULLONG),
+    "ul": (ULONG, ULLONG),
+    "lu": (ULONG, ULLONG),
+    "ll": (LLONG, ULLONG),
+    "ull": (ULLONG,),
+    "llu": (ULLONG,),
+}
+StdMode = Literal["c11", "gnu11"]
 
 
 @dataclass(frozen=True)
@@ -120,6 +153,7 @@ class SemaError(ValueError):
 class VarSymbol:
     name: str
     type_: Type
+    alignment: int | None = None
 
 
 @dataclass(frozen=True)
@@ -141,6 +175,14 @@ class FunctionSignature:
     return_type: Type
     params: tuple[Type, ...] | None
     is_variadic: bool
+
+
+@dataclass(frozen=True)
+class RecordMemberInfo:
+    name: str | None
+    type_: Type
+    alignment: int | None = None
+    bit_width: int | None = None
 
 
 class TypeMap:
@@ -207,12 +249,17 @@ class SwitchContext:
 
 
 class Analyzer:
-    def __init__(self) -> None:
+    def __init__(self, *, std: StdMode = "c11") -> None:
+        self._std = std
         self._functions: dict[str, FunctionSymbol] = {}
         self._type_map = TypeMap()
         self._function_signatures: dict[str, FunctionSignature] = {}
+        self._function_overloads: dict[str, list[FunctionSignature]] = {}
+        self._overloadable_functions: set[str] = set()
+        self._overload_expr_names: dict[Expr, str] = {}
+        self._overload_expr_ids: dict[int, str] = {}
         self._defined_functions: set[str] = set()
-        self._record_definitions: dict[str, tuple[tuple[str, Type], ...]] = {}
+        self._record_definitions: dict[str, tuple[RecordMemberInfo, ...]] = {}
         self._seen_record_definitions: set[int] = set()
         self._file_scope = Scope()
         self._loop_depth = 0
@@ -234,6 +281,10 @@ class Analyzer:
         return SemaUnit(self._functions, self._type_map)
 
     def _register_function_external(self, func: FunctionDef) -> None:
+        if func.storage_class not in {None, "static", "extern"}:
+            raise SemaError("Invalid storage class for function")
+        if func.is_thread_local:
+            raise SemaError("Invalid declaration specifier")
         if self._file_scope.lookup(func.name) is not None:
             raise SemaError(f"Conflicting declaration: {func.name}")
         if self._file_scope.lookup_typedef(func.name) is not None:
@@ -242,13 +293,83 @@ class Analyzer:
         existing = self._function_signatures.get(func.name)
         if existing is None:
             self._function_signatures[func.name] = signature
+            if func.is_overloadable:
+                self._overloadable_functions.add(func.name)
+                self._add_function_overload(func.name, signature)
         else:
-            merged_signature = self._merge_signature(existing, signature, func.name)
-            self._function_signatures[func.name] = merged_signature
+            if not self._signatures_compatible(existing, signature):
+                if not self._is_compatible_overloadable_redeclaration(func):
+                    raise SemaError(f"Conflicting declaration: {func.name}")
+                self._add_function_overload(func.name, signature)
+            else:
+                merged_signature = self._merge_signature(existing, signature, func.name)
+                self._function_signatures[func.name] = merged_signature
+                if func.is_overloadable:
+                    self._overloadable_functions.add(func.name)
+                    self._add_function_overload(func.name, merged_signature)
         if func.body is not None:
             if func.name in self._defined_functions:
                 raise SemaError(f"Duplicate function definition: {func.name}")
             self._defined_functions.add(func.name)
+
+    def _is_compatible_overloadable_redeclaration(self, func: FunctionDef) -> bool:
+        return (
+            func.is_overloadable
+            and func.name in self._overloadable_functions
+            and func.body is None
+            and func.name not in self._defined_functions
+        )
+
+    def _add_function_overload(self, name: str, signature: FunctionSignature) -> None:
+        overloads = self._function_overloads.setdefault(name, [])
+        if signature not in overloads:
+            overloads.append(signature)
+
+    def _set_overload_expr_name(self, expr: Expr, name: str) -> None:
+        with suppress(TypeError):
+            self._overload_expr_names[expr] = name
+            return
+        self._overload_expr_ids[id(expr)] = name
+
+    def _get_overload_expr_name(self, expr: Expr) -> str | None:
+        try:
+            hash(expr)
+        except TypeError:
+            return self._overload_expr_ids.get(id(expr))
+        return self._overload_expr_names.get(expr)
+
+    def _signature_matches_callable_type(
+        self,
+        signature: FunctionSignature,
+        target_type: Type,
+    ) -> bool:
+        callable_signature = target_type.callable_signature()
+        if callable_signature is None:
+            return False
+        return_type, params = callable_signature
+        parameter_types, is_variadic = params
+        return (
+            signature.return_type == return_type
+            and signature.params == parameter_types
+            and signature.is_variadic == is_variadic
+        )
+
+    def _resolve_overload_for_cast(
+        self,
+        overload_name: str,
+        target_type: Type,
+    ) -> FunctionSignature | None:
+        overloads = self._function_overloads.get(overload_name)
+        if not overloads:
+            return None
+        matches = [
+            signature
+            for signature in overloads
+            if self._signature_matches_callable_type(signature, target_type)
+        ]
+        if len(matches) != 1:
+            return None
+        return matches[0]
 
     def _merge_signature(
         self,
@@ -307,36 +428,53 @@ class Analyzer:
             if declaration.name in self._function_signatures:
                 raise SemaError(f"Conflicting declaration: {declaration.name}")
             self._register_type_spec(declaration.type_spec)
+            if self._is_invalid_atomic_type_spec(declaration.type_spec):
+                raise SemaError("Invalid atomic type")
             self._define_enum_members(declaration.type_spec, self._file_scope)
             typedef_type = self._resolve_type(declaration.type_spec)
             self._ensure_array_size_limit(typedef_type)
             self._file_scope.define_typedef(declaration.name, typedef_type)
             return
         if isinstance(declaration, DeclStmt):
+            if declaration.storage_class in {"auto", "register"}:
+                raise SemaError("Invalid storage class for file-scope declaration")
             self._register_type_spec(declaration.type_spec)
             self._define_enum_members(declaration.type_spec, self._file_scope)
+            if declaration.alignment is not None and declaration.name is None:
+                raise SemaError("Invalid alignment specifier")
             if declaration.name is None:
+                if declaration.storage_class is not None or declaration.is_thread_local:
+                    raise SemaError("Expected identifier")
                 return
             if declaration.name in self._function_signatures:
                 raise SemaError(f"Conflicting declaration: {declaration.name}")
+            if self._is_invalid_atomic_type_spec(declaration.type_spec):
+                raise SemaError("Invalid object type: atomic")
             if self._is_invalid_void_object_type(declaration.type_spec):
                 raise SemaError("Invalid object type: void")
             if self._is_invalid_incomplete_record_object_type(declaration.type_spec):
                 raise SemaError("Invalid object type: incomplete")
+            if self._is_file_scope_vla_type_spec(declaration.type_spec):
+                raise SemaError("Variable length array not allowed at file scope")
             var_type = self._resolve_type(declaration.type_spec)
+            var_alignment = self._alignof_type(var_type)
+            if not self._is_valid_explicit_alignment(declaration.alignment, var_alignment):
+                raise SemaError("Invalid alignment specifier")
             self._ensure_array_size_limit(var_type)
-            self._file_scope.define(VarSymbol(declaration.name, var_type))
-            if declaration.init is not None:
-                init_type = self._decay_array_value(
-                    self._analyze_expr(declaration.init, self._file_scope)
-                )
-                if not self._is_initializer_compatible(
+            self._file_scope.define(
+                VarSymbol(
+                    declaration.name,
                     var_type,
-                    declaration.init,
-                    init_type,
-                    self._file_scope,
-                ):
-                    raise SemaError("Initializer type mismatch")
+                    declaration.alignment if declaration.alignment is not None else var_alignment,
+                )
+            )
+            if declaration.init is not None:
+                if declaration.storage_class == "extern":
+                    raise SemaError("Extern declaration cannot have initializer")
+                self._analyze_initializer(var_type, declaration.init, self._file_scope)
+            return
+        if isinstance(declaration, StaticAssertDecl):
+            self._check_static_assert(declaration, self._file_scope)
             return
         raise SemaError("Unsupported file-scope declaration")
 
@@ -344,16 +482,22 @@ class Analyzer:
         if not func.has_prototype:
             if func.is_variadic:
                 raise SemaError("Variadic function requires a prototype")
+            if self._is_invalid_atomic_type_spec(func.return_type):
+                raise SemaError("Invalid return type: atomic")
             if self._is_invalid_incomplete_record_object_type(func.return_type):
                 raise SemaError("Invalid return type: incomplete")
             return FunctionSignature(self._resolve_type(func.return_type), None, False)
         params: list[Type] = []
         for param in func.params:
+            if self._is_invalid_atomic_type_spec(param.type_spec):
+                raise SemaError("Invalid parameter type: atomic")
             if self._is_invalid_void_parameter_type(param.type_spec):
                 raise SemaError("Invalid parameter type: void")
             if self._is_invalid_incomplete_record_object_type(param.type_spec):
                 raise SemaError("Invalid parameter type: incomplete")
             params.append(self._resolve_param_type(param.type_spec))
+        if self._is_invalid_atomic_type_spec(func.return_type):
+            raise SemaError("Invalid return type: atomic")
         if self._is_invalid_incomplete_record_object_type(func.return_type):
             raise SemaError("Invalid return type: incomplete")
         return FunctionSignature(
@@ -370,6 +514,35 @@ class Analyzer:
             return self._record_key(type_spec.name, type_spec.record_tag)
         return f"{type_spec.name} <anon:{id(type_spec)}>"
 
+    def _normalize_record_members(
+        self,
+        members: tuple[RecordMemberInfo, ...] | tuple[tuple[str | None, Type], ...],
+    ) -> tuple[RecordMemberInfo, ...]:
+        if all(isinstance(member, RecordMemberInfo) for member in members):
+            return members  # type: ignore[return-value]
+        normalized: list[RecordMemberInfo] = []
+        for member in members:
+            if isinstance(member, RecordMemberInfo):
+                normalized.append(member)
+                continue
+            if isinstance(member, tuple) and len(member) == 2:
+                normalized.append(RecordMemberInfo(member[0], member[1]))
+                continue
+            if isinstance(member, tuple) and len(member) == 3:
+                normalized.append(RecordMemberInfo(member[0], member[1], member[2]))
+                continue
+            raise TypeError("Invalid record member")
+        return tuple(normalized)
+
+    def _record_members(self, record_name: str) -> tuple[RecordMemberInfo, ...] | None:
+        members = self._record_definitions.get(record_name)
+        if members is None:
+            return None
+        normalized = self._normalize_record_members(members)
+        if normalized is not members:
+            self._record_definitions[record_name] = normalized
+        return normalized
+
     def _register_type_spec(self, type_spec: TypeSpec) -> None:
         if type_spec.name not in {"struct", "union"} or not type_spec.record_members:
             return
@@ -378,18 +551,49 @@ class Analyzer:
             return
         self._seen_record_definitions.add(spec_id)
         seen_members: set[str] = set()
-        member_types: list[tuple[str, Type]] = []
-        for member_spec, member_name in type_spec.record_members:
-            if member_name in seen_members:
+        member_types: list[RecordMemberInfo] = []
+        for member in type_spec.record_members:
+            member_spec = member.type_spec
+            member_name = member.name
+            if member_name is not None and member_name in seen_members:
                 raise SemaError(f"Duplicate declaration: {member_name}")
-            seen_members.add(member_name)
+            if member_name is not None:
+                seen_members.add(member_name)
             if self._is_invalid_void_object_type(member_spec):
+                raise SemaError("Invalid member type")
+            if self._is_invalid_atomic_type_spec(member_spec):
                 raise SemaError("Invalid member type")
             if self._is_function_object_type(member_spec):
                 raise SemaError("Invalid member type")
             if self._is_invalid_incomplete_record_object_type(member_spec):
                 raise SemaError("Invalid member type")
-            member_types.append((member_name, self._resolve_type(member_spec)))
+            resolved_member_type = self._resolve_type(member_spec)
+            bit_width: int | None = None
+            if member.bit_width_expr is not None:
+                if not self._is_integer_type(resolved_member_type):
+                    raise SemaError("Bit-field type must be integer")
+                bit_width = self._eval_int_constant_expr(member.bit_width_expr, self._file_scope)
+                if bit_width is None:
+                    raise SemaError("Bit-field width is not integer constant")
+                if bit_width < 0:
+                    raise SemaError("Bit-field width must be non-negative")
+                max_width = self._sizeof_type(resolved_member_type)
+                assert max_width is not None
+                if bit_width > max_width * 8:
+                    raise SemaError("Bit-field width exceeds type width")
+                if member_name is None and bit_width != 0:
+                    raise SemaError("Unnamed bit-field must have zero width")
+            natural_alignment = self._alignof_type(resolved_member_type)
+            if not self._is_valid_explicit_alignment(member.alignment, natural_alignment):
+                raise SemaError("Invalid alignment specifier")
+            member_types.append(
+                RecordMemberInfo(
+                    member_name,
+                    resolved_member_type,
+                    member.alignment,
+                    bit_width,
+                )
+            )
         key = self._record_type_name(type_spec)
         if key in self._record_definitions:
             raise SemaError(f"Duplicate definition: {key}")
@@ -403,6 +607,8 @@ class Analyzer:
             return CHAR
         if type_spec.name == "unsigned char" and not type_spec.declarator_ops:
             return UCHAR
+        if type_spec.name == "_Bool" and not type_spec.declarator_ops:
+            return BOOL
         if type_spec.name == "short" and not type_spec.declarator_ops:
             return SHORT
         if type_spec.name == "unsigned short" and not type_spec.declarator_ops:
@@ -432,10 +638,16 @@ class Analyzer:
         resolved_ops: list[tuple[str, int | tuple[tuple[Type, ...] | None, bool]]] = []
         for kind, value in type_spec.declarator_ops:
             if kind != "fn":
+                if kind == "arr":
+                    resolved_ops.append(("arr", self._resolve_array_bound(value)))
+                    continue
                 assert isinstance(value, int)
                 resolved_ops.append((kind, value))
                 continue
-            resolved_params = self._resolve_function_param_types(value)
+            assert isinstance(value, tuple) and len(value) == 2
+            resolved_params = self._resolve_function_param_types(
+                cast(tuple[tuple[TypeSpec, ...] | None, bool], value)
+            )
             resolved_ops.append((kind, resolved_params))
         if type_spec.name == "enum":
             base_name = "int"
@@ -444,6 +656,20 @@ class Analyzer:
         else:
             base_name = type_spec.name
         return Type(base_name, declarator_ops=tuple(resolved_ops))
+
+    def _resolve_array_bound(self, value: object) -> int:
+        if isinstance(value, int):
+            return value
+        if not isinstance(value, ArrayDecl):
+            return -1
+        if value.length is None:
+            return -1
+        if isinstance(value.length, int):
+            return value.length
+        evaluated = self._eval_int_constant_expr(value.length, self._file_scope)
+        if evaluated is None:
+            return -1
+        return evaluated
 
     def _resolve_function_param_types(
         self,
@@ -457,6 +683,8 @@ class Analyzer:
             return None, False
         params: list[Type] = []
         for param_spec in param_specs:
+            if self._is_invalid_atomic_type_spec(param_spec):
+                raise SemaError("Invalid parameter type: atomic")
             if self._is_invalid_void_parameter_type(param_spec):
                 raise SemaError("Invalid parameter type: void")
             if self._is_invalid_incomplete_record_object_type(param_spec):
@@ -482,6 +710,17 @@ class Analyzer:
     def _is_function_object_type(self, type_spec: TypeSpec) -> bool:
         return bool(type_spec.declarator_ops) and type_spec.declarator_ops[0][0] == "fn"
 
+    def _is_invalid_atomic_type_spec(self, type_spec: TypeSpec) -> bool:
+        if not type_spec.is_atomic:
+            return False
+        target = type_spec.atomic_target if type_spec.atomic_target is not None else type_spec
+        return (
+            self._is_invalid_void_object_type(target)
+            or self._is_invalid_incomplete_record_object_type(target)
+            or self._is_function_object_type(target)
+            or (bool(target.declarator_ops) and target.declarator_ops[0][0] == "arr")
+        )
+
     def _is_invalid_incomplete_record_object_type(self, type_spec: TypeSpec) -> bool:
         if type_spec.name not in {"struct", "union"}:
             return False
@@ -498,12 +737,12 @@ class Analyzer:
         return name.startswith("struct ") or name.startswith("union ")
 
     def _lookup_record_member(self, record_type: Type, member_name: str) -> Type:
-        members = self._record_definitions.get(record_type.name)
+        members = self._record_members(record_type.name)
         if members is None:
             raise SemaError("Member access on incomplete type")
-        for declared_name, declared_type in members:
-            if declared_name == member_name:
-                return declared_type
+        for member in members:
+            if member.name == member_name:
+                return member.type_
         raise SemaError(f"No such member: {member_name}")
 
     def _resolve_member_type(
@@ -528,7 +767,8 @@ class Analyzer:
 
     def _is_invalid_sizeof_type_spec(self, type_spec: TypeSpec) -> bool:
         return (
-            self._is_invalid_void_object_type(type_spec)
+            self._is_invalid_atomic_type_spec(type_spec)
+            or self._is_invalid_void_object_type(type_spec)
             or self._is_invalid_incomplete_record_object_type(type_spec)
             or self._is_function_object_type(type_spec)
         )
@@ -544,8 +784,48 @@ class Analyzer:
             return type_.name not in self._record_definitions
         return False
 
+    def _is_invalid_alignof_type_spec(self, type_spec: TypeSpec) -> bool:
+        return self._is_invalid_sizeof_type_spec(type_spec)
+
+    def _is_invalid_alignof_type(self, type_: Type) -> bool:
+        return self._is_invalid_sizeof_type(type_)
+
+    def _is_invalid_generic_association_type_spec(self, type_spec: TypeSpec) -> bool:
+        return self._is_invalid_sizeof_type_spec(type_spec) or self._is_variably_modified_type_spec(
+            type_spec
+        )
+
+    def _is_variably_modified_type_spec(self, type_spec: TypeSpec) -> bool:
+        for kind, value in type_spec.declarator_ops:
+            if kind != "arr":
+                continue
+            if isinstance(value, int):
+                if value < 0:
+                    return True
+                continue
+            if not isinstance(value, ArrayDecl):
+                return True
+            if value.length is None:
+                return True
+            if isinstance(value.length, int):
+                continue
+            if self._eval_int_constant_expr(value.length, self._file_scope) is None:
+                return True
+        return False
+
+    def _is_valid_explicit_alignment(
+        self,
+        alignment: int | None,
+        natural_alignment: int | None,
+    ) -> bool:
+        if alignment is None:
+            return True
+        if alignment <= 0 or (alignment & (alignment - 1)) != 0:
+            return False
+        return natural_alignment is not None and alignment >= natural_alignment
+
     def _is_integer_type(self, type_: Type) -> bool:
-        return type_ in (INT, UINT, SHORT, USHORT, LONG, ULONG, LLONG, ULLONG, CHAR, UCHAR)
+        return type_ in (INT, UINT, SHORT, USHORT, LONG, ULONG, LLONG, ULLONG, CHAR, UCHAR, BOOL)
 
     def _is_floating_type(self, type_: Type) -> bool:
         return type_ in (FLOAT, DOUBLE, LONGDOUBLE)
@@ -600,6 +880,181 @@ class Analyzer:
             self._is_assignment_expr_compatible(target_type, init_expr, init_type, scope)
         )
 
+    def _analyze_initializer(
+        self,
+        target_type: Type,
+        initializer: Expr | InitList,
+        scope: Scope,
+    ) -> None:
+        if isinstance(initializer, InitList):
+            self._analyze_initializer_list(target_type, initializer, scope)
+            return
+        init_type = self._decay_array_value(self._analyze_expr(initializer, scope))
+        if not self._is_initializer_compatible(target_type, initializer, init_type, scope):
+            raise SemaError("Initializer type mismatch")
+
+    def _analyze_initializer_list(self, target_type: Type, init: InitList, scope: Scope) -> None:
+        if target_type.is_array():
+            self._analyze_array_initializer_list(target_type, init, scope)
+            return
+        if self._is_record_name(target_type.name) and not target_type.declarator_ops:
+            self._analyze_record_initializer_list(target_type, init, scope)
+            return
+        if len(init.items) != 1:
+            raise SemaError("Initializer type mismatch")
+        item = init.items[0]
+        if item.designators:
+            raise SemaError("Initializer type mismatch")
+        self._analyze_initializer(target_type, item.initializer, scope)
+
+    def _analyze_array_initializer_list(
+        self,
+        target_type: Type,
+        init: InitList,
+        scope: Scope,
+    ) -> None:
+        assert target_type.declarator_ops and target_type.declarator_ops[0][0] == "arr"
+        _, length_value = target_type.declarator_ops[0]
+        assert isinstance(length_value, int)
+        length = length_value
+        element_type = target_type.element_type()
+        assert element_type is not None
+        next_index = 0
+        for item in init.items:
+            if item.designators:
+                kind, value = item.designators[0]
+                if kind != "index":
+                    raise SemaError("Initializer type mismatch")
+                assert isinstance(value, Expr)
+                index = self._eval_initializer_index(value, scope)
+                if index < 0 or index >= length:
+                    raise SemaError("Initializer index out of range")
+                self._analyze_designated_initializer(
+                    element_type,
+                    item.designators[1:],
+                    item.initializer,
+                    scope,
+                )
+                next_index = index + 1
+                continue
+            if next_index >= length:
+                raise SemaError("Initializer index out of range")
+            self._analyze_initializer(element_type, item.initializer, scope)
+            next_index += 1
+
+    def _analyze_record_initializer_list(
+        self,
+        target_type: Type,
+        init: InitList,
+        scope: Scope,
+    ) -> None:
+        all_members = self._record_members(target_type.name)
+        members = (
+            None if all_members is None else tuple(m for m in all_members if m.name is not None)
+        )
+        if members is None or not members:
+            raise SemaError("Initializer type mismatch")
+        is_union = target_type.name.startswith("union ")
+        next_member = 0
+        initialized_union = False
+        for item in init.items:
+            if item.designators:
+                kind, value = item.designators[0]
+                if kind != "member" or not isinstance(value, str):
+                    raise SemaError("Initializer type mismatch")
+                member_type, member_index = self._lookup_initializer_member(target_type, value)
+                self._analyze_designated_initializer(
+                    member_type,
+                    item.designators[1:],
+                    item.initializer,
+                    scope,
+                )
+                if is_union:
+                    initialized_union = True
+                else:
+                    next_member = member_index + 1
+                continue
+            if is_union:
+                if initialized_union:
+                    raise SemaError("Initializer type mismatch")
+                self._analyze_initializer(members[0].type_, item.initializer, scope)
+                initialized_union = True
+                continue
+            if next_member >= len(members):
+                raise SemaError("Initializer type mismatch")
+            self._analyze_initializer(members[next_member].type_, item.initializer, scope)
+            next_member += 1
+
+    def _analyze_designated_initializer(
+        self,
+        target_type: Type,
+        designators: tuple[tuple[str, Expr | str], ...],
+        initializer: Expr | InitList,
+        scope: Scope,
+    ) -> None:
+        if not designators:
+            self._analyze_initializer(target_type, initializer, scope)
+            return
+        kind, value = designators[0]
+        if kind == "index":
+            if not target_type.is_array():
+                raise SemaError("Initializer type mismatch")
+            assert isinstance(value, Expr)
+            index = self._eval_initializer_index(value, scope)
+            assert target_type.declarator_ops
+            _, length_value = target_type.declarator_ops[0]
+            assert isinstance(length_value, int)
+            if index < 0 or index >= length_value:
+                raise SemaError("Initializer index out of range")
+            element_type = target_type.element_type()
+            assert element_type is not None
+            self._analyze_designated_initializer(
+                element_type,
+                designators[1:],
+                initializer,
+                scope,
+            )
+            return
+        if kind != "member" or not isinstance(value, str):
+            raise SemaError("Initializer type mismatch")
+        member_type, _ = self._lookup_initializer_member(target_type, value)
+        self._analyze_designated_initializer(
+            member_type,
+            designators[1:],
+            initializer,
+            scope,
+        )
+
+    def _lookup_initializer_member(self, record_type: Type, member_name: str) -> tuple[Type, int]:
+        if record_type.declarator_ops or not self._is_record_name(record_type.name):
+            raise SemaError("Initializer type mismatch")
+        members = self._record_members(record_type.name)
+        if members is None:
+            raise SemaError("Initializer type mismatch")
+        for index, member in enumerate(members):
+            if member.name == member_name:
+                return member.type_, index
+        raise SemaError(f"No such member: {member_name}")
+
+    def _eval_initializer_index(self, expr: Expr, scope: Scope) -> int:
+        value = self._eval_int_constant_expr(expr, scope)
+        if value is None:
+            raise SemaError("Initializer index is not integer constant")
+        return value
+
+    def _check_static_assert(self, declaration: StaticAssertDecl, scope: Scope) -> None:
+        self._analyze_expr(declaration.condition, scope)
+        value = self._eval_int_constant_expr(declaration.condition, scope)
+        if value is None:
+            raise SemaError("Static assertion condition is not integer constant")
+        if value == 0:
+            message = self._static_assert_message(declaration.message)
+            raise SemaError(f"Static assertion failed: {message}")
+
+    def _static_assert_message(self, message: StringLiteral) -> str:
+        body = self._string_literal_body(message.value)
+        return message.value if body is None else body
+
     def _ensure_array_size_limit(self, type_: Type) -> None:
         if not type_.is_array():
             return
@@ -617,6 +1072,8 @@ class Analyzer:
             return None
         assert kind == "arr"
         assert isinstance(value, int)
+        if value <= 0:
+            return None
         element_type = Type(type_.name, declarator_ops=type_.declarator_ops[1:])
         element_size = self._sizeof_type(element_type, limit)
         if element_size is None:
@@ -625,20 +1082,31 @@ class Analyzer:
             return limit + 1
         return element_size * value
 
+    def _alignof_type(self, type_: Type) -> int | None:
+        if not type_.declarator_ops:
+            return self._alignof_object_base_type(type_)
+        kind, _ = type_.declarator_ops[0]
+        if kind == "ptr":
+            return _POINTER_SIZE
+        if kind == "fn":
+            return None
+        element_type = Type(type_.name, declarator_ops=type_.declarator_ops[1:])
+        return self._alignof_type(element_type)
+
     def _sizeof_object_base_type(self, type_: Type, limit: int | None) -> int | None:
         base_size = _BASE_TYPE_SIZES.get(type_.name)
         if base_size is not None:
             return base_size
         if not self._is_record_name(type_.name):
             return None
-        members = self._record_definitions.get(type_.name)
+        members = self._record_members(type_.name)
         if members is None:
             return None
         if type_.name.startswith("struct "):
             total = 0
-            for _, member_type in members:
+            for member in members:
                 member_limit = None if limit is None else limit - total
-                member_size = self._sizeof_type(member_type, member_limit)
+                member_size = self._sizeof_type(member.type_, member_limit)
                 if member_size is None:
                     return None
                 total += member_size
@@ -646,14 +1114,34 @@ class Analyzer:
                     return limit + 1
             return total
         largest = 0
-        for _, member_type in members:
-            member_size = self._sizeof_type(member_type, limit)
+        for member in members:
+            member_size = self._sizeof_type(member.type_, limit)
             if member_size is None:
                 return None
             if member_size > largest:
                 largest = member_size
             if limit is not None and largest > limit:
                 return limit + 1
+        return largest
+
+    def _alignof_object_base_type(self, type_: Type) -> int | None:
+        base_align = _BASE_TYPE_ALIGNMENTS.get(type_.name)
+        if base_align is not None:
+            return base_align
+        if not self._is_record_name(type_.name):
+            return None
+        members = self._record_members(type_.name)
+        if members is None:
+            return None
+        largest = 1
+        for member in members:
+            member_align = self._alignof_type(member.type_)
+            if member_align is None:
+                return None
+            if member.alignment is not None and member.alignment > member_align:
+                member_align = member.alignment
+            if member_align > largest:
+                largest = member_align
         return largest
 
     def _is_char_array_string_initializer(self, target_type: Type, init_expr: Expr) -> bool:
@@ -761,6 +1249,22 @@ class Analyzer:
     def _is_invalid_void_parameter_type(self, type_spec: TypeSpec) -> bool:
         return type_spec.name == "void" and not type_spec.declarator_ops
 
+    def _is_file_scope_vla_type_spec(self, type_spec: TypeSpec) -> bool:
+        for kind, value in type_spec.declarator_ops:
+            if kind != "arr":
+                continue
+            if isinstance(value, int):
+                continue
+            if not isinstance(value, ArrayDecl):
+                return True
+            if value.length is None:
+                return True
+            if isinstance(value.length, int):
+                continue
+            if self._eval_int_constant_expr(value.length, self._file_scope) is None:
+                return True
+        return False
+
     def _analyze_compound(self, stmt: CompoundStmt, scope: Scope, return_type: Type) -> None:
         for item in stmt.statements:
             self._analyze_stmt(item, scope, return_type)
@@ -771,29 +1275,48 @@ class Analyzer:
                 self._analyze_stmt(grouped_decl, scope, return_type)
             return
         if isinstance(stmt, DeclStmt):
+            if stmt.storage_class == "typedef":
+                raise SemaError("Invalid storage class for object declaration")
+            if stmt.is_thread_local and stmt.storage_class not in {"static", "extern"}:
+                raise SemaError("Invalid thread local storage class")
             self._register_type_spec(stmt.type_spec)
             self._define_enum_members(stmt.type_spec, scope)
+            if stmt.alignment is not None and stmt.name is None:
+                raise SemaError("Invalid alignment specifier")
             if stmt.name is None:
+                if stmt.storage_class is not None or stmt.is_thread_local:
+                    raise SemaError("Expected identifier")
                 return
+            if self._is_invalid_atomic_type_spec(stmt.type_spec):
+                raise SemaError("Invalid object type: atomic")
             if self._is_invalid_void_object_type(stmt.type_spec):
                 raise SemaError("Invalid object type: void")
             if self._is_invalid_incomplete_record_object_type(stmt.type_spec):
                 raise SemaError("Invalid object type: incomplete")
             var_type = self._resolve_type(stmt.type_spec)
+            var_alignment = self._alignof_type(var_type)
+            if not self._is_valid_explicit_alignment(stmt.alignment, var_alignment):
+                raise SemaError("Invalid alignment specifier")
             self._ensure_array_size_limit(var_type)
-            scope.define(VarSymbol(stmt.name, var_type))
-            if stmt.init is not None:
-                init_type = self._decay_array_value(self._analyze_expr(stmt.init, scope))
-                if not self._is_initializer_compatible(
+            scope.define(
+                VarSymbol(
+                    stmt.name,
                     var_type,
-                    stmt.init,
-                    init_type,
-                    scope,
-                ):
-                    raise SemaError("Initializer type mismatch")
+                    stmt.alignment if stmt.alignment is not None else var_alignment,
+                )
+            )
+            if stmt.init is not None:
+                if stmt.storage_class == "extern":
+                    raise SemaError("Extern declaration cannot have initializer")
+                self._analyze_initializer(var_type, stmt.init, scope)
+            return
+        if isinstance(stmt, StaticAssertDecl):
+            self._check_static_assert(stmt, scope)
             return
         if isinstance(stmt, TypedefDecl):
             self._register_type_spec(stmt.type_spec)
+            if self._is_invalid_atomic_type_spec(stmt.type_spec):
+                raise SemaError("Invalid atomic type")
             self._define_enum_members(stmt.type_spec, scope)
             typedef_type = self._resolve_type(stmt.type_spec)
             self._ensure_array_size_limit(typedef_type)
@@ -927,6 +1450,10 @@ class Analyzer:
         raise SemaError("Unsupported statement")
 
     def _analyze_expr(self, expr: Expr, scope: Scope) -> Type:
+        if isinstance(expr, FloatLiteral):
+            literal_type = self._parse_float_literal_type(expr.value)
+            self._type_map.set(expr, literal_type)
+            return literal_type
         if isinstance(expr, IntLiteral):
             parsed = self._parse_int_literal(expr.value)
             if parsed is None:
@@ -949,6 +1476,9 @@ class Analyzer:
             signature = self._function_signatures.get(expr.name)
             if signature is None:
                 raise SemaError(f"Undeclared identifier: {expr.name}")
+            overloads = self._function_overloads.get(expr.name)
+            if overloads is not None and len(overloads) > 1:
+                self._set_overload_expr_name(expr, expr.name)
             function_type = signature.return_type.function_of(
                 signature.params,
                 is_variadic=signature.is_variadic,
@@ -964,13 +1494,18 @@ class Analyzer:
                 raise SemaError("Statement expression outside of a function")
             inner_scope = Scope(scope)
             result_type: Type = VOID
+            result_overload: str | None = None
             for statement in expr.body.statements:
                 if isinstance(statement, ExprStmt):
                     analyzed_type = self._analyze_expr(statement.expr, inner_scope)
                     result_type = self._decay_array_value(analyzed_type)
+                    result_overload = self._get_overload_expr_name(statement.expr)
                     continue
                 self._analyze_stmt(statement, inner_scope, self._current_return_type)
                 result_type = VOID
+                result_overload = None
+            if result_overload is not None:
+                self._set_overload_expr_name(expr, result_overload)
             self._type_map.set(expr, result_type)
             return result_type
         if isinstance(expr, SubscriptExpr):
@@ -1003,14 +1538,54 @@ class Analyzer:
                     raise SemaError("Invalid sizeof operand")
             self._type_map.set(expr, INT)
             return INT
+        if isinstance(expr, AlignofExpr):
+            if expr.type_spec is not None:
+                self._register_type_spec(expr.type_spec)
+                if self._is_invalid_alignof_type_spec(expr.type_spec):
+                    raise SemaError("Invalid alignof operand")
+                resolved = self._resolve_type(expr.type_spec)
+                if self._alignof_type(resolved) is None:
+                    raise SemaError("Invalid alignof operand")
+            else:
+                assert expr.expr is not None
+                if self._std == "c11":
+                    raise SemaError("Invalid alignof operand")
+                operand_type = self._analyze_expr(expr.expr, scope)
+                if self._is_invalid_alignof_type(operand_type):
+                    raise SemaError("Invalid alignof operand")
+                if self._alignof_type(operand_type) is None:
+                    raise SemaError("Invalid alignof operand")
+            self._type_map.set(expr, INT)
+            return INT
         if isinstance(expr, CastExpr):
             self._register_type_spec(expr.type_spec)
             target_type = self._resolve_type(expr.type_spec)
             if self._is_invalid_cast_target(expr.type_spec, target_type):
                 raise SemaError("Invalid cast")
             operand_type = self._decay_array_value(self._analyze_expr(expr.expr, scope))
+            overload_name = self._get_overload_expr_name(expr.expr)
+            if overload_name is not None:
+                selected_signature = self._resolve_overload_for_cast(overload_name, target_type)
+                if selected_signature is None:
+                    raise SemaError("Invalid cast")
+                operand_type = self._decay_array_value(
+                    selected_signature.return_type.function_of(
+                        selected_signature.params,
+                        is_variadic=selected_signature.is_variadic,
+                    )
+                )
             if self._is_invalid_cast_operand(operand_type, target_type):
                 raise SemaError("Invalid cast")
+            self._type_map.set(expr, target_type)
+            return target_type
+        if isinstance(expr, CompoundLiteralExpr):
+            self._register_type_spec(expr.type_spec)
+            target_type = self._resolve_type(expr.type_spec)
+            if self._is_invalid_void_object_type(expr.type_spec):
+                raise SemaError("Invalid object type: void")
+            if self._is_invalid_incomplete_record_object_type(expr.type_spec):
+                raise SemaError("Invalid object type: incomplete")
+            self._analyze_initializer(target_type, expr.initializer, scope)
             self._type_map.set(expr, target_type)
             return target_type
         if isinstance(expr, UnaryExpr):
@@ -1127,11 +1702,56 @@ class Analyzer:
                 )
                 if result_type is None:
                     raise SemaError("Conditional type mismatch")
+            then_overload = self._get_overload_expr_name(expr.then_expr)
+            else_overload = self._get_overload_expr_name(expr.else_expr)
+            if then_overload is not None and then_overload == else_overload:
+                self._set_overload_expr_name(expr, then_overload)
+            elif then_overload is not None or else_overload is not None:
+                condition_value = self._eval_int_constant_expr(expr.condition, scope)
+                if condition_value is not None:
+                    selected = then_overload if condition_value else else_overload
+                    if selected is not None:
+                        self._set_overload_expr_name(expr, selected)
             self._type_map.set(expr, result_type)
             return result_type
+        if isinstance(expr, GenericExpr):
+            control_type = self._decay_array_value(self._analyze_expr(expr.control, scope))
+            selected_expr: Expr | None = None
+            default_expr: Expr | None = None
+            seen_types: set[Type] = set()
+            for assoc_type_spec, assoc_expr in expr.associations:
+                if assoc_type_spec is None:
+                    if default_expr is not None:
+                        raise SemaError("Duplicate default generic association")
+                    default_expr = assoc_expr
+                    self._analyze_expr(assoc_expr, scope)
+                    continue
+                self._register_type_spec(assoc_type_spec)
+                if self._is_invalid_generic_association_type_spec(assoc_type_spec):
+                    raise SemaError("Invalid generic association type")
+                assoc_type = self._resolve_type(assoc_type_spec)
+                if assoc_type in seen_types:
+                    raise SemaError("Duplicate generic association type")
+                seen_types.add(assoc_type)
+                self._analyze_expr(assoc_expr, scope)
+                if assoc_type == control_type:
+                    selected_expr = assoc_expr
+            if selected_expr is None:
+                selected_expr = default_expr
+            if selected_expr is None:
+                raise SemaError("No matching generic association")
+            selected_type = self._type_map.require(selected_expr)
+            selected_overload = self._get_overload_expr_name(selected_expr)
+            if selected_overload is not None:
+                self._set_overload_expr_name(expr, selected_overload)
+            self._type_map.set(expr, selected_type)
+            return selected_type
         if isinstance(expr, CommaExpr):
             self._analyze_expr(expr.left, scope)
             right_type = self._analyze_expr(expr.right, scope)
+            right_overload = self._get_overload_expr_name(expr.right)
+            if right_overload is not None:
+                self._set_overload_expr_name(expr, right_overload)
             self._type_map.set(expr, right_type)
             return right_type
         if isinstance(expr, AssignExpr):
@@ -1170,14 +1790,11 @@ class Analyzer:
             if isinstance(expr.callee, Identifier):
                 signature = self._function_signatures.get(expr.callee.name)
                 if signature is not None:
-                    for arg in expr.args:
-                        self._analyze_expr(arg, scope)
-                    self._check_call_arguments(
-                        expr.args,
-                        signature.params,
-                        signature.is_variadic,
+                    signature = self._resolve_call_signature(
                         expr.callee.name,
+                        expr.args,
                         scope,
+                        default=signature,
                     )
                     self._type_map.set(expr, signature.return_type)
                     return signature.return_type
@@ -1187,6 +1804,16 @@ class Analyzer:
                 callee_type = symbol.type_
             else:
                 callee_type = self._analyze_expr(expr.callee, scope)
+                overload_name = self._get_overload_expr_name(expr.callee)
+                if overload_name is not None:
+                    signature = self._resolve_call_signature(
+                        overload_name,
+                        expr.args,
+                        scope,
+                        default=self._function_signatures[overload_name],
+                    )
+                    self._type_map.set(expr, signature.return_type)
+                    return signature.return_type
             callable_signature = self._decay_array_value(callee_type).callable_signature()
             if callable_signature is None:
                 raise SemaError("Call target is not a function")
@@ -1204,6 +1831,68 @@ class Analyzer:
             return return_type
         raise SemaError("Unsupported expression")
 
+    def _resolve_call_signature(
+        self,
+        name: str,
+        args: list[Expr],
+        scope: Scope,
+        *,
+        default: FunctionSignature,
+    ) -> FunctionSignature:
+        overloads = self._function_overloads.get(name)
+        if not overloads:
+            for arg in args:
+                self._analyze_expr(arg, scope)
+            self._check_call_arguments(args, default.params, default.is_variadic, name, scope)
+            return default
+        analyzed_arg_types = [
+            self._decay_array_value(self._analyze_expr(arg, scope)) for arg in args
+        ]
+        ranked: list[tuple[int, int, FunctionSignature]] = []
+        for signature in overloads:
+            score = self._match_overload_signature(args, analyzed_arg_types, signature, scope)
+            if score is not None:
+                ranked.append((score[0], score[1], signature))
+        if not ranked:
+            self._check_call_arguments(args, default.params, default.is_variadic, name, scope)
+            return default
+        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        if len(ranked) > 1 and ranked[0][:2] == ranked[1][:2]:
+            raise SemaError(f"Ambiguous overloaded call: {name}")
+        chosen = ranked[0][2]
+        self._check_call_arguments(args, chosen.params, chosen.is_variadic, name, scope)
+        return chosen
+
+    def _match_overload_signature(
+        self,
+        args: list[Expr],
+        arg_types: list[Type],
+        signature: FunctionSignature,
+        scope: Scope,
+    ) -> tuple[int, int] | None:
+        if signature.params is None:
+            return 0, 0
+        if signature.is_variadic:
+            if len(args) < len(signature.params):
+                return None
+        elif len(args) != len(signature.params):
+            return None
+        exact_matches = 0
+        fixed_params = signature.params
+        for arg, arg_type, param_type in zip(args, arg_types, fixed_params, strict=False):
+            if not self._is_assignment_expr_compatible(param_type, arg, arg_type, scope):
+                return None
+            if arg_type == param_type:
+                exact_matches += 1
+        return exact_matches, int(not signature.is_variadic)
+
+    def _parse_float_literal_type(self, lexeme: str) -> Type:
+        if lexeme and lexeme[-1] in "fF":
+            return FLOAT
+        if lexeme and lexeme[-1] in "lL":
+            return LONGDOUBLE
+        return DOUBLE
+
     def _parse_int_literal(self, lexeme: str | int) -> tuple[int, Type] | None:
         if isinstance(lexeme, int):
             return lexeme, INT
@@ -1214,21 +1903,38 @@ class Analyzer:
             suffix_start -= 1
         body = lexeme[:suffix_start]
         suffix = lexeme[suffix_start:].lower()
-        literal_type = _INTEGER_LITERAL_SUFFIX_TYPES.get(suffix)
-        if literal_type is None:
-            return None
+        is_decimal = True
         if body.startswith(("0x", "0X")):
             digits = body[2:]
             if not digits:
                 return None
-            return int(digits, 16), literal_type
-        if body.startswith("0") and len(body) > 1:
+            value = int(digits, 16)
+            is_decimal = False
+        elif body.startswith("0") and len(body) > 1:
             if any(ch not in "01234567" for ch in body):
                 return None
-            return int(body, 8), literal_type
-        if not body.isdigit():
+            value = int(body, 8)
+            is_decimal = False
+        elif body.isdigit():
+            value = int(body)
+        else:
             return None
-        return int(body), literal_type
+        candidates = (
+            _DECIMAL_LITERAL_CANDIDATES if is_decimal else _NON_DECIMAL_LITERAL_CANDIDATES
+        ).get(suffix)
+        if candidates is None:
+            return None
+        for candidate_type in candidates:
+            if self._fits_integer_literal_value(value, candidate_type):
+                return value, candidate_type
+        return None
+
+    def _fits_integer_literal_value(self, value: int, type_: Type) -> bool:
+        signed_bounds = _SIGNED_INTEGER_TYPE_LIMITS.get(type_)
+        if signed_bounds is not None:
+            return signed_bounds[0] <= value <= signed_bounds[1]
+        unsigned_max = _UNSIGNED_INTEGER_TYPE_LIMITS.get(type_)
+        return unsigned_max is not None and 0 <= value <= unsigned_max
 
     def _eval_int_constant_expr(self, expr: Expr, scope: Scope) -> int | None:
         if isinstance(expr, IntLiteral):
@@ -1319,6 +2025,39 @@ class Analyzer:
             if not self._is_integer_type(self._resolve_type(expr.type_spec)):
                 return None
             return self._eval_int_constant_expr(expr.expr, scope)
+        if isinstance(expr, SizeofExpr):
+            if expr.type_spec is None:
+                return None
+            self._register_type_spec(expr.type_spec)
+            if self._is_invalid_sizeof_type_spec(expr.type_spec):
+                return None
+            return self._sizeof_type(self._resolve_type(expr.type_spec))
+        if isinstance(expr, AlignofExpr):
+            if expr.type_spec is None:
+                return None
+            self._register_type_spec(expr.type_spec)
+            if self._is_invalid_alignof_type_spec(expr.type_spec):
+                return None
+            return self._alignof_type(self._resolve_type(expr.type_spec))
+        if isinstance(expr, GenericExpr):
+            selected_expr: Expr | None = None
+            default_expr: Expr | None = None
+            control_type = self._type_map.get(expr.control)
+            if control_type is None:
+                control_type = self._analyze_expr(expr.control, scope)
+            control_type = self._decay_array_value(control_type)
+            for assoc_type_spec, assoc_expr in expr.associations:
+                if assoc_type_spec is None:
+                    default_expr = assoc_expr
+                    continue
+                self._register_type_spec(assoc_type_spec)
+                if self._resolve_type(assoc_type_spec) == control_type:
+                    selected_expr = assoc_expr
+            if selected_expr is None:
+                selected_expr = default_expr
+            if selected_expr is None:
+                return None
+            return self._eval_int_constant_expr(selected_expr, scope)
         if isinstance(expr, Identifier):
             symbol = scope.lookup(expr.name)
             if isinstance(symbol, EnumConstSymbol):
@@ -1408,7 +2147,7 @@ class Analyzer:
                 raise SemaError(f"Argument type mismatch{suffix}")
 
     def _is_assignable(self, expr: Expr) -> bool:
-        return isinstance(expr, (Identifier, SubscriptExpr, MemberExpr)) or (
+        return isinstance(expr, (Identifier, SubscriptExpr, MemberExpr, CompoundLiteralExpr)) or (
             isinstance(expr, UnaryExpr) and expr.op == "*"
         )
 
@@ -1416,5 +2155,5 @@ class Analyzer:
         return type_.decay_parameter_type()
 
 
-def analyze(unit: TranslationUnit) -> SemaUnit:
-    return Analyzer().analyze(unit)
+def analyze(unit: TranslationUnit, *, std: StdMode = "c11") -> SemaUnit:
+    return Analyzer(std=std).analyze(unit)
