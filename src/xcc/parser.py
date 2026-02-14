@@ -400,7 +400,7 @@ class Parser:
         return Param(declarator_type, name)
 
     def _parse_type_spec(self, *, parse_pointer_depth: bool = True) -> TypeSpec:
-        self._skip_type_qualifiers()
+        qualifiers = self._consume_type_qualifiers()
         if self._check_keyword("_Atomic"):
             atomic_token = self._advance()
             if self._check_punct("("):
@@ -425,7 +425,7 @@ class Parser:
                             atomic_type,
                             (POINTER_OP,) * pointer_depth,
                         )
-                return atomic_type
+                return self._apply_type_qualifiers(atomic_type, qualifiers)
             if self._current().kind not in {TokenKind.KEYWORD, TokenKind.IDENT}:
                 raise ParserError("Expected type name after _Atomic", atomic_token)
             atomic_base = self._parse_type_spec(parse_pointer_depth=False)
@@ -446,7 +446,7 @@ class Parser:
                         atomic_type,
                         (POINTER_OP,) * pointer_depth,
                     )
-            return atomic_type
+            return self._apply_type_qualifiers(atomic_type, qualifiers)
         token = self._current()
         if token.kind == TokenKind.IDENT:
             assert isinstance(token.lexeme, str)
@@ -454,14 +454,14 @@ class Parser:
             if type_spec is None:
                 raise ParserError("Unsupported type", token)
             self._advance()
-            return type_spec
+            return self._apply_type_qualifiers(type_spec, qualifiers)
         token = self._expect(TokenKind.KEYWORD)
         if token.lexeme == "_Complex":
             if self._check_keyword("float") or self._check_keyword("double"):
                 complex_base = self._advance()
                 assert isinstance(complex_base.lexeme, str)
                 pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
-                return TypeSpec(str(complex_base.lexeme), pointer_depth)
+                return TypeSpec(str(complex_base.lexeme), pointer_depth, qualifiers=qualifiers)
             if (
                 self._check_keyword("long")
                 and self._peek().kind == TokenKind.KEYWORD
@@ -470,35 +470,36 @@ class Parser:
                 self._advance()
                 self._advance()
                 pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
-                return TypeSpec("long double", pointer_depth)
+                return TypeSpec("long double", pointer_depth, qualifiers=qualifiers)
             raise ParserError("Unsupported type", token)
         if token.lexeme in FLOATING_TYPE_KEYWORDS:
             assert isinstance(token.lexeme, str)
             type_name = str(token.lexeme)
             self._consume_optional_complex_specifier()
             pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
-            return TypeSpec(type_name, pointer_depth)
+            return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
         if token.lexeme == "_Bool":
             pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
-            return TypeSpec("_Bool", pointer_depth)
+            return TypeSpec("_Bool", pointer_depth, qualifiers=qualifiers)
         if token.lexeme in SIMPLE_TYPE_SPEC_KEYWORDS:
             assert isinstance(token.lexeme, str)
             if token.lexeme == "void":
                 pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
-                return TypeSpec("void", pointer_depth)
+                return TypeSpec("void", pointer_depth, qualifiers=qualifiers)
             type_name = self._parse_integer_type_spec(token.lexeme, token)
             if type_name == "long" and self._check_keyword("double"):
                 self._advance()
                 type_name = "long double"
             self._consume_optional_complex_specifier()
             pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
-            return TypeSpec(type_name, pointer_depth)
+            return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
         if token.lexeme == "enum":
             enum_tag, enum_members = self._parse_enum_spec(token)
             pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
             return TypeSpec(
                 "enum",
                 pointer_depth,
+                qualifiers=qualifiers,
                 enum_tag=enum_tag,
                 enum_members=enum_members,
             )
@@ -508,10 +509,40 @@ class Parser:
             return TypeSpec(
                 str(token.lexeme),
                 pointer_depth,
+                qualifiers=qualifiers,
                 record_tag=record_tag,
                 record_members=record_members,
             )
         raise ParserError("Unsupported type", token)
+
+    def _consume_type_qualifiers(self, *, allow_atomic: bool = False) -> tuple[str, ...]:
+        qualifiers = TYPE_QUALIFIER_KEYWORDS | ({"_Atomic"} if allow_atomic else set())
+        seen: list[str] = []
+        while self._current().kind == TokenKind.KEYWORD and self._current().lexeme in qualifiers:
+            lexeme = str(self._advance().lexeme)
+            if lexeme not in seen:
+                seen.append(lexeme)
+        return tuple(seen)
+
+    def _apply_type_qualifiers(
+        self,
+        type_spec: TypeSpec,
+        qualifiers: tuple[str, ...],
+    ) -> TypeSpec:
+        if not qualifiers:
+            return type_spec
+        merged = tuple(dict.fromkeys((*type_spec.qualifiers, *qualifiers)))
+        return TypeSpec(
+            type_spec.name,
+            declarator_ops=type_spec.declarator_ops,
+            qualifiers=merged,
+            is_atomic=type_spec.is_atomic,
+            atomic_target=type_spec.atomic_target,
+            enum_tag=type_spec.enum_tag,
+            enum_members=type_spec.enum_members,
+            record_tag=type_spec.record_tag,
+            record_members=type_spec.record_members,
+        )
 
     def _consume_optional_complex_specifier(self) -> None:
         if self._check_keyword("_Complex"):
@@ -1479,6 +1510,7 @@ class Parser:
         return TypeSpec(
             base_type.name,
             declarator_ops=combined_ops,
+            qualifiers=base_type.qualifiers,
             is_atomic=base_type.is_atomic,
             atomic_target=base_type.atomic_target,
             enum_tag=base_type.enum_tag,
@@ -1493,6 +1525,7 @@ class Parser:
         return TypeSpec(
             type_spec.name,
             declarator_ops=type_spec.declarator_ops,
+            qualifiers=type_spec.qualifiers,
             is_atomic=True,
             atomic_target=type_spec,
             enum_tag=type_spec.enum_tag,
@@ -1780,7 +1813,23 @@ class Parser:
         control_type: TypeSpec,
         assoc_type: TypeSpec,
     ) -> bool:
-        return self._decay_type_spec(control_type) == self._decay_type_spec(assoc_type)
+        return self._unqualified_type_spec(
+            self._decay_type_spec(control_type)
+        ) == self._unqualified_type_spec(self._decay_type_spec(assoc_type))
+
+    def _unqualified_type_spec(self, type_spec: TypeSpec) -> TypeSpec:
+        if not type_spec.qualifiers:
+            return type_spec
+        return TypeSpec(
+            type_spec.name,
+            declarator_ops=type_spec.declarator_ops,
+            is_atomic=type_spec.is_atomic,
+            atomic_target=type_spec.atomic_target,
+            enum_tag=type_spec.enum_tag,
+            enum_members=type_spec.enum_members,
+            record_tag=type_spec.record_tag,
+            record_members=type_spec.record_members,
+        )
 
     def _sizeof_type_spec(self, type_spec: TypeSpec) -> int | None:
         def eval_ops(index: int) -> int | None:

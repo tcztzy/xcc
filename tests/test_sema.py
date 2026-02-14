@@ -87,6 +87,7 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(FLOAT), "float")
         self.assertEqual(str(DOUBLE), "double")
         self.assertEqual(str(LONGDOUBLE), "long double")
+        self.assertEqual(str(Type("int", qualifiers=("const",))), "const int")
         array = Type("int").array_of(4)
         self.assertEqual(str(array), "int[4]")
 
@@ -2608,6 +2609,18 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int *p; p=0; return p==0;}")))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
+
+    def test_assignment_to_const_object_error(self) -> None:
+        unit = parse(list(lex("int main(){const int x=0; x=1; return x;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
+
+    def test_update_const_object_error(self) -> None:
+        unit = parse(list(lex("int main(){const int x=0; ++x; return x;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
 
     def test_assignment_non_constant_integer_to_pointer_error(self) -> None:
         unit = parse(list(lex("int main(){int z=0; int *p; p=z; return 0;}")))

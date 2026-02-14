@@ -601,40 +601,41 @@ class Analyzer:
 
     def _resolve_type(self, type_spec: TypeSpec) -> Type:
         self._register_type_spec(type_spec)
-        if type_spec.name == "int" and not type_spec.declarator_ops:
+        is_unqualified_scalar = not type_spec.declarator_ops and not type_spec.qualifiers
+        if type_spec.name == "int" and is_unqualified_scalar:
             return INT
-        if type_spec.name == "char" and not type_spec.declarator_ops:
+        if type_spec.name == "char" and is_unqualified_scalar:
             return CHAR
-        if type_spec.name == "unsigned char" and not type_spec.declarator_ops:
+        if type_spec.name == "unsigned char" and is_unqualified_scalar:
             return UCHAR
-        if type_spec.name == "_Bool" and not type_spec.declarator_ops:
+        if type_spec.name == "_Bool" and is_unqualified_scalar:
             return BOOL
-        if type_spec.name == "short" and not type_spec.declarator_ops:
+        if type_spec.name == "short" and is_unqualified_scalar:
             return SHORT
-        if type_spec.name == "unsigned short" and not type_spec.declarator_ops:
+        if type_spec.name == "unsigned short" and is_unqualified_scalar:
             return USHORT
-        if type_spec.name == "long" and not type_spec.declarator_ops:
+        if type_spec.name == "long" and is_unqualified_scalar:
             return LONG
-        if type_spec.name == "unsigned long" and not type_spec.declarator_ops:
+        if type_spec.name == "unsigned long" and is_unqualified_scalar:
             return ULONG
-        if type_spec.name == "long long" and not type_spec.declarator_ops:
+        if type_spec.name == "long long" and is_unqualified_scalar:
             return LLONG
-        if type_spec.name == "unsigned long long" and not type_spec.declarator_ops:
+        if type_spec.name == "unsigned long long" and is_unqualified_scalar:
             return ULLONG
-        if type_spec.name == "float" and not type_spec.declarator_ops:
+        if type_spec.name == "float" and is_unqualified_scalar:
             return FLOAT
-        if type_spec.name == "double" and not type_spec.declarator_ops:
+        if type_spec.name == "double" and is_unqualified_scalar:
             return DOUBLE
-        if type_spec.name == "long double" and not type_spec.declarator_ops:
+        if type_spec.name == "long double" and is_unqualified_scalar:
             return LONGDOUBLE
-        if type_spec.name == "unsigned int" and not type_spec.declarator_ops:
+        if type_spec.name == "unsigned int" and is_unqualified_scalar:
             return UINT
-        if type_spec.name == "void" and not type_spec.declarator_ops:
+        if type_spec.name == "void" and is_unqualified_scalar:
             return VOID
-        if type_spec.name == "enum" and not type_spec.declarator_ops:
+        if type_spec.name == "enum" and is_unqualified_scalar:
             return INT
         if type_spec.name in {"struct", "union"} and not type_spec.declarator_ops:
-            return Type(self._record_type_name(type_spec))
+            return Type(self._record_type_name(type_spec), qualifiers=type_spec.qualifiers)
         resolved_ops: list[tuple[str, int | tuple[tuple[Type, ...] | None, bool]]] = []
         for kind, value in type_spec.declarator_ops:
             if kind != "fn":
@@ -655,7 +656,7 @@ class Analyzer:
             base_name = self._record_type_name(type_spec)
         else:
             base_name = type_spec.name
-        return Type(base_name, declarator_ops=tuple(resolved_ops))
+        return Type(base_name, declarator_ops=tuple(resolved_ops), qualifiers=type_spec.qualifiers)
 
     def _resolve_array_bound(self, value: object) -> int:
         if isinstance(value, int):
@@ -825,16 +826,36 @@ class Analyzer:
         return natural_alignment is not None and alignment >= natural_alignment
 
     def _is_integer_type(self, type_: Type) -> bool:
-        return type_ in (INT, UINT, SHORT, USHORT, LONG, ULONG, LLONG, ULLONG, CHAR, UCHAR, BOOL)
+        return type_.declarator_ops == () and type_.name in {
+            INT.name,
+            UINT.name,
+            SHORT.name,
+            USHORT.name,
+            LONG.name,
+            ULONG.name,
+            LLONG.name,
+            ULLONG.name,
+            CHAR.name,
+            UCHAR.name,
+            BOOL.name,
+        }
+
+    def _is_const_qualified(self, type_: Type) -> bool:
+        return "const" in type_.qualifiers
 
     def _is_floating_type(self, type_: Type) -> bool:
-        return type_ in (FLOAT, DOUBLE, LONGDOUBLE)
+        return type_.declarator_ops == () and type_.name in {
+            FLOAT.name,
+            DOUBLE.name,
+            LONGDOUBLE.name,
+        }
 
     def _is_arithmetic_type(self, type_: Type) -> bool:
         return self._is_integer_type(type_) or self._is_floating_type(type_)
 
     def _is_void_pointer_type(self, type_: Type) -> bool:
-        return type_.pointee() == VOID
+        pointee = type_.pointee()
+        return pointee is not None and pointee.declarator_ops == () and pointee.name == VOID.name
 
     def _is_object_pointer_type(self, type_: Type) -> bool:
         pointee = type_.pointee()
@@ -1622,6 +1643,8 @@ class Analyzer:
             if not self._is_assignable(expr.operand):
                 raise SemaError("Assignment target is not assignable")
             operand_type = self._analyze_expr(expr.operand, scope)
+            if self._is_const_qualified(operand_type):
+                raise SemaError("Assignment target is not assignable")
             if operand_type.is_array():
                 raise SemaError("Assignment target is not assignable")
             value_operand_type = self._decay_array_value(operand_type)
@@ -1762,6 +1785,8 @@ class Analyzer:
             if not self._is_assignable(expr.target):
                 raise SemaError("Assignment target is not assignable")
             target_type = self._analyze_expr(expr.target, scope)
+            if self._is_const_qualified(target_type):
+                raise SemaError("Assignment target is not assignable")
             value_type = self._decay_array_value(self._analyze_expr(expr.value, scope))
             if target_type.is_array():
                 raise SemaError("Assignment target is not assignable")
