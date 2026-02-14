@@ -162,20 +162,14 @@
       "id": "c99-n629-integer-constants",
       "upstream": "clang/test/C/C99/n629.c",
       "fixture": "tests/external/clang/fixtures/C/C99/n629.c",
-      "expect": "parse",
-      "message_contains": "Unexpected token",
-      "line": 14,
-      "column": 9,
+      "expect": "ok",
       "sha256": "9f1dff443205f100b0075a7dd0462e1964d24536cdc8f4a5dcd0960efa2b53ac"
     },
     {
       "id": "c99-n736-intmax-arithmetic",
       "upstream": "clang/test/C/C99/n736.c",
       "fixture": "tests/external/clang/fixtures/C/C99/n736.c",
-      "expect": "parse",
-      "message_contains": "Unsupported type",
-      "line": 9,
-      "column": 1,
+      "expect": "ok",
       "sha256": "743fec8b9e9510ce251b933ee7e0326f6b14e3a0b024413a2998c6f9389565b0"
     },
     {
@@ -210,6 +204,44 @@
       "sha256": "a2ca3b7094f9ba3029c337a98da920624adb1df3c01c46e6ef5d2a9c86b811b4"
     },
     {
+      "id": "parser-atomic-c11",
+      "upstream": "clang/test/Parser/atomic.c",
+      "fixture": "tests/external/clang/fixtures/Parser/atomic.c",
+      "expect": "parse",
+      "message_contains": "Invalid atomic type",
+      "line": 14,
+      "column": 15,
+      "sha256": "f6a74bc08630c67fabdecac657770e131e4aa56b504490d6f67f250086b60fb4"
+    },
+    {
+      "id": "sema-alignas-c11",
+      "upstream": "clang/test/Sema/alignas.c",
+      "fixture": "tests/external/clang/fixtures/Sema/alignas.c",
+      "expect": "parse",
+      "message_contains": "Invalid alignment specifier",
+      "line": 5,
+      "column": 1,
+      "sha256": "c2c9b08a3109bf3bcf23fdf7c8ef74692c4a99af74bda8755ea53407919a86b1"
+    },
+    {
+      "id": "sema-static-assert-c11",
+      "upstream": "clang/test/Sema/static-assert.c",
+      "fixture": "tests/external/clang/fixtures/Sema/static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expected static assertion message",
+      "line": 27,
+      "column": 19,
+      "sha256": "84a625e4b9a4e67fb641903cdf3a1709f22e6311fe3b6b158ac93cda336f8a37"
+    },
+    {
+      "id": "sema-generic-selection-c11",
+      "upstream": "clang/test/Sema/generic-selection.c",
+      "fixture": "tests/external/clang/fixtures/Sema/generic-selection.c",
+      "expect": "sema",
+      "message_contains": "Invalid generic association type",
+      "sha256": "1995a38d944d4a9360b79137fc750692b6ede0b23bed885c8e2fa5d78fac8f1f"
+    },
+    {
       "id": "sema-array-size-64",
       "upstream": "clang/test/Sema/array-size-64.c",
       "fixture": "tests/external/clang/fixtures/Sema/array-size-64.c",
@@ -222,9 +254,9 @@
       "upstream": "clang/test/Sema/c89.c",
       "fixture": "tests/external/clang/fixtures/Sema/c89.c",
       "expect": "parse",
-      "message_contains": "Unsupported array size",
-      "line": 25,
-      "column": 9,
+      "message_contains": "Expected KEYWORD",
+      "line": 31,
+      "column": 20,
       "sha256": "a1c5b865107b1237b66b9cabfb731c68905b8b0c98524827c4478be91e0ac09a"
     },
     {
@@ -309,10 +341,8 @@
       "id": "sema-warn-absolute-value-long-long",
       "upstream": "clang/test/Sema/warn-absolute-value.c",
       "fixture": "tests/external/clang/fixtures/Sema/warn-absolute-value.c",
-      "expect": "parse",
-      "message_contains": "Unexpected token",
-      "line": 784,
-      "column": 27,
+      "expect": "sema",
+      "message_contains": "Undeclared function: __builtin_abs",
       "sha256": "4c1a85bf35e67df77a794374c136291fba89657a6b5729ec2f8e9b299f7e415b"
     },
     {
