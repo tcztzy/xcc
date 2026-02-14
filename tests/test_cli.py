@@ -35,6 +35,37 @@ class CliTests(unittest.TestCase):
         self.assertIn("1:1\tKEYWORD\tint", stdout)
         self.assertIn("1:22\tEOF", stdout)
 
+    def test_main_dump_preprocessor_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.c"
+            path.write_text("int main(){return 0;}", encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "--dump-pp-tokens"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertIn("1:1\tIDENT\tint", stdout)
+        self.assertIn("1:22\tEOF", stdout)
+
+    def test_main_dump_include_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "inc.h").write_text("int x;\n", encoding="utf-8")
+            source = '#include "inc.h"\nint main(void){return x;}\n'
+            path = root / "ok.c"
+            path.write_text(source, encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "--dump-include-trace"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertIn("ok.c:1: #include", stdout)
+
+    def test_main_dump_macro_table(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.c"
+            path.write_text("#define A 1\nint main(void){return A;}\n", encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "--dump-macro-table"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertIn("A=1", stdout)
+
     def test_main_dump_ast_and_sema(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.c"
@@ -86,6 +117,34 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
         self.assertIn("sema: Non-void function must return a value", stderr)
+
+    def test_main_frontend_error_json_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad.c"
+            path.write_text("#if 1 +\nint main(void){return 0;}\n", encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "--diag-format", "json"])
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn('"stage":"pp"', stderr)
+        self.assertIn('"code":"XCC-PP-0103"', stderr)
+
+    def test_main_define_option(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.c"
+            path.write_text("int main(void){return ZERO;}", encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "-D", "ZERO=0"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(stdout, f"xcc: ok: {path}\n")
+
+    def test_main_undef_option(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad.c"
+            path.write_text("int main(void){return ZERO;}", encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "-D", "ZERO=0", "-U", "ZERO"])
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("Undeclared identifier: ZERO", stderr)
 
 
 if __name__ == "__main__":
