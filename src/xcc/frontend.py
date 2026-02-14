@@ -1,127 +1,60 @@
-import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
 from xcc.ast import TranslationUnit
-from xcc.lexer import LexerError, Token, lex
+from xcc.diag import Diagnostic, FrontendError
+from xcc.lexer import LexerError, Token, lex, lex_pp
+from xcc.options import FrontendOptions, normalize_options
 from xcc.parser import ParserError, parse
+from xcc.preprocessor import PreprocessorError, preprocess_source
 from xcc.sema import SemaError, SemaUnit, analyze
 
-
-def _trim_location_suffix(message: str, line: int, column: int) -> str:
-    return message.removesuffix(f" at {line}:{column}")
-
-
-def _blank_line(line: str) -> str:
-    return "\n" if line.endswith("\n") else ""
+_LEX_ERROR_CODE = "XCC-LEX-0001"
+_PARSE_ERROR_CODE = "XCC-PARSE-0001"
+_SEMA_ERROR_CODE = "XCC-SEMA-0001"
 
 
-_IDENT_RE = re.compile(r"[A-Za-z_]\w*")
-_DEFINE_RE = re.compile(r"^\s*#\s*define\b")
-
-
-def _parse_object_like_define(line: str) -> tuple[str, str] | None:
-    if _DEFINE_RE.match(line) is None:
-        return None
-    define_body = line.rstrip("\n")
-    define_body = define_body[define_body.find("define") + len("define") :].lstrip()
-    if not define_body:
-        return None
-    name_match = _IDENT_RE.match(define_body)
-    if name_match is None:
-        return None
-    name = name_match.group(0)
-    replacement = define_body[name_match.end() :]
-    if replacement.startswith("("):
-        return None
-    return name, replacement.strip()
-
-
-def _expand_object_like_macros(line: str, macros: dict[str, str]) -> str:
-    if not macros:
-        return line
-    names: list[str] = list(macros)
-    names.sort(key=len, reverse=True)
-    pattern = re.compile(r"\b(?:" + "|".join(re.escape(name) for name in names) + r")\b")
-    return pattern.sub(lambda match: macros[match.group(0)], line)
-
-
-def _strip_preprocessor_directives(source: str) -> str:
-    lines = source.splitlines(keepends=True)
-    if not lines:
-        return source
-    stripped_lines: list[str] = []
-    macros: dict[str, str] = {}
-    in_directive_continuation = False
-    for line in lines:
-        if in_directive_continuation:
-            stripped_lines.append(_blank_line(line))
-            in_directive_continuation = line.rstrip().endswith("\\")
-            continue
-        if line.lstrip().startswith("#"):
-            define = _parse_object_like_define(line)
-            if define is not None:
-                macros[define[0]] = define[1]
-            stripped_lines.append(_blank_line(line))
-            in_directive_continuation = line.rstrip().endswith("\\")
-            continue
-        stripped_lines.append(_expand_object_like_macros(line, macros))
-    return "".join(stripped_lines)
-
-
-_ASM_PREFIX_RE = re.compile(r"^\s*(?:__asm__|__asm|asm)\b")
-_ASM_LABEL_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\s*\([^;\n]*\)")
-
-
-def _strip_gnu_asm_extensions(source: str) -> str:
-    lines = source.splitlines(keepends=True)
-    if not lines:
-        return source
-    stripped_lines: list[str] = []
-    in_asm_statement = False
-    for line in lines:
-        if in_asm_statement:
-            stripped_lines.append(_blank_line(line))
-            if ";" in line:
-                in_asm_statement = False
-            continue
-        if _ASM_PREFIX_RE.match(line):
-            stripped_lines.append(_blank_line(line))
-            in_asm_statement = ";" not in line
-            continue
-        stripped_lines.append(_ASM_LABEL_RE.sub("", line))
-    return "".join(stripped_lines)
-
-
-@dataclass(frozen=True)
-class Diagnostic:
-    stage: str
-    filename: str
-    message: str
-    line: int | None = None
-    column: int | None = None
-
-    def __str__(self) -> str:
-        if self.line is None or self.column is None:
-            return f"{self.filename}: {self.stage}: {self.message}"
-        return f"{self.filename}:{self.line}:{self.column}: {self.stage}: {self.message}"
-
-
-class FrontendError(ValueError):
-    def __init__(self, diagnostic: Diagnostic) -> None:
-        super().__init__(str(diagnostic))
-        self.diagnostic = diagnostic
+def _trim_location_suffix(
+    message: str,
+    line: int | None,
+    column: int | None,
+    *,
+    filename: str | None = None,
+) -> str:
+    if line is None or column is None:
+        return message
+    trimmed = message.removesuffix(f" at {line}:{column}")
+    if filename is not None:
+        trimmed = trimmed.removesuffix(f" at {filename}:{line}:{column}")
+    return trimmed
 
 
 @dataclass(frozen=True)
 class FrontendResult:
     filename: str
     source: str
+    preprocessed_source: str
+    pp_tokens: list[Token]
     tokens: list[Token]
     unit: TranslationUnit
     sema: SemaUnit
+    include_trace: tuple[str, ...]
+    macro_table: tuple[str, ...]
+
+
+def _map_diagnostic_location(
+    pp_line_map: tuple[tuple[str, int], ...],
+    line: int | None,
+    column: int | None,
+) -> tuple[str | None, int | None, int | None]:
+    if line is None or column is None:
+        return None, line, column
+    if 1 <= line <= len(pp_line_map):
+        mapped_filename, mapped_line = pp_line_map[line - 1]
+        return mapped_filename, mapped_line, column
+    return None, line, column
 
 
 def read_source(path: str, *, stdin: TextIO | None = None) -> tuple[str, str]:
@@ -132,30 +65,90 @@ def read_source(path: str, *, stdin: TextIO | None = None) -> tuple[str, str]:
     return str(resolved), resolved.read_text(encoding="utf-8")
 
 
-def compile_source(source: str, *, filename: str = "<input>") -> FrontendResult:
-    normalized_source = _strip_gnu_asm_extensions(_strip_preprocessor_directives(source))
+def compile_source(
+    source: str,
+    *,
+    filename: str = "<input>",
+    options: FrontendOptions | None = None,
+) -> FrontendResult:
+    normalized_options = normalize_options(options)
     try:
-        tokens = lex(normalized_source)
-    except LexerError as error:
-        message = _trim_location_suffix(str(error), error.line, error.column)
-        diagnostic = Diagnostic("lex", filename, message, error.line, error.column)
+        pp_result = preprocess_source(source, filename=filename, options=normalized_options)
+    except PreprocessorError as error:
+        message = _trim_location_suffix(
+            str(error),
+            error.line,
+            error.column,
+            filename=error.filename,
+        )
+        diagnostic = Diagnostic(
+            "pp",
+            filename if error.filename is None else error.filename,
+            message,
+            error.line,
+            error.column,
+            code=error.code,
+        )
         raise FrontendError(diagnostic) from error
     try:
-        unit = parse(tokens)
+        tokens = lex(pp_result.source)
+    except LexerError as error:
+        mapped_filename, mapped_line, mapped_column = _map_diagnostic_location(
+            pp_result.line_map,
+            error.line,
+            error.column,
+        )
+        message = _trim_location_suffix(str(error), error.line, error.column)
+        diagnostic = Diagnostic(
+            "lex",
+            filename if mapped_filename is None else mapped_filename,
+            message,
+            mapped_line,
+            mapped_column,
+            code=_LEX_ERROR_CODE,
+        )
+        raise FrontendError(diagnostic) from error
+    try:
+        unit = parse(tokens, std=normalized_options.std)
     except ParserError as error:
         token = error.token
-        diagnostic = Diagnostic("parse", filename, error.message, token.line, token.column)
+        mapped_filename, mapped_line, mapped_column = _map_diagnostic_location(
+            pp_result.line_map,
+            token.line,
+            token.column,
+        )
+        diagnostic = Diagnostic(
+            "parse",
+            filename if mapped_filename is None else mapped_filename,
+            error.message,
+            mapped_line,
+            mapped_column,
+            code=_PARSE_ERROR_CODE,
+        )
         raise FrontendError(diagnostic) from error
     try:
-        sema = analyze(unit)
+        sema = analyze(unit, std=normalized_options.std)
     except SemaError as error:
-        raise FrontendError(Diagnostic("sema", filename, str(error))) from error
-    return FrontendResult(filename, source, tokens, unit, sema)
+        raise FrontendError(
+            Diagnostic("sema", filename, str(error), code=_SEMA_ERROR_CODE)
+        ) from error
+    pp_tokens = lex_pp(pp_result.source)
+    return FrontendResult(
+        filename,
+        source,
+        pp_result.source,
+        pp_tokens,
+        tokens,
+        unit,
+        sema,
+        pp_result.include_trace,
+        pp_result.macro_table,
+    )
 
 
-def compile_path(path: str | Path) -> FrontendResult:
+def compile_path(path: str | Path, *, options: FrontendOptions | None = None) -> FrontendResult:
     filename, source = read_source(str(path))
-    return compile_source(source, filename=filename)
+    return compile_source(source, filename=filename, options=options)
 
 
 def format_token(token: Token) -> str:
