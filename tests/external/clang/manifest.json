@@ -114,8 +114,8 @@
       "id": "parser-bad-control",
       "upstream": "clang/test/Parser/bad-control.c",
       "fixture": "tests/external/clang/fixtures/Parser/bad-control.c",
-      "expect": "sema",
-      "message_contains": "break not in loop",
+      "expect": "parse",
+      "message_contains": "Statement expression is a GNU extension",
       "sha256": "2bada42bcaded3ad1b56ac88ba4d96ffca79a35133e0cd4673ccce520f8649da"
     },
     {
@@ -200,7 +200,8 @@
       "id": "parser-no-gnu-inline-asm",
       "upstream": "clang/test/Parser/no-gnu-inline-asm.c",
       "fixture": "tests/external/clang/fixtures/Parser/no-gnu-inline-asm.c",
-      "expect": "ok",
+      "expect": "pp",
+      "message_contains": "GNU asm extension is not allowed in c11",
       "sha256": "a2ca3b7094f9ba3029c337a98da920624adb1df3c01c46e6ef5d2a9c86b811b4"
     },
     {
@@ -263,8 +264,8 @@
       "id": "sema-indirect-goto-long-long",
       "upstream": "clang/test/Sema/indirect-goto.c",
       "fixture": "tests/external/clang/fixtures/Sema/indirect-goto.c",
-      "expect": "sema",
-      "message_contains": "Indirect goto target must be pointer",
+      "expect": "parse",
+      "message_contains": "Label address is a GNU extension",
       "sha256": "2794dd34b1276692605f1fa6ee7125af7a0e2d1140f70bc6f21717efedf77f40"
     },
     {

@@ -105,9 +105,41 @@ class FrontendTests(unittest.TestCase):
             '  asm ("");\n'
             "}\n"
         )
-        result = compile_source(source, filename="asm.c")
+        result = compile_source(source, filename="asm.c", options=FrontendOptions(std="gnu11"))
         self.assertEqual(result.unit.functions[0].name, "foo")
         self.assertEqual(result.unit.functions[1].name, "f")
+
+    def test_compile_source_rejects_gnu_asm_in_c11(self) -> None:
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source('asm("INST r1, 0");\n', filename="asm.c", options=FrontendOptions(std="c11"))
+        diagnostic = ctx.exception.diagnostic
+        self.assertEqual(diagnostic.stage, "pp")
+        self.assertEqual(diagnostic.code, "XCC-PP-0105")
+        self.assertEqual(diagnostic.message, "GNU asm extension is not allowed in c11")
+
+    def test_compile_source_rejects_statement_expression_in_c11(self) -> None:
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(
+                "int main(void){return ({1;});}",
+                filename="bad.c",
+                options=FrontendOptions(std="c11"),
+            )
+        diagnostic = ctx.exception.diagnostic
+        self.assertEqual(diagnostic.stage, "parse")
+        self.assertEqual(diagnostic.code, "XCC-PARSE-0001")
+        self.assertEqual(diagnostic.message, "Statement expression is a GNU extension")
+
+    def test_compile_source_rejects_computed_goto_in_c11(self) -> None:
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(
+                "int main(void){void *target=0; goto *target;}",
+                filename="bad.c",
+                options=FrontendOptions(std="c11"),
+            )
+        diagnostic = ctx.exception.diagnostic
+        self.assertEqual(diagnostic.stage, "parse")
+        self.assertEqual(diagnostic.code, "XCC-PARSE-0001")
+        self.assertEqual(diagnostic.message, "Indirect goto is a GNU extension")
 
     def test_compile_source_lex_error(self) -> None:
         with self.assertRaises(FrontendError) as ctx:

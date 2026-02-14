@@ -27,18 +27,24 @@ _PP_UNKNOWN_DIRECTIVE = "XCC-PP-0101"
 _PP_INCLUDE_NOT_FOUND = "XCC-PP-0102"
 _PP_INVALID_IF_EXPR = "XCC-PP-0103"
 _PP_INVALID_DIRECTIVE = "XCC-PP-0104"
+_PP_GNU_EXTENSION = "XCC-PP-0105"
 _PP_INVALID_MACRO = "XCC-PP-0201"
 _PP_INCLUDE_READ_ERROR = "XCC-PP-0301"
 _PP_INCLUDE_CYCLE = "XCC-PP-0302"
 _PREDEFINED_MACROS = (
+    "__STDC__=1",
+    "__STDC_VERSION__=201112L",
     "__INT_WIDTH__=32",
     "__LONG_WIDTH__=64",
     "__LONG_LONG_WIDTH__=64",
     "__INTMAX_MAX__=9223372036854775807LL",
     "__LONG_LONG_MAX__=9223372036854775807LL",
     "__UINTMAX_MAX__=18446744073709551615ULL",
+    "__FILE__=0",
+    "__LINE__=0",
 )
 _PREDEFINED_MACRO_NAMES = frozenset(item.split("=", 1)[0] for item in _PREDEFINED_MACROS)
+_PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__LINE__"})
 
 
 @dataclass(frozen=True)
@@ -209,7 +215,11 @@ def preprocess_source(
     normalized_options = normalize_options(options)
     processor = _Preprocessor(normalized_options)
     processed = processor.process(source, filename=filename)
-    stripped = _strip_gnu_asm_extensions(processed.source)
+    if normalized_options.std == "gnu11":
+        stripped = _strip_gnu_asm_extensions(processed.source)
+    else:
+        _reject_gnu_asm_extensions(processed.source, processed.line_map)
+        stripped = processed.source
     return PreprocessResult(
         stripped,
         processed.line_map,
@@ -729,6 +739,15 @@ def _expand_macro_tokens(
         token = tokens[index]
         if token.kind != TokenKind.IDENT:
             expanded.append(token)
+            index += 1
+            continue
+        if token.text in _PREDEFINED_DYNAMIC_MACROS and token.text in macros:
+            if token.text == "__LINE__":
+                expanded.append(_MacroToken(TokenKind.INT_CONST, str(location.line)))
+            else:
+                expanded.append(
+                    _MacroToken(TokenKind.STRING_LITERAL, _quote_string_literal(location.filename))
+                )
             index += 1
             continue
         macro = macros.get(token.text)
@@ -1353,3 +1372,27 @@ def _strip_gnu_asm_extensions(source: str) -> str:
             continue
         stripped_lines.append(_ASM_LABEL_RE.sub("", line))
     return "".join(stripped_lines)
+
+
+def _quote_string_literal(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _reject_gnu_asm_extensions(
+    source: str,
+    line_map: tuple[tuple[str, int], ...],
+) -> None:
+    for line_number, line in enumerate(source.splitlines(), start=1):
+        if _ASM_PREFIX_RE.match(line) or _ASM_LABEL_RE.search(line):
+            mapped_filename, mapped_line = (
+                line_map[line_number - 1]
+                if 1 <= line_number <= len(line_map)
+                else ("<input>", line_number)
+            )
+            raise PreprocessorError(
+                "GNU asm extension is not allowed in c11",
+                mapped_line,
+                1,
+                filename=mapped_filename,
+                code=_PP_GNU_EXTENSION,
+            )

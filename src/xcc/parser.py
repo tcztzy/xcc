@@ -890,6 +890,8 @@ class Parser:
     def _parse_goto_stmt(self) -> Stmt:
         self._advance()
         if self._check_punct("*"):
+            if self._std == "c11":
+                raise ParserError("Indirect goto is a GNU extension", self._current())
             self._advance()
             target = self._parse_expression()
             self._expect_punct(";")
@@ -1212,6 +1214,8 @@ class Parser:
             operand = self._parse_unary()
             return UpdateExpr(op, operand, False)
         if self._check_punct("&&"):
+            if self._std == "c11":
+                raise ParserError("Label address is a GNU extension", self._current())
             self._advance()
             label = self._expect(TokenKind.IDENT)
             assert isinstance(label.lexeme, str)
@@ -1879,6 +1883,8 @@ class Parser:
             return Identifier(token.lexeme)
         if self._check_punct("("):
             if self._peek_punct("{"):
+                if self._std == "c11":
+                    raise ParserError("Statement expression is a GNU extension", self._current())
                 return self._parse_statement_expr()
             self._advance()
             expr = self._parse_expression()

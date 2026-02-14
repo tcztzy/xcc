@@ -439,14 +439,20 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(body[1], LabelStmt)
 
     def test_indirect_goto_statement(self) -> None:
-        unit = parse(list(lex("int main(void){void *target=0; goto *target; return 0;}")))
+        unit = parse(
+            list(lex("int main(void){void *target=0; goto *target; return 0;}")),
+            std="gnu11",
+        )
         stmt = _body(unit.functions[0]).statements[1]
         self.assertIsInstance(stmt, IndirectGotoStmt)
         self.assertIsInstance(stmt.target, Identifier)
         self.assertEqual(stmt.target.name, "target")
 
     def test_label_address_expression(self) -> None:
-        unit = parse(list(lex("int main(void){void *target = &&done; goto *target; done: return 0;}")))
+        unit = parse(
+            list(lex("int main(void){void *target = &&done; goto *target; done: return 0;}")),
+            std="gnu11",
+        )
         decl = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(decl, DeclStmt)
         self.assertIsInstance(decl.init, LabelAddressExpr)
@@ -454,11 +460,30 @@ class ParserTests(unittest.TestCase):
 
     def test_statement_expression_in_for_init(self) -> None:
         source = "int main(void){for(({int x=0; x;});;); return 0;}"
-        unit = parse(list(lex(source)))
+        unit = parse(list(lex(source)), std="gnu11")
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ForStmt)
         self.assertIsInstance(stmt.init, StatementExpr)
         self.assertEqual(len(stmt.init.body.statements), 2)
+
+    def test_c11_rejects_indirect_goto_statement(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){void *target=0; goto *target; return 0;}")), std="c11")
+        self.assertEqual(ctx.exception.message, "Indirect goto is a GNU extension")
+
+    def test_c11_rejects_label_address_expression(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(
+                list(lex("int main(void){void *target = &&done; goto *target; done: return 0;}")),
+                std="c11",
+            )
+        self.assertEqual(ctx.exception.message, "Label address is a GNU extension")
+
+    def test_c11_rejects_statement_expression(self) -> None:
+        source = "int main(void){for(({int x=0; x;});;); return 0;}"
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex(source)), std="c11")
+        self.assertEqual(ctx.exception.message, "Statement expression is a GNU extension")
 
     def test_goto_requires_label_name(self) -> None:
         with self.assertRaises(ParserError):
