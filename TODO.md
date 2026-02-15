@@ -107,5 +107,6 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
   - Iteration 3 slice: replaced generic sema fallback `Unsupported expression` for unknown binary operators with operator-specific diagnostics (`Unsupported binary operator: <op>`), while preserving supported `BinaryExpr` analysis paths.
   - Iteration 3 slice: replaced generic sema fallback `Unsupported expression` for unknown unary operators with operator-specific diagnostics (`Unsupported unary operator: <op>`), while preserving supported `UnaryExpr` analysis paths.
   - Iteration 3 slice: removed the implicit assignment-operator fallback in sema by validating compound operators explicitly and emitting `Unsupported assignment operator: <op>` for unknown `AssignExpr.op` values.
+  - Iteration 3 slice: removed the implicit update-operator fallback in sema by validating `UpdateExpr.op` and emitting `Unsupported update operator: <op>` for unknown update operators.
 - Remaining risk: full C11 pointer qualification rules still need structural pointer-level qualifier modeling (current `Type` qualifier representation is base-type-centric).
 - Next target: start Iteration 3 by reducing remaining `Unsupported statement/expression` fallback paths.
