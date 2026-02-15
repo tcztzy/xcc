@@ -4244,7 +4244,22 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported expression")
+        self.assertEqual(str(ctx.exception), "Unsupported expression node: Expr")
+
+    def test_supported_expression_does_not_hit_fallback(self) -> None:
+        expr = IntLiteral("1")
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt([ExprStmt(expr)]),
+                )
+            ]
+        )
+        sema = analyze(unit)
+        self.assertEqual(sema.type_map.get(expr), INT)
 
     def test_unsupported_binary_expression_error(self) -> None:
         unit = TranslationUnit(
