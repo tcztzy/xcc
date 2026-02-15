@@ -105,5 +105,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
   - pointer subtraction/relational checks now accept qualified-compatible object pointers and reject `void*` subtraction;
   - assignment/argument/equality/conditional paths now reject nested pointer qualifier promotions such as `int **` to `const int **`;
   - Iteration 3 slice: replaced generic sema fallback `Unsupported expression` for unknown binary operators with operator-specific diagnostics (`Unsupported binary operator: <op>`), while preserving supported `BinaryExpr` analysis paths.
+  - Iteration 3 slice: replaced generic sema fallback `Unsupported expression` for unknown unary operators with operator-specific diagnostics (`Unsupported unary operator: <op>`), while preserving supported `UnaryExpr` analysis paths.
+  - Iteration 3 slice: removed the implicit assignment-operator fallback in sema by validating compound operators explicitly and emitting `Unsupported assignment operator: <op>` for unknown `AssignExpr.op` values.
 - Remaining risk: full C11 pointer qualification rules still need structural pointer-level qualifier modeling (current `Type` qualifier representation is base-type-centric).
 - Next target: start Iteration 3 by reducing remaining `Unsupported statement/expression` fallback paths.

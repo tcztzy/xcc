@@ -1811,7 +1811,7 @@ class Analyzer:
                     raise SemaError("Cannot dereference non-pointer")
                 self._type_map.set(expr, pointee)
                 return pointee
-            raise SemaError("Unsupported expression")
+            raise SemaError(f"Unsupported unary operator: {expr.op}")
         if isinstance(expr, UpdateExpr):
             if isinstance(expr.operand, Identifier):
                 target_symbol = scope.lookup(expr.operand.name)
@@ -2014,12 +2014,12 @@ class Analyzer:
                     self._type_map.set(expr, target_type)
                     return target_type
                 raise SemaError("Assignment type mismatch")
-            if expr.op in {"<<=", ">>=", "%=", "&=", "^=", "|="} and (
-                not self._is_integer_type(target_type) or not self._is_integer_type(value_type)
-            ):
-                raise SemaError("Assignment type mismatch")
-            self._type_map.set(expr, target_type)
-            return target_type
+            if expr.op in {"<<=", ">>=", "%=", "&=", "^=", "|="}:
+                if not self._is_integer_type(target_type) or not self._is_integer_type(value_type):
+                    raise SemaError("Assignment type mismatch")
+                self._type_map.set(expr, target_type)
+                return target_type
+            raise SemaError(f"Unsupported assignment operator: {expr.op}")
         if isinstance(expr, CallExpr):
             if isinstance(expr.callee, Identifier):
                 signature = self._function_signatures.get(expr.callee.name)
