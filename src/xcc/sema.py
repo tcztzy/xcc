@@ -1813,6 +1813,8 @@ class Analyzer:
                 return pointee
             raise SemaError(f"Unsupported unary operator: {expr.op}")
         if isinstance(expr, UpdateExpr):
+            if expr.op not in {"++", "--"}:
+                raise SemaError(f"Unsupported update operator: {expr.op}")
             if isinstance(expr.operand, Identifier):
                 target_symbol = scope.lookup(expr.operand.name)
                 if isinstance(target_symbol, EnumConstSymbol):

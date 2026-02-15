@@ -2814,6 +2814,47 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Unsupported assignment operator: ?=")
 
+    def test_manual_update_expression_still_analyzes_supported_operator(self) -> None:
+        expr = UpdateExpr("++", Identifier("x"), False)
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            DeclStmt(TypeSpec("int"), "x", IntLiteral("1")),
+                            ExprStmt(expr),
+                            ReturnStmt(Identifier("x")),
+                        ]
+                    ),
+                )
+            ]
+        )
+        sema = analyze(unit)
+        self.assertIs(sema.type_map.get(expr), INT)
+
+    def test_unsupported_update_operator_error(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            DeclStmt(TypeSpec("int"), "x", IntLiteral("1")),
+                            ExprStmt(UpdateExpr("?!", Identifier("x"), False)),
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Unsupported update operator: ?!")
+
     def test_assignment_pointer_null_constant_ok(self) -> None:
         unit = parse(list(lex("int main(){int *p; p=0; return p==0;}")))
         sema = analyze(unit)
