@@ -2065,7 +2065,7 @@ class Analyzer:
             )
             self._type_map.set(expr, return_type)
             return return_type
-        raise SemaError("Unsupported expression")
+        raise SemaError(f"Unsupported expression node: {type(expr).__name__}")
 
     def _resolve_call_signature(
         self,
