@@ -1848,7 +1848,7 @@ class Analyzer:
                 not self._is_integer_type(value_operand_type)
                 and value_operand_type.pointee() is None
             ):
-                raise SemaError("Assignment type mismatch")
+                raise SemaError("Update operand must be integer or pointer")
             self._type_map.set(expr, operand_type)
             return operand_type
         if isinstance(expr, BinaryExpr):
