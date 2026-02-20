@@ -2769,19 +2769,28 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){float x=1.0f; x|=1; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception),
+            "Compound bitwise/shift/modulo assignment requires integer operands",
+        )
 
     def test_compound_assignment_multiplicative_requires_arithmetic_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; int *p=&x; p*=2; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception),
+            "Compound multiplicative assignment requires arithmetic operands",
+        )
 
     def test_compound_assignment_type_mismatch(self) -> None:
         unit = parse(list(lex("int main(){int x=1; int *p=&x; x+=p; return x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception),
+            "Compound additive assignment requires arithmetic operands or pointer/integer",
+        )
 
     def test_compound_assignment_pointer_plus_equals_int_ok(self) -> None:
         unit = parse(list(lex("int main(){int a[3]; int *p=&a[0]; p+=1; return p-a;}")))
@@ -2799,13 +2808,19 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int x=1; int y=2; int *p=&x; int *q=&y; p+=q; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception),
+            "Compound additive assignment requires arithmetic operands or pointer/integer",
+        )
 
     def test_compound_assignment_shift_value_type_mismatch(self) -> None:
         unit = parse(list(lex("int main(){int x=1; int *p=&x; x<<=p; return x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception),
+            "Compound bitwise/shift/modulo assignment requires integer operands",
+        )
 
     def test_manual_assignment_expression_still_analyzes_supported_operator(self) -> None:
         expr = AssignExpr("|=", Identifier("x"), IntLiteral("1"))
