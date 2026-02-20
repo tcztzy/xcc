@@ -1790,9 +1790,24 @@ class Analyzer:
         if isinstance(expr, UnaryExpr):
             operand_type = self._analyze_expr(expr.operand, scope)
             value_operand_type = self._decay_array_value(operand_type)
-            if expr.op in {"+", "-", "~"}:
+            if expr.op in {"+", "-"}:
+                if not self._is_arithmetic_type(value_operand_type):
+                    message = (
+                        "Unary plus operand must be arithmetic"
+                        if expr.op == "+"
+                        else "Unary minus operand must be arithmetic"
+                    )
+                    raise SemaError(message)
+                result_type = (
+                    self._integer_promotion(value_operand_type)
+                    if self._is_integer_type(value_operand_type)
+                    else value_operand_type
+                )
+                self._type_map.set(expr, result_type)
+                return result_type
+            if expr.op == "~":
                 if not self._is_integer_type(value_operand_type):
-                    raise SemaError("Unary operator requires integer operand")
+                    raise SemaError("Bitwise not operand must be integer")
                 result_type = self._integer_promotion(value_operand_type)
                 self._type_map.set(expr, result_type)
                 return result_type
