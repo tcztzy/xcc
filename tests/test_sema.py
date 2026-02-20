@@ -2665,13 +2665,13 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){int x = {1, 2}; return x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+        self.assertEqual(str(ctx.exception), "Scalar initializer list must contain exactly one item")
 
     def test_scalar_braced_initializer_with_designator_error(self) -> None:
         unit = parse(list(lex("int main(void){int x = {[0] = 1}; return x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+        self.assertEqual(str(ctx.exception), "Scalar initializer list item cannot be designated")
 
     def test_scalar_braced_initializer_single_item_ok(self) -> None:
         unit = parse(list(lex("int main(void){int x = {1}; return x;}")))
@@ -2682,7 +2682,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){int a[2] = {.x = 1}; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+        self.assertEqual(str(ctx.exception), "Array initializer designator must use index")
 
     def test_array_initializer_rejects_too_many_positional_items_error(self) -> None:
         unit = parse(list(lex("int main(void){int a[1] = {1, 2}; return 0;}")))
@@ -2711,7 +2711,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){struct S { int x; } s = {[0] = 1}; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+        self.assertEqual(str(ctx.exception), "Record initializer designator must use member")
 
     def test_nested_array_designated_initializer_ok(self) -> None:
         unit = parse(list(lex("int main(void){int a[2][2] = {[0][1] = 1}; return a[0][1];}")))

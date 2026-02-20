@@ -123,5 +123,6 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
   - Iteration 3 slice: replaced plain assignment mismatch diagnostics with an explicit compatibility message (`Assignment value is not compatible with target type`).
   - Iteration 3 slice: replaced return mismatch diagnostics with an explicit compatibility message (`Return value is not compatible with function return type`).
   - Iteration 3 slice: split cast rejection diagnostics into target, operand, and overload-selection failures for clearer cast errors.
+  - Iteration 3 slice: split scalar/array/record initializer-list designator diagnostics into shape-specific messages (scalar single-item/designator rules and array/member designator kind requirements).
 - Remaining risk: full C11 pointer qualification rules still need structural pointer-level qualifier modeling (current `Type` qualifier representation is base-type-centric).
 - Next target: start Iteration 3 by reducing remaining `Unsupported statement/expression` fallback paths.

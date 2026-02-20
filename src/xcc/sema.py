@@ -1071,10 +1071,10 @@ class Analyzer:
             self._analyze_record_initializer_list(target_type, init, scope)
             return
         if len(init.items) != 1:
-            raise SemaError("Initializer type mismatch")
+            raise SemaError("Scalar initializer list must contain exactly one item")
         item = init.items[0]
         if item.designators:
-            raise SemaError("Initializer type mismatch")
+            raise SemaError("Scalar initializer list item cannot be designated")
         self._analyze_initializer(target_type, item.initializer, scope)
 
     def _analyze_array_initializer_list(
@@ -1094,7 +1094,7 @@ class Analyzer:
             if item.designators:
                 kind, value = item.designators[0]
                 if kind != "index":
-                    raise SemaError("Initializer type mismatch")
+                    raise SemaError("Array initializer designator must use index")
                 assert isinstance(value, Expr)
                 index = self._eval_initializer_index(value, scope)
                 if index < 0 or index >= length:
@@ -1131,7 +1131,7 @@ class Analyzer:
             if item.designators:
                 kind, value = item.designators[0]
                 if kind != "member" or not isinstance(value, str):
-                    raise SemaError("Initializer type mismatch")
+                    raise SemaError("Record initializer designator must use member")
                 member_type, member_index = self._lookup_initializer_member(target_type, value)
                 self._analyze_designated_initializer(
                     member_type,
