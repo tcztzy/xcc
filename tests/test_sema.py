@@ -328,6 +328,12 @@ class SemaTests(unittest.TestCase):
         return_expr = _body(unit.functions[0]).statements[1].value
         self.assertIs(sema.type_map.get(return_expr), INT)
 
+    def test_bitwise_not_expression_typemap(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; return ~x;}")))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[1].value
+        self.assertIs(sema.type_map.get(return_expr), INT)
+
     def test_update_expression_typemap(self) -> None:
         source = "int main(){int x=1; ++x; x--; return x;}"
         unit = parse(list(lex(source)))
@@ -3031,11 +3037,35 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Cannot dereference non-pointer")
 
-    def test_unary_integer_operand_error(self) -> None:
+    def test_unary_minus_requires_arithmetic_operand_error(self) -> None:
         unit = parse(list(lex("int main(){int *p; return -p;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unary operator requires integer operand")
+        self.assertEqual(str(ctx.exception), "Unary minus operand must be arithmetic")
+
+    def test_unary_plus_requires_arithmetic_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){int *p; return +p;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Unary plus operand must be arithmetic")
+
+    def test_bitwise_not_requires_integer_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; return ~p;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Bitwise not operand must be integer")
+
+    def test_unary_minus_float_typemap(self) -> None:
+        unit = parse(list(lex("int main(){float f=1.0f; -f; return 0;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[1].expr
+        self.assertIs(sema.type_map.get(expr), FLOAT)
+
+    def test_unary_plus_float_typemap(self) -> None:
+        unit = parse(list(lex("int main(){float f=1.0f; +f; return 0;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[1].expr
+        self.assertIs(sema.type_map.get(expr), FLOAT)
 
     def test_logical_not_scalar_operand_error(self) -> None:
         unit = parse(list(lex("int main(){struct S { int x; } s; return !s;}")))
