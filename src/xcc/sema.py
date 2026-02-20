@@ -2047,7 +2047,9 @@ class Analyzer:
                 if not self._is_arithmetic_type(target_type) or not self._is_arithmetic_type(
                     value_type
                 ):
-                    raise SemaError("Assignment type mismatch")
+                    raise SemaError(
+                        "Compound multiplicative assignment requires arithmetic operands"
+                    )
                 self._type_map.set(expr, target_type)
                 return target_type
             if expr.op in {"+=", "-="}:
@@ -2057,10 +2059,14 @@ class Analyzer:
                 if target_type.pointee() is not None and self._is_integer_type(value_type):
                     self._type_map.set(expr, target_type)
                     return target_type
-                raise SemaError("Assignment type mismatch")
+                raise SemaError(
+                    "Compound additive assignment requires arithmetic operands or pointer/integer"
+                )
             if expr.op in {"<<=", ">>=", "%=", "&=", "^=", "|="}:
                 if not self._is_integer_type(target_type) or not self._is_integer_type(value_type):
-                    raise SemaError("Assignment type mismatch")
+                    raise SemaError(
+                        "Compound bitwise/shift/modulo assignment requires integer operands"
+                    )
                 self._type_map.set(expr, target_type)
                 return target_type
             raise SemaError(f"Unsupported assignment operator: {expr.op}")
