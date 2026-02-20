@@ -2040,7 +2040,7 @@ class Analyzer:
                     value_type,
                     scope,
                 ):
-                    raise SemaError("Assignment type mismatch")
+                    raise SemaError("Assignment value is not compatible with target type")
                 self._type_map.set(expr, target_type)
                 return target_type
             if expr.op in {"*=", "/="}:

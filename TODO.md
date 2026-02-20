@@ -120,5 +120,6 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
   - Iteration 3 slice: improved call diagnostics by including expected/got argument counts and 1-based argument index in type mismatch errors.
   - Iteration 3 slice: replaced update-expression generic mismatch diagnostics with a dedicated operand constraint message (`Update operand must be integer or pointer`).
   - Iteration 3 slice: replaced compound-assignment generic mismatch diagnostics with operator-family-specific messages (additive, multiplicative, and bitwise/shift/modulo assignment constraints).
+  - Iteration 3 slice: replaced plain assignment mismatch diagnostics with an explicit compatibility message (`Assignment value is not compatible with target type`).
 - Remaining risk: full C11 pointer qualification rules still need structural pointer-level qualifier modeling (current `Type` qualifier representation is base-type-centric).
 - Next target: start Iteration 3 by reducing remaining `Unsupported statement/expression` fallback paths.
