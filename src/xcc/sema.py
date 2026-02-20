@@ -1462,6 +1462,18 @@ class Analyzer:
                 return True
         return False
 
+    def _check_condition_type(self, condition_type: Type) -> None:
+        if condition_type is VOID:
+            raise SemaError("Condition must be non-void")
+        if not self._is_scalar_type(self._decay_array_value(condition_type)):
+            raise SemaError("Condition must be scalar")
+
+    def _check_switch_condition_type(self, condition_type: Type) -> None:
+        if condition_type is VOID:
+            raise SemaError("Condition must be non-void")
+        if not self._is_integer_type(self._decay_array_value(condition_type)):
+            raise SemaError("Switch condition must be integer")
+
     def _analyze_compound(self, stmt: CompoundStmt, scope: Scope, return_type: Type) -> None:
         for item in stmt.statements:
             self._analyze_stmt(item, scope, return_type)
@@ -1545,9 +1557,7 @@ class Analyzer:
             elif isinstance(stmt.init, Expr):
                 self._analyze_expr(stmt.init, inner_scope)
             if stmt.condition is not None:
-                condition_type = self._analyze_expr(stmt.condition, inner_scope)
-                if condition_type is VOID:
-                    raise SemaError("Condition must be non-void")
+                self._check_condition_type(self._analyze_expr(stmt.condition, inner_scope))
             if stmt.post is not None:
                 self._analyze_expr(stmt.post, inner_scope)
             self._loop_depth += 1
@@ -1557,9 +1567,7 @@ class Analyzer:
                 self._loop_depth -= 1
             return
         if isinstance(stmt, SwitchStmt):
-            condition_type = self._analyze_expr(stmt.condition, scope)
-            if condition_type is VOID:
-                raise SemaError("Condition must be non-void")
+            self._check_switch_condition_type(self._analyze_expr(stmt.condition, scope))
             self._switch_stack.append(SwitchContext())
             try:
                 self._analyze_stmt(stmt.body, scope, return_type)
@@ -1607,17 +1615,13 @@ class Analyzer:
             self._analyze_compound(stmt, inner_scope, return_type)
             return
         if isinstance(stmt, IfStmt):
-            condition_type = self._analyze_expr(stmt.condition, scope)
-            if condition_type is VOID:
-                raise SemaError("Condition must be non-void")
+            self._check_condition_type(self._analyze_expr(stmt.condition, scope))
             self._analyze_stmt(stmt.then_body, scope, return_type)
             if stmt.else_body is not None:
                 self._analyze_stmt(stmt.else_body, scope, return_type)
             return
         if isinstance(stmt, WhileStmt):
-            condition_type = self._analyze_expr(stmt.condition, scope)
-            if condition_type is VOID:
-                raise SemaError("Condition must be non-void")
+            self._check_condition_type(self._analyze_expr(stmt.condition, scope))
             self._loop_depth += 1
             try:
                 self._analyze_stmt(stmt.body, scope, return_type)
@@ -1628,9 +1632,7 @@ class Analyzer:
             self._loop_depth += 1
             try:
                 self._analyze_stmt(stmt.body, scope, return_type)
-                condition_type = self._analyze_expr(stmt.condition, scope)
-                if condition_type is VOID:
-                    raise SemaError("Condition must be non-void")
+                self._check_condition_type(self._analyze_expr(stmt.condition, scope))
             finally:
                 self._loop_depth -= 1
             return
@@ -1907,9 +1909,7 @@ class Analyzer:
             self._type_map.set(expr, INT)
             return INT
         if isinstance(expr, ConditionalExpr):
-            condition_type = self._analyze_expr(expr.condition, scope)
-            if condition_type is VOID:
-                raise SemaError("Condition must be non-void")
+            self._check_condition_type(self._analyze_expr(expr.condition, scope))
             then_type = self._decay_array_value(self._analyze_expr(expr.then_expr, scope))
             else_type = self._decay_array_value(self._analyze_expr(expr.else_expr, scope))
             if then_type == else_type:
