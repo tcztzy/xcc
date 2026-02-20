@@ -2546,11 +2546,11 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Invalid object type: void")
 
-    def test_unsupported_file_scope_declaration_error(self) -> None:
+    def test_unsupported_file_scope_declaration_node_error(self) -> None:
         unit = TranslationUnit([], [ExprStmt(IntLiteral("1"))])
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported file-scope declaration")
+        self.assertEqual(str(ctx.exception), "Unsupported file-scope declaration node: ExprStmt")
 
     def test_parenthesized_pointer_to_array_typemap(self) -> None:
         source = "int main(){int a[4]; int (*p)[4]=&a; return (*p)[1];}"
@@ -4297,7 +4297,7 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertEqual(sema.type_map.get(expr), INT)
 
-    def test_unsupported_statement(self) -> None:
+    def test_unsupported_statement_node(self) -> None:
         unit = TranslationUnit(
             [
                 FunctionDef(
@@ -4310,7 +4310,7 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported statement")
+        self.assertEqual(str(ctx.exception), "Unsupported statement node: Stmt")
 
 
 if __name__ == "__main__":

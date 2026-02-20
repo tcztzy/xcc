@@ -110,5 +110,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
   - Iteration 3 slice: removed the implicit update-operator fallback in sema by validating `UpdateExpr.op` and emitting `Unsupported update operator: <op>` for unknown update operators.
   - Iteration 3 slice: replaced the generic sema fallback `Unsupported expression` with node-specific diagnostics (`Unsupported expression node: <ExprClass>`), reducing opaque fallback behavior for unsupported expression AST nodes.
   - Iteration 3 slice: removed the shared shift-family fallback diagnostic (`Binary operator requires integer operands`) by adding operand-specific checks for `<<`/`>>` (`Shift left operand must be integer` / `Shift right operand must be integer`).
+  - Iteration 3 slice: replaced the generic statement fallback (`Unsupported statement`) with a node-specific diagnostic (`Unsupported statement node: <StmtClass>`), reducing opaque sema failures for unsupported statement AST nodes.
+  - Iteration 3 slice: replaced the generic file-scope declaration fallback (`Unsupported file-scope declaration`) with a node-specific diagnostic (`Unsupported file-scope declaration node: <DeclClass>`), improving unsupported top-level declaration diagnostics.
 - Remaining risk: full C11 pointer qualification rules still need structural pointer-level qualifier modeling (current `Type` qualifier representation is base-type-centric).
 - Next target: start Iteration 3 by reducing remaining `Unsupported statement/expression` fallback paths.
