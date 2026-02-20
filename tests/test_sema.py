@@ -2990,7 +2990,9 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int *f(int *p){return 1;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Return type mismatch")
+        self.assertEqual(
+            str(ctx.exception), "Return value is not compatible with function return type"
+        )
 
     def test_return_null_pointer_constant_ok(self) -> None:
         unit = parse(list(lex("int *f(void){return 0;} int main(){return f()==0;}")))
@@ -3009,7 +3011,9 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Return type mismatch")
+        self.assertEqual(
+            str(ctx.exception), "Return value is not compatible with function return type"
+        )
 
     def test_argument_type_mismatch(self) -> None:
         unit = parse(list(lex("int *id(int *p){return p;} int main(){int x=1; return id(x);}")))

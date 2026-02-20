@@ -1548,7 +1548,7 @@ class Analyzer:
                 value_type,
                 scope,
             ):
-                raise SemaError("Return type mismatch")
+                raise SemaError("Return value is not compatible with function return type")
             return
         if isinstance(stmt, ForStmt):
             inner_scope = Scope(scope)
