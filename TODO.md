@@ -113,5 +113,6 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
   - Iteration 3 slice: replaced the generic statement fallback (`Unsupported statement`) with a node-specific diagnostic (`Unsupported statement node: <StmtClass>`), reducing opaque sema failures for unsupported statement AST nodes.
   - Iteration 3 slice: replaced the generic file-scope declaration fallback (`Unsupported file-scope declaration`) with a node-specific diagnostic (`Unsupported file-scope declaration node: <DeclClass>`), improving unsupported top-level declaration diagnostics.
   - Iteration 3 slice: tightened condition validation by enforcing scalar conditions for `if`/`for`/`while`/`do-while`/`?:` and integer conditions for `switch`, with dedicated diagnostics for non-scalar and non-integer cases.
+  - Iteration 3 slice: replaced remaining shared multiplicative/modulo/bitwise operand diagnostics with operator- and side-specific checks (`Multiplication/Division/Modulo/Bitwise <left|right> operand ...`) to reduce ambiguous sema failures.
 - Remaining risk: full C11 pointer qualification rules still need structural pointer-level qualifier modeling (current `Type` qualifier representation is base-type-centric).
 - Next target: start Iteration 3 by reducing remaining `Unsupported statement/expression` fallback paths.

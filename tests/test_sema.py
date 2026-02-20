@@ -1307,17 +1307,36 @@ class SemaTests(unittest.TestCase):
         assert expr is not None
         self.assertIs(sema.type_map.get(expr), ULONG)
 
-    def test_modulo_requires_integer_operands_error(self) -> None:
+    def test_division_usual_arithmetic_conversion_typemap(self) -> None:
+        unit = parse(list(lex("int main(){float a=8.0f; int b=2; return a/b;}")))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[2].value
+        assert expr is not None
+        self.assertIs(sema.type_map.get(expr), FLOAT)
+
+    def test_modulo_requires_integer_left_operand_error(self) -> None:
         unit = parse(list(lex("int main(){float f=1.0f; return f%2;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Binary operator requires integer operands")
+        self.assertEqual(str(ctx.exception), "Modulo left operand must be integer")
 
-    def test_bitwise_requires_integer_operands_error(self) -> None:
+    def test_modulo_requires_integer_right_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=2; float f=1.0f; return x%f;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Modulo right operand must be integer")
+
+    def test_bitwise_requires_integer_left_operand_error(self) -> None:
         unit = parse(list(lex("int main(){float f=1.0f; return f|1;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Binary operator requires integer operands")
+        self.assertEqual(str(ctx.exception), "Bitwise left operand must be integer")
+
+    def test_bitwise_requires_integer_right_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; float f=1.0f; return x|f;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Bitwise right operand must be integer")
 
     def test_logical_expression_typemap(self) -> None:
         unit = parse(list(lex("int main(){return (1&&2) || 0;}")))
@@ -3024,11 +3043,29 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Logical not requires scalar operand")
 
-    def test_binary_integer_operands_error(self) -> None:
+    def test_multiplication_requires_arithmetic_left_operand_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; int *p=&x; return p*1;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Binary operator requires integer operands")
+        self.assertEqual(str(ctx.exception), "Multiplication left operand must be arithmetic")
+
+    def test_multiplication_requires_arithmetic_right_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; return 1*p;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Multiplication right operand must be arithmetic")
+
+    def test_division_requires_arithmetic_left_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; return p/1;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Division left operand must be arithmetic")
+
+    def test_division_requires_arithmetic_right_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; int *p=&x; return 1/p;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Division right operand must be arithmetic")
 
     def test_additive_pointer_plus_pointer_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; int y=2; int *p=&x; int *q=&y; return p+q;}")))

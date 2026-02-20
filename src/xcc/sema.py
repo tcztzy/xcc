@@ -1847,16 +1847,31 @@ class Analyzer:
                     )
                 self._type_map.set(expr, result_type)
                 return result_type
-            if expr.op in {"*", "/"}:
+            if expr.op == "*":
+                if not self._is_arithmetic_type(left_type):
+                    raise SemaError("Multiplication left operand must be arithmetic")
+                if not self._is_arithmetic_type(right_type):
+                    raise SemaError("Multiplication right operand must be arithmetic")
                 result_type = self._usual_arithmetic_conversion(left_type, right_type)
-                if result_type is None:
-                    raise SemaError("Binary operator requires integer operands")
+                assert result_type is not None
+                self._type_map.set(expr, result_type)
+                return result_type
+            if expr.op == "/":
+                if not self._is_arithmetic_type(left_type):
+                    raise SemaError("Division left operand must be arithmetic")
+                if not self._is_arithmetic_type(right_type):
+                    raise SemaError("Division right operand must be arithmetic")
+                result_type = self._usual_arithmetic_conversion(left_type, right_type)
+                assert result_type is not None
                 self._type_map.set(expr, result_type)
                 return result_type
             if expr.op == "%":
+                if not self._is_integer_type(left_type):
+                    raise SemaError("Modulo left operand must be integer")
+                if not self._is_integer_type(right_type):
+                    raise SemaError("Modulo right operand must be integer")
                 result_type = self._usual_arithmetic_conversion(left_type, right_type)
-                if result_type is None or not self._is_integer_type(result_type):
-                    raise SemaError("Binary operator requires integer operands")
+                assert result_type is not None and self._is_integer_type(result_type)
                 self._type_map.set(expr, result_type)
                 return result_type
             if expr.op in {"<<", ">>"}:
@@ -1868,9 +1883,12 @@ class Analyzer:
                 self._type_map.set(expr, result_type)
                 return result_type
             if expr.op in {"&", "^", "|"}:
+                if not self._is_integer_type(left_type):
+                    raise SemaError("Bitwise left operand must be integer")
+                if not self._is_integer_type(right_type):
+                    raise SemaError("Bitwise right operand must be integer")
                 result_type = self._usual_arithmetic_conversion(left_type, right_type)
-                if result_type is None or not self._is_integer_type(result_type):
-                    raise SemaError("Binary operator requires integer operands")
+                assert result_type is not None and self._is_integer_type(result_type)
                 self._type_map.set(expr, result_type)
                 return result_type
             if expr.op in {"<", "<=", ">", ">="}:
