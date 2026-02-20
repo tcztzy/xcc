@@ -3635,7 +3635,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){struct S { int x; } s; ++s; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(str(ctx.exception), "Update operand must be integer or pointer")
 
     def test_update_array_target_not_assignable(self) -> None:
         unit = parse(list(lex("int main(){int a[2]; a++; return 0;}")))
