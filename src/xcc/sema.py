@@ -515,7 +515,7 @@ class Analyzer:
         if isinstance(declaration, StaticAssertDecl):
             self._check_static_assert(declaration, self._file_scope)
             return
-        raise SemaError("Unsupported file-scope declaration")
+        raise SemaError(f"Unsupported file-scope declaration node: {type(declaration).__name__}")
 
     def _signature_from(self, func: FunctionDef) -> FunctionSignature:
         if not func.has_prototype:
@@ -1644,7 +1644,7 @@ class Analyzer:
             return
         if isinstance(stmt, NullStmt):
             return
-        raise SemaError("Unsupported statement")
+        raise SemaError(f"Unsupported statement node: {type(stmt).__name__}")
 
     def _analyze_expr(self, expr: Expr, scope: Scope) -> Type:
         if isinstance(expr, FloatLiteral):
