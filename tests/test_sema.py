@@ -2746,7 +2746,9 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int x=1; int *p=&x; x=p; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception), "Assignment value is not compatible with target type"
+        )
 
     def test_compound_assignment_int_ok(self) -> None:
         source = "int main(){int x=8; x+=2; x<<=1; x%=3; return x;}"
@@ -2925,7 +2927,9 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int z=0; int *p; p=z; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception), "Assignment value is not compatible with target type"
+        )
 
     def test_assignment_void_pointer_conversion_ok(self) -> None:
         source = "int main(){int x=1; int *p=&x; void *vp=0; vp=p; p=vp; return p!=0;}"
@@ -2944,7 +2948,9 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception), "Assignment value is not compatible with target type"
+        )
 
     def test_assignment_nested_pointer_adds_const_qualifier_error(self) -> None:
         source = "int main(){int x=1; int *p=&x; int **pp=&p; const int **cpp=pp; return 0;}"
@@ -2958,21 +2964,27 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception), "Assignment value is not compatible with target type"
+        )
 
     def test_assignment_void_pointer_to_function_pointer_error(self) -> None:
         source = "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; fp=vp; return 0;}"
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception), "Assignment value is not compatible with target type"
+        )
 
     def test_assignment_incompatible_object_pointers_error(self) -> None:
         source = "int main(){int x=1; char y=97; int *p=&x; char *q=&y; p=q; return 0;}"
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment type mismatch")
+        self.assertEqual(
+            str(ctx.exception), "Assignment value is not compatible with target type"
+        )
 
     def test_return_type_mismatch(self) -> None:
         unit = parse(list(lex("int *f(int *p){return 1;}")))
