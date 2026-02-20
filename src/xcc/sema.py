@@ -1857,8 +1857,11 @@ class Analyzer:
             if expr.op in {"+", "-"}:
                 result_type = self._analyze_additive_types(left_type, right_type, expr.op)
                 if result_type is None:
+                    if expr.op == "+":
+                        raise SemaError("Addition operands must be arithmetic or pointer/integer")
                     raise SemaError(
-                        "Additive operator requires integer and compatible pointer operands"
+                        "Subtraction operands must be arithmetic, pointer/integer, "
+                        "or compatible pointers"
                     )
                 self._type_map.set(expr, result_type)
                 return result_type

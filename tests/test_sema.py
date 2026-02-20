@@ -3103,7 +3103,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Additive operator requires integer and compatible pointer operands",
+            "Addition operands must be arithmetic or pointer/integer",
         )
 
     def test_additive_integer_minus_pointer_error(self) -> None:
@@ -3112,7 +3112,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Additive operator requires integer and compatible pointer operands",
+            "Subtraction operands must be arithmetic, pointer/integer, or compatible pointers",
         )
 
     def test_additive_pointer_mismatch_error(self) -> None:
@@ -3121,7 +3121,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Additive operator requires integer and compatible pointer operands",
+            "Subtraction operands must be arithmetic, pointer/integer, or compatible pointers",
         )
 
     def test_additive_void_pointer_subtraction_error(self) -> None:
@@ -3130,7 +3130,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Additive operator requires integer and compatible pointer operands",
+            "Subtraction operands must be arithmetic, pointer/integer, or compatible pointers",
         )
 
     def test_relational_pointer_mismatch_error(self) -> None:
