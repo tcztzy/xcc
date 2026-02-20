@@ -1899,8 +1899,10 @@ class Analyzer:
                         "Relational operator requires integer or compatible object pointer operands"
                     )
             elif expr.op in {"==", "!="}:
-                if not self._is_scalar_type(left_type) or not self._is_scalar_type(right_type):
-                    raise SemaError("Equality operator requires scalar operands")
+                if not self._is_scalar_type(left_type):
+                    raise SemaError("Equality left operand must be scalar")
+                if not self._is_scalar_type(right_type):
+                    raise SemaError("Equality right operand must be scalar")
                 if self._usual_arithmetic_conversion(left_type, right_type) is None:
                     if left_type.pointee() is not None and right_type.pointee() is not None:
                         if not self._is_pointer_equality_compatible(left_type, right_type):
@@ -1920,8 +1922,10 @@ class Analyzer:
                             "Equality operator requires integer or compatible pointer operands"
                         )
             elif expr.op in {"&&", "||"}:
-                if not self._is_scalar_type(left_type) or not self._is_scalar_type(right_type):
-                    raise SemaError("Logical operator requires scalar operands")
+                if not self._is_scalar_type(left_type):
+                    raise SemaError("Logical left operand must be scalar")
+                if not self._is_scalar_type(right_type):
+                    raise SemaError("Logical right operand must be scalar")
             else:
                 raise SemaError(f"Unsupported binary operator: {expr.op}")
             self._type_map.set(expr, INT)

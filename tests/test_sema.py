@@ -3206,17 +3206,29 @@ class SemaTests(unittest.TestCase):
             "Equality operator requires integer or compatible pointer operands",
         )
 
-    def test_equality_scalar_operands_error(self) -> None:
+    def test_equality_scalar_left_operand_error(self) -> None:
         unit = parse(list(lex("int main(){struct S { int x; } a; struct S b; return a==b;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Equality operator requires scalar operands")
+        self.assertEqual(str(ctx.exception), "Equality left operand must be scalar")
 
-    def test_logical_scalar_operands_error(self) -> None:
+    def test_equality_scalar_right_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; } s; return 1==s;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Equality right operand must be scalar")
+
+    def test_logical_scalar_left_operand_error(self) -> None:
         unit = parse(list(lex("int main(){struct S { int x; } s; return s&&1;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Logical operator requires scalar operands")
+        self.assertEqual(str(ctx.exception), "Logical left operand must be scalar")
+
+    def test_logical_scalar_right_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int x; } s; return 1&&s;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Logical right operand must be scalar")
 
     def test_address_of_non_assignable_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; return &(x+1);}")))
