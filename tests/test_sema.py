@@ -3970,6 +3970,12 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be non-void")
 
+    def test_switch_non_integer_condition_error(self) -> None:
+        unit = parse(list(lex("int main(){float f=1.0f; switch(f){default:return 0;}}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Switch condition must be integer")
+
     def test_for_scope_does_not_leak(self) -> None:
         unit = parse(list(lex("int main(){for(int i=0;i<1;i=i+1) ; return i;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -3982,11 +3988,27 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be non-void")
 
+    def test_if_non_scalar_condition_error(self) -> None:
+        unit = parse(
+            list(lex("struct S{int x;}; int main(){struct S s={0}; if(s) return 0; return 1;}"))
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be scalar")
+
     def test_conditional_void_condition_error(self) -> None:
         unit = parse(list(lex("void foo(){return;} int main(){return foo() ? 1 : 2;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be non-void")
+
+    def test_conditional_non_scalar_condition_error(self) -> None:
+        unit = parse(
+            list(lex("struct S{int x;}; int main(){struct S s={0}; return s ? 1 : 2;}"))
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be scalar")
 
     def test_static_assert_non_constant_condition_error(self) -> None:
         unit = parse(list(lex('int main(void){int x=1; _Static_assert(x, "bad"); return 0;}')))
@@ -4027,6 +4049,18 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be non-void")
 
+    def test_while_non_scalar_condition_error(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "struct S{int x;}; int main(){struct S s={0}; while(s){return 0;} return 1;}"
+                )
+            )
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be scalar")
+
     def test_do_while_void_condition_error(self) -> None:
         unit = parse(
             list(lex("void foo(){return;} int main(){do return 0; while(foo());}"))
@@ -4034,6 +4068,28 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be non-void")
+
+    def test_do_while_non_scalar_condition_error(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "struct S{int x;}; int main(){struct S s={0}; do {return 0;} while(s); return 1;}"
+                )
+            )
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be scalar")
+
+    def test_for_non_scalar_condition_error(self) -> None:
+        unit = parse(
+            list(
+                lex("struct S{int x;}; int main(){struct S s={0}; for(;s;){return 0;} return 1;}")
+            )
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Condition must be scalar")
 
     def test_undeclared_function_call(self) -> None:
         unit = parse(list(lex("int main(){return foo(1);}")))
