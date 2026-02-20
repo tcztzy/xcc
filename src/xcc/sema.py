@@ -2411,7 +2411,13 @@ class Analyzer:
             is_variadic and len(args) < len(parameter_types)
         ):
             suffix = f": {function_name}" if function_name is not None else ""
-            raise SemaError(f"Argument count mismatch{suffix}")
+            expected = len(parameter_types)
+            got = len(args)
+            if is_variadic:
+                raise SemaError(
+                    f"Argument count mismatch (expected at least {expected}, got {got}){suffix}"
+                )
+            raise SemaError(f"Argument count mismatch (expected {expected}, got {got}){suffix}")
         for index, arg in enumerate(args[: len(parameter_types)]):
             arg_type = self._type_map.require(arg)
             value_arg_type = self._decay_array_value(arg_type)
@@ -2422,7 +2428,7 @@ class Analyzer:
                 scope,
             ):
                 suffix = f": {function_name}" if function_name is not None else ""
-                raise SemaError(f"Argument type mismatch{suffix}")
+                raise SemaError(f"Argument {index + 1} type mismatch{suffix}")
 
     def _is_assignable(self, expr: Expr) -> bool:
         return isinstance(expr, (Identifier, SubscriptExpr, MemberExpr, CompoundLiteralExpr)) or (

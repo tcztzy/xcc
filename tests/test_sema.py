@@ -1443,14 +1443,14 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument count mismatch")
+        self.assertEqual(str(ctx.exception), "Argument count mismatch (expected 1, got 0)")
 
     def test_function_pointer_call_argument_type_mismatch(self) -> None:
         source = "int inc(int x){return x;} int main(){int (*fp)(int)=inc; int *p; return fp(p);}"
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument type mismatch")
+        self.assertEqual(str(ctx.exception), "Argument 1 type mismatch")
 
     def test_function_pointer_without_prototype_call(self) -> None:
         source = "int apply(int (*fp)(), int x){return fp(x,x);}"
@@ -1469,7 +1469,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument count mismatch")
+        self.assertEqual(str(ctx.exception), "Argument count mismatch (expected at least 1, got 0)")
 
     def test_void_function_pointer_parameter_is_allowed(self) -> None:
         unit = parse(list(lex("int f(void (*cb)(void)){return 0;}")))
@@ -1515,14 +1515,17 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument count mismatch: logf")
+        self.assertEqual(
+            str(ctx.exception),
+            "Argument count mismatch (expected at least 1, got 0): logf",
+        )
 
     def test_variadic_function_call_fixed_argument_type_mismatch(self) -> None:
         source = "int logf(int level, ...){return level;} int main(){int *p; return logf(p, 1);}"
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument type mismatch: logf")
+        self.assertEqual(str(ctx.exception), "Argument 1 type mismatch: logf")
 
     def test_function_declaration_without_definition(self) -> None:
         unit = parse(list(lex("int add(int a, int b);")))
@@ -1886,7 +1889,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int add(int a,int b){return a+b;} int main(){return add(1);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument count mismatch: add")
+        self.assertEqual(str(ctx.exception), "Argument count mismatch (expected 2, got 1): add")
 
     def test_missing_parameter_name_error(self) -> None:
         unit = TranslationUnit(
@@ -2985,7 +2988,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int *id(int *p){return p;} int main(){int x=1; return id(x);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument type mismatch: id")
+        self.assertEqual(str(ctx.exception), "Argument 1 type mismatch: id")
 
     def test_argument_null_pointer_constant_ok(self) -> None:
         unit = parse(list(lex("int *id(int *p){return p;} int main(){return id(0)==0;}")))
@@ -3015,21 +3018,21 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument type mismatch: f")
+        self.assertEqual(str(ctx.exception), "Argument 1 type mismatch: f")
 
     def test_argument_nested_pointer_adds_const_qualifier_error(self) -> None:
         source = "int f(const int **p){return 0;} int main(){int x=1; int *p=&x; int **pp=&p; return f(pp);}"
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument type mismatch: f")
+        self.assertEqual(str(ctx.exception), "Argument 1 type mismatch: f")
 
     def test_argument_void_pointer_from_function_pointer_error(self) -> None:
         source = "int takes(void *p){return 0;} int f(void){return 0;} int main(){return takes(f);}"
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument type mismatch: takes")
+        self.assertEqual(str(ctx.exception), "Argument 1 type mismatch: takes")
 
     def test_dereference_non_pointer_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; return *x;}")))
