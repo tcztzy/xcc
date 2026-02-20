@@ -1845,7 +1845,7 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid cast")
+        self.assertEqual(str(ctx.exception), "Cast target is not compatible with overload set")
 
     def test_overloadable_call_resolves_through_statement_expression_callee(self) -> None:
         unit = parse(
@@ -4361,26 +4361,26 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("void f(void){return;} int main(){return (int)f();}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid cast")
+        self.assertEqual(str(ctx.exception), "Cast operand is not castable to target type")
 
     def test_cast_struct_target_error(self) -> None:
         source = "int main(){struct S { int x; } s; return (struct S)s;}"
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid cast")
+        self.assertEqual(str(ctx.exception), "Cast target type is not castable")
 
     def test_cast_incomplete_record_target_error(self) -> None:
         unit = parse(list(lex("int main(){int x; return (struct S)x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid cast")
+        self.assertEqual(str(ctx.exception), "Cast target type is not castable")
 
     def test_cast_array_target_error(self) -> None:
         unit = parse(list(lex("int main(){int x; return (int[2])x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid cast")
+        self.assertEqual(str(ctx.exception), "Cast target type is not castable")
 
     def test_cast_function_type_target_error(self) -> None:
         unit = TranslationUnit(
@@ -4404,7 +4404,7 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid cast")
+        self.assertEqual(str(ctx.exception), "Cast target type is not castable")
 
     def test_unsupported_expression(self) -> None:
         unit = TranslationUnit(

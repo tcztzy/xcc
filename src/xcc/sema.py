@@ -1760,13 +1760,13 @@ class Analyzer:
             self._register_type_spec(expr.type_spec)
             target_type = self._resolve_type(expr.type_spec)
             if self._is_invalid_cast_target(expr.type_spec, target_type):
-                raise SemaError("Invalid cast")
+                raise SemaError("Cast target type is not castable")
             operand_type = self._decay_array_value(self._analyze_expr(expr.expr, scope))
             overload_name = self._get_overload_expr_name(expr.expr)
             if overload_name is not None:
                 selected_signature = self._resolve_overload_for_cast(overload_name, target_type)
                 if selected_signature is None:
-                    raise SemaError("Invalid cast")
+                    raise SemaError("Cast target is not compatible with overload set")
                 operand_type = self._decay_array_value(
                     selected_signature.return_type.function_of(
                         selected_signature.params,
@@ -1774,7 +1774,7 @@ class Analyzer:
                     )
                 )
             if self._is_invalid_cast_operand(operand_type, target_type):
-                raise SemaError("Invalid cast")
+                raise SemaError("Cast operand is not castable to target type")
             self._type_map.set(expr, target_type)
             return target_type
         if isinstance(expr, CompoundLiteralExpr):
