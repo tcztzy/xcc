@@ -117,5 +117,6 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
   - Iteration 3 slice: replaced shared equality/logical scalar-operand diagnostics with side-specific messages (`Equality/Logical <left|right> operand must be scalar`) for clearer sema failures.
   - Iteration 3 slice: tightened unary operand constraints and diagnostics by splitting `+`/`-`/`~` checks (`Unary plus/minus operand must be arithmetic`, `Bitwise not operand must be integer`) and allowing floating unary `+`/`-` results.
   - Iteration 3 slice: replaced shared additive diagnostics with operator-specific messages for `+` and `-`, clarifying pointer/integer and pointer-pointer rejection paths.
+  - Iteration 3 slice: improved call diagnostics by including expected/got argument counts and 1-based argument index in type mismatch errors.
 - Remaining risk: full C11 pointer qualification rules still need structural pointer-level qualifier modeling (current `Type` qualifier representation is base-type-centric).
 - Next target: start Iteration 3 by reducing remaining `Unsupported statement/expression` fallback paths.
