@@ -1288,11 +1288,17 @@ class SemaTests(unittest.TestCase):
         assert expr is not None
         self.assertIs(sema.type_map.get(expr), INT)
 
-    def test_shift_requires_integer_operands_error(self) -> None:
+    def test_shift_requires_integer_left_operand_error(self) -> None:
         unit = parse(list(lex("int main(){float f=1.0f; return f<<1;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Binary operator requires integer operands")
+        self.assertEqual(str(ctx.exception), "Shift left operand must be integer")
+
+    def test_shift_requires_integer_right_operand_error(self) -> None:
+        unit = parse(list(lex("int main(){int x=1; float f=1.0f; return x<<f;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Shift right operand must be integer")
 
     def test_modulo_usual_arithmetic_conversion_typemap(self) -> None:
         unit = parse(list(lex("int main(){unsigned long a=7; int b=3; return a%b;}")))

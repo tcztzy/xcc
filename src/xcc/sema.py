@@ -1858,8 +1858,10 @@ class Analyzer:
                 self._type_map.set(expr, result_type)
                 return result_type
             if expr.op in {"<<", ">>"}:
-                if not self._is_integer_type(left_type) or not self._is_integer_type(right_type):
-                    raise SemaError("Binary operator requires integer operands")
+                if not self._is_integer_type(left_type):
+                    raise SemaError("Shift left operand must be integer")
+                if not self._is_integer_type(right_type):
+                    raise SemaError("Shift right operand must be integer")
                 result_type = self._integer_promotion(left_type)
                 self._type_map.set(expr, result_type)
                 return result_type
