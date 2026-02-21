@@ -299,6 +299,10 @@ class Analyzer:
         self._overload_expr_ids: dict[int, str] = {}
         self._defined_functions: set[str] = set()
         self._record_definitions: dict[str, tuple[RecordMemberInfo, ...]] = {}
+        self._record_member_lookup_cache: dict[
+            str,
+            tuple[tuple[RecordMemberInfo, ...], dict[str, tuple[Type, int]]],
+        ] = {}
         self._seen_record_definitions: set[int] = set()
         self._file_scope = Scope()
         self._loop_depth = 0
@@ -581,6 +585,24 @@ class Analyzer:
         if normalized is not members:
             self._record_definitions[record_name] = normalized
         return normalized
+
+    def _record_member_lookup(
+        self,
+        record_name: str,
+    ) -> dict[str, tuple[Type, int]] | None:
+        members = self._record_members(record_name)
+        if members is None:
+            return None
+        cached = self._record_member_lookup_cache.get(record_name)
+        if cached is not None and cached[0] is members:
+            return cached[1]
+        lookup = {
+            member.name: (member.type_, index)
+            for index, member in enumerate(members)
+            if member.name is not None
+        }
+        self._record_member_lookup_cache[record_name] = (members, lookup)
+        return lookup
 
     def _register_type_spec(self, type_spec: TypeSpec) -> None:
         if type_spec.name not in {"struct", "union"} or not type_spec.record_members:
@@ -1198,12 +1220,12 @@ class Analyzer:
     def _lookup_initializer_member(self, record_type: Type, member_name: str) -> tuple[Type, int]:
         if record_type.declarator_ops or not self._is_record_name(record_type.name):
             raise SemaError("Initializer type mismatch")
-        members = self._record_members(record_type.name)
-        if members is None:
+        lookup = self._record_member_lookup(record_type.name)
+        if lookup is None:
             raise SemaError("Initializer type mismatch")
-        for index, member in enumerate(members):
-            if member.name == member_name:
-                return member.type_, index
+        member = lookup.get(member_name)
+        if member is not None:
+            return member
         raise SemaError(f"No such member: {member_name}")
 
     def _eval_initializer_index(self, expr: Expr, scope: Scope) -> int:
