@@ -1174,7 +1174,7 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
         ):
             value = _eval_pp_node(node.args[0])
             return _PPValue(value.as_unsigned(), True)
-        raise ValueError("Unsupported expression")
+        raise ValueError("Unsupported preprocessor call expression")
     if isinstance(node, ast.UnaryOp):
         operand = _eval_pp_node(node.operand)
         if isinstance(node.op, ast.Not):
@@ -1189,14 +1189,14 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
             value = ~operand.value
             result = _PPValue(value, operand.is_unsigned)
             return result.normalize()
-        raise ValueError("Unsupported unary operator")
+        raise ValueError(f"Unsupported preprocessor unary operator: {type(node.op).__name__}")
     if isinstance(node, ast.BoolOp):
         values = [_eval_pp_node(value).value for value in node.values]
         if isinstance(node.op, ast.And):
             return _PPValue(int(all(values)))
         if isinstance(node.op, ast.Or):
             return _PPValue(int(any(values)))
-        raise ValueError("Unsupported boolean operator")
+        raise ValueError(f"Unsupported preprocessor boolean operator: {type(node.op).__name__}")
     if isinstance(node, ast.BinOp):
         left = _eval_pp_node(node.left)
         right = _eval_pp_node(node.right)
@@ -1224,7 +1224,7 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
         elif isinstance(node.op, ast.BitXor):
             value = left_value ^ right_value
         else:
-            raise ValueError("Unsupported binary operator")
+            raise ValueError(f"Unsupported preprocessor binary operator: {type(node.op).__name__}")
         result = _PPValue(value, is_unsigned)
         return result.normalize()
     if isinstance(node, ast.Compare):
@@ -1248,8 +1248,8 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
             return _PPValue(int(left_value > right_value))
         if isinstance(op, ast.GtE):
             return _PPValue(int(left_value >= right_value))
-        raise ValueError("Unsupported comparison")
-    raise ValueError("Unsupported expression")
+        raise ValueError(f"Unsupported preprocessor comparison operator: {type(op).__name__}")
+    raise ValueError(f"Unsupported preprocessor expression node: {type(node).__name__}")
 
 
 def _eval_node(node: ast.AST) -> int:
@@ -1271,14 +1271,14 @@ def _eval_node(node: ast.AST) -> int:
             return -value
         if isinstance(node.op, ast.Invert):
             return ~value
-        raise ValueError("Unsupported unary operator")
+        raise ValueError(f"Unsupported integer-expression unary operator: {type(node.op).__name__}")
     if isinstance(node, ast.BoolOp):
         values = [_eval_node(value) for value in node.values]
         if isinstance(node.op, ast.And):
             return int(all(values))
         if isinstance(node.op, ast.Or):
             return int(any(values))
-        raise ValueError("Unsupported boolean operator")
+        raise ValueError(f"Unsupported integer-expression boolean operator: {type(node.op).__name__}")
     if isinstance(node, ast.BinOp):
         left = _eval_node(node.left)
         right = _eval_node(node.right)
@@ -1302,7 +1302,7 @@ def _eval_node(node: ast.AST) -> int:
             return left & right
         if isinstance(node.op, ast.BitXor):
             return left ^ right
-        raise ValueError("Unsupported binary operator")
+        raise ValueError(f"Unsupported integer-expression binary operator: {type(node.op).__name__}")
     if isinstance(node, ast.Compare):
         if len(node.ops) != 1 or len(node.comparators) != 1:
             raise ValueError("Unsupported comparison")
@@ -1321,8 +1321,8 @@ def _eval_node(node: ast.AST) -> int:
             return int(left > right)
         if isinstance(op, ast.GtE):
             return int(left >= right)
-        raise ValueError("Unsupported comparison")
-    raise ValueError("Unsupported expression")
+        raise ValueError(f"Unsupported integer-expression comparison operator: {type(op).__name__}")
+    raise ValueError(f"Unsupported integer-expression node: {type(node).__name__}")
 
 
 def _parse_directive(line: str) -> tuple[str, str] | None:

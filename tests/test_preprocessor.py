@@ -491,46 +491,56 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_eval_pp_node_unsupported_branches(self) -> None:
         unsupported_unary = ast.UnaryOp(op=ast.MatMult(), operand=ast.Constant(1))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_unary)
+        self.assertEqual(str(ctx.exception), "Unsupported preprocessor unary operator: MatMult")
         unsupported_bool = ast.BoolOp(op=ast.BitAnd(), values=[ast.Constant(1), ast.Constant(1)])
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_bool)
+        self.assertEqual(str(ctx.exception), "Unsupported preprocessor boolean operator: BitAnd")
         unsupported_bin = ast.BinOp(left=ast.Constant(1), op=ast.Pow(), right=ast.Constant(1))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_bin)
+        self.assertEqual(str(ctx.exception), "Unsupported preprocessor binary operator: Pow")
         unsupported_chain = ast.Compare(
             left=ast.Constant(1),
             ops=[ast.Lt(), ast.Lt()],
             comparators=[ast.Constant(2), ast.Constant(3)],
         )
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_chain)
+        self.assertEqual(str(ctx.exception), "Unsupported comparison")
         unsupported_cmp = ast.Compare(left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)])
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_cmp)
+        self.assertEqual(str(ctx.exception), "Unsupported preprocessor comparison operator: Is")
         unsupported_expr = ast.IfExp(
             test=ast.Constant(True),
             body=ast.Constant(1),
             orelse=ast.Constant(0),
         )
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_expr)
+        self.assertEqual(str(ctx.exception), "Unsupported preprocessor expression node: IfExp")
 
     def test_eval_node_unsupported_branches(self) -> None:
         self.assertEqual(_eval_node(ast.Constant(True)), 1)
         unsupported_unary = ast.UnaryOp(op=ast.MatMult(), operand=ast.Constant(1))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_unary)
+        self.assertEqual(str(ctx.exception), "Unsupported integer-expression unary operator: MatMult")
         unsupported_bool = ast.BoolOp(op=ast.BitAnd(), values=[ast.Constant(1), ast.Constant(1)])
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_bool)
+        self.assertEqual(str(ctx.exception), "Unsupported integer-expression boolean operator: BitAnd")
         unsupported_bin = ast.BinOp(left=ast.Constant(1), op=ast.Pow(), right=ast.Constant(1))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_bin)
+        self.assertEqual(str(ctx.exception), "Unsupported integer-expression binary operator: Pow")
         unsupported_cmp = ast.Compare(left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)])
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_cmp)
+        self.assertEqual(str(ctx.exception), "Unsupported integer-expression comparison operator: Is")
 
     def test_helpers(self) -> None:
         self.assertEqual(_blank_line("abc\n"), "\n")
