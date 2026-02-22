@@ -540,7 +540,10 @@ class Parser:
                 raise ParserError(self._unsupported_type_message(context, token), token)
             self._advance()
             return self._apply_type_qualifiers(type_spec, qualifiers)
-        token = self._expect(TokenKind.KEYWORD)
+        token = self._current()
+        if token.kind != TokenKind.KEYWORD:
+            raise ParserError(self._unsupported_type_message(context, token), token)
+        self._advance()
         if token.lexeme == "_Complex":
             if self._check_keyword("float") or self._check_keyword("double"):
                 complex_base = self._advance()
@@ -606,9 +609,143 @@ class Parser:
             if context == "type-name":
                 return f"Unknown type name: '{token_text}'"
             return f"Unknown declaration type name: '{token_text}'"
+        if token.kind == TokenKind.KEYWORD:
+            if context == "type-name":
+                return f"Unsupported type name: '{token_text}'"
+            return f"Unsupported declaration type: '{token_text}'"
+        token_kind = self._unsupported_type_token_kind(token.kind)
         if context == "type-name":
-            return f"Unsupported type name: '{token_text}'"
-        return f"Unsupported declaration type: '{token_text}'"
+            if token.kind == TokenKind.PUNCTUATOR:
+                return self._unsupported_type_name_punctuator_message(token_text)
+            return self._unsupported_type_name_token_message(token_text, token_kind)
+        if token.kind == TokenKind.PUNCTUATOR:
+            return self._unsupported_declaration_type_punctuator_message(token_text)
+        return f"Unsupported declaration type token ({token_kind}): '{token_text}'"
+
+    def _unsupported_type_name_token_message(self, token_text: str, token_kind: str) -> str:
+        if token_kind == "end of input":
+            return "Type name is missing before end of input"
+        return f"Type name cannot start with {token_kind}: '{token_text}'"
+
+    def _unsupported_type_name_punctuator_message(self, punctuator: str) -> str:
+        messages = {
+            "(": "Type name cannot start with '(': expected a type specifier",
+            ")": "Type name is missing before ')'",
+            "+": "Type name cannot start with '+': expected a type specifier",
+            "-": "Type name cannot start with '-': expected a type specifier",
+            "<": "Type name cannot start with '<': expected a type specifier",
+            "<=": "Type name cannot start with '<=': expected a type specifier",
+            "<<": "Type name cannot start with '<<': expected a type specifier",
+            ">": "Type name cannot start with '>': expected a type specifier",
+            ">=": "Type name cannot start with '>=': expected a type specifier",
+            ">>": "Type name cannot start with '>>': expected a type specifier",
+            "!": "Type name cannot start with '!': expected a type specifier",
+            "~": "Type name cannot start with '~': expected a type specifier",
+            "&": "Type name cannot start with '&': expected a type specifier",
+            "&&": "Type name cannot start with '&&': expected a type specifier",
+            "|": "Type name cannot start with '|': expected a type specifier",
+            "||": "Type name cannot start with '||': expected a type specifier",
+            "^": "Type name cannot start with '^': expected a type specifier",
+            "*": "Type name cannot start with '*': expected a type specifier",
+            "/": "Type name cannot start with '/': expected a type specifier",
+            "%": "Type name cannot start with '%': expected a type specifier",
+            "%:": "Type name cannot start with '%:': expected a type specifier",
+            "%:%:": "Type name cannot start with '%:%:': expected a type specifier",
+            ".": "Type name cannot start with '.': expected a type specifier",
+            "->": "Type name cannot start with '->': expected a type specifier",
+            "[": "Type name cannot start with '[': expected a type specifier",
+            "{": "Type name is missing before '{'",
+            "]": "Type name is missing before ']'",
+            ",": "Type name is missing before ','",
+            ":": "Type name is missing before ':'",
+            ";": "Type name is missing before ';'",
+            "?": "Type name is missing before '?'",
+            "=": "Type name cannot start with '=': expected a type specifier",
+            "==": "Type name cannot start with '==': expected a type specifier",
+            "!=": "Type name cannot start with '!=': expected a type specifier",
+            "+=": "Type name cannot start with '+=': expected a type specifier",
+            "-=": "Type name cannot start with '-=': expected a type specifier",
+            "*=": "Type name cannot start with '*=': expected a type specifier",
+            "/=": "Type name cannot start with '/=': expected a type specifier",
+            "%=": "Type name cannot start with '%=': expected a type specifier",
+            "&=": "Type name cannot start with '&=': expected a type specifier",
+            "|=": "Type name cannot start with '|=': expected a type specifier",
+            "^=": "Type name cannot start with '^=': expected a type specifier",
+            "<<=": "Type name cannot start with '<<=': expected a type specifier",
+            ">>=": "Type name cannot start with '>>=': expected a type specifier",
+            "}": "Type name is missing before '}'",
+        }
+        return messages.get(punctuator, f"Unsupported type name punctuator: '{punctuator}'")
+
+    def _unsupported_declaration_type_punctuator_message(self, punctuator: str) -> str:
+        messages = {
+            "(": "Declaration type cannot start with '(': expected a type specifier",
+            ")": "Declaration type is missing before ')'",
+            "+": "Declaration type is missing before '+': expected a type specifier",
+            "-": "Declaration type is missing before '-': expected a type specifier",
+            "<": "Declaration type is missing before '<': expected a type specifier",
+            "<=": "Declaration type is missing before '<=': expected a type specifier",
+            "<<": "Declaration type is missing before '<<': expected a type specifier",
+            ">": "Declaration type is missing before '>': expected a type specifier",
+            ">=": "Declaration type is missing before '>=': expected a type specifier",
+            ">>": "Declaration type is missing before '>>': expected a type specifier",
+            "!": "Declaration type is missing before '!': expected a type specifier",
+            "~": "Declaration type is missing before '~': expected a type specifier",
+            "&": "Declaration type is missing before '&': expected a type specifier",
+            "&&": "Declaration type is missing before '&&': expected a type specifier",
+            "|": "Declaration type is missing before '|': expected a type specifier",
+            "||": "Declaration type is missing before '||': expected a type specifier",
+            "^": "Declaration type is missing before '^': expected a type specifier",
+            "/": "Declaration type is missing before '/': expected a type specifier",
+            "%": "Declaration type is missing before '%': expected a type specifier",
+            "%:": "Declaration type is missing before '%:': expected a type specifier",
+            "%:%:": "Declaration type is missing before '%:%:': expected a type specifier",
+            "[": "Declaration type cannot start with '[': expected a type specifier",
+            "*": "Declaration type is missing before '*': pointer declarator requires a base type",
+            ".": "Declaration type is missing before '.': expected a type specifier",
+            "->": "Declaration type is missing before '->': expected a type specifier",
+            "...": "Declaration type is missing before '...': expected a type specifier",
+            ",": "Declaration type is missing before ','",
+            ":": "Declaration type is missing before ':'",
+            ";": "Declaration type is missing before ';'",
+            "?": "Declaration type is missing before '?'",
+            "=": "Declaration type is missing before '=': expected a type specifier",
+            "==": "Declaration type is missing before '==': expected a type specifier",
+            "!=": "Declaration type is missing before '!=': expected a type specifier",
+            "+=": "Declaration type is missing before '+=': expected a type specifier",
+            "-=": "Declaration type is missing before '-=': expected a type specifier",
+            "*=": "Declaration type is missing before '*=': expected a type specifier",
+            "/=": "Declaration type is missing before '/=': expected a type specifier",
+            "%=": "Declaration type is missing before '%=': expected a type specifier",
+            "&=": "Declaration type is missing before '&=': expected a type specifier",
+            "|=": "Declaration type is missing before '|=': expected a type specifier",
+            "^=": "Declaration type is missing before '^=': expected a type specifier",
+            "<<=": "Declaration type is missing before '<<=': expected a type specifier",
+            ">>=": "Declaration type is missing before '>>=': expected a type specifier",
+            "]": "Declaration type is missing before ']'",
+            "{": "Declaration type is missing before '{'",
+            "}": "Declaration type is missing before '}'",
+        }
+        return messages.get(punctuator, f"Unsupported declaration type punctuator: '{punctuator}'")
+
+    def _unsupported_type_token_kind(self, kind: TokenKind) -> str:
+        if kind == TokenKind.INT_CONST:
+            return "integer constant"
+        if kind == TokenKind.FLOAT_CONST:
+            return "floating constant"
+        if kind == TokenKind.CHAR_CONST:
+            return "character constant"
+        if kind == TokenKind.STRING_LITERAL:
+            return "string literal"
+        if kind == TokenKind.PUNCTUATOR:
+            return "punctuator"
+        if kind == TokenKind.HEADER_NAME:
+            return "header name"
+        if kind == TokenKind.PP_NUMBER:
+            return "preprocessor number"
+        if kind == TokenKind.EOF:
+            return "end of input"
+        return "token"
 
     def _consume_type_qualifiers(self, *, allow_atomic: bool = False) -> tuple[str, ...]:
         qualifiers = TYPE_QUALIFIER_KEYWORDS | ({"_Atomic"} if allow_atomic else set())

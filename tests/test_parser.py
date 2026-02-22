@@ -1164,6 +1164,590 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("int main(void){ int x = 0; return _Generic(x, foo: 1, default: 0); }")))
         self.assertEqual(ctx.exception.message, "Unknown type name: 'foo'")
 
+    def test_unsupported_non_keyword_type_uses_declaration_token_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("1 value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Unsupported declaration type token (integer constant): '1'",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_left_parenthesis_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("( value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type cannot start with '(': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_left_bracket_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("[ value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type cannot start with '[': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_right_parenthesis_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex(") value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before ')'",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_plus_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("+ value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '+': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_minus_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("- value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '-': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_less_than_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("< value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '<': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_less_than_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("<= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '<=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_double_less_than_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("<< value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '<<': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_greater_than_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("> value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '>': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_greater_than_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex(">= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '>=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_double_greater_than_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex(">> value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '>>': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_bang_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("! value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '!': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_tilde_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("~ value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '~': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_ampersand_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("& value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '&': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_double_ampersand_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("&& value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '&&': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_pipe_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("| value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '|': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_double_pipe_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("|| value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '||': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_caret_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("^ value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '^': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_slash_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("/ value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '/': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_percent_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("% value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '%': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_percent_colon_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("%: value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '%:': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_percent_colon_percent_colon_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("%:%: value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '%:%:': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_star_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("* value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '*': pointer declarator requires a base type",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_dot_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex(". value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '.': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_arrow_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("-> value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '->': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_ellipsis_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("... value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '...': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_double_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("== value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '==': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_bang_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("!= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '!=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_plus_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("+= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '+=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_left_shift_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("<<= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '<<=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_semicolon_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("; value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before ';'",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_left_brace_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("{ value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '{'",
+        )
+
+    def test_unsupported_non_keyword_type_uses_type_name_token_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, 1: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with integer constant: '1'",
+        )
+
+    def test_unsupported_type_name_reports_end_of_input_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before end of input",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_left_parenthesis_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, (: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '(': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_left_bracket_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, [: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '[': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_right_parenthesis_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ): 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before ')'",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_plus_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, +: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '+': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_minus_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, -: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '-': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_less_than_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, < : 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '<': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_less_than_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, <=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '<=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_double_less_than_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, <<: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '<<': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_greater_than_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, >: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '>': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_greater_than_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, >=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '>=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_double_greater_than_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, >>: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '>>': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_bang_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, !: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '!': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_tilde_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ~: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '~': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_ampersand_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, &: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '&': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_double_ampersand_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, &&: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '&&': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_pipe_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, |: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '|': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_double_pipe_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ||: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '||': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_caret_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ^: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '^': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_star_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, *: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '*': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_slash_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, /: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '/': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_percent_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, % : 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '%': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_percent_colon_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, %: : 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '%:': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_percent_colon_percent_colon_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, %:%: : 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '%:%:': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_dot_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, .: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '.': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_arrow_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ->: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '->': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_comma_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ,: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before ','",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_colon_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, :: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before ':'",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_semicolon_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ;: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before ';'",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_question_mark_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ?: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before '?'",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, =: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_double_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ==: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '==': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_bang_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, !=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '!=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_plus_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, +=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '+=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_left_shift_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, <<=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '<<=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_right_bracket_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ]: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before ']'",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_left_brace_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, {: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before '{'",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_right_brace_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, }: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before '}'",
+        )
+
     def test_integer_type_rejects_duplicate_signedness(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("unsigned signed int value;")))
