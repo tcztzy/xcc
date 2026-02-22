@@ -1228,8 +1228,15 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
         result = _PPValue(value, is_unsigned)
         return result.normalize()
     if isinstance(node, ast.Compare):
-        if len(node.ops) != 1 or len(node.comparators) != 1:
-            raise ValueError("Unsupported comparison")
+        if len(node.ops) != 1:
+            raise ValueError(
+                f"Unsupported preprocessor comparison shape: expected 1 operator, got {len(node.ops)}"
+            )
+        if len(node.comparators) != 1:
+            raise ValueError(
+                "Unsupported preprocessor comparison shape: "
+                f"expected 1 comparator, got {len(node.comparators)}"
+            )
         left = _eval_pp_node(node.left)
         right = _eval_pp_node(node.comparators[0])
         is_unsigned = left.is_unsigned or right.is_unsigned
@@ -1304,8 +1311,16 @@ def _eval_node(node: ast.AST) -> int:
             return left ^ right
         raise ValueError(f"Unsupported integer-expression binary operator: {type(node.op).__name__}")
     if isinstance(node, ast.Compare):
-        if len(node.ops) != 1 or len(node.comparators) != 1:
-            raise ValueError("Unsupported comparison")
+        if len(node.ops) != 1:
+            raise ValueError(
+                "Unsupported integer-expression comparison shape: "
+                f"expected 1 operator, got {len(node.ops)}"
+            )
+        if len(node.comparators) != 1:
+            raise ValueError(
+                "Unsupported integer-expression comparison shape: "
+                f"expected 1 comparator, got {len(node.comparators)}"
+            )
         left = _eval_node(node.left)
         right = _eval_node(node.comparators[0])
         op = node.ops[0]
