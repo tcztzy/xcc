@@ -513,10 +513,25 @@ class PreprocessorTests(unittest.TestCase):
             str(ctx.exception),
             "Unsupported preprocessor comparison shape: expected 1 operator, got 2",
         )
+        unsupported_comparator_shape = ast.Compare(
+            left=ast.Constant(1),
+            ops=[ast.Lt()],
+            comparators=[ast.Constant(2), ast.Constant(3)],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            _eval_pp_node(unsupported_comparator_shape)
+        self.assertEqual(
+            str(ctx.exception),
+            "Unsupported preprocessor comparison shape: expected 1 comparator, got 2",
+        )
         unsupported_cmp = ast.Compare(left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)])
         with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_cmp)
         self.assertEqual(str(ctx.exception), "Unsupported preprocessor comparison operator: Is")
+        unsupported_literal = ast.Constant("x")
+        with self.assertRaises(ValueError) as ctx:
+            _eval_pp_node(unsupported_literal)
+        self.assertEqual(str(ctx.exception), "Unsupported preprocessor literal type: str")
         unsupported_expr = ast.IfExp(
             test=ast.Constant(True),
             body=ast.Constant(1),
@@ -551,10 +566,25 @@ class PreprocessorTests(unittest.TestCase):
             str(ctx.exception),
             "Unsupported integer-expression comparison shape: expected 1 operator, got 2",
         )
+        unsupported_comparator_shape = ast.Compare(
+            left=ast.Constant(1),
+            ops=[ast.Lt()],
+            comparators=[ast.Constant(2), ast.Constant(3)],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            _eval_node(unsupported_comparator_shape)
+        self.assertEqual(
+            str(ctx.exception),
+            "Unsupported integer-expression comparison shape: expected 1 comparator, got 2",
+        )
         unsupported_cmp = ast.Compare(left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)])
         with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_cmp)
         self.assertEqual(str(ctx.exception), "Unsupported integer-expression comparison operator: Is")
+        unsupported_literal = ast.Constant("x")
+        with self.assertRaises(ValueError) as ctx:
+            _eval_node(unsupported_literal)
+        self.assertEqual(str(ctx.exception), "Unsupported integer-expression literal type: str")
 
     def test_helpers(self) -> None:
         self.assertEqual(_blank_line("abc\n"), "\n")

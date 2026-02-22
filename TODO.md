@@ -127,5 +127,6 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
   - Iteration 3 slice: tightened pointer arithmetic constraints so additive/compound-additive/update expressions reject `void*` and function-pointer arithmetic (`+`, `-`, `+=`, `-=`, `++`, `--`) while preserving object-pointer arithmetic.
   - Iteration 3 slice: split scalar/array/record initializer-list designator diagnostics into shape-specific messages (scalar single-item/designator rules and array/member designator kind requirements).
   - Iteration 3 slice: made preprocessor `#if` expression fallback diagnostics node/operator-specific in both evaluators (preprocessor and integer-expression paths), and added regression assertions for the exact error text.
+  - Iteration 3 slice: split generic preprocessor/integer-expression literal fallback diagnostics into literal-type-specific messages and added comparator-shape regression coverage for both evaluators.
 - Remaining risk: full C11 pointer qualification rules still need structural pointer-level qualifier modeling (current `Type` qualifier representation is base-type-centric).
-- Next target: tighten preprocessor expression diagnostics further by splitting generic `Unsupported comparison` (e.g., chained comparisons) into shape-specific messages.
+- Next target: tighten parser fallback diagnostics by splitting generic `Unsupported type` parse errors into more specific declaration/type-name context diagnostics.
