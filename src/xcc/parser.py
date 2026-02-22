@@ -654,12 +654,17 @@ class Parser:
             ".": "Type name cannot start with '.': expected a type specifier",
             "->": "Type name cannot start with '->': expected a type specifier",
             "[": "Type name cannot start with '[': expected a type specifier",
+            "<:": "Type name cannot start with '<:': expected a type specifier",
             "{": "Type name is missing before '{'",
+            "<%": "Type name is missing before '<%'",
             "]": "Type name is missing before ']'",
+            ":>": "Type name is missing before ':>'",
             ",": "Type name is missing before ','",
             ":": "Type name is missing before ':'",
             ";": "Type name is missing before ';'",
             "?": "Type name is missing before '?'",
+            "#": "Type name cannot start with '#': expected a type specifier",
+            "##": "Type name cannot start with '##': expected a type specifier",
             "=": "Type name cannot start with '=': expected a type specifier",
             "==": "Type name cannot start with '==': expected a type specifier",
             "!=": "Type name cannot start with '!=': expected a type specifier",
@@ -674,6 +679,7 @@ class Parser:
             "<<=": "Type name cannot start with '<<=': expected a type specifier",
             ">>=": "Type name cannot start with '>>=': expected a type specifier",
             "}": "Type name is missing before '}'",
+            "%>": "Type name is missing before '}'",
         }
         return messages.get(punctuator, f"Unsupported type name punctuator: '{punctuator}'")
 
@@ -701,6 +707,7 @@ class Parser:
             "%:": "Declaration type is missing before '%:': expected a type specifier",
             "%:%:": "Declaration type is missing before '%:%:': expected a type specifier",
             "[": "Declaration type cannot start with '[': expected a type specifier",
+            "<:": "Declaration type cannot start with '<:': expected a type specifier",
             "*": "Declaration type is missing before '*': pointer declarator requires a base type",
             ".": "Declaration type is missing before '.': expected a type specifier",
             "->": "Declaration type is missing before '->': expected a type specifier",
@@ -709,6 +716,8 @@ class Parser:
             ":": "Declaration type is missing before ':'",
             ";": "Declaration type is missing before ';'",
             "?": "Declaration type is missing before '?'",
+            "#": "Declaration type is missing before '#': expected a type specifier",
+            "##": "Declaration type is missing before '##': expected a type specifier",
             "=": "Declaration type is missing before '=': expected a type specifier",
             "==": "Declaration type is missing before '==': expected a type specifier",
             "!=": "Declaration type is missing before '!=': expected a type specifier",
@@ -723,8 +732,11 @@ class Parser:
             "<<=": "Declaration type is missing before '<<=': expected a type specifier",
             ">>=": "Declaration type is missing before '>>=': expected a type specifier",
             "]": "Declaration type is missing before ']'",
+            ":>": "Declaration type is missing before ':>'",
             "{": "Declaration type is missing before '{'",
+            "<%": "Declaration type is missing before '<%'",
             "}": "Declaration type is missing before '}'",
+            "%>": "Declaration type is missing before '%>'",
         }
         return messages.get(punctuator, f"Unsupported declaration type punctuator: '{punctuator}'")
 

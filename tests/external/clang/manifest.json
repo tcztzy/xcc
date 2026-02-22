@@ -405,6 +405,26 @@
       "line": 8,
       "column": 19,
       "sha256": "2e53ab58eb56c295f0c62505f38b171cf9d05b69d324e15b5e5cd20270be551c"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-lsquare",
+      "upstream": "xcc/local/parser-digraph-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-lsquare.c",
+      "expect": "parse",
+      "message_contains": "Declaration type cannot start with '<:': expected a type specifier",
+      "line": 1,
+      "column": 1,
+      "sha256": "e682921ad71dcdc760e1a4a31cfef4f429334ca3bea6d99b250526516533d68f"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-hash",
+      "upstream": "xcc/local/parser-hash-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-hash.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '#': expected a type specifier",
+      "line": 1,
+      "column": 7,
+      "sha256": "14515c1024b26869e7db2a9b707a00621526fa5673ce08a25ff16f6c5ce6f6c8"
     }
   ]
 }
