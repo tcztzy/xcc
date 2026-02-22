@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Callable, Literal, cast
 
 from xcc.ast import (
     AlignofExpr,
@@ -130,6 +130,56 @@ def _parse_int_literal_value(lexeme: str) -> int | None:
     if not body.isdigit():
         return None
     return int(body)
+
+
+def _array_size_literal_error(lexeme: str) -> str | None:
+    suffix_start = len(lexeme)
+    while suffix_start > 0 and lexeme[suffix_start - 1] in "uUlL":
+        suffix_start -= 1
+    body = lexeme[:suffix_start]
+    suffix = lexeme[suffix_start:].lower()
+    if suffix not in _INTEGER_LITERAL_SUFFIXES:
+        return "Array size literal has unsupported integer suffix"
+    if body.startswith(("0x", "0X")):
+        digits = body[2:]
+        if not digits:
+            return "Array size hexadecimal literal requires at least one digit"
+        return None
+    if body.startswith("0") and len(body) > 1:
+        if any(ch not in "01234567" for ch in body):
+            return "Array size octal literal contains non-octal digits"
+        return None
+    if not body.isdigit():
+        return "Array size literal must contain decimal digits"
+    return None
+
+
+def _array_size_non_ice_error(
+    expr: Expr,
+    eval_expr: Callable[[Expr], int | None],
+) -> str:
+    if isinstance(expr, Identifier):
+        return f"Array size identifier '{expr.name}' is not an integer constant expression"
+    if isinstance(expr, UnaryExpr):
+        return f"Array size unary operator '{expr.op}' is not an integer constant expression"
+    if isinstance(expr, BinaryExpr):
+        return f"Array size binary operator '{expr.op}' is not an integer constant expression"
+    if isinstance(expr, CallExpr):
+        return "Array size call expression is not an integer constant expression"
+    if isinstance(expr, CastExpr):
+        if eval_expr(expr.expr) is None:
+            return _array_size_non_ice_error(expr.expr, eval_expr)
+        return "Array size cast expression is not an integer constant expression"
+    if isinstance(expr, ConditionalExpr):
+        if eval_expr(expr.condition) is None:
+            return "Array size conditional condition is not an integer constant expression"
+        branch = expr.then_expr if eval_expr(expr.condition) != 0 else expr.else_expr
+        if eval_expr(branch) is None:
+            return _array_size_non_ice_error(branch, eval_expr)
+        return "Array size conditional expression is not an integer constant expression"
+    return (
+        f"Array size expression '{type(expr).__name__}' is not an integer constant expression"
+    )
 
 
 @dataclass(frozen=True)
@@ -399,7 +449,12 @@ class Parser:
             raise ParserError("Invalid parameter type", self._previous())
         return Param(declarator_type, name)
 
-    def _parse_type_spec(self, *, parse_pointer_depth: bool = True) -> TypeSpec:
+    def _parse_type_spec(
+        self,
+        *,
+        parse_pointer_depth: bool = True,
+        context: str = "declaration",
+    ) -> TypeSpec:
         qualifiers = self._consume_type_qualifiers()
         if self._check_keyword("_Atomic"):
             atomic_token = self._advance()
@@ -428,7 +483,7 @@ class Parser:
                 return self._apply_type_qualifiers(atomic_type, qualifiers)
             if self._current().kind not in {TokenKind.KEYWORD, TokenKind.IDENT}:
                 raise ParserError("Expected type name after _Atomic", atomic_token)
-            atomic_base = self._parse_type_spec(parse_pointer_depth=False)
+            atomic_base = self._parse_type_spec(parse_pointer_depth=False, context=context)
             invalid_reason = self._classify_invalid_atomic_type(
                 atomic_base,
                 include_atomic=False,
@@ -452,7 +507,7 @@ class Parser:
             assert isinstance(token.lexeme, str)
             type_spec = self._lookup_typedef(token.lexeme)
             if type_spec is None:
-                raise ParserError("Unsupported type", token)
+                raise ParserError(self._unsupported_type_message(context), token)
             self._advance()
             return self._apply_type_qualifiers(type_spec, qualifiers)
         token = self._expect(TokenKind.KEYWORD)
@@ -471,7 +526,7 @@ class Parser:
                 self._advance()
                 pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
                 return TypeSpec("long double", pointer_depth, qualifiers=qualifiers)
-            raise ParserError("Unsupported type", token)
+            raise ParserError(self._unsupported_type_message(context), token)
         if token.lexeme in FLOATING_TYPE_KEYWORDS:
             assert isinstance(token.lexeme, str)
             type_name = str(token.lexeme)
@@ -486,7 +541,7 @@ class Parser:
             if token.lexeme == "void":
                 pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
                 return TypeSpec("void", pointer_depth, qualifiers=qualifiers)
-            type_name = self._parse_integer_type_spec(token.lexeme, token)
+            type_name = self._parse_integer_type_spec(token.lexeme, token, context=context)
             if type_name == "long" and self._check_keyword("double"):
                 self._advance()
                 type_name = "long double"
@@ -513,15 +568,22 @@ class Parser:
                 record_tag=record_tag,
                 record_members=record_members,
             )
-        raise ParserError("Unsupported type", token)
+        raise ParserError(self._unsupported_type_message(context), token)
+
+    def _unsupported_type_message(self, context: str) -> str:
+        if context == "type-name":
+            return "Unsupported type name"
+        return "Unsupported declaration type"
 
     def _consume_type_qualifiers(self, *, allow_atomic: bool = False) -> tuple[str, ...]:
         qualifiers = TYPE_QUALIFIER_KEYWORDS | ({"_Atomic"} if allow_atomic else set())
         seen: list[str] = []
         while self._current().kind == TokenKind.KEYWORD and self._current().lexeme in qualifiers:
-            lexeme = str(self._advance().lexeme)
-            if lexeme not in seen:
-                seen.append(lexeme)
+            token = self._advance()
+            lexeme = str(token.lexeme)
+            if lexeme in seen:
+                raise ParserError(f"Duplicate type qualifier: '{lexeme}'", token)
+            seen.append(lexeme)
         return tuple(seen)
 
     def _apply_type_qualifiers(
@@ -548,27 +610,40 @@ class Parser:
         if self._check_keyword("_Complex"):
             self._advance()
 
-    def _parse_integer_type_spec(self, first_keyword: str, first_token: Token) -> str:
+    def _parse_integer_type_spec(
+        self,
+        first_keyword: str,
+        first_token: Token,
+        *,
+        context: str = "declaration",
+    ) -> str:
         signedness: str | None = None
         base: str | None = None
+
+        def invalid_order(keyword: str, *, current_base: str | None) -> str:
+            prior = current_base if current_base is not None else "<none>"
+            return f"Invalid integer type keyword order: '{keyword}' after '{prior}'"
 
         def consume(keyword: str, token: Token) -> None:
             nonlocal signedness, base
             if keyword in {"signed", "unsigned"}:
                 if signedness is not None:
-                    raise ParserError("Unsupported type", token)
+                    raise ParserError(
+                        f"Duplicate integer signedness specifier: '{keyword}'",
+                        token,
+                    )
                 signedness = keyword
                 return
             if keyword == "char":
                 if base is not None:
-                    raise ParserError("Unsupported type", token)
+                    raise ParserError(invalid_order(keyword, current_base=base), token)
                 base = keyword
                 return
             if keyword == "short":
                 if base in {None, "int"}:
                     base = keyword
                     return
-                raise ParserError("Unsupported type", token)
+                raise ParserError(invalid_order(keyword, current_base=base), token)
             if keyword == "long":
                 if base in {None, "int"}:
                     base = keyword
@@ -576,14 +651,14 @@ class Parser:
                 if base == "long":
                     base = "long long"
                     return
-                raise ParserError("Unsupported type", token)
+                raise ParserError(invalid_order(keyword, current_base=base), token)
             assert keyword == "int"
             if base is None:
                 base = keyword
                 return
             if base in {"short", "long", "long long"}:
                 return
-            raise ParserError("Unsupported type", token)
+            raise ParserError(invalid_order(keyword, current_base=base), token)
 
         consume(first_keyword, first_token)
         while self._current().kind == TokenKind.KEYWORD:
@@ -1289,7 +1364,7 @@ class Parser:
 
     def _parse_parenthesized_type_name(self) -> TypeSpec:
         self._expect_punct("(")
-        base_type = self._parse_type_spec()
+        base_type = self._parse_type_spec(context="type-name")
         name, declarator_ops = self._parse_declarator(allow_abstract=True, allow_vla=True)
         if name is not None:
             raise ParserError("Expected type name", self._current())
@@ -1306,7 +1381,7 @@ class Parser:
             self._current().kind == TokenKind.KEYWORD
             and self._current().lexeme in TYPE_QUALIFIER_KEYWORDS
         )
-        base_type = self._parse_type_spec(parse_pointer_depth=False)
+        base_type = self._parse_type_spec(parse_pointer_depth=False, context="type-name")
         name, declarator_ops, declarator_has_prefix_qualifier, top_pointer_is_qualified = (
             self._parse_atomic_type_name_declarator(allow_gnu_attributes=True)
         )
@@ -1646,12 +1721,15 @@ class Parser:
         while allow_parameter_arrays and self._current().kind == TokenKind.KEYWORD:
             lexeme = str(self._current().lexeme)
             if lexeme in TYPE_QUALIFIER_KEYWORDS:
-                if lexeme not in seen_qualifiers:
-                    qualifiers.append(lexeme)
-                    seen_qualifiers.add(lexeme)
+                if lexeme in seen_qualifiers:
+                    raise ParserError(f"Duplicate type qualifier: '{lexeme}'", self._current())
+                qualifiers.append(lexeme)
+                seen_qualifiers.add(lexeme)
                 self._advance()
                 continue
-            if lexeme == "static" and not has_static_bound:
+            if lexeme == "static":
+                if has_static_bound:
+                    raise ParserError("Duplicate array bound specifier: 'static'", self._current())
                 has_static_bound = True
                 self._advance()
                 continue
@@ -1663,12 +1741,18 @@ class Parser:
         self._expect_punct("]")
         if size_expr is None:
             if has_static_bound:
-                raise ParserError("Expected array size", size_token)
+                raise ParserError("Array parameter with 'static' requires a size", size_token)
             if allow_parameter_arrays:
                 return ArrayDecl(None, tuple(qualifiers), False)
             if allow_vla:
                 return ArrayDecl(None)
-            raise ParserError("Unsupported array size", size_token)
+            raise ParserError("Array size is required in this context", size_token)
+        if isinstance(size_expr, IntLiteral):
+            if not isinstance(size_expr.value, str):
+                raise ParserError("Array size literal token is malformed", size_token)
+            message = _array_size_literal_error(size_expr.value)
+            if message is not None:
+                raise ParserError(message, size_token)
         size = self._eval_array_size_expr(size_expr)
         if size is not None and size <= 0:
             raise ParserError("Array size must be positive", size_token)
@@ -1678,15 +1762,17 @@ class Parser:
             return size
         if allow_vla:
             return ArrayDecl(size_expr, tuple(qualifiers), has_static_bound)
-        raise ParserError("Unsupported array size", size_token)
+        raise ParserError(_array_size_non_ice_error(size_expr, self._eval_array_size_expr), size_token)
 
     def _parse_array_size(self, token: Token) -> int:
         lexeme = token.lexeme
         if not isinstance(lexeme, str):
-            raise ParserError("Unsupported array size", token)
+            raise ParserError("Array size literal token is malformed", token)
+        message = _array_size_literal_error(lexeme)
+        if message is not None:
+            raise ParserError(message, token)
         size = _parse_int_literal_value(lexeme)
-        if size is None:
-            raise ParserError("Unsupported array size", token)
+        assert size is not None
         if size <= 0:
             raise ParserError("Array size must be positive", token)
         return size
@@ -1694,7 +1780,7 @@ class Parser:
     def _parse_array_size_expr(self, expr: Expr, token: Token) -> int:
         size = self._eval_array_size_expr(expr)
         if size is None:
-            raise ParserError("Unsupported array size", token)
+            raise ParserError(_array_size_non_ice_error(expr, self._eval_array_size_expr), token)
         if size <= 0:
             raise ParserError("Array size must be positive", token)
         return size
@@ -2112,25 +2198,29 @@ class Parser:
             lexeme = str(self._current().lexeme)
             if lexeme in STORAGE_CLASS_KEYWORDS:
                 if storage_class is not None:
-                    raise ParserError("Duplicate storage class", self._current())
+                    raise ParserError(
+                        f"Duplicate storage class specifier: '{lexeme}'", self._current()
+                    )
                 storage_class = cast(StorageClass, lexeme)
                 self._advance()
                 continue
             if lexeme == "_Thread_local":
                 if is_thread_local:
-                    raise ParserError("Duplicate declaration specifier", self._current())
+                    raise ParserError(
+                        "Duplicate thread-local specifier: '_Thread_local'", self._current()
+                    )
                 is_thread_local = True
                 self._advance()
                 continue
             if lexeme == "inline":
                 if is_inline:
-                    raise ParserError("Duplicate declaration specifier", self._current())
+                    raise ParserError("Duplicate function specifier: 'inline'", self._current())
                 is_inline = True
                 self._advance()
                 continue
             if lexeme == "_Noreturn":
                 if is_noreturn:
-                    raise ParserError("Duplicate declaration specifier", self._current())
+                    raise ParserError("Duplicate function specifier: '_Noreturn'", self._current())
                 is_noreturn = True
                 self._advance()
                 continue

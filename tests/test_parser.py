@@ -220,11 +220,10 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(statements[0], DeclStmt)
         self.assertEqual(statements[0].type_spec, TypeSpec("int", qualifiers=("const",)))
 
-    def test_duplicate_leading_type_qualifiers_are_deduplicated(self) -> None:
-        unit = parse(list(lex("int main(void){const const int x=0; return x;}")))
-        statements = _body(unit.functions[0]).statements
-        self.assertIsInstance(statements[0], DeclStmt)
-        self.assertEqual(statements[0].type_spec, TypeSpec("int", qualifiers=("const",)))
+    def test_duplicate_leading_type_qualifiers_are_rejected(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){const const int x=0; return x;}")))
+        self.assertEqual(ctx.exception.message, "Duplicate type qualifier: 'const'")
 
     def test_sizeof_parenthesized_type_name_allows_type_qualifier(self) -> None:
         unit = parse(list(lex("int main(void){return sizeof(const int*);}")))
@@ -1139,6 +1138,40 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("struct S { int; };")))
         self.assertEqual(ctx.exception.message, "Expected identifier")
 
+    def test_unsupported_type_uses_declaration_context_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("_Complex int value;")))
+        self.assertEqual(ctx.exception.message, "Unsupported declaration type")
+
+    def test_unsupported_type_uses_type_name_context_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ return sizeof(_Complex int); }")))
+        self.assertEqual(ctx.exception.message, "Unsupported type name")
+
+    def test_integer_type_rejects_duplicate_signedness(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("unsigned signed int value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Duplicate integer signedness specifier: 'signed'",
+        )
+
+    def test_integer_type_rejects_invalid_keyword_order_in_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("short char value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid integer type keyword order: 'char' after 'short'",
+        )
+
+    def test_integer_type_rejects_invalid_keyword_order_in_type_name(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ return sizeof(short char); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid integer type keyword order: 'char' after 'short'",
+        )
+
     def test_typespec_normalizes_legacy_record_member_with_alignment(self) -> None:
         record_type = TypeSpec("struct", record_members=((TypeSpec("int"), "x", 16),))
         self.assertEqual(record_type.record_members[0], RecordMemberDecl(TypeSpec("int"), "x", 16))
@@ -1781,17 +1814,58 @@ class ParserTests(unittest.TestCase):
     def test_array_parameter_allows_unsized_declarator(self) -> None:
         unit = parse(list(lex("int f(int a[]){return 0;}")))
         self.assertEqual(unit.functions[0].params[0].type_spec.declarator_ops, (("arr", ArrayDecl(None)),))
-        unit = parse(list(lex("int f(int a[const const 4]){return 0;}")))
+        unit = parse(list(lex("int f(int a[const volatile 4]){return 0;}")))
         self.assertEqual(
             unit.functions[0].params[0].type_spec.declarator_ops,
-            (("arr", ArrayDecl(IntLiteral("4"), ("const",), False)),),
+            (("arr", ArrayDecl(IntLiteral("4"), ("const", "volatile"), False)),),
         )
 
     def test_array_size_helpers_cover_error_paths(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(
+            ParserError, "Array size identifier 'n' is not an integer constant expression"
+        ):
             parser._parse_array_size_expr(Identifier("n"), Token(TokenKind.IDENT, "n", 1, 1))
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(
+            ParserError,
+            "Array size unary operator '\\+' is not an integer constant expression",
+        ):
+            parser._parse_array_size_expr(
+                UnaryExpr("+", Identifier("n")),
+                Token(TokenKind.PUNCTUATOR, "+", 1, 1),
+            )
+        with self.assertRaisesRegex(
+            ParserError,
+            "Array size binary operator '\\*' is not an integer constant expression",
+        ):
+            parser._parse_array_size_expr(
+                BinaryExpr("*", IntLiteral("1"), IntLiteral("n")),
+                Token(TokenKind.PUNCTUATOR, "*", 1, 1),
+            )
+        with self.assertRaisesRegex(
+            ParserError, "Array size call expression is not an integer constant expression"
+        ):
+            parser._parse_array_size_expr(
+                CallExpr(Identifier("f"), []),
+                Token(TokenKind.IDENT, "f", 1, 1),
+            )
+        with self.assertRaisesRegex(
+            ParserError,
+            "Array size conditional condition is not an integer constant expression",
+        ):
+            parser._parse_array_size_expr(
+                ConditionalExpr(Identifier("n"), IntLiteral("1"), IntLiteral("2")),
+                Token(TokenKind.PUNCTUATOR, "?", 1, 1),
+            )
+        with self.assertRaisesRegex(
+            ParserError,
+            "Array size identifier 'n' is not an integer constant expression",
+        ):
+            parser._parse_array_size_expr(
+                CastExpr(TypeSpec("int"), Identifier("n")),
+                Token(TokenKind.PUNCTUATOR, "(", 1, 1),
+            )
+        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
             parser._parse_array_size_expr(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1))
         self.assertEqual(parser._parse_array_size_expr_or_vla(Identifier("n"), Token(TokenKind.IDENT, "n", 1, 1)), -1)
 
@@ -1817,14 +1891,24 @@ class ParserTests(unittest.TestCase):
         )
 
     def test_decl_specifier_duplicate_errors(self) -> None:
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(
+            ParserError, "Duplicate storage class specifier: 'extern'"
+        ):
             parse(list(lex("static extern int x;")))
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(
+            ParserError, "Duplicate thread-local specifier: '_Thread_local'"
+        ):
             parse(list(lex("_Thread_local _Thread_local int x;")))
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(ParserError, "Duplicate function specifier: 'inline'"):
             parse(list(lex("inline inline int f(void);")))
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(ParserError, "Duplicate function specifier: '_Noreturn'"):
             parse(list(lex("_Noreturn _Noreturn int f(void);")))
+        with self.assertRaisesRegex(ParserError, "Duplicate type qualifier: 'volatile'"):
+            parse(list(lex("volatile volatile int x;")))
+        with self.assertRaisesRegex(ParserError, "Duplicate type qualifier: 'const'"):
+            parse(list(lex("int f(int a[const const 4]){return 0;}")))
+        with self.assertRaisesRegex(ParserError, "Duplicate array bound specifier: 'static'"):
+            parse(list(lex("int f(int a[static static 4]){return 0;}")))
 
     def test_compound_literal_helper_errors(self) -> None:
         parser = Parser(list(lex("1")))
@@ -1835,11 +1919,51 @@ class ParserTests(unittest.TestCase):
 
     def test_array_declarator_helper_unsupported_paths(self) -> None:
         parser = Parser(list(lex("]")))
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(ParserError, "Array size is required in this context"):
             parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
         parser = Parser(list(lex("n]")))
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(
+            ParserError,
+            "Array size identifier 'n' is not an integer constant expression",
+        ):
             parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
+        parser = Parser(list(lex("1*2]")))
+        with self.assertRaisesRegex(
+            ParserError,
+            "Array size binary operator '\*' is not an integer constant expression",
+        ):
+            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
+        parser = Parser(list(lex("foo()]")))
+        with self.assertRaisesRegex(
+            ParserError,
+            "Array size call expression is not an integer constant expression",
+        ):
+            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
+        parser = Parser(
+            [
+                Token(TokenKind.INT_CONST, "1uu", 1, 1),
+                Token(TokenKind.PUNCTUATOR, "]", 1, 4),
+                Token(TokenKind.EOF, "", 1, 5),
+            ]
+        )
+        with self.assertRaisesRegex(
+            ParserError, "Array size literal has unsupported integer suffix"
+        ):
+            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
+        parser = Parser(list(lex("n]")))
+
+        def parse_assignment_with_malformed_int_literal() -> IntLiteral:
+            parser._advance()
+            return IntLiteral(1)
+
+        parser._parse_assignment = parse_assignment_with_malformed_int_literal
+        with self.assertRaisesRegex(ParserError, "Array size literal token is malformed"):
+            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
+        parser = Parser(list(lex("static ]")))
+        with self.assertRaisesRegex(
+            ParserError, "Array parameter with 'static' requires a size"
+        ):
+            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=True)
         parser = Parser(list(lex("int]")))
         with self.assertRaises(ParserError):
             parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=True)
@@ -2048,12 +2172,26 @@ class ParserTests(unittest.TestCase):
     def test_array_size_rejects_non_string_or_invalid_literal_tokens(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
         self.assertEqual(parser._parse_array_size(Token(TokenKind.INT_CONST, "1", 1, 1)), 1)
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
             parser._parse_array_size(Token(TokenKind.INT_CONST, "0", 1, 1))
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(ParserError, "Array size literal token is malformed"):
             parser._parse_array_size(Token(TokenKind.INT_CONST, None, 1, 1))
-        with self.assertRaises(ParserError):
+        with self.assertRaisesRegex(
+            ParserError, "Array size literal has unsupported integer suffix"
+        ):
             parser._parse_array_size(Token(TokenKind.INT_CONST, "1uu", 1, 1))
+        with self.assertRaisesRegex(
+            ParserError, "Array size octal literal contains non-octal digits"
+        ):
+            parser._parse_array_size(Token(TokenKind.INT_CONST, "08", 1, 1))
+        with self.assertRaisesRegex(
+            ParserError, "Array size hexadecimal literal requires at least one digit"
+        ):
+            parser._parse_array_size(Token(TokenKind.INT_CONST, "0x", 1, 1))
+        with self.assertRaisesRegex(
+            ParserError, "Array size literal must contain decimal digits"
+        ):
+            parser._parse_array_size(Token(TokenKind.INT_CONST, "u", 1, 1))
 
     def test_array_size_accepts_vla_non_constant_expression(self) -> None:
         unit = parse(list(lex("int main(){int n=4;int a[n];return 0;}")))
