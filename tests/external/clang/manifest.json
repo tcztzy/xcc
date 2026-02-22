@@ -417,6 +417,46 @@
       "sha256": "e682921ad71dcdc760e1a4a31cfef4f429334ca3bea6d99b250526516533d68f"
     },
     {
+      "id": "parser-xcc-decl-missing-before-digraph-lsquare-top",
+      "upstream": "xcc/local/parser-digraph-lsquare-top-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-lsquare-top.c",
+      "expect": "parse",
+      "message_contains": "Declaration type cannot start with '<:': expected a type specifier",
+      "line": 1,
+      "column": 1,
+      "sha256": "a6c9d8b14d43339ce5d9f44f7ff6e01ef4d26537460f875235a270620f39d3b2"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-lbrace",
+      "upstream": "xcc/local/parser-digraph-lbrace-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-lbrace.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '<%'",
+      "line": 1,
+      "column": 7,
+      "sha256": "ca52411aa21111e61111746a50d6f32575be27b84e4a6942d2b8225df5175f45"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-lbrace-top",
+      "upstream": "xcc/local/parser-digraph-lbrace-top-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-lbrace-top.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '<%'",
+      "line": 1,
+      "column": 1,
+      "sha256": "44ae6b84c05342b93472bd6654861baa62950f5a25899b202809311011d500fb"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-lsquare-param",
+      "upstream": "xcc/local/parser-digraph-lsquare-param-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-lsquare-param.c",
+      "expect": "parse",
+      "message_contains": "Declaration type cannot start with '<:': expected a type specifier",
+      "line": 1,
+      "column": 7,
+      "sha256": "cf0a1c6f975cd619c347d436152199cb65d3d5c9ac4ba9bc35a2e2bb9505542e"
+    },
+    {
       "id": "parser-xcc-decl-missing-before-digraph-rbrace",
       "upstream": "xcc/local/parser-digraph-rbrace-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-rbrace.c",
@@ -427,6 +467,36 @@
       "sha256": "7315727dad0f8369af6264f33c030100261ffe0b74ff530da5695da3ab90acc4"
     },
     {
+      "id": "parser-xcc-decl-missing-before-digraph-rbrace-top",
+      "upstream": "xcc/local/parser-digraph-rbrace-top-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-rbrace-top.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '%>'",
+      "line": 1,
+      "column": 1,
+      "sha256": "905fbcd610e20846731513e5f4c3dd810bd9d8a8ad2cbfe7e0b62ababfb882c6"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-rsquare",
+      "upstream": "xcc/local/parser-digraph-rsquare-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-rsquare.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before ':>'",
+      "line": 1,
+      "column": 7,
+      "sha256": "b62f8bf62a70f156fa615566566552228b6c18e3dbf4fe67cdbd426e8b342548"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-rsquare-top",
+      "upstream": "xcc/local/parser-digraph-rsquare-top-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-rsquare-top.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before ':>'",
+      "line": 1,
+      "column": 1,
+      "sha256": "ab0c859d0e7f6eef5eecc0318a5dfb789df9498b6b45160870c8ceadb0790369"
+    },
+    {
       "id": "parser-xcc-decl-missing-before-digraph-hash",
       "upstream": "xcc/local/parser-digraph-hash-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-hash.c",
@@ -435,6 +505,36 @@
       "line": 1,
       "column": 7,
       "sha256": "772428d8338b97edabbe0b15d8c79052380965df03d9702b50131d132ff587f0"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-hash-top",
+      "upstream": "xcc/local/parser-digraph-hash-top-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-hash-top.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '%:': expected a type specifier",
+      "line": 1,
+      "column": 1,
+      "sha256": "7d3db9206e5007ba56352e1acfc20ea4cbcabd034cefcd6c34ec8fa4bc946ad9"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-hash-hash",
+      "upstream": "xcc/local/parser-digraph-hash-hash-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-hash-hash.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '%:%:': expected a type specifier",
+      "line": 1,
+      "column": 7,
+      "sha256": "165b48cd1416a5bb3295d26a32f52a78ed2f4c4470c3e1ae04eb179f54f0f7fe"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-hash-hash-top",
+      "upstream": "xcc/local/parser-digraph-hash-hash-top-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-hash-hash-top.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '%:%:': expected a type specifier",
+      "line": 1,
+      "column": 1,
+      "sha256": "4973e1060aee870651ae6e4710ff7e1eedf8df90a21d9fdfaa1ac2df1b75d6f8"
     },
     {
       "id": "parser-xcc-decl-missing-before-hash",
@@ -535,6 +635,146 @@
       "line": 1,
       "column": 47,
       "sha256": "8193243da87c316bba14efabdbc2a6ce3de1f94fc71c2220078efc298e89f0bf"
+    },
+    {
+      "id": "pp-xcc-unknown-directive-hash-member",
+      "upstream": "xcc/local/pp-hash-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-hash-member.c",
+      "expect": "pp",
+      "message_contains": "Unknown preprocessor directive: #member",
+      "line": 2,
+      "column": 1,
+      "sha256": "18f9d6af677be795523a88bcd45638a98e6bc2b5fd86f6aae87fbe5c76a0a3fc"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-hash-hash-member",
+      "upstream": "xcc/local/parser-hash-hash-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-hash-hash-member.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '##': expected a type specifier",
+      "line": 2,
+      "column": 3,
+      "sha256": "4ad7e8c40fa011821ac9b3b51140b1aad093653238c2de3932851944e38a2e84"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-hash-member",
+      "upstream": "xcc/local/parser-digraph-hash-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-hash-member.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '%:': expected a type specifier",
+      "line": 2,
+      "column": 3,
+      "sha256": "c8b4f30b49650e026912c3eabd9bd1c8ba45b3a65d7a4a64e7db4e567c0908b0"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-hash-hash-member",
+      "upstream": "xcc/local/parser-digraph-hash-hash-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-hash-hash-member.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '%:%:': expected a type specifier",
+      "line": 2,
+      "column": 3,
+      "sha256": "3dab52075fc7bb7dd8ad2c148a088dcb3057b88c373f4fd18043f10309fecde3"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-lsquare-member",
+      "upstream": "xcc/local/parser-digraph-lsquare-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-lsquare-member.c",
+      "expect": "parse",
+      "message_contains": "Declaration type cannot start with '<:': expected a type specifier",
+      "line": 2,
+      "column": 3,
+      "sha256": "be39537a02ce7fa8f4221c3d2f7e4f0f50668a70f53e05eb2211867c853dffa9"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-rsquare-member",
+      "upstream": "xcc/local/parser-digraph-rsquare-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-rsquare-member.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before ':>'",
+      "line": 2,
+      "column": 3,
+      "sha256": "24882a4fb2b58752777ecea45080933a0b68e7acff1b7189dbc5af80827ac6fb"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-lbrace-member",
+      "upstream": "xcc/local/parser-digraph-lbrace-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-lbrace-member.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '<%'",
+      "line": 2,
+      "column": 3,
+      "sha256": "e0d5fe55530d9f34654f39a12240970722c8257f3422e39822b162b72727dc17"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-rbrace-member",
+      "upstream": "xcc/local/parser-digraph-rbrace-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-rbrace-member.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '%>'",
+      "line": 2,
+      "column": 3,
+      "sha256": "0ad672b3a35e9670a2298af7a95a488e251ad70b061b2ef5952baee4e76769ca"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-star-member",
+      "upstream": "xcc/local/parser-decl-start-star-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-star-member.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '*': pointer declarator requires a base type",
+      "line": 2,
+      "column": 3,
+      "sha256": "fcaf349b3ed7fefdafeece72428c769fd82996a12fec1139d8f0bac7b651ba81"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-ellipsis-member",
+      "upstream": "xcc/local/parser-decl-start-ellipsis-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-ellipsis-member.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '...': expected a type specifier",
+      "line": 2,
+      "column": 3,
+      "sha256": "98920b139ac768e3e17f6a10988657fdf1edf2e6a04439c120f714f76f22468a"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-star",
+      "upstream": "xcc/local/parser-decl-start-star-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-star.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '*': pointer declarator requires a base type",
+      "line": 1,
+      "column": 7,
+      "sha256": "b1155f2de4cc1dd6b0483db7efc50d13de666a888528fa7b94ca9219fbe9a397"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-ellipsis",
+      "upstream": "xcc/local/parser-decl-start-ellipsis-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-ellipsis.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '...': expected a type specifier",
+      "line": 1,
+      "column": 1,
+      "sha256": "11bd9c338a51e140b6bac56be32cfa468188233543eee7eaafe472e388e98df1"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 7,
+      "sha256": "4333aa0f60a89a33cb1c25788e5f77d4ea6750547fe9f1656a06e8643d5a9601"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-fnptr",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-fnptr-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-fnptr.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 11,
+      "sha256": "2753189a96c0ea61d085f0f8c08bce1d90966a94e3cf14752cfe53f745859e6a"
     }
   ]
 }
