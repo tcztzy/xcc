@@ -1412,12 +1412,76 @@ class ParserTests(unittest.TestCase):
             "Declaration type is missing before '+=': expected a type specifier",
         )
 
+    def test_unsupported_declaration_type_punctuator_reports_minus_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("-= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '-=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_star_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("*= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '*=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_slash_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("/= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '/=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_percent_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("%= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '%=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_ampersand_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("&= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '&=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_pipe_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("|= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '|=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_caret_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("^= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '^=': expected a type specifier",
+        )
+
     def test_unsupported_declaration_type_punctuator_reports_left_shift_equal_message(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("<<= value;")))
         self.assertEqual(
             ctx.exception.message,
             "Declaration type is missing before '<<=': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_right_shift_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex(">>= value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '>>=': expected a type specifier",
         )
 
     def test_unsupported_declaration_type_punctuator_reports_semicolon_message(self) -> None:
@@ -1716,12 +1780,76 @@ class ParserTests(unittest.TestCase):
             "Type name cannot start with '+=': expected a type specifier",
         )
 
+    def test_unsupported_type_name_punctuator_reports_minus_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, -=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '-=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_star_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, *=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '*=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_slash_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, /=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '/=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_percent_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, %=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '%=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_ampersand_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, &=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '&=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_pipe_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, |=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '|=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_caret_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ^=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '^=': expected a type specifier",
+        )
+
     def test_unsupported_type_name_punctuator_reports_left_shift_equal_message(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){ int x = 0; return _Generic(x, <<=: 1, default: 0); }")))
         self.assertEqual(
             ctx.exception.message,
             "Type name cannot start with '<<=': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_right_shift_equal_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, >>=: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '>>=': expected a type specifier",
         )
 
     def test_unsupported_type_name_punctuator_reports_right_bracket_message(self) -> None:
