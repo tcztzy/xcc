@@ -1348,6 +1348,54 @@ class ParserTests(unittest.TestCase):
             "Declaration type is missing before '%:%:': expected a type specifier",
         )
 
+    def test_unsupported_declaration_type_punctuator_reports_hash_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("# value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '#': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_hash_hash_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("## value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '##': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_left_bracket_digraph_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("<: value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type cannot start with '<:': expected a type specifier",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_right_bracket_digraph_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex(":> value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before ':>'",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_left_brace_digraph_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("<% value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '<%'",
+        )
+
+    def test_unsupported_declaration_type_punctuator_reports_right_brace_digraph_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("%> value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before '%>'",
+        )
+
     def test_unsupported_declaration_type_punctuator_reports_star_message(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("* value;")))
@@ -1698,6 +1746,54 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(
             ctx.exception.message,
             "Type name cannot start with '%:%:': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_hash_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, #: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '#': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_hash_hash_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ##: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '##': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_left_bracket_digraph_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, <: : 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '<:': expected a type specifier",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_right_bracket_digraph_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, :> : 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before ':>'",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_left_brace_digraph_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, <% : 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before '<%'",
+        )
+
+    def test_unsupported_type_name_punctuator_reports_right_brace_digraph_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, %> : 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name is missing before '}'",
         )
 
     def test_unsupported_type_name_punctuator_reports_dot_message(self) -> None:
