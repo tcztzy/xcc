@@ -2243,6 +2243,22 @@ class SemaTests(unittest.TestCase):
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
 
+    def test_equality_function_pointer_and_casted_null_pointer_constant_typemap(self) -> None:
+        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; return fp==(void*)0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[1]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_equality_casted_null_pointer_constant_and_function_pointer_typemap(self) -> None:
+        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; return (void*)0==fp;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[1]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
     def test_equality_void_pointer_and_object_pointer_typemap(self) -> None:
         source = "int main(){int x=1; int *p=&x; void *vp=p; return vp==p;}"
         unit = parse(list(lex(source)))
@@ -2815,6 +2831,25 @@ class SemaTests(unittest.TestCase):
             "Compound additive assignment requires arithmetic operands or pointer/integer",
         )
 
+    def test_compound_assignment_void_pointer_plus_equals_int_error(self) -> None:
+        unit = parse(list(lex("int main(){void *p=0; p+=1; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Compound additive assignment requires arithmetic operands or pointer/integer",
+        )
+
+    def test_compound_assignment_function_pointer_minus_equals_int_error(self) -> None:
+        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; fp-=1; return 0;}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Compound additive assignment requires arithmetic operands or pointer/integer",
+        )
+
     def test_compound_assignment_shift_value_type_mismatch(self) -> None:
         unit = parse(list(lex("int main(){int x=1; int *p=&x; x<<=p; return x;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -3165,6 +3200,25 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(
             str(ctx.exception),
             "Subtraction operands must be arithmetic, pointer/integer, or compatible pointers",
+        )
+
+    def test_additive_void_pointer_plus_integer_error(self) -> None:
+        unit = parse(list(lex("int main(){void *p=0; return p+1==0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Addition operands must be arithmetic or pointer/integer",
+        )
+
+    def test_additive_function_pointer_plus_integer_error(self) -> None:
+        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; return fp+1==0;}"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Addition operands must be arithmetic or pointer/integer",
         )
 
     def test_relational_pointer_mismatch_error(self) -> None:
@@ -3664,6 +3718,19 @@ class SemaTests(unittest.TestCase):
 
     def test_update_type_mismatch(self) -> None:
         unit = parse(list(lex("int main(){struct S { int x; } s; ++s; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Update operand must be integer or pointer")
+
+    def test_update_void_pointer_error(self) -> None:
+        unit = parse(list(lex("int main(){void *p=0; ++p; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Update operand must be integer or pointer")
+
+    def test_update_function_pointer_error(self) -> None:
+        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; ++fp; return 0;}"
+        unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Update operand must be integer or pointer")
