@@ -417,6 +417,26 @@
       "sha256": "e682921ad71dcdc760e1a4a31cfef4f429334ca3bea6d99b250526516533d68f"
     },
     {
+      "id": "parser-xcc-decl-missing-before-digraph-rbrace",
+      "upstream": "xcc/local/parser-digraph-rbrace-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-rbrace.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '%>'",
+      "line": 1,
+      "column": 7,
+      "sha256": "7315727dad0f8369af6264f33c030100261ffe0b74ff530da5695da3ab90acc4"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-digraph-hash",
+      "upstream": "xcc/local/parser-digraph-hash-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-digraph-hash.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '%:': expected a type specifier",
+      "line": 1,
+      "column": 7,
+      "sha256": "772428d8338b97edabbe0b15d8c79052380965df03d9702b50131d132ff587f0"
+    },
+    {
       "id": "parser-xcc-decl-missing-before-hash",
       "upstream": "xcc/local/parser-hash-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-hash.c",
@@ -425,6 +445,96 @@
       "line": 1,
       "column": 7,
       "sha256": "14515c1024b26869e7db2a9b707a00621526fa5673ce08a25ff16f6c5ce6f6c8"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-hash-hash",
+      "upstream": "xcc/local/parser-hash-hash-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-hash-hash.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '##': expected a type specifier",
+      "line": 1,
+      "column": 7,
+      "sha256": "826125883c72690cc3d3a6e59ae9f36efef43042303f90cfd4bee48209689a40"
+    },
+    {
+      "id": "parser-xcc-type-name-start-hash",
+      "upstream": "xcc/local/parser-type-name-hash-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-hash.c",
+      "expect": "parse",
+      "message_contains": "Type name cannot start with '#': expected a type specifier",
+      "line": 1,
+      "column": 47,
+      "sha256": "2e720ec8d512a952d3c6f434566835999a1a1669d273b1534a479eaec43a2213"
+    },
+    {
+      "id": "parser-xcc-type-name-start-hash-hash",
+      "upstream": "xcc/local/parser-type-name-hash-hash-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-hash-hash.c",
+      "expect": "parse",
+      "message_contains": "Type name cannot start with '##': expected a type specifier",
+      "line": 1,
+      "column": 47,
+      "sha256": "31af452305abf201cf2233437e073fdadf6bba427bdef39cef6247e6c1199167"
+    },
+    {
+      "id": "parser-xcc-type-name-start-digraph-lsquare",
+      "upstream": "xcc/local/parser-type-name-digraph-lsquare-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-digraph-lsquare.c",
+      "expect": "parse",
+      "message_contains": "Type name cannot start with '<:': expected a type specifier",
+      "line": 1,
+      "column": 47,
+      "sha256": "a7eba0f76d9bad1c7f5fe5d06eb545818a3bb89300e379d66cf9c93c2768efd6"
+    },
+    {
+      "id": "parser-xcc-type-name-start-digraph-hash",
+      "upstream": "xcc/local/parser-type-name-digraph-hash-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-digraph-hash.c",
+      "expect": "parse",
+      "message_contains": "Type name cannot start with '%:': expected a type specifier",
+      "line": 1,
+      "column": 47,
+      "sha256": "894e41cb558696cbee44cc2f4c3f403913fc1de3725ba9d58d449a283db6864a"
+    },
+    {
+      "id": "parser-xcc-type-name-start-digraph-hash-hash",
+      "upstream": "xcc/local/parser-type-name-digraph-hash-hash-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-digraph-hash-hash.c",
+      "expect": "parse",
+      "message_contains": "Type name cannot start with '%:%:': expected a type specifier",
+      "line": 1,
+      "column": 47,
+      "sha256": "6db9803286e62b213aafa5ae751697dee6ca7d98cdcf24562d29c53696206736"
+    },
+    {
+      "id": "parser-xcc-type-name-start-digraph-lbrace",
+      "upstream": "xcc/local/parser-type-name-digraph-lbrace-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-digraph-lbrace.c",
+      "expect": "parse",
+      "message_contains": "Type name is missing before '<%'",
+      "line": 1,
+      "column": 47,
+      "sha256": "505f25d0041de4fa004cbc93966c4772afe2b6cae25421ccc0ccabfc0f52f79e"
+    },
+    {
+      "id": "parser-xcc-type-name-start-digraph-rsquare",
+      "upstream": "xcc/local/parser-type-name-digraph-rsquare-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-digraph-rsquare.c",
+      "expect": "parse",
+      "message_contains": "Type name is missing before ':>'",
+      "line": 1,
+      "column": 47,
+      "sha256": "10c4d0838e10512015ff1578115aa03c71507661d5b9f3d14e1386853b929eec"
+    },
+    {
+      "id": "parser-xcc-type-name-start-digraph-rbrace",
+      "upstream": "xcc/local/parser-type-name-digraph-rbrace-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-digraph-rbrace.c",
+      "expect": "parse",
+      "message_contains": "Type name is missing before '}'",
+      "line": 1,
+      "column": 47,
+      "sha256": "8193243da87c316bba14efabdbc2a6ce3de1f94fc71c2220078efc298e89f0bf"
     }
   ]
 }
