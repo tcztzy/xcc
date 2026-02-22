@@ -1164,7 +1164,7 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
             return _PPValue(int(node.value))
         if isinstance(node.value, int):
             return _PPValue(node.value)
-        raise ValueError("Unsupported literal")
+        raise ValueError(f"Unsupported preprocessor literal type: {type(node.value).__name__}")
     if isinstance(node, ast.Call):
         if (
             isinstance(node.func, ast.Name)
@@ -1267,7 +1267,7 @@ def _eval_node(node: ast.AST) -> int:
             return int(node.value)
         if isinstance(node.value, int):
             return node.value
-        raise ValueError("Unsupported literal")
+        raise ValueError(f"Unsupported integer-expression literal type: {type(node.value).__name__}")
     if isinstance(node, ast.UnaryOp):
         value = _eval_node(node.operand)
         if isinstance(node.op, ast.Not):
