@@ -509,7 +509,10 @@ class PreprocessorTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_chain)
-        self.assertEqual(str(ctx.exception), "Unsupported comparison")
+        self.assertEqual(
+            str(ctx.exception),
+            "Unsupported preprocessor comparison shape: expected 1 operator, got 2",
+        )
         unsupported_cmp = ast.Compare(left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)])
         with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_cmp)
@@ -537,6 +540,17 @@ class PreprocessorTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_bin)
         self.assertEqual(str(ctx.exception), "Unsupported integer-expression binary operator: Pow")
+        unsupported_chain = ast.Compare(
+            left=ast.Constant(1),
+            ops=[ast.Lt(), ast.Lt()],
+            comparators=[ast.Constant(2), ast.Constant(3)],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            _eval_node(unsupported_chain)
+        self.assertEqual(
+            str(ctx.exception),
+            "Unsupported integer-expression comparison shape: expected 1 operator, got 2",
+        )
         unsupported_cmp = ast.Compare(left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)])
         with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_cmp)
