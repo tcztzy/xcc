@@ -999,6 +999,18 @@ class Analyzer:
             pointee.declarator_ops and pointee.declarator_ops[0][0] == "fn"
         )
 
+    def _is_complete_object_pointer_type(self, type_: Type) -> bool:
+        pointee = type_.pointee()
+        if pointee is None:
+            return False
+        if pointee.name == VOID.name:
+            return False
+        if pointee.declarator_ops and pointee.declarator_ops[0][0] == "fn":
+            return False
+        return not (
+            self._is_record_name(pointee.name) and self._record_members(pointee.name) is None
+        )
+
     def _is_assignment_compatible(self, target_type: Type, value_type: Type) -> bool:
         if target_type == value_type:
             return True
@@ -1369,15 +1381,17 @@ class Analyzer:
         arithmetic_result = self._usual_arithmetic_conversion(left_type, right_type)
         if arithmetic_result is not None:
             return arithmetic_result
-        left_ptr = left_type.pointee()
-        right_ptr = right_type.pointee()
         if op == "+":
-            if left_ptr is not None and self._is_integer_type(right_type):
+            if self._is_complete_object_pointer_type(left_type) and self._is_integer_type(
+                right_type
+            ):
                 return left_type
-            if right_ptr is not None and self._is_integer_type(left_type):
+            if self._is_complete_object_pointer_type(right_type) and self._is_integer_type(
+                left_type
+            ):
                 return right_type
             return None
-        if left_ptr is not None and self._is_integer_type(right_type):
+        if self._is_complete_object_pointer_type(left_type) and self._is_integer_type(right_type):
             return left_type
         if self._is_compatible_nonvoid_object_pointer_pair(left_type, right_type):
             return INT
@@ -1866,10 +1880,9 @@ class Analyzer:
             if operand_type.is_array():
                 raise SemaError("Assignment target is not assignable")
             value_operand_type = self._decay_array_value(operand_type)
-            if (
-                not self._is_integer_type(value_operand_type)
-                and value_operand_type.pointee() is None
-            ):
+            if not self._is_integer_type(
+                value_operand_type
+            ) and not self._is_complete_object_pointer_type(value_operand_type):
                 raise SemaError("Update operand must be integer or pointer")
             self._type_map.set(expr, operand_type)
             return operand_type
@@ -1944,20 +1957,25 @@ class Analyzer:
                 if not self._is_scalar_type(right_type):
                     raise SemaError("Equality right operand must be scalar")
                 if self._usual_arithmetic_conversion(left_type, right_type) is None:
-                    if left_type.pointee() is not None and right_type.pointee() is not None:
-                        if not self._is_pointer_equality_compatible(left_type, right_type):
+                    left_is_pointer = left_type.pointee() is not None
+                    right_is_pointer = right_type.pointee() is not None
+                    if left_is_pointer and right_is_pointer:
+                        if not self._is_pointer_equality_compatible(
+                            left_type,
+                            right_type,
+                        ) and not (
+                            self._is_null_pointer_constant(expr.left, scope)
+                            or self._is_null_pointer_constant(expr.right, scope)
+                        ):
                             raise SemaError(
                                 "Equality operator requires integer or compatible pointer operands"
                             )
-                    elif left_type.pointee() is not None:
-                        if self._eval_int_constant_expr(expr.right, scope) != 0:
+                    elif left_is_pointer:
+                        if not self._is_null_pointer_constant(expr.right, scope):
                             raise SemaError(
                                 "Equality operator requires integer or compatible pointer operands"
                             )
-                    elif (
-                        right_type.pointee() is not None
-                        and self._eval_int_constant_expr(expr.left, scope) != 0
-                    ):
+                    elif right_is_pointer and not self._is_null_pointer_constant(expr.left, scope):
                         raise SemaError(
                             "Equality operator requires integer or compatible pointer operands"
                         )
@@ -2078,7 +2096,9 @@ class Analyzer:
                 if self._is_arithmetic_type(target_type) and self._is_arithmetic_type(value_type):
                     self._type_map.set(expr, target_type)
                     return target_type
-                if target_type.pointee() is not None and self._is_integer_type(value_type):
+                if self._is_complete_object_pointer_type(target_type) and self._is_integer_type(
+                    value_type
+                ):
                     self._type_map.set(expr, target_type)
                     return target_type
                 raise SemaError(
