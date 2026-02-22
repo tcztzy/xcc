@@ -52,7 +52,13 @@ from xcc.ast import (
     WhileStmt,
 )
 from xcc.lexer import Token, TokenKind, lex
-from xcc.parser import Parser, ParserError, _parse_int_literal_value, parse
+from xcc.parser import (
+    Parser,
+    ParserError,
+    _array_size_non_ice_error,
+    _parse_int_literal_value,
+    parse,
+)
 
 
 def _body(func):
@@ -1141,12 +1147,22 @@ class ParserTests(unittest.TestCase):
     def test_unsupported_type_uses_declaration_context_diagnostic(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("_Complex int value;")))
-        self.assertEqual(ctx.exception.message, "Unsupported declaration type")
+        self.assertEqual(ctx.exception.message, "Unsupported declaration type: '_Complex'")
 
     def test_unsupported_type_uses_type_name_context_diagnostic(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){ return sizeof(_Complex int); }")))
-        self.assertEqual(ctx.exception.message, "Unsupported type name")
+        self.assertEqual(ctx.exception.message, "Unsupported type name: '_Complex'")
+
+    def test_unknown_identifier_type_uses_declaration_context_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("foo value;")))
+        self.assertEqual(ctx.exception.message, "Unknown declaration type name: 'foo'")
+
+    def test_unknown_identifier_type_uses_type_name_context_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, foo: 1, default: 0); }")))
+        self.assertEqual(ctx.exception.message, "Unknown type name: 'foo'")
 
     def test_integer_type_rejects_duplicate_signedness(self) -> None:
         with self.assertRaises(ParserError) as ctx:
@@ -1851,6 +1867,22 @@ class ParserTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(
             ParserError,
+            "Array size generic selection is not an integer constant expression",
+        ):
+            parser._parse_array_size_expr(
+                GenericExpr(IntLiteral("0"), ((TypeSpec("long"), IntLiteral("1")),)),
+                Token(TokenKind.PUNCTUATOR, "_Generic", 1, 1),
+            )
+        with self.assertRaisesRegex(
+            ParserError,
+            "Array size comma expression is not an integer constant expression",
+        ):
+            parser._parse_array_size_expr(
+                CommaExpr(IntLiteral("1"), Identifier("n")),
+                Token(TokenKind.PUNCTUATOR, ",", 1, 1),
+            )
+        with self.assertRaisesRegex(
+            ParserError,
             "Array size conditional condition is not an integer constant expression",
         ):
             parser._parse_array_size_expr(
@@ -2326,6 +2358,97 @@ class ParserTests(unittest.TestCase):
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
         expr = BinaryExpr("+", Identifier("x"), IntLiteral("1"))
         self.assertIsNone(parser._eval_array_size_expr(expr))
+
+    def test_array_size_non_ice_error_helper_covers_conditional_and_cast_fallbacks(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(
+            _array_size_non_ice_error(CastExpr(TypeSpec("int"), IntLiteral("1")), parser._eval_array_size_expr),
+            "Array size cast expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(
+                ConditionalExpr(IntLiteral("0"), IntLiteral("1"), IntLiteral("2")),
+                parser._eval_array_size_expr,
+            ),
+            "Array size conditional expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(
+                ConditionalExpr(IntLiteral("1"), Identifier("n"), IntLiteral("2")),
+                parser._eval_array_size_expr,
+            ),
+            "Array size identifier 'n' is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(SizeofExpr(None, None), parser._eval_array_size_expr),
+            "Array size sizeof expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(AlignofExpr(None, None), parser._eval_array_size_expr),
+            "Array size alignof expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(
+                StatementExpr(CompoundStmt([ExprStmt(IntLiteral("1"))])),
+                parser._eval_array_size_expr,
+            ),
+            "Array size statement expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(LabelAddressExpr("target"), parser._eval_array_size_expr),
+            "Array size label address expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(
+                AssignExpr("=", Identifier("n"), IntLiteral("1")),
+                parser._eval_array_size_expr,
+            ),
+            "Array size assignment expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(
+                UpdateExpr("++", Identifier("n"), is_postfix=False),
+                parser._eval_array_size_expr,
+            ),
+            "Array size update expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(
+                SubscriptExpr(Identifier("arr"), IntLiteral("0")),
+                parser._eval_array_size_expr,
+            ),
+            "Array size subscript expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(
+                MemberExpr(Identifier("s"), "field", False),
+                parser._eval_array_size_expr,
+            ),
+            "Array size member access expression is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(
+                CompoundLiteralExpr(TypeSpec("int"), InitList((InitItem((), IntLiteral("1")),))),
+                parser._eval_array_size_expr,
+            ),
+            "Array size compound literal is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(IntLiteral("0x"), parser._eval_array_size_expr),
+            "Array size integer literal is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(FloatLiteral("1.0"), parser._eval_array_size_expr),
+            "Array size floating literal is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(CharLiteral("'a'"), parser._eval_array_size_expr),
+            "Array size character literal is not an integer constant expression",
+        )
+        self.assertEqual(
+            _array_size_non_ice_error(StringLiteral('"x"'), parser._eval_array_size_expr),
+            "Array size string literal is not an integer constant expression",
+        )
 
     def test_array_size_helper_or_vla_accepts_constant_size(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])

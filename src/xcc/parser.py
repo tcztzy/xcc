@@ -166,10 +166,40 @@ def _array_size_non_ice_error(
         return f"Array size binary operator '{expr.op}' is not an integer constant expression"
     if isinstance(expr, CallExpr):
         return "Array size call expression is not an integer constant expression"
+    if isinstance(expr, GenericExpr):
+        return "Array size generic selection is not an integer constant expression"
+    if isinstance(expr, CommaExpr):
+        return "Array size comma expression is not an integer constant expression"
+    if isinstance(expr, AssignExpr):
+        return "Array size assignment expression is not an integer constant expression"
+    if isinstance(expr, UpdateExpr):
+        return "Array size update expression is not an integer constant expression"
+    if isinstance(expr, SubscriptExpr):
+        return "Array size subscript expression is not an integer constant expression"
+    if isinstance(expr, MemberExpr):
+        return "Array size member access expression is not an integer constant expression"
+    if isinstance(expr, CompoundLiteralExpr):
+        return "Array size compound literal is not an integer constant expression"
+    if isinstance(expr, IntLiteral):
+        return "Array size integer literal is not an integer constant expression"
+    if isinstance(expr, FloatLiteral):
+        return "Array size floating literal is not an integer constant expression"
+    if isinstance(expr, CharLiteral):
+        return "Array size character literal is not an integer constant expression"
+    if isinstance(expr, StringLiteral):
+        return "Array size string literal is not an integer constant expression"
+    if isinstance(expr, StatementExpr):
+        return "Array size statement expression is not an integer constant expression"
+    if isinstance(expr, LabelAddressExpr):
+        return "Array size label address expression is not an integer constant expression"
     if isinstance(expr, CastExpr):
         if eval_expr(expr.expr) is None:
             return _array_size_non_ice_error(expr.expr, eval_expr)
         return "Array size cast expression is not an integer constant expression"
+    if isinstance(expr, SizeofExpr):
+        return "Array size sizeof expression is not an integer constant expression"
+    if isinstance(expr, AlignofExpr):
+        return "Array size alignof expression is not an integer constant expression"
     if isinstance(expr, ConditionalExpr):
         if eval_expr(expr.condition) is None:
             return "Array size conditional condition is not an integer constant expression"
@@ -507,7 +537,7 @@ class Parser:
             assert isinstance(token.lexeme, str)
             type_spec = self._lookup_typedef(token.lexeme)
             if type_spec is None:
-                raise ParserError(self._unsupported_type_message(context), token)
+                raise ParserError(self._unsupported_type_message(context, token), token)
             self._advance()
             return self._apply_type_qualifiers(type_spec, qualifiers)
         token = self._expect(TokenKind.KEYWORD)
@@ -526,7 +556,7 @@ class Parser:
                 self._advance()
                 pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
                 return TypeSpec("long double", pointer_depth, qualifiers=qualifiers)
-            raise ParserError(self._unsupported_type_message(context), token)
+            raise ParserError(self._unsupported_type_message(context, token), token)
         if token.lexeme in FLOATING_TYPE_KEYWORDS:
             assert isinstance(token.lexeme, str)
             type_name = str(token.lexeme)
@@ -568,12 +598,17 @@ class Parser:
                 record_tag=record_tag,
                 record_members=record_members,
             )
-        raise ParserError(self._unsupported_type_message(context), token)
+        raise ParserError(self._unsupported_type_message(context, token), token)
 
-    def _unsupported_type_message(self, context: str) -> str:
+    def _unsupported_type_message(self, context: str, token: Token) -> str:
+        token_text = str(token.lexeme)
+        if token.kind == TokenKind.IDENT:
+            if context == "type-name":
+                return f"Unknown type name: '{token_text}'"
+            return f"Unknown declaration type name: '{token_text}'"
         if context == "type-name":
-            return "Unsupported type name"
-        return "Unsupported declaration type"
+            return f"Unsupported type name: '{token_text}'"
+        return f"Unsupported declaration type: '{token_text}'"
 
     def _consume_type_qualifiers(self, *, allow_atomic: bool = False) -> tuple[str, ...]:
         qualifiers = TYPE_QUALIFIER_KEYWORDS | ({"_Atomic"} if allow_atomic else set())
@@ -2028,7 +2063,7 @@ class Parser:
         raise ParserError("Unexpected token", token)
 
     def _parse_type_name(self) -> TypeSpec:
-        base_type = self._parse_type_spec()
+        base_type = self._parse_type_spec(context="type-name")
         name, declarator_ops = self._parse_declarator(allow_abstract=True, allow_vla=True)
         if name is not None:
             raise ParserError("Expected type name", self._current())
