@@ -374,6 +374,26 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source("#pragma once\n#line 42\nint x;\n", filename="if.c")
         self.assertEqual(result.source, "\n\nint x;\n")
 
+    def test_pragma_once_skips_second_include(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            header = root / "once.h"
+            header.write_text("#pragma once\nint from_once;\n", encoding="utf-8")
+            source_path = root / "main.c"
+            source_path.write_text('#include "once.h"\n#include "once.h"\n', encoding="utf-8")
+            result = preprocess_source(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        self.assertEqual(result.source, "\nint from_once;\n")
+
+    def test_pragma_once_applies_across_nested_includes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "once.h").write_text("#pragma once\nint from_once;\n", encoding="utf-8")
+            (root / "wrapper.h").write_text('#include "once.h"\n', encoding="utf-8")
+            main = root / "main.c"
+            main.write_text('#include "once.h"\n#include "wrapper.h"\n', encoding="utf-8")
+            result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main))
+        self.assertEqual(result.source, "\nint from_once;\n")
+
     def test_include_quoted_from_source_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

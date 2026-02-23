@@ -260,6 +260,7 @@ class _Preprocessor:
             (_MacroToken(TokenKind.STRING_LITERAL, self._time_literal),),
         )
         self.include_trace: list[str] = []
+        self._pragma_once_files: set[str] = set()
         for define in options.defines:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
@@ -274,6 +275,7 @@ class _Preprocessor:
         return self._process_text(
             source,
             filename=filename,
+            source_id=filename,
             base_dir=base_dir,
             include_stack=(filename,),
         )
@@ -288,6 +290,7 @@ class _Preprocessor:
         source: str,
         *,
         filename: str,
+        source_id: str,
         base_dir: Path | None,
         include_stack: tuple[str, ...],
     ) -> _ProcessedText:
@@ -389,6 +392,8 @@ class _Preprocessor:
                 line_index += 1
                 continue
             if name == "pragma":
+                if body.strip() == "once":
+                    self._pragma_once_files.add(source_id)
                 for directive_index, chunk in enumerate(directive_lines):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.advance(len(directive_lines))
@@ -572,6 +577,8 @@ class _Preprocessor:
                 code=_PP_INCLUDE_NOT_FOUND,
             )
         include_path_text = str(include_path)
+        if include_path_text in self._pragma_once_files:
+            return _ProcessedText("", ())
         self.include_trace.append(
             _format_include_trace(
                 include_stack[-1],
@@ -602,6 +609,7 @@ class _Preprocessor:
         return self._process_text(
             include_source,
             filename=include_path_text,
+            source_id=include_path_text,
             base_dir=include_path.parent,
             include_stack=(*include_stack, include_path_text),
         )
