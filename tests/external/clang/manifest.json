@@ -557,6 +557,26 @@
       "sha256": "826125883c72690cc3d3a6e59ae9f36efef43042303f90cfd4bee48209689a40"
     },
     {
+      "id": "parser-xcc-decl-missing-before-increment",
+      "upstream": "xcc/local/parser-increment-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-increment.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '++': expected a type specifier",
+      "line": 1,
+      "column": 7,
+      "sha256": "233bd611123bc8a0c1216244fe9ed8ca0ac30bedcd3f007ba12b047597fdfc6e"
+    },
+    {
+      "id": "parser-xcc-decl-missing-before-decrement",
+      "upstream": "xcc/local/parser-decrement-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-decl-missing-before-decrement.c",
+      "expect": "parse",
+      "message_contains": "Declaration type is missing before '--': expected a type specifier",
+      "line": 1,
+      "column": 7,
+      "sha256": "c5d39c1d2af830e10c5defb44c662bc8dda8ff1b0172956d75e56fa7cef0db88"
+    },
+    {
       "id": "parser-xcc-type-name-start-hash",
       "upstream": "xcc/local/parser-type-name-hash-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-hash.c",
@@ -575,6 +595,26 @@
       "line": 1,
       "column": 47,
       "sha256": "31af452305abf201cf2233437e073fdadf6bba427bdef39cef6247e6c1199167"
+    },
+    {
+      "id": "parser-xcc-type-name-start-increment",
+      "upstream": "xcc/local/parser-type-name-increment-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-increment.c",
+      "expect": "parse",
+      "message_contains": "Type name cannot start with '++': expected a type specifier",
+      "line": 1,
+      "column": 47,
+      "sha256": "20acf666de9b536cac599a0688f2e8574bef793d3f709dc5fbb58d5c4e7bd917"
+    },
+    {
+      "id": "parser-xcc-type-name-start-decrement",
+      "upstream": "xcc/local/parser-type-name-decrement-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-decrement.c",
+      "expect": "parse",
+      "message_contains": "Type name cannot start with '--': expected a type specifier",
+      "line": 1,
+      "column": 47,
+      "sha256": "ec62380acc8f9a46e332e375c404b0664618fbcf704e58d1105af71dbca7826e"
     },
     {
       "id": "parser-xcc-type-name-start-digraph-lsquare",
