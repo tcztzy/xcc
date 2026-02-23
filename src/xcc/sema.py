@@ -325,7 +325,8 @@ class Analyzer:
 
     def _register_function_external(self, func: FunctionDef) -> None:
         if func.storage_class not in {None, "static", "extern"}:
-            raise SemaError("Invalid storage class for function")
+            storage_class = func.storage_class if func.storage_class is not None else "<none>"
+            raise SemaError(f"Invalid storage class for function: '{storage_class}'")
         if func.is_thread_local:
             raise SemaError("Invalid declaration specifier")
         if self._file_scope.lookup(func.name) is not None:
@@ -480,7 +481,10 @@ class Analyzer:
             return
         if isinstance(declaration, DeclStmt):
             if declaration.storage_class in {"auto", "register"}:
-                raise SemaError("Invalid storage class for file-scope declaration")
+                storage_class = declaration.storage_class if declaration.storage_class is not None else "<none>"
+                raise SemaError(
+                    f"Invalid storage class for file-scope declaration: '{storage_class}'"
+                )
             self._register_type_spec(declaration.type_spec)
             self._define_enum_members(declaration.type_spec, self._file_scope)
             if declaration.alignment is not None and declaration.name is None:
@@ -1521,9 +1525,10 @@ class Analyzer:
             return
         if isinstance(stmt, DeclStmt):
             if stmt.storage_class == "typedef":
-                raise SemaError("Invalid storage class for object declaration")
+                raise SemaError("Invalid storage class for object declaration: 'typedef'")
             if stmt.is_thread_local and stmt.storage_class not in {"static", "extern"}:
-                raise SemaError("Invalid thread local storage class")
+                storage_class = stmt.storage_class if stmt.storage_class is not None else "none"
+                raise SemaError(f"Invalid thread local storage class: '{storage_class}'")
             self._register_type_spec(stmt.type_spec)
             self._define_enum_members(stmt.type_spec, scope)
             if stmt.alignment is not None and stmt.name is None:
