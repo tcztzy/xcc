@@ -2291,7 +2291,10 @@ class Parser:
         base_type = self._parse_type_spec(context="type-name")
         name, declarator_ops = self._parse_declarator(allow_abstract=True, allow_vla=True)
         if name is not None:
-            raise ParserError("Expected type name", self._current())
+            raise ParserError(
+                f"Type name cannot declare identifier '{name}'",
+                self._current(),
+            )
         return self._build_declarator_type(base_type, declarator_ops)
 
     def _parse_generic_expr(self) -> GenericExpr:
