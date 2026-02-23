@@ -3134,6 +3134,30 @@ class ParserTests(unittest.TestCase):
             "Expression cannot start with '%:%:': expected an operand",
         )
 
+    def test_expression_start_left_bracket_digraph_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); <:; return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with '<:': expected an operand",
+        )
+
+    def test_expression_start_right_bracket_digraph_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); :>; return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with ':>': expected an operand",
+        )
+
+    def test_expression_start_left_brace_digraph_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); <%; return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with '<%': expected an operand",
+        )
+
     def test_expression_start_right_brace_digraph_reports_operand_diagnostic(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex('int main(void){ _Static_assert(1, "ok"); %>; return 0; }')))
