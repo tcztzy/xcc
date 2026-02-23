@@ -475,7 +475,10 @@ class Parser:
         if decl_specs.storage_class not in {None, "register"}:
             raise ParserError("Invalid storage class for parameter", self._current())
         if decl_specs.is_thread_local or decl_specs.is_inline or decl_specs.is_noreturn:
-            raise ParserError("Invalid declaration specifier", self._current())
+            raise ParserError(
+                self._invalid_decl_specifier_message("parameter", decl_specs),
+                self._current(),
+            )
         self._reject_invalid_alignment_context(
             decl_specs.alignment,
             decl_specs.alignment_token,
@@ -963,7 +966,10 @@ class Parser:
         if decl_specs.is_typedef or decl_specs.storage_class not in {None, "typedef"}:
             raise ParserError("Expected type specifier", self._current())
         if decl_specs.is_thread_local or decl_specs.is_inline or decl_specs.is_noreturn:
-            raise ParserError("Invalid declaration specifier", self._current())
+            raise ParserError(
+                self._invalid_decl_specifier_message("record member", decl_specs),
+                self._current(),
+            )
         base_type = self._parse_type_spec()
         if self._check_punct(";"):
             if decl_specs.alignment is not None:
@@ -1227,7 +1233,10 @@ class Parser:
         if is_typedef and (
             decl_specs.is_thread_local or decl_specs.is_inline or decl_specs.is_noreturn
         ):
-            raise ParserError("Invalid declaration specifier", self._current())
+            raise ParserError(
+                self._invalid_decl_specifier_message("typedef", decl_specs),
+                self._current(),
+            )
         base_is_qualified_typedef = False
         current = self._current()
         if current.kind == TokenKind.IDENT and isinstance(current.lexeme, str):
@@ -2397,6 +2406,15 @@ class Parser:
     def _skip_extension_markers(self) -> None:
         while self._check_keyword(_EXTENSION_MARKER):
             self._advance()
+
+    def _invalid_decl_specifier_message(self, context: str, decl_specs: DeclSpecInfo) -> str:
+        if decl_specs.is_thread_local:
+            return f"Invalid declaration specifier for {context}: '_Thread_local'"
+        if decl_specs.is_inline:
+            return f"Invalid declaration specifier for {context}: 'inline'"
+        if decl_specs.is_noreturn:
+            return f"Invalid declaration specifier for {context}: '_Noreturn'"
+        return f"Invalid declaration specifier for {context}"
 
     def _consume_overloadable_gnu_attributes(self) -> bool:
         _, has_overloadable = self._consume_gnu_attributes()

@@ -2838,16 +2838,28 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("int f(static int x){return x;}")))
 
     def test_parameter_rejects_thread_local_specifier(self) -> None:
-        with self.assertRaises(ParserError):
+        with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int f(_Thread_local int x){return x;}")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid declaration specifier for parameter: '_Thread_local'",
+        )
 
     def test_record_member_rejects_function_specifier(self) -> None:
-        with self.assertRaises(ParserError):
+        with self.assertRaises(ParserError) as ctx:
             parse(list(lex("struct S { inline int x; };")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid declaration specifier for record member: 'inline'",
+        )
 
     def test_typedef_rejects_function_specifier(self) -> None:
-        with self.assertRaises(ParserError):
+        with self.assertRaises(ParserError) as ctx:
             parse(list(lex("typedef inline int T;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid declaration specifier for typedef: 'inline'",
+        )
 
     def test_array_declarator_rejects_missing_static_bound(self) -> None:
         with self.assertRaises(ParserError):
