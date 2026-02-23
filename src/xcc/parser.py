@@ -654,6 +654,7 @@ class Parser:
             "%:%:": "Type name cannot start with '%:%:': expected a type specifier",
             ".": "Type name cannot start with '.': expected a type specifier",
             "->": "Type name cannot start with '->': expected a type specifier",
+            "...": "Type name cannot start with '...': expected a type specifier",
             "[": "Type name cannot start with '[': expected a type specifier",
             "<:": "Type name cannot start with '<:': expected a type specifier",
             "{": "Type name is missing before '{'",

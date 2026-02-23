@@ -617,6 +617,16 @@
       "sha256": "ec62380acc8f9a46e332e375c404b0664618fbcf704e58d1105af71dbca7826e"
     },
     {
+      "id": "parser-xcc-type-name-start-ellipsis",
+      "upstream": "xcc/local/parser-type-name-ellipsis-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-ellipsis.c",
+      "expect": "parse",
+      "message_contains": "Type name cannot start with '...': expected a type specifier",
+      "line": 1,
+      "column": 47,
+      "sha256": "0b4958d0620b7514d10de4bf920e0d24c11b12e82553a5b4898e5e71730bcc3b"
+    },
+    {
       "id": "parser-xcc-type-name-start-digraph-lsquare",
       "upstream": "xcc/local/parser-type-name-digraph-lsquare-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-digraph-lsquare.c",
