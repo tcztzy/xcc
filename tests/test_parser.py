@@ -3270,6 +3270,44 @@ class ParserTests(unittest.TestCase):
             "Expression is missing before end of input",
         )
 
+    def test_expression_start_pp_number_reports_operand_diagnostic(self) -> None:
+        tokens = list(lex("int main(void){ return 0; }"))
+        int_token_index = next(
+            i for i, tok in enumerate(tokens) if tok.kind == TokenKind.INT_CONST
+        )
+        int_token = tokens[int_token_index]
+        tokens[int_token_index] = Token(
+            TokenKind.PP_NUMBER,
+            "1e+",
+            int_token.line,
+            int_token.column,
+        )
+        with self.assertRaises(ParserError) as ctx:
+            parse(tokens)
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with preprocessing number: '1e+'",
+        )
+
+    def test_expression_start_header_name_reports_operand_diagnostic(self) -> None:
+        tokens = list(lex("int main(void){ return 0; }"))
+        int_token_index = next(
+            i for i, tok in enumerate(tokens) if tok.kind == TokenKind.INT_CONST
+        )
+        int_token = tokens[int_token_index]
+        tokens[int_token_index] = Token(
+            TokenKind.HEADER_NAME,
+            "<stdio.h>",
+            int_token.line,
+            int_token.column,
+        )
+        with self.assertRaises(ParserError) as ctx:
+            parse(tokens)
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with header name: '<stdio.h>'",
+        )
+
     def test_parse_decl_stmt_static_assert_dispatch(self) -> None:
         parser = Parser(list(lex('_Static_assert(1, "ok");')))
         stmt = parser._parse_decl_stmt()

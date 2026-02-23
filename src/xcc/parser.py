@@ -2254,6 +2254,16 @@ class Parser:
             )
         if token.kind == TokenKind.EOF:
             raise ParserError("Expression is missing before end of input", token)
+        if token.kind == TokenKind.PP_NUMBER:
+            raise ParserError(
+                f"Expression cannot start with preprocessing number: '{token.lexeme}'",
+                token,
+            )
+        if token.kind == TokenKind.HEADER_NAME:
+            raise ParserError(
+                f"Expression cannot start with header name: '{token.lexeme}'",
+                token,
+            )
         raise ParserError("Unexpected token", token)
 
     def _parse_type_name(self) -> TypeSpec:
