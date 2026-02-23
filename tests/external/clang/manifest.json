@@ -857,6 +857,36 @@
       "sha256": "ef7d9c64bbbe2ee677967c15c211efb2b474df6aae11132731bcc6757900bfd6"
     },
     {
+      "id": "parser-xcc-expr-start-token-paste-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-token-paste-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-token-paste-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '##': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "97333fce12a18ed0d0f6f650cb0bc4534355f9e83464239340c601e9e550f8e5"
+    },
+    {
+      "id": "parser-xcc-expr-start-digraph-hash-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-digraph-hash-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-hash-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '%:': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "cea54e264d9bbe2142aa58324e540c713cce703767f341c96f958d09e7413ebb"
+    },
+    {
+      "id": "parser-xcc-expr-start-digraph-hash-hash-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-digraph-hash-hash-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-hash-hash-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '%:%:': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "243bd60f4442badad0f1f1e43b4d1b4c28662848fc39620ad437aa018078c8cd"
+    },
+    {
       "id": "parser-xcc-param-before-ellipsis",
       "upstream": "xcc/local/parser-variadic-requires-parameter-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis.c",
