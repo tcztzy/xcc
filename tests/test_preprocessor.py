@@ -190,13 +190,14 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int x;", result.source)
 
     def test_cli_undef_removes_predefined_macro(self) -> None:
-        source = "#if __INT_WIDTH__\nint x;\n#endif\n"
+        source = "#if __INT_WIDTH__\nint x;\n#endif\n#if __STDC_UTF_16__\nint y;\n#endif\n"
         result = preprocess_source(
             source,
             filename="main.c",
-            options=FrontendOptions(undefs=("__INT_WIDTH__",)),
+            options=FrontendOptions(undefs=("__INT_WIDTH__", "__STDC_UTF_16__")),
         )
         self.assertNotIn("int x;", result.source)
+        self.assertNotIn("int y;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
         source = (
@@ -477,12 +478,18 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_predefined_standard_macros(self) -> None:
         result = preprocess_source(
-            "int s = __STDC__;\nint h = __STDC_HOSTED__;\nlong v = __STDC_VERSION__;\n",
+            "int s = __STDC__;\n"
+            "int h = __STDC_HOSTED__;\n"
+            "long v = __STDC_VERSION__;\n"
+            "int u16 = __STDC_UTF_16__;\n"
+            "int u32 = __STDC_UTF_32__;\n",
             filename="main.c",
         )
         self.assertIn("int s = 1 ;", result.source)
         self.assertIn("int h = 1 ;", result.source)
         self.assertIn("long v = 201112L ;", result.source)
+        self.assertIn("int u16 = 1 ;", result.source)
+        self.assertIn("int u32 = 1 ;", result.source)
 
     def test_predefined_file_and_line_macros(self) -> None:
         result = preprocess_source(

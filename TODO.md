@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - preprocessor predefined standard macro baseline now includes `__STDC_UTF_16__=1` and `__STDC_UTF_32__=1`, with regression coverage for expansion and CLI `-U` removal behavior;
   - preprocessor `#if`/`#elif` now supports `__has_include("...")` and `__has_include(<...>)` with include-path-aware evaluation plus invalid-form diagnostics;
   - predefined macro baseline now includes `__STDC_HOSTED__=1` alongside `__STDC__` / `__STDC_VERSION__`, with regression coverage for expansion behavior;
   - compound assignment accepts arithmetic operands for `*=`, `/=`, `+=`, `-=` and keeps integer-only checks for `%=` / bit/shift assigns;
