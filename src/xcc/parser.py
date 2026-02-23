@@ -448,10 +448,14 @@ class Parser:
         params = [self._parse_param()]
         is_variadic = False
         while self._check_punct(","):
-            self._advance()
+            comma = self._advance()
+            if self._check_punct(")"):
+                raise ParserError("Expected parameter after ','", comma)
             if self._check_punct("..."):
                 self._advance()
                 is_variadic = True
+                if not self._check_punct(")"):
+                    raise ParserError("Expected ')' after ... in parameter list", self._current())
                 break
             params.append(self._parse_param())
         return params, True, is_variadic
@@ -2168,10 +2172,14 @@ class Parser:
         params = [self._parse_param().type_spec]
         is_variadic = False
         while self._check_punct(","):
-            self._advance()
+            comma = self._advance()
+            if self._check_punct(")"):
+                raise ParserError("Expected parameter after ','", comma)
             if self._check_punct("..."):
                 self._advance()
                 is_variadic = True
+                if not self._check_punct(")"):
+                    raise ParserError("Expected ')' after ... in parameter list", self._current())
                 break
             params.append(self._parse_param().type_spec)
         return tuple(params), is_variadic
