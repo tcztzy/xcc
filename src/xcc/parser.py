@@ -1560,7 +1560,10 @@ class Parser:
         base_type = self._parse_type_spec(context="type-name")
         name, declarator_ops = self._parse_declarator(allow_abstract=True, allow_vla=True)
         if name is not None:
-            raise ParserError("Expected type name", self._current())
+            raise ParserError(
+                f"Type name cannot declare identifier '{name}'",
+                self._current(),
+            )
         self._expect_punct(")")
         return self._build_declarator_type(base_type, declarator_ops)
 
@@ -1579,7 +1582,10 @@ class Parser:
             self._parse_atomic_type_name_declarator(allow_gnu_attributes=True)
         )
         if name is not None:
-            raise ParserError("Expected type name", self._current())
+            raise ParserError(
+                f"Type name cannot declare identifier '{name}'",
+                self._current(),
+            )
         self._expect_punct(")")
         type_spec = self._build_declarator_type(base_type, declarator_ops)
         is_qualified = self._is_top_level_qualified_type_name(

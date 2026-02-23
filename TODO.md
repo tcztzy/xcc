@@ -324,3 +324,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 - Iteration 3 slice: added focused local parser regression coverage that injects a synthetic non-`TokenKind` token kind at expression entry and asserts the exact new fallback diagnostic text.
 - Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_expression_start_unsupported_token_kind_reports_specific_diagnostic tests.test_parser -q` (pass).
 - Next target: audit other parser generic fallback sites outside `_parse_primary` for similarly opaque diagnostics and apply token-aware message upgrades where fallback paths are still reachable.
+- Iteration 3 slice: tightened type-name parse diagnostics by rejecting named declarators in parenthesized type-name contexts (cast and `_Atomic(type-name)`) with an explicit identifier-bearing message (`Type name cannot declare identifier '<name>'`) instead of the opaque `Expected type name` fallback.
+- Iteration 3 slice: added focused local parser regressions for both cast and `_Atomic(type-name)` paths to lock down this diagnostic shape.
+- Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_type_name_cannot_declare_identifier_in_cast tests.test_parser.ParserTests.test_type_name_cannot_declare_identifier_in_atomic_type_specifier tests.test_parser -q` (pass).
+- Next target: audit remaining parser `Expected identifier` / `Expected type name` diagnostics to identify other contexts where including the offending token/identifier would improve actionability without changing parse behavior.
