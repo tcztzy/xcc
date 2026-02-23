@@ -3086,6 +3086,30 @@ class ParserTests(unittest.TestCase):
             "Expression cannot start with ':': expected an operand",
         )
 
+    def test_expression_start_question_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); ? return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with '?': expected an operand",
+        )
+
+    def test_expression_start_semicolon_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ int x = ; return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with ';': expected an operand",
+        )
+
+    def test_expression_start_left_brace_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ return { 0; } }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with '{': expected an operand",
+        )
+
     def test_parse_decl_stmt_static_assert_dispatch(self) -> None:
         parser = Parser(list(lex('_Static_assert(1, "ok");')))
         stmt = parser._parse_decl_stmt()
