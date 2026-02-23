@@ -382,11 +382,56 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int z;\n")
 
+    def test_include_quoted_prefers_source_directory_over_include_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            include_dir = root / "include"
+            source_dir.mkdir()
+            include_dir.mkdir()
+            (source_dir / "inc.h").write_text("int from_source;\n", encoding="utf-8")
+            (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
+            main = source_dir / "main.c"
+            main.write_text('#include "inc.h"\n', encoding="utf-8")
+            options = FrontendOptions(include_dirs=(str(include_dir),))
+            result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main), options=options)
+        self.assertEqual(result.source, "int from_source ;\n")
+
+    def test_include_angle_skips_source_directory_and_uses_include_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            include_dir = root / "include"
+            source_dir.mkdir()
+            include_dir.mkdir()
+            (source_dir / "inc.h").write_text("int from_source;\n", encoding="utf-8")
+            (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
+            main = source_dir / "main.c"
+            options = FrontendOptions(include_dirs=(str(include_dir),))
+            result = preprocess_source("#include <inc.h>\n", filename=str(main), options=options)
+        self.assertEqual(result.source, "int from_include ;\n")
+
+    def test_include_expansion_preserves_line_map_for_header_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include = root / "inc.h"
+            main = root / "main.c"
+            include.write_text("int from_header;\n", encoding="utf-8")
+            result = preprocess_source('#include "inc.h"\nint from_main;\n', filename=str(main))
+        self.assertEqual(result.line_map, ((str(include.resolve()), 1), (str(main), 2)))
+
     def test_include_not_found(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source('#include "missing.h"\n', filename="main.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
         self.assertEqual((ctx.exception.filename, ctx.exception.line), ("main.c", 1))
+        self.assertEqual(ctx.exception.args[0], 'Include not found: "missing.h" at main.c:1:1')
+
+    def test_include_not_found_for_angle_include_reports_delimiters(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#include <missing.h>\n", filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+        self.assertEqual(ctx.exception.args[0], "Include not found: <missing.h> at main.c:1:1")
 
     def test_invalid_include_directive(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
