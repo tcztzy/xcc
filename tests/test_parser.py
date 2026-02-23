@@ -3038,6 +3038,14 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int main(void){_Static_assert(1, 2); return 0;}")))
 
+    def test_expression_start_ellipsis_after_static_assert_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); ...; return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with '...': expected an operand",
+        )
+
     def test_parse_decl_stmt_static_assert_dispatch(self) -> None:
         parser = Parser(list(lex('_Static_assert(1, "ok");')))
         stmt = parser._parse_decl_stmt()
