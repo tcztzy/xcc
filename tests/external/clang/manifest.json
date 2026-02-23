@@ -817,6 +817,46 @@
       "sha256": "0f52c096cc0d12f03e578c296b9303633e7e1e56c7abd2586259b43b8a88df0c"
     },
     {
+      "id": "parser-xcc-expr-start-digraph-lsquare-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-digraph-lsquare-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-lsquare-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '<:': expected an operand",
+      "line": 3,
+      "column": 1,
+      "sha256": "a9cbcbafa37ec27db350b50fa7dff42b47d42516fc6ad652f01d15740c545546"
+    },
+    {
+      "id": "parser-xcc-expr-start-digraph-rsquare-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-digraph-rsquare-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-rsquare-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ':>': expected an operand",
+      "line": 3,
+      "column": 1,
+      "sha256": "7933592fc41ed1925bb1b90eeef7793de67b0c76972952c746e2f368fa20acae"
+    },
+    {
+      "id": "parser-xcc-expr-start-digraph-lbrace-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-digraph-lbrace-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-lbrace-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '<%': expected an operand",
+      "line": 3,
+      "column": 1,
+      "sha256": "b949207a74a6bfc2a940d40f55c206d68cbdc624c86ba8d809dddfe9ea58884c"
+    },
+    {
+      "id": "parser-xcc-expr-start-digraph-rbrace-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-digraph-rbrace-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-rbrace-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '%>': expected an operand",
+      "line": 3,
+      "column": 1,
+      "sha256": "ef7d9c64bbbe2ee677967c15c211efb2b474df6aae11132731bcc6757900bfd6"
+    },
+    {
       "id": "parser-xcc-param-before-ellipsis",
       "upstream": "xcc/local/parser-variadic-requires-parameter-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis.c",
