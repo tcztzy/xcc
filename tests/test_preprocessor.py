@@ -1,6 +1,7 @@
 import ast
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -399,6 +400,18 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int l = 2 ;", result.source)
         self.assertIn("int m = 42 ;", result.source)
         self.assertEqual(result.line_map[-1], ("mapped.c", 42))
+
+    def test_predefined_date_and_time_macros_use_translation_start_time(self) -> None:
+        with patch("xcc.preprocessor.datetime") as mock_datetime:
+            mock_datetime.now.return_value = datetime(2026, 2, 23, 22, 21, 9)
+            result = preprocess_source(
+                'const char *d = __DATE__;\nconst char *t = __TIME__;\n',
+                filename="main.c",
+            )
+        self.assertIn('const char * d = "Feb 23 2026" ;', result.source)
+        self.assertIn('const char * t = "22:21:09" ;', result.source)
+        self.assertIn('__DATE__="Feb 23 2026"', result.macro_table)
+        self.assertIn('__TIME__="22:21:09"', result.macro_table)
 
     def test_c11_rejects_gnu_asm_extensions(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
