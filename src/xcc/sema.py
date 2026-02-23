@@ -500,10 +500,12 @@ class Analyzer:
             self._register_type_spec(declaration.type_spec)
             self._define_enum_members(declaration.type_spec, self._file_scope)
             if declaration.alignment is not None and declaration.name is None:
-                raise SemaError("Invalid alignment specifier")
+                raise SemaError(
+                    "Invalid alignment specifier for file-scope declaration without identifier"
+                )
             if declaration.name is None:
                 if declaration.storage_class is not None or declaration.is_thread_local:
-                    raise SemaError("Expected identifier")
+                    raise SemaError("Expected identifier for file-scope object declaration")
                 return
             if declaration.name in self._function_signatures:
                 raise SemaError(f"Conflicting declaration: {declaration.name}")
@@ -518,7 +520,7 @@ class Analyzer:
             var_type = self._resolve_type(declaration.type_spec)
             var_alignment = self._alignof_type(var_type)
             if not self._is_valid_explicit_alignment(declaration.alignment, var_alignment):
-                raise SemaError("Invalid alignment specifier")
+                raise SemaError("Invalid alignment specifier for file-scope object declaration")
             self._ensure_array_size_limit(var_type)
             self._file_scope.define(
                 VarSymbol(
@@ -662,7 +664,7 @@ class Analyzer:
                     raise SemaError("Unnamed bit-field must have zero width")
             natural_alignment = self._alignof_type(resolved_member_type)
             if not self._is_valid_explicit_alignment(member.alignment, natural_alignment):
-                raise SemaError("Invalid alignment specifier")
+                raise SemaError("Invalid alignment specifier for record member declaration")
             member_types.append(
                 RecordMemberInfo(
                     member_name,
@@ -1551,10 +1553,12 @@ class Analyzer:
             self._register_type_spec(stmt.type_spec)
             self._define_enum_members(stmt.type_spec, scope)
             if stmt.alignment is not None and stmt.name is None:
-                raise SemaError("Invalid alignment specifier")
+                raise SemaError(
+                    "Invalid alignment specifier for block-scope declaration without identifier"
+                )
             if stmt.name is None:
                 if stmt.storage_class is not None or stmt.is_thread_local:
-                    raise SemaError("Expected identifier")
+                    raise SemaError("Expected identifier for block-scope object declaration")
                 return
             if self._is_invalid_atomic_type_spec(stmt.type_spec):
                 raise SemaError("Invalid object type: atomic")
@@ -1565,7 +1569,7 @@ class Analyzer:
             var_type = self._resolve_type(stmt.type_spec)
             var_alignment = self._alignof_type(var_type)
             if not self._is_valid_explicit_alignment(stmt.alignment, var_alignment):
-                raise SemaError("Invalid alignment specifier")
+                raise SemaError("Invalid alignment specifier for block-scope object declaration")
             self._ensure_array_size_limit(var_type)
             scope.define(
                 VarSymbol(
