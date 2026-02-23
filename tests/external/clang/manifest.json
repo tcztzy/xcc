@@ -681,7 +681,7 @@
       "upstream": "xcc/local/parser-type-name-digraph-rbrace-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-type-name-start-digraph-rbrace.c",
       "expect": "parse",
-      "message_contains": "Type name is missing before '}'",
+      "message_contains": "Type name is missing before '%>'",
       "line": 1,
       "column": 47,
       "sha256": "8193243da87c316bba14efabdbc2a6ce3de1f94fc71c2220078efc298e89f0bf"
