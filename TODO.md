@@ -103,6 +103,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 - Iteration: `codex/m0-conversion-01`
 - Done:
   - preprocessor `#if`/`#elif` now supports `__has_include("...")` and `__has_include(<...>)` with include-path-aware evaluation plus invalid-form diagnostics;
+  - predefined macro baseline now includes `__STDC_HOSTED__=1` alongside `__STDC__` / `__STDC_VERSION__`, with regression coverage for expansion behavior;
   - compound assignment accepts arithmetic operands for `*=`, `/=`, `+=`, `-=` and keeps integer-only checks for `%=` / bit/shift assigns;
   - pointer subtraction/relational checks now accept qualified-compatible object pointers and reject `void*` subtraction;
   - assignment/argument/equality/conditional paths now reject nested pointer qualifier promotions such as `int **` to `const int **`;
