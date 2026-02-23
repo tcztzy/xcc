@@ -1085,6 +1085,66 @@
       "line": 1,
       "column": 38,
       "sha256": "37fcb7fc5fd9b1b4269427ad736157f7a4ae560c3a5bcd6b642fe1a34259b5cc"
+    },
+    {
+      "id": "parser-xcc-param-trailing-comma-block",
+      "upstream": "xcc/local/parser-parameter-list-trailing-comma-block-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-block.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter after ','",
+      "line": 1,
+      "column": 30,
+      "sha256": "7daedd00512bea58deaf33a43fb24142c5c55dcd9a012b363b6a8a013c1fa7eb"
+    },
+    {
+      "id": "parser-xcc-param-nonterminal-ellipsis-block",
+      "upstream": "xcc/local/parser-parameter-list-nonterminal-ellipsis-block-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-nonterminal-ellipsis-block.c",
+      "expect": "parse",
+      "message_contains": "Expected ')' after ... in parameter list",
+      "line": 1,
+      "column": 35,
+      "sha256": "d79ef6b296ced22cf752823a77e6960b33cc016bf8420e68b74753b9475c2f90"
+    },
+    {
+      "id": "parser-xcc-param-trailing-comma-struct-member",
+      "upstream": "xcc/local/parser-parameter-list-trailing-comma-struct-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-struct-member.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter after ','",
+      "line": 1,
+      "column": 30,
+      "sha256": "6b58bbfcd5509ab95af52231b758f91c3cff3278a0ddda75a113dae1642f2e7f"
+    },
+    {
+      "id": "parser-xcc-param-nonterminal-ellipsis-struct-member",
+      "upstream": "xcc/local/parser-parameter-list-nonterminal-ellipsis-struct-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-nonterminal-ellipsis-struct-member.c",
+      "expect": "parse",
+      "message_contains": "Expected ')' after ... in parameter list",
+      "line": 1,
+      "column": 35,
+      "sha256": "236f03495455b91f064449f48fbf71ce295a6873c3a1f0d8bd655f84b9322b2d"
+    },
+    {
+      "id": "parser-xcc-param-trailing-comma-union-member",
+      "upstream": "xcc/local/parser-parameter-list-trailing-comma-union-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-union-member.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter after ','",
+      "line": 1,
+      "column": 29,
+      "sha256": "6147fbac6a488a8bd69437034b50eed9090fe1ca0cf01b3aa06f0aa75fca3ddb"
+    },
+    {
+      "id": "parser-xcc-param-nonterminal-ellipsis-union-member",
+      "upstream": "xcc/local/parser-parameter-list-nonterminal-ellipsis-union-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-nonterminal-ellipsis-union-member.c",
+      "expect": "parse",
+      "message_contains": "Expected ')' after ... in parameter list",
+      "line": 1,
+      "column": 34,
+      "sha256": "b81c3fb26219baf4052bc6c022df37a6fde4ace7b8a998eb1b71484a4ac2f353"
     }
   ]
 }
