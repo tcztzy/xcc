@@ -497,6 +497,34 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source('#include "inc.h"\nint from_main;\n', filename=str(main))
         self.assertEqual(result.line_map, ((str(include.resolve()), 1), (str(main), 2)))
 
+    def test_include_macro_expands_to_quoted_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "inc.h").write_text("int from_header;\n", encoding="utf-8")
+            source_path = root / "main.c"
+            source_path.write_text('#define HDR "inc.h"\n#include HDR\n', encoding="utf-8")
+            result = preprocess_source(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        self.assertEqual(result.source, "\nint from_header ;\n")
+
+    def test_include_macro_expands_to_angle_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_dir = root / "include"
+            include_dir.mkdir()
+            (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
+            options = FrontendOptions(include_dirs=(str(include_dir),))
+            result = preprocess_source(
+                "#define HDR <inc.h>\n#include HDR\n",
+                filename="main.c",
+                options=options,
+            )
+        self.assertEqual(result.source, "\nint from_include ;\n")
+
+    def test_include_macro_rejects_non_header_expansion(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#define HDR bad\n#include HDR\n", filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+
     def test_include_not_found(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source('#include "missing.h"\n', filename="main.c")

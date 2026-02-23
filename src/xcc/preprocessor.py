@@ -561,21 +561,7 @@ class _Preprocessor:
         base_dir: Path | None,
         include_stack: tuple[str, ...],
     ) -> _ProcessedText:
-        include_body = body.strip()
-        match = _INCLUDE_RE.match(include_body)
-        if match is None:
-            raise PreprocessorError(
-                "Invalid #include directive",
-                location.line,
-                1,
-                filename=location.filename,
-                code=_PP_INVALID_DIRECTIVE,
-            )
-        quoted_name = match.group("quote")
-        angle_name = match.group("angle")
-        include_name = quoted_name if quoted_name is not None else angle_name
-        assert include_name is not None
-        is_angled = angle_name is not None
+        include_name, is_angled = self._parse_include_target(body, location)
         include_path = self._resolve_include(include_name, is_angled=is_angled, base_dir=base_dir)
         if include_path is None:
             raise PreprocessorError(
@@ -618,6 +604,48 @@ class _Preprocessor:
             filename=include_path_text,
             base_dir=include_path.parent,
             include_stack=(*include_stack, include_path_text),
+        )
+
+    def _parse_include_target(self, body: str, location: _SourceLocation) -> tuple[str, bool]:
+        include_body = body.strip()
+        direct = _INCLUDE_RE.match(include_body)
+        if direct is not None:
+            quoted_name = direct.group("quote")
+            angle_name = direct.group("angle")
+            include_name = quoted_name if quoted_name is not None else angle_name
+            assert include_name is not None
+            return include_name, angle_name is not None
+
+        expanded = self._expand_macro_text(include_body, location).strip()
+        tokens = _tokenize_macro_text(expanded)
+        if tokens is None:
+            raise PreprocessorError(
+                "Invalid #include directive",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_DIRECTIVE,
+            )
+
+        if len(tokens) == 1 and tokens[0].kind == TokenKind.STRING_LITERAL:
+            literal = tokens[0].text
+            return literal[1:-1], False
+
+        if (
+            len(tokens) >= 3
+            and tokens[0].kind == TokenKind.PUNCTUATOR
+            and tokens[-1].kind == TokenKind.PUNCTUATOR
+            and tokens[0].text == "<"
+            and tokens[-1].text == ">"
+        ):
+            return "".join(token.text for token in tokens[1:-1]), True
+
+        raise PreprocessorError(
+            "Invalid #include directive",
+            location.line,
+            1,
+            filename=location.filename,
+            code=_PP_INVALID_DIRECTIVE,
         )
 
     def _resolve_include(
