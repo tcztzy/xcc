@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: made `#line` parsing macro-aware by expanding directive operands before validation, accepting decimal line macros and optional filename-string macros while preserving invalid-directive diagnostics for non-decimal expansions.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_line_directive_expands_macro_operands tests.test_preprocessor.PreprocessorTests.test_line_directive_rejects_non_decimal_macro_expansion -q` (pass).
   - Iteration 3 slice: added GNU `#include_next` support in the preprocessor so include search continues after the current include directory (including quoted-include source-dir skipping), while C11 mode keeps rejecting `#include_next` as an unknown directive.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: refined parser `_Alignas(...)` operand diagnostics by replacing the generic `Invalid alignment specifier` fallback with explicit operand-shape errors for non-object type operands (`_Alignas type operand must denote an object type`), non-ICE expressions, non-positive values, and non-power-of-two values; added focused parser regression coverage, including a dedicated non-ICE `_Alignas(n)` case.

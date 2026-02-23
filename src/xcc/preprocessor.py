@@ -11,7 +11,6 @@ from xcc.options import FrontendOptions, normalize_options
 _IDENT_RE = re.compile(r"[A-Za-z_]\w*")
 _INCLUDE_RE = re.compile(r"^(?:\"(?P<quote>[^\"\n]+)\"|<(?P<angle>[^>\n]+)>)$")
 _DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$")
-_LINE_RE = re.compile(r'^\s*(\d+)(?:\s+"([^"\n]+)")?\s*$')
 _DEFINED_PAREN_RE = re.compile(r"\bdefined\s*\(\s*([A-Za-z_]\w*)\s*\)")
 _DEFINED_BARE_RE = re.compile(r"\bdefined\s+([A-Za-z_]\w*)")
 _PP_INT_RE = re.compile(
@@ -849,7 +848,8 @@ class _Preprocessor:
         body: str,
         location: _SourceLocation,
     ) -> tuple[int, str | None]:
-        match = _LINE_RE.match(body)
+        expanded = self._expand_macro_text(body, location).strip()
+        match = re.match(r'^(\d+)(?:\s+("(?:[^"\n]|\\.)*"))?\s*$', expanded)
         if match is None:
             raise PreprocessorError(
                 "Invalid #line directive",
@@ -858,6 +858,7 @@ class _Preprocessor:
                 filename=location.filename,
                 code=_PP_INVALID_DIRECTIVE,
             )
+
         line = int(match.group(1))
         if line <= 0:
             raise PreprocessorError(
@@ -867,7 +868,21 @@ class _Preprocessor:
                 filename=location.filename,
                 code=_PP_INVALID_DIRECTIVE,
             )
-        return line, match.group(2)
+
+        filename_literal = match.group(2)
+        if filename_literal is None:
+            return line, None
+        try:
+            mapped_filename = cast(str, ast.literal_eval(filename_literal))
+        except (SyntaxError, ValueError) as error:
+            raise PreprocessorError(
+                "Invalid #line directive",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_DIRECTIVE,
+            ) from error
+        return line, mapped_filename
 
 
 def _parse_macro_parameters(text: str) -> tuple[list[str], bool] | None:

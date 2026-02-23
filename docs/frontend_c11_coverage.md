@@ -28,7 +28,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - `#include` now accepts macro-expanded header operands for both quoted and angle forms, with invalid expansion diagnostics covered.
   - GNU mode supports `#include_next` and continues include search after the current include directory (including skipping the source directory for quoted includes).
   - `#pragma once` include guards are honored so repeated and nested includes of the same header are skipped after the first expansion.
-  - `#line` mapping and diagnostic remapping.
+  - `#line` mapping and diagnostic remapping, including macro-expanded decimal/filename operands.
 - **Predefined macro coverage (current)**
   - `__STDC__`, `__STDC_HOSTED__`, `__STDC_VERSION__`, `__STDC_UTF_16__`, `__STDC_UTF_32__`, `__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`.
   - Integer width/value macros already used by tests.
