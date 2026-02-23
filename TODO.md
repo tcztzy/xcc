@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: refined parser `_Alignas(...)` operand diagnostics by replacing the generic `Invalid alignment specifier` fallback with explicit operand-shape errors for non-object type operands (`_Alignas type operand must denote an object type`), non-ICE expressions, non-positive values, and non-power-of-two values; added focused parser regression coverage, including a dedicated non-ICE `_Alignas(n)` case.
   - Iteration 3 slice: made function `_Thread_local` sema rejections declaration-context-specific by replacing the generic `Invalid declaration specifier` fallback with `Invalid declaration specifier for function declaration: '_Thread_local'` for both prototypes and definitions.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_function_thread_local_error tests.test_sema.SemaTests.test_function_definition_thread_local_error -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
