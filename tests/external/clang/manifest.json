@@ -817,6 +817,26 @@
       "sha256": "0f52c096cc0d12f03e578c296b9303633e7e1e56c7abd2586259b43b8a88df0c"
     },
     {
+      "id": "parser-xcc-expr-start-rsquare-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-rsquare-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-rsquare-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ']': expected an operand",
+      "line": 3,
+      "column": 1,
+      "sha256": "95ab6e63bdd81202bbbf712fb206ce6302485278920b55f060247ba58c3ba01e"
+    },
+    {
+      "id": "parser-xcc-expr-start-rbrace-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-rbrace-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-rbrace-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '}': expected an operand",
+      "line": 3,
+      "column": 8,
+      "sha256": "12f1d5ac24fb7f8aec983b8b5a0da80b94b8d6e060265d62cbe96f0da3f3fb3e"
+    },
+    {
       "id": "parser-xcc-expr-start-digraph-lsquare-after-static-assert",
       "upstream": "xcc/local/parser-expression-start-digraph-lsquare-after-static-assert-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-lsquare-after-static-assert.c",
