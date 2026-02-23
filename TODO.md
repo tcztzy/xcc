@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: made sema object-declaration storage-class diagnostics context-specific for synthetic `DeclStmt(..., storage_class="typedef")` paths by splitting file-scope and block-scope errors (`Invalid storage class for file-scope object declaration: 'typedef'` vs `Invalid storage class for block-scope object declaration: 'typedef'`).
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_file_scope_object_declaration_rejects_typedef_storage_class tests.test_sema.SemaTests.test_block_scope_object_declaration_rejects_typedef_storage_class tests.test_sema -q` (pass).
   - Iteration 3 slice: fixed predefined-macro fast-path gating by treating `__DATE__`/`__TIME__` as predefined names, so non-macro lines no longer get retokenized into spaced output when only builtin macros are active; updated preprocessor regressions for include/`__has_include` output-shape expectations and added a focused no-retokenization test.
   - preprocessor predefined standard macro baseline now includes `__STDC_UTF_16__=1` and `__STDC_UTF_32__=1`, with regression coverage for expansion and CLI `-U` removal behavior;
   - preprocessor `#if`/`#elif` now supports `__has_include("...")` and `__has_include(<...>)` with include-path-aware evaluation plus invalid-form diagnostics;

@@ -119,6 +119,32 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Invalid thread local storage class: 'none'")
 
+    def test_file_scope_object_declaration_rejects_typedef_storage_class(self) -> None:
+        unit = TranslationUnit(
+            declarations=[DeclStmt(TypeSpec("int"), "x", None, storage_class="typedef")],
+            functions=[],
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid storage class for file-scope object declaration: 'typedef'",
+        )
+
+    def test_block_scope_object_declaration_rejects_typedef_storage_class(self) -> None:
+        unit = parse(list(lex("int f(void){int x=0; return x;}")))
+        body = _body(unit.functions[0])
+        body.statements.insert(
+            0,
+            DeclStmt(TypeSpec("int"), "y", IntLiteral("1"), storage_class="typedef"),
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid storage class for block-scope object declaration: 'typedef'",
+        )
+
     def test_file_scope_vla_error(self) -> None:
         unit = parse(list(lex("int n; int a[n];")))
         with self.assertRaises(SemaError) as ctx:
