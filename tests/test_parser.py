@@ -3046,6 +3046,46 @@ class ParserTests(unittest.TestCase):
             "Expression cannot start with '...': expected an operand",
         )
 
+    def test_expression_start_right_paren_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); ); return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with ')': expected an operand",
+        )
+
+    def test_expression_start_right_bracket_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); ]; return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with ']': expected an operand",
+        )
+
+    def test_expression_start_right_brace_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); return };')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with '}': expected an operand",
+        )
+
+    def test_expression_start_comma_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); , return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with ',': expected an operand",
+        )
+
+    def test_expression_start_colon_reports_operand_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex('int main(void){ _Static_assert(1, "ok"); : return 0; }')))
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with ':': expected an operand",
+        )
+
     def test_parse_decl_stmt_static_assert_dispatch(self) -> None:
         parser = Parser(list(lex('_Static_assert(1, "ok");')))
         stmt = parser._parse_decl_stmt()
