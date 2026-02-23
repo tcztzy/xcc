@@ -274,6 +274,45 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source("#if 1 /* keep */\nint x;\n#endif\n", filename="if.c")
         self.assertIn("int x;", result.source)
 
+    def test_if_expression_with_has_include_quoted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "present.h").write_text("int x;\n", encoding="utf-8")
+            source_path = root / "main.c"
+            source_path.write_text(
+                "#if __has_include(\"present.h\")\nint ok;\n#endif\n",
+                encoding="utf-8",
+            )
+            source = source_path.read_text(encoding="utf-8")
+            result = preprocess_source(source, filename=str(source_path))
+        self.assertIn("int ok ;", result.source)
+
+    def test_if_expression_with_has_include_angle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include = root / "include"
+            include.mkdir()
+            (include / "present.h").write_text("int x;\n", encoding="utf-8")
+            options = FrontendOptions(include_dirs=(str(include),))
+            result = preprocess_source(
+                "#if __has_include(<present.h>)\nint ok;\n#endif\n",
+                filename="main.c",
+                options=options,
+            )
+        self.assertIn("int ok ;", result.source)
+
+    def test_if_expression_with_has_include_missing(self) -> None:
+        result = preprocess_source(
+            "#if __has_include(\"missing.h\")\nint bad;\n#endif\n",
+            filename="main.c",
+        )
+        self.assertNotIn("int bad;", result.source)
+
+    def test_if_expression_with_has_include_invalid_form(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if __has_include(MISSING)\nint x;\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+
     def test_unknown_directive_active_errors_in_c11(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#unknown\n", filename="if.c")

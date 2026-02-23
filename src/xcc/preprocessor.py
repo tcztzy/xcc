@@ -313,7 +313,11 @@ class _Preprocessor:
                 continue
             name, body = parsed
             conditional_result = self._handle_conditional(
-                name, body, directive_cursor.first_location(), stack
+                name,
+                body,
+                directive_cursor.first_location(),
+                stack,
+                base_dir=base_dir,
             )
             if conditional_result is not None:
                 for directive_index, chunk in enumerate(directive_lines):
@@ -408,12 +412,14 @@ class _Preprocessor:
         body: str,
         location: _SourceLocation,
         stack: list[_ConditionalFrame],
+        *,
+        base_dir: Path | None,
     ) -> str | None:
         if name not in {"if", "ifdef", "ifndef", "elif", "else", "endif"}:
             return None
         if name == "if":
             parent_active = _is_active(stack)
-            condition = parent_active and self._eval_condition(body, location)
+            condition = parent_active and self._eval_condition(body, location, base_dir=base_dir)
             stack.append(_ConditionalFrame(parent_active, condition, condition))
             return ""
         if name == "ifdef":
@@ -449,7 +455,7 @@ class _Preprocessor:
             if not frame.parent_active or frame.branch_taken:
                 frame.active = False
                 return ""
-            condition = self._eval_condition(body, location)
+            condition = self._eval_condition(body, location, base_dir=base_dir)
             frame.active = condition
             frame.branch_taken = frame.branch_taken or condition
             return ""
@@ -641,7 +647,13 @@ class _Preprocessor:
             )
         return macro_name
 
-    def _eval_condition(self, body: str, location: _SourceLocation) -> bool:
+    def _eval_condition(
+        self,
+        body: str,
+        location: _SourceLocation,
+        *,
+        base_dir: Path | None,
+    ) -> bool:
         def replace_defined(match: re.Match[str]) -> str:
             macro_name = match.group(1)
             return "1" if macro_name in self._macros else "0"
@@ -650,6 +662,11 @@ class _Preprocessor:
         expanded = _DEFINED_PAREN_RE.sub(replace_defined, condition)
         expanded = _DEFINED_BARE_RE.sub(replace_defined, expanded)
         try:
+            expanded = self._replace_has_include_operators(
+                expanded,
+                location,
+                base_dir=base_dir,
+            )
             expanded = self._expand_macro_text(expanded, location)
             py_expr = _translate_expr_to_python(expanded)
             return bool(_safe_eval_pp_expr(py_expr))
@@ -663,6 +680,104 @@ class _Preprocessor:
                 filename=location.filename,
                 code=_PP_INVALID_IF_EXPR,
             ) from error
+
+    def _replace_has_include_operators(
+        self,
+        expr: str,
+        location: _SourceLocation,
+        *,
+        base_dir: Path | None,
+    ) -> str:
+        # Handle __has_include(<...>) and __has_include("...") before expression tokenization.
+        marker = "__has_include"
+        chunks: list[str] = []
+        index = 0
+        while True:
+            found = expr.find(marker, index)
+            if found < 0:
+                chunks.append(expr[index:])
+                return "".join(chunks)
+            prev = expr[found - 1] if found > 0 else ""
+            next_pos = found + len(marker)
+            next_char = expr[next_pos] if next_pos < len(expr) else ""
+            if (prev and (prev.isalnum() or prev == "_")) or (
+                next_char and (next_char.isalnum() or next_char == "_")
+            ):
+                chunks.append(expr[index : found + len(marker)])
+                index = found + len(marker)
+                continue
+            chunks.append(expr[index:found])
+            cursor = next_pos
+            while cursor < len(expr) and expr[cursor].isspace():
+                cursor += 1
+            if cursor >= len(expr) or expr[cursor] != "(":
+                raise PreprocessorError(
+                    "Invalid __has_include expression",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+            cursor += 1
+            while cursor < len(expr) and expr[cursor].isspace():
+                cursor += 1
+            if cursor >= len(expr):
+                raise PreprocessorError(
+                    "Invalid __has_include expression",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+            is_angled = False
+            include_name: str
+            if expr[cursor] == '"':
+                end_quote = expr.find('"', cursor + 1)
+                if end_quote < 0:
+                    raise PreprocessorError(
+                        "Invalid __has_include expression",
+                        location.line,
+                        1,
+                        filename=location.filename,
+                        code=_PP_INVALID_IF_EXPR,
+                    )
+                include_name = expr[cursor + 1 : end_quote]
+                cursor = end_quote + 1
+            elif expr[cursor] == "<":
+                end_angle = expr.find(">", cursor + 1)
+                if end_angle < 0:
+                    raise PreprocessorError(
+                        "Invalid __has_include expression",
+                        location.line,
+                        1,
+                        filename=location.filename,
+                        code=_PP_INVALID_IF_EXPR,
+                    )
+                include_name = expr[cursor + 1 : end_angle]
+                cursor = end_angle + 1
+                is_angled = True
+            else:
+                raise PreprocessorError(
+                    "Invalid __has_include expression",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+            while cursor < len(expr) and expr[cursor].isspace():
+                cursor += 1
+            if cursor >= len(expr) or expr[cursor] != ")":
+                raise PreprocessorError(
+                    "Invalid __has_include expression",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+            cursor += 1
+            present = self._resolve_include(include_name, is_angled=is_angled, base_dir=base_dir)
+            chunks.append("1" if present is not None else "0")
+            index = cursor
 
     def _parse_line_directive(
         self,
