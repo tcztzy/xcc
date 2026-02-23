@@ -664,6 +664,18 @@ class PreprocessorTests(unittest.TestCase):
             preprocess_source("#line 0\n", filename="main.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0104")
 
+    def test_line_directive_expands_macro_operands(self) -> None:
+        result = preprocess_source(
+            '#define LINE_NO 42\n#define FILE_NAME "mapped.c"\n#line LINE_NO FILE_NAME\nint x;\n',
+            filename="main.c",
+        )
+        self.assertEqual(result.line_map[-1], ("mapped.c", 42))
+
+    def test_line_directive_rejects_non_decimal_macro_expansion(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#define LINE_NO 0x2A\n#line LINE_NO\n", filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+
     def test_predefined_standard_macros(self) -> None:
         result = preprocess_source(
             "int s = __STDC__;\n"
