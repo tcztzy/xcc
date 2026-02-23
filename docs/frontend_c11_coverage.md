@@ -18,7 +18,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - Type-name contexts now reject accidental declarator identifiers with an explicit diagnostic (`Type name cannot declare identifier '...'`) in cast and `_Atomic(type-name)` parsing.
 - **Core preprocessor behavior**
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
-  - Conditional directives, `defined`, and `__has_include` checks in `#if`/`#elif`.
+  - Conditional directives, `defined`, and `__has_include` checks in `#if`/`#elif` (including macro-expanded header operands).
   - `#if`/`#elif` boolean short-circuit evaluation for `&&`/`||` (including divide-by-zero guard cases).
   - Include search precedence is validated (`"..."` prefers source directory; `<...>` resolves via include paths), with cycle/read diagnostics.
   - Include-not-found diagnostics preserve directive delimiters (`"..."` vs `<...>`), and include expansion line-map provenance is regression-tested.
