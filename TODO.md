@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: implemented `#pragma once` tracking in the preprocessor so once-marked headers are skipped on subsequent direct and nested includes, with focused regression coverage for repeated includes and wrapper-include scenarios.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_pragma_once_skips_second_include tests.test_preprocessor.PreprocessorTests.test_pragma_once_applies_across_nested_includes tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: implemented macro-expanded `#include` target parsing so object-like macros can provide either `"..."` or `<...>` header operands (`#define HDR "inc.h"` / `#define HDR <inc.h>`), with explicit invalid-expansion diagnostics when macro results are not header names.
   - Iteration 3 slice: expanded preprocessor include search + `__has_include` regression coverage for path precedence and nested-include base-dir behavior by adding focused tests for include-vs-system precedence (`#include <...>` and `#include "..."` fallback ordering) plus a nested-header `__has_include("local.h")` case that resolves relative to the including header directory.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
