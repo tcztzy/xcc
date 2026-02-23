@@ -272,8 +272,8 @@ class PreprocessorTests(unittest.TestCase):
             "#if 0 && (1 / 0)\nint bad;\n#elif 1 || (1 / 0)\nint ok;\n#endif\n",
             filename="if.c",
         )
-        self.assertNotIn("int bad ;", result.source)
-        self.assertIn("int ok ;", result.source)
+        self.assertNotIn("int bad;", result.source)
+        self.assertIn("int ok;", result.source)
 
     def test_if_expression_with_trailing_comment(self) -> None:
         result = preprocess_source("#if 1 // keep\nint x;\n#endif\n", filename="if.c")
@@ -294,7 +294,7 @@ class PreprocessorTests(unittest.TestCase):
             )
             source = source_path.read_text(encoding="utf-8")
             result = preprocess_source(source, filename=str(source_path))
-        self.assertIn("int ok ;", result.source)
+        self.assertIn("int ok;", result.source)
 
     def test_if_expression_with_has_include_angle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -308,7 +308,7 @@ class PreprocessorTests(unittest.TestCase):
                 filename="main.c",
                 options=options,
             )
-        self.assertIn("int ok ;", result.source)
+        self.assertIn("int ok;", result.source)
 
     def test_if_expression_with_has_include_missing(self) -> None:
         result = preprocess_source(
@@ -396,7 +396,7 @@ class PreprocessorTests(unittest.TestCase):
             main.write_text('#include "inc.h"\n', encoding="utf-8")
             options = FrontendOptions(include_dirs=(str(include_dir),))
             result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main), options=options)
-        self.assertEqual(result.source, "int from_source ;\n")
+        self.assertEqual(result.source, "int from_source;\n")
 
     def test_include_angle_skips_source_directory_and_uses_include_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -410,7 +410,7 @@ class PreprocessorTests(unittest.TestCase):
             main = source_dir / "main.c"
             options = FrontendOptions(include_dirs=(str(include_dir),))
             result = preprocess_source("#include <inc.h>\n", filename=str(main), options=options)
-        self.assertEqual(result.source, "int from_include ;\n")
+        self.assertEqual(result.source, "int from_include;\n")
 
     def test_include_expansion_preserves_line_map_for_header_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -512,6 +512,10 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn('const char * t = "22:21:09" ;', result.source)
         self.assertIn('__DATE__="Feb 23 2026"', result.macro_table)
         self.assertIn('__TIME__="22:21:09"', result.macro_table)
+
+    def test_predefined_date_and_time_do_not_force_retokenization(self) -> None:
+        result = preprocess_source("int keep;\n", filename="main.c")
+        self.assertEqual(result.source, "int keep;\n")
 
     def test_c11_rejects_gnu_asm_extensions(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:

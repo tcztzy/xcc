@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: fixed predefined-macro fast-path gating by treating `__DATE__`/`__TIME__` as predefined names, so non-macro lines no longer get retokenized into spaced output when only builtin macros are active; updated preprocessor regressions for include/`__has_include` output-shape expectations and added a focused no-retokenization test.
   - preprocessor predefined standard macro baseline now includes `__STDC_UTF_16__=1` and `__STDC_UTF_32__=1`, with regression coverage for expansion and CLI `-U` removal behavior;
   - preprocessor `#if`/`#elif` now supports `__has_include("...")` and `__has_include(<...>)` with include-path-aware evaluation plus invalid-form diagnostics;
   - predefined macro baseline now includes `__STDC_HOSTED__=1` alongside `__STDC__` / `__STDC_VERSION__`, with regression coverage for expansion behavior;

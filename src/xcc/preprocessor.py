@@ -47,8 +47,11 @@ _PREDEFINED_MACROS = (
     "__FILE__=0",
     "__LINE__=0",
 )
-_PREDEFINED_MACRO_NAMES = frozenset(item.split("=", 1)[0] for item in _PREDEFINED_MACROS)
 _PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__LINE__"})
+_PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__"})
+_PREDEFINED_MACRO_NAMES = frozenset(item.split("=", 1)[0] for item in _PREDEFINED_MACROS) | frozenset(
+    _PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS
+)
 
 
 @dataclass(frozen=True)
