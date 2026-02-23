@@ -117,7 +117,19 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int f(void){_Thread_local int x; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid thread local storage class: 'none'")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid storage class for block-scope thread-local object declaration: 'none'",
+        )
+
+    def test_file_scope_thread_local_rejects_invalid_storage_class(self) -> None:
+        unit = parse(list(lex("_Thread_local auto int x;")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid storage class for file-scope thread-local object declaration: 'auto'",
+        )
 
     def test_file_scope_object_declaration_rejects_typedef_storage_class(self) -> None:
         unit = TranslationUnit(

@@ -480,13 +480,23 @@ class Analyzer:
             self._file_scope.define_typedef(declaration.name, typedef_type)
             return
         if isinstance(declaration, DeclStmt):
+            if declaration.is_thread_local and declaration.storage_class not in {None, "static", "extern"}:
+                storage_class = declaration.storage_class if declaration.storage_class is not None else "none"
+                raise SemaError(
+                    "Invalid storage class for file-scope thread-local object declaration: "
+                    f"'{storage_class}'"
+                )
             if declaration.storage_class in {"auto", "register"}:
-                storage_class = declaration.storage_class if declaration.storage_class is not None else "<none>"
+                storage_class = declaration.storage_class if declaration.storage_class is not None else "none"
                 raise SemaError(
                     f"Invalid storage class for file-scope declaration: '{storage_class}'"
                 )
             if declaration.storage_class == "typedef":
-                raise SemaError("Invalid storage class for file-scope object declaration: 'typedef'")
+                storage_class = declaration.storage_class if declaration.storage_class is not None else "none"
+                raise SemaError(
+                    "Invalid storage class for file-scope object declaration: "
+                    f"'{storage_class}'"
+                )
             self._register_type_spec(declaration.type_spec)
             self._define_enum_members(declaration.type_spec, self._file_scope)
             if declaration.alignment is not None and declaration.name is None:
@@ -1527,10 +1537,17 @@ class Analyzer:
             return
         if isinstance(stmt, DeclStmt):
             if stmt.storage_class == "typedef":
-                raise SemaError("Invalid storage class for block-scope object declaration: 'typedef'")
+                storage_class = stmt.storage_class if stmt.storage_class is not None else "none"
+                raise SemaError(
+                    "Invalid storage class for block-scope object declaration: "
+                    f"'{storage_class}'"
+                )
             if stmt.is_thread_local and stmt.storage_class not in {"static", "extern"}:
                 storage_class = stmt.storage_class if stmt.storage_class is not None else "none"
-                raise SemaError(f"Invalid thread local storage class: '{storage_class}'")
+                raise SemaError(
+                    "Invalid storage class for block-scope thread-local object declaration: "
+                    f"'{storage_class}'"
+                )
             self._register_type_spec(stmt.type_spec)
             self._define_enum_members(stmt.type_spec, scope)
             if stmt.alignment is not None and stmt.name is None:
