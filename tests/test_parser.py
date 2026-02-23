@@ -1129,32 +1129,32 @@ class ParserTests(unittest.TestCase):
     def test_alignas_rejects_function_definition(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("_Alignas(16) int f(void){return 1;}")))
-        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier for function declaration")
 
     def test_alignas_rejects_function_declaration(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("_Alignas(16) int f(void);")))
-        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier for function declaration")
 
     def test_alignas_rejects_typedef_declaration(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("typedef _Alignas(16) int I;")))
-        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier for typedef declaration")
 
     def test_alignas_rejects_parameter_declaration(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int f(_Alignas(8) int x){return x;}")))
-        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier for parameter")
 
     def test_alignas_rejects_file_scope_tag_only_declaration(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("_Alignas(16) struct S; int main(void){return 0;}")))
-        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier for tag-only declaration")
 
     def test_alignas_rejects_block_scope_tag_only_declaration(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){_Alignas(16) struct S; return 0;}")))
-        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier for tag-only declaration")
 
     def test_alignas_rejects_named_type_name(self) -> None:
         with self.assertRaises(ParserError):
@@ -1210,12 +1210,12 @@ class ParserTests(unittest.TestCase):
     def test_alignas_rejects_member_tag_only_declaration(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("struct S {_Alignas(16) struct T;};")))
-        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier for record member declaration")
 
     def test_alignas_rejects_member_function_declaration(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("struct S {_Alignas(16) int f(void);};")))
-        self.assertEqual(ctx.exception.message, "Invalid alignment specifier")
+        self.assertEqual(ctx.exception.message, "Invalid alignment specifier for record member declaration")
 
     def test_record_member_rejects_typedef_specifier(self) -> None:
         with self.assertRaises(ParserError) as ctx:
