@@ -1846,6 +1846,14 @@ class ParserTests(unittest.TestCase):
             "Type name cannot start with '->': expected a type specifier",
         )
 
+    def test_unsupported_type_name_punctuator_reports_ellipsis_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, ...: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot start with '...': expected a type specifier",
+        )
+
     def test_unsupported_type_name_punctuator_reports_comma_message(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){ int x = 0; return _Generic(x, ,: 1, default: 0); }")))
