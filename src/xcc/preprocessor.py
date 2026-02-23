@@ -1,6 +1,7 @@
 import ast
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -231,10 +232,21 @@ def preprocess_source(
 class _Preprocessor:
     def __init__(self, options: FrontendOptions) -> None:
         self._options = options
+        translation_start = datetime.now()
+        self._date_literal = _quote_string_literal(_format_date_macro(translation_start))
+        self._time_literal = _quote_string_literal(translation_start.strftime("%H:%M:%S"))
         self._macros: dict[str, _Macro] = {}
         for define in _PREDEFINED_MACROS:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
+        self._macros["__DATE__"] = _Macro(
+            "__DATE__",
+            (_MacroToken(TokenKind.STRING_LITERAL, self._date_literal),),
+        )
+        self._macros["__TIME__"] = _Macro(
+            "__TIME__",
+            (_MacroToken(TokenKind.STRING_LITERAL, self._time_literal),),
+        )
         self.include_trace: list[str] = []
         for define in options.defines:
             macro = self._parse_cli_define(define)
@@ -1398,6 +1410,24 @@ def _strip_gnu_asm_extensions(source: str) -> str:
 
 def _quote_string_literal(text: str) -> str:
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _format_date_macro(now: datetime) -> str:
+    month = (
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    )[now.month - 1]
+    return f"{month} {now.day:2d} {now.year:04d}"
 
 
 def _reject_gnu_asm_extensions(
