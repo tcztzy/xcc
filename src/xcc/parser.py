@@ -2247,6 +2247,11 @@ class Parser:
                 f"Expression cannot start with '{token.lexeme}': expected an operand",
                 token,
             )
+        if token.kind == TokenKind.KEYWORD:
+            raise ParserError(
+                f"Expression cannot start with keyword '{token.lexeme}': expected an operand",
+                token,
+            )
         raise ParserError("Unexpected token", token)
 
     def _parse_type_name(self) -> TypeSpec:
