@@ -17,6 +17,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
 - **Core preprocessor behavior**
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
   - Conditional directives, `defined`, and `__has_include` checks in `#if`/`#elif`.
+  - `#if`/`#elif` boolean short-circuit evaluation for `&&`/`||` (including divide-by-zero guard cases).
   - Include search and cycle/read diagnostics.
   - `#line` mapping and diagnostic remapping.
 - **Predefined macro coverage (current)**

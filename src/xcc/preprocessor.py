@@ -1319,11 +1319,16 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
             return result.normalize()
         raise ValueError(f"Unsupported preprocessor unary operator: {type(node.op).__name__}")
     if isinstance(node, ast.BoolOp):
-        values = [_eval_pp_node(value).value for value in node.values]
         if isinstance(node.op, ast.And):
-            return _PPValue(int(all(values)))
+            for value in node.values:
+                if _eval_pp_node(value).value == 0:
+                    return _PPValue(0)
+            return _PPValue(1)
         if isinstance(node.op, ast.Or):
-            return _PPValue(int(any(values)))
+            for value in node.values:
+                if _eval_pp_node(value).value != 0:
+                    return _PPValue(1)
+            return _PPValue(0)
         raise ValueError(f"Unsupported preprocessor boolean operator: {type(node.op).__name__}")
     if isinstance(node, ast.BinOp):
         left = _eval_pp_node(node.left)
@@ -1411,11 +1416,16 @@ def _eval_node(node: ast.AST) -> int:
             return ~value
         raise ValueError(f"Unsupported integer-expression unary operator: {type(node.op).__name__}")
     if isinstance(node, ast.BoolOp):
-        values = [_eval_node(value) for value in node.values]
         if isinstance(node.op, ast.And):
-            return int(all(values))
+            for value in node.values:
+                if _eval_node(value) == 0:
+                    return 0
+            return 1
         if isinstance(node.op, ast.Or):
-            return int(any(values))
+            for value in node.values:
+                if _eval_node(value) != 0:
+                    return 1
+            return 0
         raise ValueError(
             f"Unsupported integer-expression boolean operator: {type(node.op).__name__}"
         )
