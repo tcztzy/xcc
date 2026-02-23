@@ -360,12 +360,21 @@ class _Preprocessor:
                 logical_cursor.advance(len(directive_lines))
                 line_index += 1
                 continue
-            if name == "include":
+            if name in {"include", "include_next"}:
+                if name == "include_next" and self._options.std == "c11":
+                    raise PreprocessorError(
+                        "Unknown preprocessor directive: #include_next",
+                        directive_cursor.first_location().line,
+                        1,
+                        filename=directive_cursor.first_location().filename,
+                        code=_PP_UNKNOWN_DIRECTIVE,
+                    )
                 include_processed = self._handle_include(
                     body,
                     directive_cursor.first_location(),
                     base_dir=base_dir,
                     include_stack=include_stack,
+                    include_next=name == "include_next",
                 )
                 out.extend_processed(include_processed)
                 for directive_index, chunk in enumerate(directive_lines[1:], start=1):
@@ -565,9 +574,15 @@ class _Preprocessor:
         *,
         base_dir: Path | None,
         include_stack: tuple[str, ...],
+        include_next: bool = False,
     ) -> _ProcessedText:
         include_name, is_angled = self._parse_include_target(body, location)
-        include_path = self._resolve_include(include_name, is_angled=is_angled, base_dir=base_dir)
+        include_path = self._resolve_include(
+            include_name,
+            is_angled=is_angled,
+            base_dir=base_dir,
+            include_next_from=base_dir if include_next else None,
+        )
         if include_path is None:
             raise PreprocessorError(
                 f"Include not found: {_format_include_reference(include_name, is_angled)}",
@@ -668,13 +683,23 @@ class _Preprocessor:
         *,
         is_angled: bool,
         base_dir: Path | None,
+        include_next_from: Path | None = None,
     ) -> Path | None:
         search_roots: list[Path] = []
         if not is_angled and base_dir is not None:
             search_roots.append(base_dir)
         search_roots.extend(Path(path) for path in self._options.include_dirs)
         search_roots.extend(Path(path) for path in self._options.system_include_dirs)
-        for root in search_roots:
+
+        start_index = 0
+        if include_next_from is not None:
+            include_next_from_resolved = include_next_from.resolve()
+            for index, root in enumerate(search_roots):
+                if root.resolve() == include_next_from_resolved:
+                    start_index = index + 1
+                    break
+
+        for root in search_roots[start_index:]:
             candidate = root / include_name
             if candidate.is_file():
                 return candidate.resolve()

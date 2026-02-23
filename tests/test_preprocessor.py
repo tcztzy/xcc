@@ -536,6 +536,42 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source("#include <inc.h>\n", filename=str(main), options=options)
         self.assertEqual(result.source, "int from_include;\n")
 
+    def test_include_next_in_gnu_mode_uses_following_include_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first_dir = root / "first"
+            second_dir = root / "second"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            (first_dir / "inc.h").write_text("#include_next <inc.h>\nint from_first;\n", encoding="utf-8")
+            (second_dir / "inc.h").write_text("int from_second;\n", encoding="utf-8")
+            options = FrontendOptions(
+                std="gnu11",
+                include_dirs=(str(first_dir), str(second_dir)),
+            )
+            result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_second;\nint from_first;\n")
+
+    def test_include_next_in_gnu_mode_skips_source_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            include_dir = root / "include"
+            source_dir.mkdir()
+            include_dir.mkdir()
+            (source_dir / "inc.h").write_text('#include_next "inc.h"\nint from_source;\n', encoding="utf-8")
+            (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
+            main = source_dir / "main.c"
+            options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),))
+            result = preprocess_source('#include "inc.h"\n', filename=str(main), options=options)
+        self.assertEqual(result.source, "int from_include;\nint from_source;\n")
+
+    def test_include_next_is_rejected_in_c11_mode(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#include_next <inc.h>\n", filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0101")
+        self.assertEqual(ctx.exception.args[0], "Unknown preprocessor directive: #include_next at main.c:1:1")
+
     def test_include_expansion_preserves_line_map_for_header_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
