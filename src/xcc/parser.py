@@ -2216,24 +2216,29 @@ class Parser:
             expr = self._parse_expression()
             self._expect_punct(")")
             return expr
-        if self._check_punct("..."):
-            raise ParserError("Expression cannot start with '...': expected an operand", token)
-        if self._check_punct(")"):
-            raise ParserError("Expression cannot start with ')': expected an operand", token)
-        if self._check_punct("]"):
-            raise ParserError("Expression cannot start with ']': expected an operand", token)
-        if self._check_punct("}"):
-            raise ParserError("Expression cannot start with '}': expected an operand", token)
-        if self._check_punct(","):
-            raise ParserError("Expression cannot start with ',': expected an operand", token)
-        if self._check_punct(":"):
-            raise ParserError("Expression cannot start with ':': expected an operand", token)
-        if self._check_punct("?"):
-            raise ParserError("Expression cannot start with '?': expected an operand", token)
-        if self._check_punct(";"):
-            raise ParserError("Expression cannot start with ';': expected an operand", token)
-        if self._check_punct("{"):
-            raise ParserError("Expression cannot start with '{': expected an operand", token)
+        invalid_expression_starts = {
+            "...",
+            ")",
+            "]",
+            "}",
+            ",",
+            ":",
+            "?",
+            ";",
+            "{",
+            "##",
+            "%:",
+            "%:%:",
+            "<:",
+            ":>",
+            "<%",
+            "%>",
+        }
+        if token.kind == TokenKind.PUNCTUATOR and token.lexeme in invalid_expression_starts:
+            raise ParserError(
+                f"Expression cannot start with '{token.lexeme}': expected an operand",
+                token,
+            )
         raise ParserError("Unexpected token", token)
 
     def _parse_type_name(self) -> TypeSpec:
