@@ -1145,6 +1145,66 @@
       "line": 1,
       "column": 34,
       "sha256": "b81c3fb26219baf4052bc6c022df37a6fde4ace7b8a998eb1b71484a4ac2f353"
+    },
+    {
+      "id": "parser-xcc-param-trailing-comma-fnptr-block",
+      "upstream": "xcc/local/parser-function-pointer-parameter-list-trailing-comma-block-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-fnptr-block.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter after ','",
+      "line": 1,
+      "column": 25,
+      "sha256": "5a7c0a926ffea929cf0f04fd80c9b37bcc2172d6299e286a2c6e9c55df6b8488"
+    },
+    {
+      "id": "parser-xcc-param-nonterminal-ellipsis-fnptr-block",
+      "upstream": "xcc/local/parser-function-pointer-parameter-list-nonterminal-ellipsis-block-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-nonterminal-ellipsis-fnptr-block.c",
+      "expect": "parse",
+      "message_contains": "Expected ')' after ... in parameter list",
+      "line": 1,
+      "column": 30,
+      "sha256": "3f7ae1ae99774bc37fae9de4d9c11ad065e32c2d40f582cc7fd28971ebd65dd7"
+    },
+    {
+      "id": "parser-xcc-param-trailing-comma-fnptr-struct-member",
+      "upstream": "xcc/local/parser-function-pointer-parameter-list-trailing-comma-struct-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-fnptr-struct-member.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter after ','",
+      "line": 1,
+      "column": 25,
+      "sha256": "8174ca3de8103e0a24ba6df6b12f1801e11fdb871d37fa442eb110298013c47a"
+    },
+    {
+      "id": "parser-xcc-param-nonterminal-ellipsis-fnptr-struct-member",
+      "upstream": "xcc/local/parser-function-pointer-parameter-list-nonterminal-ellipsis-struct-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-nonterminal-ellipsis-fnptr-struct-member.c",
+      "expect": "parse",
+      "message_contains": "Expected ')' after ... in parameter list",
+      "line": 1,
+      "column": 30,
+      "sha256": "7b8c19f1ba024e45f4bf0f8b2c8a1330e823664586fa169ae0eb53f0470ca16c"
+    },
+    {
+      "id": "parser-xcc-param-trailing-comma-fnptr-union-member",
+      "upstream": "xcc/local/parser-function-pointer-parameter-list-trailing-comma-union-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-fnptr-union-member.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter after ','",
+      "line": 1,
+      "column": 24,
+      "sha256": "d02e8ddcb080f4d1a26c28bf711819d2f229a60c2d6bf8a081b3b8ea96ba4aab"
+    },
+    {
+      "id": "parser-xcc-param-nonterminal-ellipsis-fnptr-union-member",
+      "upstream": "xcc/local/parser-function-pointer-parameter-list-nonterminal-ellipsis-union-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-nonterminal-ellipsis-fnptr-union-member.c",
+      "expect": "parse",
+      "message_contains": "Expected ')' after ... in parameter list",
+      "line": 1,
+      "column": 29,
+      "sha256": "16c7bc14ccca44c50acdc164e4a5db0cb1ae07cd01251cd23579255e1434b0bb"
     }
   ]
 }
