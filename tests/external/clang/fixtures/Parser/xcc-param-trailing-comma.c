@@ -1,0 +1,1 @@
+int logf(int level,);

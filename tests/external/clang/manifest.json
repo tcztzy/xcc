@@ -1045,6 +1045,46 @@
       "line": 1,
       "column": 31,
       "sha256": "daa5a75a3c8f53adcb093599583bd692698e391f79d7e6c692d0c74b3c6be7c3"
+    },
+    {
+      "id": "parser-xcc-param-trailing-comma",
+      "upstream": "xcc/local/parser-parameter-list-trailing-comma-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter after ','",
+      "line": 1,
+      "column": 22,
+      "sha256": "762213419428d57bcbad0c2e147b9a6ba8f5421896107e82baab5844f181f171"
+    },
+    {
+      "id": "parser-xcc-param-trailing-comma-fnptr-typedef",
+      "upstream": "xcc/local/parser-function-suffix-parameter-list-trailing-comma-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-fnptr-typedef.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter after ','",
+      "line": 1,
+      "column": 32,
+      "sha256": "7f1ab7fea1041af59b071903b62b6ee22287f291b5c68f8517cd2854ff753301"
+    },
+    {
+      "id": "parser-xcc-param-nonterminal-ellipsis",
+      "upstream": "xcc/local/parser-parameter-list-nonterminal-ellipsis-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-nonterminal-ellipsis.c",
+      "expect": "parse",
+      "message_contains": "Expected ')' after ... in parameter list",
+      "line": 1,
+      "column": 28,
+      "sha256": "c12493db332d53cf6a2fb2ecc8a2a1524cca7d08c44db9b7a68786008b147f4f"
+    },
+    {
+      "id": "parser-xcc-param-nonterminal-ellipsis-fnptr-typedef",
+      "upstream": "xcc/local/parser-function-suffix-parameter-list-nonterminal-ellipsis-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-nonterminal-ellipsis-fnptr-typedef.c",
+      "expect": "parse",
+      "message_contains": "Expected ')' after ... in parameter list",
+      "line": 1,
+      "column": 38,
+      "sha256": "37fcb7fc5fd9b1b4269427ad736157f7a4ae560c3a5bcd6b642fe1a34259b5cc"
     }
   ]
 }
