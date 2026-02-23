@@ -817,6 +817,66 @@
       "sha256": "0f52c096cc0d12f03e578c296b9303633e7e1e56c7abd2586259b43b8a88df0c"
     },
     {
+      "id": "parser-xcc-expr-start-rparen-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-rparen-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-rparen-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ')': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "ff05bdaf73b5ee01653964769b17d53f2c6c4c1604289801cb8c0a3ccfc93e68"
+    },
+    {
+      "id": "parser-xcc-expr-start-comma-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-comma-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-comma-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ',': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "3f3322a13449d2d044a6e79944497bfe388010429ac1acb9b15cc63a83f8d4da"
+    },
+    {
+      "id": "parser-xcc-expr-start-colon-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-colon-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-colon-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ':': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "276c51a4ba4c53643c0c24c77d2af38e970600171fa9f7aa8b53a8e2cb08217b"
+    },
+    {
+      "id": "parser-xcc-expr-start-question-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-question-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-question-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '?': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "9be0ae1d9f10bd0a613eedaa4e541f0d4741da2e6bca1bc081c59b86d934f19d"
+    },
+    {
+      "id": "parser-xcc-expr-start-semicolon-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-semicolon-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-semicolon-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ';': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "ba0fc0a33b2b8704a813bf39283ebd7b9fc24c547add8074e576b8318ae07085"
+    },
+    {
+      "id": "parser-xcc-expr-start-lbrace-after-static-assert",
+      "upstream": "xcc/local/parser-expression-start-lbrace-after-static-assert-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-lbrace-after-static-assert.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '{': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "9805483c06513a5e3489584e2171e99e1662125d2a13c1d1c4d7b8aee2e2544b"
+    },
+    {
       "id": "parser-xcc-expr-start-rsquare-after-static-assert",
       "upstream": "xcc/local/parser-expression-start-rsquare-after-static-assert-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-rsquare-after-static-assert.c",
