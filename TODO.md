@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: extended `__has_include(...)` condition handling to accept macro-expanded header operands (`#define HDR "x.h"` / `#define HDR <x.h>`), while preserving `Invalid __has_include expression` diagnostics for invalid expansions.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_macro_expands_to_quoted_header tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_macro_expands_to_angle_header tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_macro_expands_to_invalid_header -q` (pass).
   - Iteration 3 slice: implemented `#pragma once` tracking in the preprocessor so once-marked headers are skipped on subsequent direct and nested includes, with focused regression coverage for repeated includes and wrapper-include scenarios.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_pragma_once_skips_second_include tests.test_preprocessor.PreprocessorTests.test_pragma_once_applies_across_nested_includes tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: implemented macro-expanded `#include` target parsing so object-like macros can provide either `"..."` or `<...>` header operands (`#define HDR "inc.h"` / `#define HDR <inc.h>`), with explicit invalid-expansion diagnostics when macro results are not header names.

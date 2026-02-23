@@ -338,6 +338,34 @@ class PreprocessorTests(unittest.TestCase):
         )
         self.assertNotIn("int bad;", result.source)
 
+    def test_if_expression_with_has_include_macro_expands_to_quoted_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "present.h").write_text("int x;\n", encoding="utf-8")
+            source = '#define HDR "present.h"\n#if __has_include(HDR)\nint ok;\n#endif\n'
+            result = preprocess_source(source, filename=str(root / "main.c"))
+        self.assertIn("int ok ;", result.source)
+
+    def test_if_expression_with_has_include_macro_expands_to_angle_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include = root / "include"
+            include.mkdir()
+            (include / "present.h").write_text("int x;\n", encoding="utf-8")
+            source = "#define HDR <present.h>\n#if __has_include(HDR)\nint ok;\n#endif\n"
+            result = preprocess_source(
+                source,
+                filename="main.c",
+                options=FrontendOptions(include_dirs=(str(include),)),
+            )
+        self.assertIn("int ok ;", result.source)
+
+    def test_if_expression_with_has_include_macro_expands_to_invalid_header(self) -> None:
+        source = "#define HDR present.h\n#if __has_include(HDR)\nint bad;\n#endif\n"
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source(source, filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+
     def test_if_expression_with_has_include_invalid_form(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#if __has_include(MISSING)\nint x;\n#endif\n", filename="if.c")

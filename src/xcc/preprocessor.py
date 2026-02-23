@@ -615,8 +615,14 @@ class _Preprocessor:
         )
 
     def _parse_include_target(self, body: str, location: _SourceLocation) -> tuple[str, bool]:
-        include_body = body.strip()
-        direct = _INCLUDE_RE.match(include_body)
+        return self._parse_header_name_operand(body.strip(), location)
+
+    def _parse_header_name_operand(
+        self,
+        operand: str,
+        location: _SourceLocation,
+    ) -> tuple[str, bool]:
+        direct = _INCLUDE_RE.match(operand)
         if direct is not None:
             quoted_name = direct.group("quote")
             angle_name = direct.group("angle")
@@ -624,7 +630,7 @@ class _Preprocessor:
             assert include_name is not None
             return include_name, angle_name is not None
 
-        expanded = self._expand_macro_text(include_body, location).strip()
+        expanded = self._expand_macro_text(operand, location).strip()
         tokens = _tokenize_macro_text(expanded)
         if tokens is None:
             raise PreprocessorError(
@@ -766,10 +772,8 @@ class _Preprocessor:
                     filename=location.filename,
                     code=_PP_INVALID_IF_EXPR,
                 )
-            cursor += 1
-            while cursor < len(expr) and expr[cursor].isspace():
-                cursor += 1
-            if cursor >= len(expr):
+            close_paren = self._find_matching_has_include_close(expr, cursor)
+            if close_paren < 0:
                 raise PreprocessorError(
                     "Invalid __has_include expression",
                     location.line,
@@ -777,34 +781,8 @@ class _Preprocessor:
                     filename=location.filename,
                     code=_PP_INVALID_IF_EXPR,
                 )
-            is_angled = False
-            include_name: str
-            if expr[cursor] == '"':
-                end_quote = expr.find('"', cursor + 1)
-                if end_quote < 0:
-                    raise PreprocessorError(
-                        "Invalid __has_include expression",
-                        location.line,
-                        1,
-                        filename=location.filename,
-                        code=_PP_INVALID_IF_EXPR,
-                    )
-                include_name = expr[cursor + 1 : end_quote]
-                cursor = end_quote + 1
-            elif expr[cursor] == "<":
-                end_angle = expr.find(">", cursor + 1)
-                if end_angle < 0:
-                    raise PreprocessorError(
-                        "Invalid __has_include expression",
-                        location.line,
-                        1,
-                        filename=location.filename,
-                        code=_PP_INVALID_IF_EXPR,
-                    )
-                include_name = expr[cursor + 1 : end_angle]
-                cursor = end_angle + 1
-                is_angled = True
-            else:
+            operand = expr[cursor + 1 : close_paren].strip()
+            if not operand:
                 raise PreprocessorError(
                     "Invalid __has_include expression",
                     location.line,
@@ -812,20 +790,34 @@ class _Preprocessor:
                     filename=location.filename,
                     code=_PP_INVALID_IF_EXPR,
                 )
-            while cursor < len(expr) and expr[cursor].isspace():
-                cursor += 1
-            if cursor >= len(expr) or expr[cursor] != ")":
+            try:
+                include_name, is_angled = self._parse_header_name_operand(operand, location)
+            except PreprocessorError as error:
                 raise PreprocessorError(
                     "Invalid __has_include expression",
                     location.line,
                     1,
                     filename=location.filename,
                     code=_PP_INVALID_IF_EXPR,
-                )
-            cursor += 1
+                ) from error
+            cursor = close_paren + 1
             present = self._resolve_include(include_name, is_angled=is_angled, base_dir=base_dir)
             chunks.append("1" if present is not None else "0")
             index = cursor
+
+    def _find_matching_has_include_close(self, expr: str, open_paren: int) -> int:
+        depth = 0
+        index = open_paren
+        while index < len(expr):
+            char = expr[index]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    return index
+            index += 1
+        return -1
 
     def _parse_line_directive(
         self,
