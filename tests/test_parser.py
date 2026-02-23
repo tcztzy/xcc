@@ -1689,6 +1689,14 @@ class ParserTests(unittest.TestCase):
             "Type name cannot declare identifier 'value'",
         )
 
+    def test_type_name_cannot_declare_identifier_in_generic_association(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int x = 0; return _Generic(x, int value: 1, default: 0); }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot declare identifier 'value'",
+        )
+
     def test_unsupported_type_name_punctuator_reports_left_parenthesis_message(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){ int x = 0; return _Generic(x, (: 1, default: 0); }")))
