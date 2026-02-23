@@ -349,6 +349,15 @@ class Parser:
         token = self._current()
         return token.kind == TokenKind.KEYWORD and token.lexeme in EXTERNAL_STATEMENT_KEYWORDS
 
+    def _expected_identifier_error(self, token: Token | None = None) -> ParserError:
+        culprit = self._current() if token is None else token
+        if culprit.kind == TokenKind.EOF:
+            return ParserError("Expected identifier before end of input", culprit)
+        lexeme = culprit.lexeme
+        if lexeme is None:
+            return ParserError("Expected identifier", culprit)
+        return ParserError(f"Expected identifier before '{lexeme}'", culprit)
+
     def _looks_like_function(self) -> bool:
         saved_index = self._index
         try:
@@ -962,7 +971,7 @@ class Parser:
                     "Invalid alignment specifier",
                     decl_specs.alignment_token or self._current(),
                 )
-            raise ParserError("Expected identifier", self._current())
+            raise self._expected_identifier_error()
         members: list[RecordMemberDecl] = []
         while True:
             name, declarator_ops = self._parse_declarator(allow_abstract=True)
@@ -971,7 +980,7 @@ class Parser:
                 self._advance()
                 bit_width_expr = self._parse_conditional()
             if name is None and bit_width_expr is None:
-                raise ParserError("Expected identifier", self._current())
+                raise self._expected_identifier_error()
             member_type = self._build_declarator_type(base_type, declarator_ops)
             if decl_specs.alignment is not None and self._is_function_object_type(member_type):
                 raise ParserError(
@@ -1235,7 +1244,7 @@ class Parser:
                 allow=False,
             )
             if is_typedef or not self._is_tag_or_definition_decl(base_type):
-                raise ParserError("Expected identifier", self._current())
+                raise self._expected_identifier_error()
             self._expect_punct(";")
             self._define_enum_member_names(base_type)
             return DeclStmt(
@@ -1267,7 +1276,7 @@ class Parser:
                     allow_vla=True,
                 )
             if name is None:
-                raise ParserError("Expected identifier", self._current())
+                raise self._expected_identifier_error()
             decl_type = self._build_declarator_type(base_type, declarator_ops)
             if is_typedef:
                 if self._check_punct("="):
@@ -1663,7 +1672,7 @@ class Parser:
             name = None
             declarator_ops = ()
         else:
-            raise ParserError("Expected identifier", self._current())
+            raise self._expected_identifier_error()
         while True:
             if allow_gnu_attributes and self._skip_gnu_attributes():
                 continue
@@ -1889,7 +1898,7 @@ class Parser:
             name = None
             ops = ()
         else:
-            raise ParserError("Expected identifier", self._current())
+            raise self._expected_identifier_error()
         while True:
             if self._check_punct("["):
                 self._advance()

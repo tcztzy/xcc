@@ -1225,7 +1225,17 @@ class ParserTests(unittest.TestCase):
     def test_record_member_rejects_missing_declarator(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("struct S { int; };")))
-        self.assertEqual(ctx.exception.message, "Expected identifier")
+        self.assertEqual(ctx.exception.message, "Expected identifier before ';'")
+
+    def test_file_scope_declaration_rejects_missing_declarator_with_token(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int;")))
+        self.assertEqual(ctx.exception.message, "Expected identifier before ';'")
+
+    def test_declarator_rejects_missing_identifier_before_comma(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ int ,x; }")))
+        self.assertEqual(ctx.exception.message, "Expected identifier before ','")
 
     def test_unsupported_type_uses_declaration_context_diagnostic(self) -> None:
         with self.assertRaises(ParserError) as ctx:
