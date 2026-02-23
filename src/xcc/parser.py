@@ -2218,6 +2218,16 @@ class Parser:
             return expr
         if self._check_punct("..."):
             raise ParserError("Expression cannot start with '...': expected an operand", token)
+        if self._check_punct(")"):
+            raise ParserError("Expression cannot start with ')': expected an operand", token)
+        if self._check_punct("]"):
+            raise ParserError("Expression cannot start with ']': expected an operand", token)
+        if self._check_punct("}"):
+            raise ParserError("Expression cannot start with '}': expected an operand", token)
+        if self._check_punct(","):
+            raise ParserError("Expression cannot start with ',': expected an operand", token)
+        if self._check_punct(":"):
+            raise ParserError("Expression cannot start with ':': expected an operand", token)
         raise ParserError("Unexpected token", token)
 
     def _parse_type_name(self) -> TypeSpec:
