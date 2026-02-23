@@ -18,7 +18,8 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
   - Conditional directives, `defined`, and `__has_include` checks in `#if`/`#elif`.
   - `#if`/`#elif` boolean short-circuit evaluation for `&&`/`||` (including divide-by-zero guard cases).
-  - Include search and cycle/read diagnostics.
+  - Include search precedence is validated (`"..."` prefers source directory; `<...>` resolves via include paths), with cycle/read diagnostics.
+  - Include-not-found diagnostics preserve directive delimiters (`"..."` vs `<...>`), and include expansion line-map provenance is regression-tested.
   - `#line` mapping and diagnostic remapping.
 - **Predefined macro coverage (current)**
   - `__STDC__`, `__STDC_HOSTED__`, `__STDC_VERSION__`, `__FILE__`, `__LINE__`.

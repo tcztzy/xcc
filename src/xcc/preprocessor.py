@@ -182,6 +182,12 @@ def _format_include_trace(
     return f"{source}:{line}: #include {delim_open}{include_name}{delim_close} -> {include_path}"
 
 
+def _format_include_reference(include_name: str, is_angled: bool) -> str:
+    if is_angled:
+        return f"<{include_name}>"
+    return f'"{include_name}"'
+
+
 @dataclass
 class _ConditionalFrame:
     parent_active: bool
@@ -568,7 +574,7 @@ class _Preprocessor:
         include_path = self._resolve_include(include_name, is_angled=is_angled, base_dir=base_dir)
         if include_path is None:
             raise PreprocessorError(
-                f"Include not found: {include_name}",
+                f"Include not found: {_format_include_reference(include_name, is_angled)}",
                 location.line,
                 1,
                 filename=location.filename,
