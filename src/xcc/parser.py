@@ -386,6 +386,7 @@ class Parser:
         self._reject_invalid_alignment_context(
             decl_specs.alignment,
             decl_specs.alignment_token,
+            context="function declaration",
             allow=False,
         )
         return_type = self._parse_type_spec()
@@ -482,6 +483,7 @@ class Parser:
         self._reject_invalid_alignment_context(
             decl_specs.alignment,
             decl_specs.alignment_token,
+            context="parameter",
             allow=False,
         )
         base_type = self._parse_type_spec()
@@ -974,7 +976,7 @@ class Parser:
         if self._check_punct(";"):
             if decl_specs.alignment is not None:
                 raise ParserError(
-                    "Invalid alignment specifier",
+                    self._invalid_alignment_specifier_message("record member declaration"),
                     decl_specs.alignment_token or self._current(),
                 )
             raise self._expected_identifier_error()
@@ -990,7 +992,7 @@ class Parser:
             member_type = self._build_declarator_type(base_type, declarator_ops)
             if decl_specs.alignment is not None and self._is_function_object_type(member_type):
                 raise ParserError(
-                    "Invalid alignment specifier",
+                    self._invalid_alignment_specifier_message("record member declaration"),
                     decl_specs.alignment_token or self._current(),
                 )
             if self._is_invalid_void_object_type(member_type):
@@ -1227,7 +1229,7 @@ class Parser:
         is_typedef = decl_specs.is_typedef
         if is_typedef and decl_specs.alignment is not None:
             raise ParserError(
-                "Invalid alignment specifier",
+                self._invalid_alignment_specifier_message("typedef declaration"),
                 decl_specs.alignment_token or self._current(),
             )
         if is_typedef and (
@@ -1250,6 +1252,7 @@ class Parser:
             self._reject_invalid_alignment_context(
                 decl_specs.alignment,
                 decl_specs.alignment_token,
+                context="tag-only declaration",
                 allow=False,
             )
             if is_typedef or not self._is_tag_or_definition_decl(base_type):
@@ -2416,6 +2419,9 @@ class Parser:
             return f"Invalid declaration specifier for {context}: '_Noreturn'"
         return f"Invalid declaration specifier for {context}"
 
+    def _invalid_alignment_specifier_message(self, context: str) -> str:
+        return f"Invalid alignment specifier for {context}"
+
     def _consume_overloadable_gnu_attributes(self) -> bool:
         _, has_overloadable = self._consume_gnu_attributes()
         return has_overloadable
@@ -2528,11 +2534,15 @@ class Parser:
         alignment: int | None,
         alignment_token: Token | None,
         *,
+        context: str,
         allow: bool,
     ) -> None:
         if alignment is None or allow:
             return
-        raise ParserError("Invalid alignment specifier", alignment_token or self._current())
+        raise ParserError(
+            self._invalid_alignment_specifier_message(context),
+            alignment_token or self._current(),
+        )
 
     def _consume_alignas_specifier(self) -> int:
         token = self._current()
