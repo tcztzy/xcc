@@ -102,7 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: implemented macro-expanded `#include` target parsing so object-like macros can provide either `"..."` or `<...>` header operands (`#define HDR "inc.h"` / `#define HDR <inc.h>`), with explicit invalid-expansion diagnostics when macro results are not header names.
   - Iteration 3 slice: expanded preprocessor include search + `__has_include` regression coverage for path precedence and nested-include base-dir behavior by adding focused tests for include-vs-system precedence (`#include <...>` and `#include "..."` fallback ordering) plus a nested-header `__has_include("local.h")` case that resolves relative to the including header directory.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: made sema object-declaration storage-class diagnostics context-specific for synthetic `DeclStmt(..., storage_class="typedef")` paths by splitting file-scope and block-scope errors (`Invalid storage class for file-scope object declaration: 'typedef'` vs `Invalid storage class for block-scope object declaration: 'typedef'`).
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_file_scope_object_declaration_rejects_typedef_storage_class tests.test_sema.SemaTests.test_block_scope_object_declaration_rejects_typedef_storage_class tests.test_sema -q` (pass).
