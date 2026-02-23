@@ -775,6 +775,146 @@
       "line": 1,
       "column": 11,
       "sha256": "2753189a96c0ea61d085f0f8c08bce1d90966a94e3cf14752cfe53f745859e6a"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-block",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-block-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-block.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 18,
+      "sha256": "502ba36b102f1a5aa0b444706fbab880ccb48fb7515246d11725e8bd8a3ddf6c"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-fnptr-block",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-fnptr-block-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-fnptr-block.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 22,
+      "sha256": "f97b48ec040bdde82ddc0c627919f6b35513ef18dd551baf7d9b43888d72ba34"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-for-init",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-for-init-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-for-init.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 23,
+      "sha256": "355ecdd44788a33c5be35aa910fe1bf9db9b285fc08d9ab13e16b62477338ba2"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-fnptr-for-init",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-fnptr-for-init-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-fnptr-for-init.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 27,
+      "sha256": "1b5f14688c793f0c36d26727887a4eddd0dc0c39648e097f4ae0b087647f7f87"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-fnptr-member",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-fnptr-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-fnptr-member.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 22,
+      "sha256": "dd8ea5cd295867ad3b11021d8291d9c7454dc893c66219e18999bc71f6fc97ba"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-member",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-member.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 18,
+      "sha256": "8c7d840d32060e013e1d071ec209aad1e31d0302fc15fca1d550e8695b5be355"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-union-member",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-union-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-union-member.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 17,
+      "sha256": "2f5b7051f45665525056166f73f65bbff723f0e77f7666dfd94fdb57e22248f0"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-fnptr-union-member",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-fnptr-union-member-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-fnptr-union-member.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 21,
+      "sha256": "84cdf9945e2799cd57690f6e395f3bc59937430ba6a0ba57cdc849e78b53cc57"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-typedef",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-typedef-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-typedef.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 15,
+      "sha256": "f7fbf5da41ad7894f321fe17e1fedce40c04e75aa9f0a381f44587d5320a8448"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-fnptr-typedef",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-fnptr-typedef-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-fnptr-typedef.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 19,
+      "sha256": "2abcb16d8a459bfa075a94463c76afd9516014acbabd6b4a7eb3ba640efb6a49"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-typedef-block",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-typedef-block-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-typedef-block.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 27,
+      "sha256": "10adc34b4aeeb206e876df9f22725b9f4659007993a69f7a03bc5f2a1c5edfc4"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-typedef-for-init",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-typedef-for-init-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-typedef-for-init.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 31,
+      "sha256": "eab88871d1c182ec3d4cf249107939bd08d78aed9a842848c1b381589044642b"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-fnptr-typedef-for-init",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-fnptr-typedef-for-init-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-fnptr-typedef-for-init.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 35,
+      "sha256": "911bd84dfb7f52d88d3ca1c001eccc7fb9799b536c616d7a9711aa1de3c0ef09"
+    },
+    {
+      "id": "parser-xcc-param-before-ellipsis-fnptr-typedef-block",
+      "upstream": "xcc/local/parser-variadic-requires-parameter-fnptr-typedef-block-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis-fnptr-typedef-block.c",
+      "expect": "parse",
+      "message_contains": "Expected parameter before ...",
+      "line": 1,
+      "column": 31,
+      "sha256": "daa5a75a3c8f53adcb093599583bd692698e391f79d7e6c692d0c74b3c6be7c3"
     }
   ]
 }

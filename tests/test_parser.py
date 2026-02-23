@@ -278,8 +278,9 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(decl.params, [Param(TypeSpec("int"), "level")])
 
     def test_variadic_requires_fixed_parameter(self) -> None:
-        with self.assertRaises(ParserError):
+        with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int logf(...);")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
 
     def test_definition_requires_parameter_names(self) -> None:
         with self.assertRaises(ParserError):
@@ -2340,8 +2341,69 @@ class ParserTests(unittest.TestCase):
         )
 
     def test_variadic_function_pointer_requires_fixed_parameter(self) -> None:
-        with self.assertRaises(ParserError):
+        with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(){int (*fp)(...);return 0;}")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_typedef_function_pointer_requires_fixed_parameter_in_block_scope(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){typedef int (*fp)(...);return 0;}")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_function_requires_fixed_parameter_in_block_scope(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){int f(...);return 0;}")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_typedef_requires_fixed_parameter_at_file_scope(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef int f(...);")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_typedef_function_pointer_requires_fixed_parameter_at_file_scope(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef int (*fp)(...);")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_function_pointer_requires_fixed_parameter_in_for_init_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){for (int (*fp)(...);;){} }")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_typedef_function_pointer_requires_fixed_parameter_in_for_init_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){for (typedef int (*fp)(...);;){} }")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_typedef_requires_fixed_parameter_in_for_init_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){for (typedef int f(...);;){} }")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_function_requires_fixed_parameter_in_for_init_declaration(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){for (int f(...);;){} }")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_function_pointer_requires_fixed_parameter_in_union_member(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("union U { int (*fp)(...); };")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_function_pointer_requires_fixed_parameter_in_struct_member(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("struct S { int (*fp)(...); };")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_function_requires_fixed_parameter_in_union_member(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("union U { int f(...); };")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
+
+    def test_variadic_function_requires_fixed_parameter_in_struct_member(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("struct S { int f(...); };")))
+        self.assertEqual(ctx.exception.message, "Expected parameter before ...")
 
     def test_function_pointer_declaration_with_void_suffix(self) -> None:
         unit = parse(list(lex("int main(){int (*fp)(void);return 0;}")))
