@@ -310,6 +310,27 @@ class PreprocessorTests(unittest.TestCase):
             )
         self.assertIn("int ok;", result.source)
 
+    def test_if_expression_with_has_include_quoted_uses_including_file_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_dir = root / "include"
+            source_dir = root / "src"
+            include_dir.mkdir()
+            source_dir.mkdir()
+            (include_dir / "local.h").write_text("\n", encoding="utf-8")
+            (include_dir / "feature.h").write_text(
+                '#if __has_include("local.h")\nint found;\n#endif\n',
+                encoding="utf-8",
+            )
+            (source_dir / "main.c").write_text('#include "feature.h"\n', encoding="utf-8")
+            options = FrontendOptions(include_dirs=(str(include_dir),))
+            result = preprocess_source(
+                (source_dir / "main.c").read_text(encoding="utf-8"),
+                filename=str(source_dir / "main.c"),
+                options=options,
+            )
+        self.assertIn("int found;", result.source)
+
     def test_if_expression_with_has_include_missing(self) -> None:
         result = preprocess_source(
             "#if __has_include(\"missing.h\")\nint bad;\n#endif\n",
@@ -382,6 +403,61 @@ class PreprocessorTests(unittest.TestCase):
             options = FrontendOptions(system_include_dirs=(str(include),))
             result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int z;\n")
+
+    def test_include_angle_prefers_include_dirs_over_system_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_dir = root / "include"
+            system_dir = root / "sys"
+            include_dir.mkdir()
+            system_dir.mkdir()
+            (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
+            (system_dir / "inc.h").write_text("int from_system;\n", encoding="utf-8")
+            options = FrontendOptions(
+                include_dirs=(str(include_dir),),
+                system_include_dirs=(str(system_dir),),
+            )
+            result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_include;\n")
+
+    def test_include_quoted_falls_back_to_system_dirs_after_include_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            include_dir = root / "include"
+            system_dir = root / "sys"
+            source_dir.mkdir()
+            include_dir.mkdir()
+            system_dir.mkdir()
+            (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
+            (system_dir / "inc.h").write_text("int from_system;\n", encoding="utf-8")
+            main = source_dir / "main.c"
+            main.write_text('#include "inc.h"\n', encoding="utf-8")
+            options = FrontendOptions(
+                include_dirs=(str(include_dir),),
+                system_include_dirs=(str(system_dir),),
+            )
+            result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main), options=options)
+        self.assertEqual(result.source, "int from_include;\n")
+
+    def test_include_quoted_uses_system_dirs_when_include_dirs_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            include_dir = root / "include"
+            system_dir = root / "sys"
+            source_dir.mkdir()
+            include_dir.mkdir()
+            system_dir.mkdir()
+            (system_dir / "inc.h").write_text("int from_system;\n", encoding="utf-8")
+            main = source_dir / "main.c"
+            main.write_text('#include "inc.h"\n', encoding="utf-8")
+            options = FrontendOptions(
+                include_dirs=(str(include_dir),),
+                system_include_dirs=(str(system_dir),),
+            )
+            result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main), options=options)
+        self.assertEqual(result.source, "int from_system;\n")
 
     def test_include_quoted_prefers_source_directory_over_include_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
