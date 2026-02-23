@@ -1907,7 +1907,7 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("int main(void){ int x = 0; return _Generic(x, %> : 1, default: 0); }")))
         self.assertEqual(
             ctx.exception.message,
-            "Type name is missing before '}'",
+            "Type name is missing before '%>'",
         )
 
     def test_unsupported_type_name_punctuator_reports_dot_message(self) -> None:
