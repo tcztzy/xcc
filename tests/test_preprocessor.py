@@ -266,6 +266,14 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
         self.assertEqual((ctx.exception.filename, ctx.exception.line), ("if.c", 1))
 
+    def test_if_expression_short_circuits_boolean_operators(self) -> None:
+        result = preprocess_source(
+            "#if 0 && (1 / 0)\nint bad;\n#elif 1 || (1 / 0)\nint ok;\n#endif\n",
+            filename="if.c",
+        )
+        self.assertNotIn("int bad ;", result.source)
+        self.assertIn("int ok ;", result.source)
+
     def test_if_expression_with_trailing_comment(self) -> None:
         result = preprocess_source("#if 1 // keep\nint x;\n#endif\n", filename="if.c")
         self.assertIn("int x;", result.source)
@@ -494,6 +502,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(_safe_eval_int_expr("3 ^ 1"), 2)
         self.assertEqual(_safe_eval_int_expr("1 and 0"), 0)
         self.assertEqual(_safe_eval_int_expr("1 or 0"), 1)
+        self.assertEqual(_safe_eval_int_expr("0 and (1 // 0)"), 0)
+        self.assertEqual(_safe_eval_int_expr("1 or (1 // 0)"), 1)
         self.assertEqual(_safe_eval_int_expr("not 0"), 1)
         self.assertEqual(_safe_eval_int_expr("~1"), -2)
         self.assertEqual(_safe_eval_int_expr("-1"), -1)
@@ -522,6 +532,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(_safe_eval_pp_expr("u64(0) - u64(1)"), 18446744073709551615)
         self.assertEqual(_safe_eval_pp_expr("u64(1) != 0"), 1)
         self.assertEqual(_safe_eval_pp_expr("u64(1) and 0"), 0)
+        self.assertEqual(_safe_eval_pp_expr("0 and (u64(1) // 0)"), 0)
+        self.assertEqual(_safe_eval_pp_expr("1 or (u64(1) // 0)"), 1)
         self.assertEqual(_safe_eval_pp_expr("True"), 1)
         self.assertEqual(_safe_eval_pp_expr("+u64(1)"), 1)
         self.assertEqual(_safe_eval_pp_expr("~u64(0)"), 18446744073709551615)
