@@ -1,4 +1,5 @@
 import unittest
+from enum import Enum, auto
 
 from tests import _bootstrap  # noqa: F401
 from xcc.ast import (
@@ -3306,6 +3307,32 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(
             ctx.exception.message,
             "Expression cannot start with header name: '<stdio.h>'",
+        )
+
+    def test_expression_start_unsupported_token_kind_reports_specific_diagnostic(
+        self,
+    ) -> None:
+        class SyntheticTokenKind(Enum):
+            GARBAGE = auto()
+
+        tokens = list(lex("int main(void){ return 0; }"))
+        int_token_index = next(
+            i for i, tok in enumerate(tokens) if tok.kind == TokenKind.INT_CONST
+        )
+        int_token = tokens[int_token_index]
+        tokens[int_token_index] = Token(
+            SyntheticTokenKind.GARBAGE,  # type: ignore[arg-type]
+            "@@",
+            int_token.line,
+            int_token.column,
+        )
+
+        with self.assertRaises(ParserError) as ctx:
+            parse(tokens)
+
+        self.assertEqual(
+            ctx.exception.message,
+            "Expression cannot start with unsupported token kind 'GARBAGE' (lexeme '@@')",
         )
 
     def test_parse_decl_stmt_static_assert_dispatch(self) -> None:
