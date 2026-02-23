@@ -21,6 +21,7 @@ from xcc.ast import (
     DefaultStmt,
     DoWhileStmt,
     ExprStmt,
+    Expr,
     FloatLiteral,
     ForStmt,
     FunctionDef,
@@ -3319,6 +3320,35 @@ class ParserTests(unittest.TestCase):
             _array_size_non_ice_error(StringLiteral('"x"'), parser._eval_array_size_expr),
             "Array size string literal is not an integer constant expression",
         )
+
+        class WeirdExpr(Expr):
+            pass
+
+        self.assertEqual(
+            _array_size_non_ice_error(WeirdExpr(), parser._eval_array_size_expr),
+            "Array size expression 'WeirdExpr' is not an integer constant expression",
+        )
+
+    def test_unsupported_type_token_kind_helper_covers_remaining_branches(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(
+            parser._unsupported_type_token_kind(TokenKind.FLOAT_CONST),
+            "floating constant",
+        )
+        self.assertEqual(
+            parser._unsupported_type_token_kind(TokenKind.CHAR_CONST),
+            "character constant",
+        )
+        self.assertEqual(
+            parser._unsupported_type_token_kind(TokenKind.STRING_LITERAL),
+            "string literal",
+        )
+        self.assertEqual(parser._unsupported_type_token_kind(TokenKind.HEADER_NAME), "header name")
+        self.assertEqual(
+            parser._unsupported_type_token_kind(TokenKind.PP_NUMBER),
+            "preprocessor number",
+        )
+        self.assertEqual(parser._unsupported_type_token_kind(TokenKind.IDENT), "token")
 
     def test_array_size_helper_or_vla_accepts_constant_size(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])

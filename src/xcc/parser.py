@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Literal, cast
+from typing import Literal, cast
 
 from xcc.ast import (
     AlignofExpr,
@@ -207,9 +208,7 @@ def _array_size_non_ice_error(
         if eval_expr(branch) is None:
             return _array_size_non_ice_error(branch, eval_expr)
         return "Array size conditional expression is not an integer constant expression"
-    return (
-        f"Array size expression '{type(expr).__name__}' is not an integer constant expression"
-    )
+    return f"Array size expression '{type(expr).__name__}' is not an integer constant expression"
 
 
 @dataclass(frozen=True)
@@ -1946,7 +1945,10 @@ class Parser:
             return size
         if allow_vla:
             return ArrayDecl(size_expr, tuple(qualifiers), has_static_bound)
-        raise ParserError(_array_size_non_ice_error(size_expr, self._eval_array_size_expr), size_token)
+        raise ParserError(
+            _array_size_non_ice_error(size_expr, self._eval_array_size_expr),
+            size_token,
+        )
 
     def _parse_array_size(self, token: Token) -> int:
         lexeme = token.lexeme

@@ -1230,7 +1230,8 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
     if isinstance(node, ast.Compare):
         if len(node.ops) != 1:
             raise ValueError(
-                f"Unsupported preprocessor comparison shape: expected 1 operator, got {len(node.ops)}"
+                "Unsupported preprocessor comparison shape: "
+                f"expected 1 operator, got {len(node.ops)}"
             )
         if len(node.comparators) != 1:
             raise ValueError(
@@ -1267,7 +1268,9 @@ def _eval_node(node: ast.AST) -> int:
             return int(node.value)
         if isinstance(node.value, int):
             return node.value
-        raise ValueError(f"Unsupported integer-expression literal type: {type(node.value).__name__}")
+        raise ValueError(
+            f"Unsupported integer-expression literal type: {type(node.value).__name__}"
+        )
     if isinstance(node, ast.UnaryOp):
         value = _eval_node(node.operand)
         if isinstance(node.op, ast.Not):
@@ -1285,7 +1288,9 @@ def _eval_node(node: ast.AST) -> int:
             return int(all(values))
         if isinstance(node.op, ast.Or):
             return int(any(values))
-        raise ValueError(f"Unsupported integer-expression boolean operator: {type(node.op).__name__}")
+        raise ValueError(
+            f"Unsupported integer-expression boolean operator: {type(node.op).__name__}"
+        )
     if isinstance(node, ast.BinOp):
         left = _eval_node(node.left)
         right = _eval_node(node.right)
@@ -1309,7 +1314,9 @@ def _eval_node(node: ast.AST) -> int:
             return left & right
         if isinstance(node.op, ast.BitXor):
             return left ^ right
-        raise ValueError(f"Unsupported integer-expression binary operator: {type(node.op).__name__}")
+        raise ValueError(
+            f"Unsupported integer-expression binary operator: {type(node.op).__name__}"
+        )
     if isinstance(node, ast.Compare):
         if len(node.ops) != 1:
             raise ValueError(
