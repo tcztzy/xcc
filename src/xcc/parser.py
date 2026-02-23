@@ -225,6 +225,7 @@ class ParserError(ValueError):
 class DeclSpecInfo:
     is_typedef: bool = False
     storage_class: StorageClass | None = None
+    storage_class_token: Token | None = None
     alignment: int | None = None
     alignment_token: Token | None = None
     is_thread_local: bool = False
@@ -474,7 +475,11 @@ class Parser:
     def _parse_param(self) -> Param:
         decl_specs = self._consume_decl_specifiers()
         if decl_specs.storage_class not in {None, "register"}:
-            raise ParserError("Invalid storage class for parameter", self._current())
+            storage_class = decl_specs.storage_class or "<unknown>"
+            raise ParserError(
+                f"Invalid storage class for parameter: '{storage_class}'",
+                decl_specs.storage_class_token or self._current(),
+            )
         if decl_specs.is_thread_local or decl_specs.is_inline or decl_specs.is_noreturn:
             raise ParserError(
                 self._invalid_decl_specifier_message("parameter", decl_specs),
@@ -2476,6 +2481,7 @@ class Parser:
 
     def _consume_decl_specifiers(self) -> DeclSpecInfo:
         storage_class: str | None = None
+        storage_class_token: Token | None = None
         alignment: int | None = None
         alignment_token: Token | None = None
         is_thread_local = False
@@ -2489,6 +2495,7 @@ class Parser:
                         f"Duplicate storage class specifier: '{lexeme}'", self._current()
                     )
                 storage_class = cast(StorageClass, lexeme)
+                storage_class_token = self._current()
                 self._advance()
                 continue
             if lexeme == "_Thread_local":
@@ -2522,6 +2529,7 @@ class Parser:
         return DeclSpecInfo(
             is_typedef=storage_class == "typedef",
             storage_class=storage_class,
+            storage_class_token=storage_class_token,
             alignment=alignment,
             alignment_token=alignment_token,
             is_thread_local=is_thread_local,
