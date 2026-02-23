@@ -16,6 +16,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - [ ] Close remaining C11 edge cases for macro replacement order and rescanning behavior.
 - [ ] Tighten conditional expression evaluation parity for `#if` / `#elif` corner cases.
+- [x] Add `__has_include("...")` / `__has_include(<...>)` conditional support with regression tests.
 - [ ] Expand include behavior coverage (path search precedence, diagnostics consistency, mapping interaction).
 - [ ] Validate predefined macro behavior against C11 and target assumptions.
 - [ ] Add curated fixture cases for every preprocessor diagnostic path.
@@ -101,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - preprocessor `#if`/`#elif` now supports `__has_include("...")` and `__has_include(<...>)` with include-path-aware evaluation plus invalid-form diagnostics;
   - compound assignment accepts arithmetic operands for `*=`, `/=`, `+=`, `-=` and keeps integer-only checks for `%=` / bit/shift assigns;
   - pointer subtraction/relational checks now accept qualified-compatible object pointers and reject `void*` subtraction;
   - assignment/argument/equality/conditional paths now reject nested pointer qualifier promotions such as `int **` to `const int **`;

@@ -16,7 +16,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - GNU asm statement and asm label forms in preprocessing.
 - **Core preprocessor behavior**
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
-  - Conditional directives and `defined`.
+  - Conditional directives, `defined`, and `__has_include` checks in `#if`/`#elif`.
   - Include search and cycle/read diagnostics.
   - `#line` mapping and diagnostic remapping.
 - **Predefined macro coverage (current)**
