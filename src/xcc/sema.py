@@ -328,7 +328,9 @@ class Analyzer:
             storage_class = func.storage_class if func.storage_class is not None else "<none>"
             raise SemaError(f"Invalid storage class for function: '{storage_class}'")
         if func.is_thread_local:
-            raise SemaError("Invalid declaration specifier")
+            raise SemaError(
+                "Invalid declaration specifier for function declaration: '_Thread_local'"
+            )
         if self._file_scope.lookup(func.name) is not None:
             raise SemaError(f"Conflicting declaration: {func.name}")
         if self._file_scope.lookup_typedef(func.name) is not None:

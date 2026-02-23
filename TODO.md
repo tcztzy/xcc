@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: made function `_Thread_local` sema rejections declaration-context-specific by replacing the generic `Invalid declaration specifier` fallback with `Invalid declaration specifier for function declaration: '_Thread_local'` for both prototypes and definitions.
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_function_thread_local_error tests.test_sema.SemaTests.test_function_definition_thread_local_error -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
   - Iteration 3 slice: upgraded sema declaration-analysis diagnostics for alignment/identifier failures to be context-specific (file-scope object, block-scope object, file-scope without identifier, block-scope without identifier, and record member declaration) instead of generic `Invalid alignment specifier` / `Expected identifier` fallbacks.
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
   - Next target: audit remaining sema declaration-analysis diagnostics for other context-ambiguous wording and apply the same token-aware/context-aware pattern where behavior is unchanged.
