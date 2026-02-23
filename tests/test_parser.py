@@ -2834,8 +2834,20 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(member1.bit_width_expr, IntLiteral("0"))
 
     def test_parameter_rejects_non_register_storage_class(self) -> None:
-        with self.assertRaises(ParserError):
+        with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int f(static int x){return x;}")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid storage class for parameter: 'static'",
+        )
+
+    def test_parameter_rejects_extern_storage_class(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int f(extern int x){return x;}")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid storage class for parameter: 'extern'",
+        )
 
     def test_parameter_rejects_thread_local_specifier(self) -> None:
         with self.assertRaises(ParserError) as ctx:
