@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Literal, cast
 
 from xcc.ast import (
@@ -2264,7 +2265,12 @@ class Parser:
                 f"Expression cannot start with header name: '{token.lexeme}'",
                 token,
             )
-        raise ParserError("Unexpected token", token)
+        kind_name = token.kind.name if isinstance(token.kind, Enum) else repr(token.kind)
+        lexeme_hint = f" (lexeme {token.lexeme!r})" if token.lexeme is not None else ""
+        raise ParserError(
+            f"Expression cannot start with unsupported token kind '{kind_name}'{lexeme_hint}",
+            token,
+        )
 
     def _parse_type_name(self) -> TypeSpec:
         base_type = self._parse_type_spec(context="type-name")
