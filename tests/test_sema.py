@@ -173,7 +173,10 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("static struct S;")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Expected identifier")
+        self.assertEqual(
+            str(ctx.exception),
+            "Expected identifier for file-scope object declaration",
+        )
 
     def test_file_scope_extern_initializer_error(self) -> None:
         unit = parse(list(lex("extern int x=1;")))
@@ -442,19 +445,28 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){_Alignas(1) int x=1; return x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid alignment specifier")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid alignment specifier for block-scope object declaration",
+        )
 
     def test_alignas_tag_only_declaration_error(self) -> None:
         unit = TranslationUnit([], [DeclStmt(TypeSpec("struct", record_tag="S"), None, None, 16)])
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid alignment specifier")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid alignment specifier for file-scope declaration without identifier",
+        )
 
     def test_alignas_file_scope_weaker_alignment_error(self) -> None:
         unit = parse(list(lex("_Alignas(1) int g; int main(void){return g;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid alignment specifier")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid alignment specifier for file-scope object declaration",
+        )
 
     def test_alignas_block_scope_tag_only_declaration_error(self) -> None:
         unit = TranslationUnit(
@@ -469,7 +481,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid alignment specifier")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid alignment specifier for block-scope declaration without identifier",
+        )
 
     def test_alignas_member_increases_record_alignof(self) -> None:
         unit = parse(
@@ -504,7 +519,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid alignment specifier")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid alignment specifier for record member declaration",
+        )
 
     def test_atomic_declaration_typemap(self) -> None:
         unit = parse(list(lex("int main(void){_Atomic int value=1; return value;}")))
