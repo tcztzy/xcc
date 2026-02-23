@@ -1663,6 +1663,22 @@ class ParserTests(unittest.TestCase):
             "Type name is missing before end of input",
         )
 
+    def test_type_name_cannot_declare_identifier_in_cast(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ return (int value)0; }")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot declare identifier 'value'",
+        )
+
+    def test_type_name_cannot_declare_identifier_in_atomic_type_specifier(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("_Atomic(int value) x;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Type name cannot declare identifier 'value'",
+        )
+
     def test_unsupported_type_name_punctuator_reports_left_parenthesis_message(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){ int x = 0; return _Generic(x, (: 1, default: 0); }")))
