@@ -424,10 +424,11 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_predefined_standard_macros(self) -> None:
         result = preprocess_source(
-            "int s = __STDC__;\nlong v = __STDC_VERSION__;\n",
+            "int s = __STDC__;\nint h = __STDC_HOSTED__;\nlong v = __STDC_VERSION__;\n",
             filename="main.c",
         )
         self.assertIn("int s = 1 ;", result.source)
+        self.assertIn("int h = 1 ;", result.source)
         self.assertIn("long v = 201112L ;", result.source)
 
     def test_predefined_file_and_line_macros(self) -> None:

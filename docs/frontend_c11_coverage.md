@@ -20,7 +20,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - Include search and cycle/read diagnostics.
   - `#line` mapping and diagnostic remapping.
 - **Predefined macro coverage (current)**
-  - `__STDC__`, `__STDC_VERSION__`, `__FILE__`, `__LINE__`.
+  - `__STDC__`, `__STDC_HOSTED__`, `__STDC_VERSION__`, `__FILE__`, `__LINE__`.
   - Integer width/value macros already used by tests.
 
 ## Partially covered / pending
