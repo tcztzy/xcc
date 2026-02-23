@@ -333,6 +333,36 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("union U { int logf(int level, ..., int other); };")))
         self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
 
+    def test_block_scope_function_pointer_parameter_list_rejects_trailing_comma(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){int (*logf)(int level,);return 0;}")))
+        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+
+    def test_block_scope_function_pointer_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(){int (*logf)(int level, ..., int other);return 0;}")))
+        self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
+
+    def test_struct_member_function_pointer_parameter_list_rejects_trailing_comma(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("struct S { int (*logf)(int level,); };")))
+        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+
+    def test_struct_member_function_pointer_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("struct S { int (*logf)(int level, ..., int other); };")))
+        self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
+
+    def test_union_member_function_pointer_parameter_list_rejects_trailing_comma(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("union U { int (*logf)(int level,); };")))
+        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+
+    def test_union_member_function_pointer_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("union U { int (*logf)(int level, ..., int other); };")))
+        self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
+
     def test_definition_requires_parameter_names(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int add(int, int){return 0;}")))
