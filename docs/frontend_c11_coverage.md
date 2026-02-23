@@ -16,6 +16,8 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - GNU asm statement and asm label forms in preprocessing.
 - **Parser diagnostic hardening (ongoing)**
   - Type-name contexts now reject accidental declarator identifiers with an explicit diagnostic (`Type name cannot declare identifier '...'`) in cast and `_Atomic(type-name)` parsing.
+- **Sema diagnostic hardening (ongoing)**
+  - Function declarations/definitions using `_Thread_local` now emit a declaration-context-specific diagnostic (`Invalid declaration specifier for function declaration: '_Thread_local'`) instead of a generic specifier error.
 - **Core preprocessor behavior**
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
   - Conditional directives, `defined`, and `__has_include` checks in `#if`/`#elif` (including macro-expanded header operands).

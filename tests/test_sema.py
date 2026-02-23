@@ -167,7 +167,19 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("_Thread_local int f(void);")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid declaration specifier")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid declaration specifier for function declaration: '_Thread_local'",
+        )
+
+    def test_function_definition_thread_local_error(self) -> None:
+        unit = parse(list(lex("_Thread_local int f(void){return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid declaration specifier for function declaration: '_Thread_local'",
+        )
 
     def test_file_scope_storage_without_identifier_error(self) -> None:
         unit = parse(list(lex("static struct S;")))
