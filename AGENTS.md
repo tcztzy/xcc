@@ -23,6 +23,13 @@ This repository aims to become a C11 compiler written in modern Python (CPython 
 - Run local tests: `tox -e py311` (coverage is enforced).
 - Run lint/type checks: `tox -e lint` and `tox -e type`.
 
+## Commit Discipline
+
+- Prefer **slice commits**: a single commit should bundle the behavior change with its tests/fixtures and any required doc updates, and keep the tree green (lint/type/tests + 100% coverage).
+- Avoid **progress-only micro-commits** (e.g., TODO/log updates, one fixture at a time). Batch related fixture/manifest cases so each commit is reviewable and meaningful.
+- Use `git commit --fixup <sha>` for follow-ups, then squash before pushing/merging with `git rebase -i --autosquash <base>`.
+- Do not force-push `master` unless doing an explicitly coordinated history cleanup (keep a backup ref before rewriting).
+
 ## Feature Implementation Order
 
 - For every new feature, add or update tests before implementing production code.
