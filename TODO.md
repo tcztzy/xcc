@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined floating-point capability/exponent baseline macros with `__FLT|DBL|LDBL_{MIN_10_EXP,MAX_10_EXP}__`, `__FLT|DBL|LDBL_HAS_INFINITY__`, and `__FLT|DBL|LDBL_HAS_QUIET_NAN__`; added focused preprocessor regression coverage for expansion and CLI `-U` removal paths, and updated frontend coverage docs.
   - Iteration 3 slice: upgraded sema `_Generic` duplicate diagnostics to include source location for the current association when available, so duplicate-compatible-type failures now report both current and previous association coordinates and duplicate-default failures identify the duplicate default site in addition to the original default.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_generic_selection_typedef_alias_duplicate_compatible_type_error tests.test_sema.SemaTests.test_generic_selection_qualified_typedef_alias_duplicate_compatible_type_error tests.test_sema.SemaTests.test_generic_selection_duplicate_default_association_error_with_location -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
