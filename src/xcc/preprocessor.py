@@ -807,8 +807,42 @@ class _Preprocessor:
         *,
         base_dir: Path | None,
     ) -> str:
-        # Handle __has_include(<...>) and __has_include("...") before expression tokenization.
-        marker = "__has_include"
+        # Handle include-probing operators before expression tokenization.
+        rewritten = expr
+        rewritten = self._replace_single_has_include_operator(
+            rewritten,
+            marker="__has_include_next",
+            location=location,
+            base_dir=base_dir,
+            include_next=True,
+        )
+        rewritten = self._replace_single_has_include_operator(
+            rewritten,
+            marker="__has_include",
+            location=location,
+            base_dir=base_dir,
+            include_next=False,
+        )
+        return rewritten
+
+    def _replace_single_has_include_operator(
+        self,
+        expr: str,
+        *,
+        marker: str,
+        location: _SourceLocation,
+        base_dir: Path | None,
+        include_next: bool,
+    ) -> str:
+        if include_next and self._options.std == "c11" and marker in expr:
+            raise PreprocessorError(
+                "Invalid #if expression",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_IF_EXPR,
+            )
+
         chunks: list[str] = []
         index = 0
         while True:
@@ -831,7 +865,7 @@ class _Preprocessor:
                 cursor += 1
             if cursor >= len(expr) or expr[cursor] != "(":
                 raise PreprocessorError(
-                    "Invalid __has_include expression",
+                    f"Invalid {marker} expression",
                     location.line,
                     1,
                     filename=location.filename,
@@ -840,7 +874,7 @@ class _Preprocessor:
             close_paren = self._find_matching_has_include_close(expr, cursor)
             if close_paren < 0:
                 raise PreprocessorError(
-                    "Invalid __has_include expression",
+                    f"Invalid {marker} expression",
                     location.line,
                     1,
                     filename=location.filename,
@@ -849,7 +883,7 @@ class _Preprocessor:
             operand = expr[cursor + 1 : close_paren].strip()
             if not operand:
                 raise PreprocessorError(
-                    "Invalid __has_include expression",
+                    f"Invalid {marker} expression",
                     location.line,
                     1,
                     filename=location.filename,
@@ -859,7 +893,7 @@ class _Preprocessor:
                 include_name, is_angled = self._parse_header_name_operand(operand, location)
             except PreprocessorError as error:
                 raise PreprocessorError(
-                    "Invalid __has_include expression",
+                    f"Invalid {marker} expression",
                     location.line,
                     1,
                     filename=location.filename,
@@ -870,6 +904,7 @@ class _Preprocessor:
                 include_name,
                 is_angled=is_angled,
                 base_dir=base_dir,
+                include_next_from=base_dir if include_next else None,
             )
             chunks.append("1" if include_path is not None else "0")
             index = cursor
