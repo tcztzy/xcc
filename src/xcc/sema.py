@@ -326,7 +326,10 @@ class Analyzer:
     def _register_function_external(self, func: FunctionDef) -> None:
         if func.storage_class not in {None, "static", "extern"}:
             storage_class = func.storage_class if func.storage_class is not None else "<none>"
-            raise SemaError(f"Invalid storage class for function: '{storage_class}'")
+            raise SemaError(
+                "Invalid storage class for file-scope function declaration: "
+                f"'{storage_class}'"
+            )
         if func.is_thread_local:
             raise SemaError(
                 "Invalid declaration specifier for function declaration: '_Thread_local'"
@@ -1664,7 +1667,10 @@ class Analyzer:
             if self._is_function_object_type(stmt.type_spec):
                 if stmt.storage_class not in {None, "extern"}:
                     storage_class = stmt.storage_class if stmt.storage_class is not None else "<none>"
-                    raise SemaError(f"Invalid storage class for function: '{storage_class}'")
+                    raise SemaError(
+                        "Invalid storage class for block-scope function declaration: "
+                        f"'{storage_class}'"
+                    )
                 if stmt.is_thread_local:
                     raise SemaError(
                         "Invalid declaration specifier for function declaration: '_Thread_local'"

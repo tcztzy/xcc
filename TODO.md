@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: made sema function storage-class diagnostics declaration-context-specific by distinguishing file-scope and block-scope function declaration failures (`Invalid storage class for file-scope function declaration: ...` vs `Invalid storage class for block-scope function declaration: ...`), and updated focused sema regressions for both contexts.
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_function_invalid_storage_class_error tests.test_sema.SemaTests.test_block_scope_function_rejects_static_storage_class tests.test_sema.SemaTests.test_block_scope_function_rejects_register_storage_class -q` (pass).
   - Iteration 3 slice: added LP64 predefined macro compatibility aliases `__LP64` and `_LP64` alongside `__LP64__`, so codebases that key off either GCC/Clang alias family now preprocess consistently under xcc; extended predefined-macro expansion and `-U` regression coverage for both aliases.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: implemented `-idirafter` include path support end-to-end (CLI/options/preprocessor), extending angle-include search order to `-I` then `-isystem` then `-idirafter` while preserving quoted include precedence and include-next traversal over the same merged search chain; added focused preprocessor and CLI regressions for `-idirafter` fallback and precedence.
