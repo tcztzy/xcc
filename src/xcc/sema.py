@@ -494,6 +494,29 @@ class Analyzer:
     def _invalid_record_member_type_message(self, type_label: str) -> str:
         return f"Invalid object type for record member declaration: {type_label}"
 
+    def _invalid_alignment_message(
+        self,
+        context_label: str,
+        alignment: int,
+        natural_alignment: int | None,
+    ) -> str:
+        if alignment <= 0:
+            return f"Invalid alignment specifier for {context_label}: alignment must be positive"
+        if (alignment & (alignment - 1)) != 0:
+            return (
+                f"Invalid alignment specifier for {context_label}: "
+                f"alignment {alignment} is not a power of two"
+            )
+        if natural_alignment is None:
+            return (
+                f"Invalid alignment specifier for {context_label}: "
+                "cannot determine natural alignment"
+            )
+        return (
+            f"Invalid alignment specifier for {context_label}: "
+            f"alignment {alignment} is weaker than natural alignment {natural_alignment}"
+        )
+
     def _invalid_object_type_label(self, type_spec: TypeSpec) -> str | None:
         if self._is_invalid_atomic_type_spec(type_spec):
             return "atomic"
@@ -563,7 +586,14 @@ class Analyzer:
             var_type = self._resolve_type(declaration.type_spec)
             var_alignment = self._alignof_type(var_type)
             if not self._is_valid_explicit_alignment(declaration.alignment, var_alignment):
-                raise SemaError("Invalid alignment specifier for file-scope object declaration")
+                assert declaration.alignment is not None
+                raise SemaError(
+                    self._invalid_alignment_message(
+                        "file-scope object declaration",
+                        declaration.alignment,
+                        var_alignment,
+                    )
+                )
             self._ensure_array_size_limit(var_type)
             self._file_scope.define(
                 VarSymbol(
@@ -707,7 +737,14 @@ class Analyzer:
                     raise SemaError("Unnamed bit-field must have zero width")
             natural_alignment = self._alignof_type(resolved_member_type)
             if not self._is_valid_explicit_alignment(member.alignment, natural_alignment):
-                raise SemaError("Invalid alignment specifier for record member declaration")
+                assert member.alignment is not None
+                raise SemaError(
+                    self._invalid_alignment_message(
+                        "record member declaration",
+                        member.alignment,
+                        natural_alignment,
+                    )
+                )
             member_types.append(
                 RecordMemberInfo(
                     member_name,
@@ -1645,7 +1682,14 @@ class Analyzer:
             var_type = self._resolve_type(stmt.type_spec)
             var_alignment = self._alignof_type(var_type)
             if not self._is_valid_explicit_alignment(stmt.alignment, var_alignment):
-                raise SemaError("Invalid alignment specifier for block-scope object declaration")
+                assert stmt.alignment is not None
+                raise SemaError(
+                    self._invalid_alignment_message(
+                        "block-scope object declaration",
+                        stmt.alignment,
+                        var_alignment,
+                    )
+                )
             self._ensure_array_size_limit(var_type)
             scope.define(
                 VarSymbol(
