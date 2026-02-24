@@ -2320,18 +2320,20 @@ class Parser:
         control = self._parse_assignment()
         self._expect_punct(",")
         associations: list[tuple[TypeSpec | None, Expr]] = []
-        saw_default = False
+        first_default_index: int | None = None
         association_index = 0
         while True:
             association_index += 1
             assoc_type: TypeSpec | None
             if self._check_keyword("default"):
-                if saw_default:
+                if first_default_index is not None:
                     raise ParserError(
-                        f"Duplicate default generic association at position {association_index}: only one default association is allowed",
+                        "Duplicate default generic association at position "
+                        f"{association_index}: previous default was at position "
+                        f"{first_default_index}; only one default association is allowed",
                         self._current(),
                     )
-                saw_default = True
+                first_default_index = association_index
                 self._advance()
                 assoc_type = None
             else:
