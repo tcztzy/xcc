@@ -1476,6 +1476,34 @@ class SemaTests(unittest.TestCase):
             "No matching generic association for control type 'double'; available association types: 'int' at position 1",
         )
 
+    def test_generic_selection_without_match_uses_association_location_fallback(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            ReturnStmt(
+                                GenericExpr(
+                                    FloatLiteral("1.0"),
+                                    ((TypeSpec("int"), IntLiteral("1")),),
+                                    ((7, 22),),
+                                )
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "No matching generic association for control type 'double'; available association types: 'int' at position 1 (line 7, column 22)",
+        )
+
     def test_generic_selection_duplicate_compatible_type_error(self) -> None:
         unit = TranslationUnit(
             [
@@ -1645,6 +1673,65 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(
             str(ctx.exception),
             "Invalid generic association type at position 1 ('void'): void type",
+        )
+
+    def test_generic_selection_duplicate_type_uses_association_location_fallback(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            ReturnStmt(
+                                GenericExpr(
+                                    IntLiteral("0"),
+                                    (
+                                        (TypeSpec("int"), IntLiteral("1")),
+                                        (TypeSpec("int"), IntLiteral("2")),
+                                    ),
+                                    ((3, 11), (3, 19)),
+                                )
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Duplicate generic association type at position 2 at line 3, column 19 ('int'): previous compatible type was at position 1 at line 3, column 11 ('int')",
+        )
+
+    def test_generic_selection_invalid_type_uses_association_location_fallback(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            ReturnStmt(
+                                GenericExpr(
+                                    IntLiteral("0"),
+                                    ((TypeSpec("void"), IntLiteral("1")), (None, IntLiteral("2"))),
+                                    ((9, 4), (9, 16)),
+                                )
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid generic association type at position 1 ('void') at line 9, column 4: void type",
         )
 
     def test_generic_selection_pointer_to_incomplete_record_association_ok(self) -> None:
