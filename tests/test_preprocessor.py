@@ -2103,7 +2103,12 @@ class PreprocessorTests(unittest.TestCase):
             "int acq_rel = __ATOMIC_ACQ_REL;\n"
             "int seq_cst = __ATOMIC_SEQ_CST;\n"
             "int lock_free = __GCC_ATOMIC_POINTER_LOCK_FREE;\n"
-            "#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)\nint has_sync_8;\n#endif\n",
+            "int lock_free_char16 = __GCC_ATOMIC_CHAR16_T_LOCK_FREE;\n"
+            "int lock_free_char32 = __GCC_ATOMIC_CHAR32_T_LOCK_FREE;\n"
+            "int lock_free_wchar = __GCC_ATOMIC_WCHAR_T_LOCK_FREE;\n"
+            "int test_and_set_trueval = __GCC_ATOMIC_TEST_AND_SET_TRUEVAL;\n"
+            "#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)\nint has_sync_8;\n#endif\n"
+            "#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16)\nint has_sync_16;\n#endif\n",
             filename="main.c",
         )
         self.assertIn("int relaxed = 0 ;", result.source)
@@ -2113,25 +2118,39 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int acq_rel = 4 ;", result.source)
         self.assertIn("int seq_cst = 5 ;", result.source)
         self.assertIn("int lock_free = 2 ;", result.source)
+        self.assertIn("int lock_free_char16 = 2 ;", result.source)
+        self.assertIn("int lock_free_char32 = 2 ;", result.source)
+        self.assertIn("int lock_free_wchar = 2 ;", result.source)
+        self.assertIn("int test_and_set_trueval = 1 ;", result.source)
         self.assertIn("int has_sync_8;", result.source)
+        self.assertIn("int has_sync_16;", result.source)
 
     def test_cli_undef_removes_predefined_atomic_and_sync_macros(self) -> None:
         result = preprocess_source(
             "#if defined(__ATOMIC_ACQUIRE)\nint acq;\n#endif\n"
             "#if defined(__GCC_ATOMIC_POINTER_LOCK_FREE)\nint lock_free;\n#endif\n"
-            "#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)\nint sync8;\n#endif\n",
+            "#if defined(__GCC_ATOMIC_CHAR16_T_LOCK_FREE)\nint lock_free_char16;\n#endif\n"
+            "#if defined(__GCC_ATOMIC_TEST_AND_SET_TRUEVAL)\nint test_and_set_trueval;\n#endif\n"
+            "#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)\nint sync8;\n#endif\n"
+            "#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16)\nint sync16;\n#endif\n",
             filename="main.c",
             options=FrontendOptions(
                 undefs=(
                     "__ATOMIC_ACQUIRE",
                     "__GCC_ATOMIC_POINTER_LOCK_FREE",
+                    "__GCC_ATOMIC_CHAR16_T_LOCK_FREE",
+                    "__GCC_ATOMIC_TEST_AND_SET_TRUEVAL",
                     "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8",
+                    "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16",
                 )
             ),
         )
         self.assertNotIn("int acq;", result.source)
         self.assertNotIn("int lock_free;", result.source)
+        self.assertNotIn("int lock_free_char16;", result.source)
+        self.assertNotIn("int test_and_set_trueval;", result.source)
         self.assertNotIn("int sync8;", result.source)
+        self.assertNotIn("int sync16;", result.source)
 
     def test_predefined_date_time_and_timestamp_macros_use_translation_start_time(self) -> None:
         with patch("xcc.preprocessor.datetime") as mock_datetime:
