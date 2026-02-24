@@ -2236,6 +2236,20 @@ class Analyzer:
             for association_index, (assoc_type_spec, assoc_expr) in enumerate(
                 expr.associations, start=1
             ):
+                association_line: int | None = None
+                association_column: int | None = None
+                if assoc_type_spec is not None:
+                    association_line = assoc_type_spec.source_line
+                    association_column = assoc_type_spec.source_column
+                if association_line is None or association_column is None:
+                    if association_index <= len(expr.association_source_locations):
+                        mapped_line, mapped_column = expr.association_source_locations[
+                            association_index - 1
+                        ]
+                        if association_line is None:
+                            association_line = mapped_line
+                        if association_column is None:
+                            association_column = mapped_column
                 if assoc_type_spec is None:
                     if default_expr is not None and default_association_index is not None:
                         previous_default_location = None
@@ -2278,13 +2292,10 @@ class Analyzer:
                 )
                 if invalid_assoc_reason is not None:
                     location_suffix = ""
-                    if (
-                        assoc_type_spec.source_line is not None
-                        and assoc_type_spec.source_column is not None
-                    ):
+                    if association_line is not None and association_column is not None:
                         location_suffix = (
-                            f" at line {assoc_type_spec.source_line}, "
-                            f"column {assoc_type_spec.source_column}"
+                            f" at line {association_line}, "
+                            f"column {association_column}"
                         )
                     raise SemaError(
                         "Invalid generic association type at position "
@@ -2295,13 +2306,10 @@ class Analyzer:
                 if previous_assoc is not None:
                     previous_assoc_index, previous_assoc_label, previous_assoc_location = previous_assoc
                     current_location_suffix = ""
-                    if (
-                        assoc_type_spec.source_line is not None
-                        and assoc_type_spec.source_column is not None
-                    ):
+                    if association_line is not None and association_column is not None:
                         current_location_suffix = (
-                            f" at line {assoc_type_spec.source_line}, "
-                            f"column {assoc_type_spec.source_column}"
+                            f" at line {association_line}, "
+                            f"column {association_column}"
                         )
                     location_suffix = ""
                     if previous_assoc_location is not None:
@@ -2314,13 +2322,10 @@ class Analyzer:
                         f"('{previous_assoc_label}')"
                     )
                 association_location = None
-                if (
-                    assoc_type_spec.source_line is not None
-                    and assoc_type_spec.source_column is not None
-                ):
+                if association_line is not None and association_column is not None:
                     association_location = (
-                        f"line {assoc_type_spec.source_line}, "
-                        f"column {assoc_type_spec.source_column}"
+                        f"line {association_line}, "
+                        f"column {association_column}"
                     )
                 seen_type_associations[assoc_type] = (
                     association_index,
