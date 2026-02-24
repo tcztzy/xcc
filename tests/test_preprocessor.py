@@ -705,6 +705,7 @@ class PreprocessorTests(unittest.TestCase):
             "int s = __STDC__;\n"
             "int h = __STDC_HOSTED__;\n"
             "long v = __STDC_VERSION__;\n"
+            "int iec = __STDC_IEC_559__;\n"
             "int u16 = __STDC_UTF_16__;\n"
             "int u32 = __STDC_UTF_32__;\n"
             "int na = __STDC_NO_ATOMICS__;\n"
@@ -727,6 +728,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int s = 1 ;", result.source)
         self.assertIn("int h = 1 ;", result.source)
         self.assertIn("long v = 201112L ;", result.source)
+        self.assertIn("int iec = 1 ;", result.source)
         self.assertIn("int u16 = 1 ;", result.source)
         self.assertIn("int u32 = 1 ;", result.source)
         self.assertIn("int na = 1 ;", result.source)

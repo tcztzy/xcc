@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined C11 macro coverage with `__STDC_IEC_559__=1` so preprocessing now explicitly advertises IEC 60559 floating-point support assumptions alongside the existing `__STDC__`/`__STDC_VERSION__` baseline.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: improved `_Generic` duplicate-association diagnostics with association-order context by reporting both the current and previous association positions for duplicate default associations and duplicate compatible type associations, while keeping selection behavior unchanged.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_generic_selection_duplicate_compatible_type_error tests.test_sema.SemaTests.test_generic_selection_duplicate_default_association_error -q` (pass).
   - Iteration 3 slice: expanded the predefined C11 macro baseline with implementation-availability macros (`__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`) so preprocessing now advertises unsupported optional C11 feature families explicitly instead of leaving them implicit.
