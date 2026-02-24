@@ -153,7 +153,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid storage class for file-scope object declaration: 'typedef'",
+            "Invalid storage class for file-scope object declaration: 'typedef'; use a typedef declaration instead",
         )
 
     def test_block_scope_object_declaration_rejects_typedef_storage_class(self) -> None:
@@ -167,7 +167,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid storage class for block-scope object declaration: 'typedef'",
+            "Invalid storage class for block-scope object declaration: 'typedef'; use a typedef declaration instead",
         )
 
     def test_file_scope_vla_error(self) -> None:
