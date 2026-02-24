@@ -634,24 +634,44 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int from_include;\n")
 
-    def test_include_quoted_falls_back_to_system_dirs_after_include_dirs(self) -> None:
+    def test_include_quoted_prefers_quote_include_dirs_over_include_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source_dir = root / "src"
+            quote_dir = root / "quote"
             include_dir = root / "include"
             system_dir = root / "sys"
             source_dir.mkdir()
+            quote_dir.mkdir()
             include_dir.mkdir()
             system_dir.mkdir()
+            (quote_dir / "inc.h").write_text("int from_quote;\n", encoding="utf-8")
             (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
             (system_dir / "inc.h").write_text("int from_system;\n", encoding="utf-8")
             main = source_dir / "main.c"
             main.write_text('#include "inc.h"\n', encoding="utf-8")
             options = FrontendOptions(
+                quote_include_dirs=(str(quote_dir),),
                 include_dirs=(str(include_dir),),
                 system_include_dirs=(str(system_dir),),
             )
             result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main), options=options)
+        self.assertEqual(result.source, "int from_quote;\n")
+
+    def test_include_angle_ignores_quote_include_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            quote_dir = root / "quote"
+            include_dir = root / "include"
+            quote_dir.mkdir()
+            include_dir.mkdir()
+            (quote_dir / "inc.h").write_text("int from_quote;\n", encoding="utf-8")
+            (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
+            options = FrontendOptions(
+                quote_include_dirs=(str(quote_dir),),
+                include_dirs=(str(include_dir),),
+            )
+            result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int from_include;\n")
 
     def test_include_quoted_uses_system_dirs_when_include_dirs_miss(self) -> None:

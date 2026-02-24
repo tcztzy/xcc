@@ -814,6 +814,7 @@ class _Preprocessor:
         search_roots: list[Path] = []
         if not is_angled and base_dir is not None:
             search_roots.append(base_dir)
+            search_roots.extend(Path(path) for path in self._options.quote_include_dirs)
         search_roots.extend(Path(path) for path in self._options.include_dirs)
         search_roots.extend(Path(path) for path in self._options.system_include_dirs)
 

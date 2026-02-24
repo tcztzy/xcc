@@ -14,6 +14,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("-std", choices=("c11", "gnu11"), default="c11", help="language mode")
     parser.add_argument("-I", dest="include_dirs", action="append", default=[], help="include path")
     parser.add_argument(
+        "-iquote",
+        dest="quote_include_dirs",
+        action="append",
+        default=[],
+        help="quote include path",
+    )
+    parser.add_argument(
         "-isystem",
         dest="system_include_dirs",
         action="append",
@@ -58,6 +65,7 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None) -> i
     options = FrontendOptions(
         std=args.std,
         include_dirs=tuple(args.include_dirs),
+        quote_include_dirs=tuple(args.quote_include_dirs),
         system_include_dirs=tuple(args.system_include_dirs),
         defines=tuple(args.defines),
         undefs=tuple(args.undefs),

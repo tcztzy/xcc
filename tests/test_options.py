@@ -9,6 +9,7 @@ class FrontendOptionsTests(unittest.TestCase):
         options = FrontendOptions()
         self.assertEqual(options.std, "c11")
         self.assertEqual(options.include_dirs, ())
+        self.assertEqual(options.quote_include_dirs, ())
         self.assertEqual(options.system_include_dirs, ())
         self.assertEqual(options.defines, ())
         self.assertEqual(options.undefs, ())
