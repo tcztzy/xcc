@@ -237,6 +237,9 @@ class PreprocessorTests(unittest.TestCase):
             "#if __STDC_MB_MIGHT_NEQ_WC__\nint mw;\n#endif\n"
             "#if __STDC_NO_THREADS__\nint t;\n#endif\n"
             "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
+            "#if __SIZEOF_FLOAT__\nint fsz;\n#endif\n"
+            "#if __SIZEOF_DOUBLE__\nint dsz;\n#endif\n"
+            "#if __SIZEOF_LONG_DOUBLE__\nint ldsz;\n#endif\n"
             "#if __SIZEOF_SIZE_T__\nint szz;\n#endif\n"
             "#if __SIZEOF_PTRDIFF_T__\nint pdz;\n#endif\n"
             "#if __SIZEOF_INTMAX_T__\nint imz;\n#endif\n"
@@ -294,6 +297,9 @@ class PreprocessorTests(unittest.TestCase):
                     "__STDC_MB_MIGHT_NEQ_WC__",
                     "__STDC_NO_THREADS__",
                     "__SIZEOF_POINTER__",
+                    "__SIZEOF_FLOAT__",
+                    "__SIZEOF_DOUBLE__",
+                    "__SIZEOF_LONG_DOUBLE__",
                     "__SIZEOF_SIZE_T__",
                     "__SIZEOF_PTRDIFF_T__",
                     "__SIZEOF_INTMAX_T__",
@@ -349,6 +355,9 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int mw;", result.source)
         self.assertNotIn("int t;", result.source)
         self.assertNotIn("int z;", result.source)
+        self.assertNotIn("int fsz;", result.source)
+        self.assertNotIn("int dsz;", result.source)
+        self.assertNotIn("int ldsz;", result.source)
         self.assertNotIn("int szz;", result.source)
         self.assertNotIn("int pdz;", result.source)
         self.assertNotIn("int imz;", result.source)
@@ -1240,6 +1249,9 @@ class PreprocessorTests(unittest.TestCase):
             "unsigned long upmax = __UINTPTR_MAX__;\n"
             "int ssz = __SIZEOF_SHORT__;\n"
             "int isz = __SIZEOF_INT__;\n"
+            "int fsz = __SIZEOF_FLOAT__;\n"
+            "int dsz = __SIZEOF_DOUBLE__;\n"
+            "int ldsz = __SIZEOF_LONG_DOUBLE__;\n"
             "int psz = __SIZEOF_POINTER__;\n"
             "int lsz = __SIZEOF_LONG__;\n"
             "int llsz = __SIZEOF_LONG_LONG__;\n"
@@ -1322,6 +1334,9 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("unsigned long upmax = 18446744073709551615UL ;", result.source)
         self.assertIn("int ssz = 2 ;", result.source)
         self.assertIn("int isz = 4 ;", result.source)
+        self.assertIn("int fsz = 4 ;", result.source)
+        self.assertIn("int dsz = 8 ;", result.source)
+        self.assertIn("int ldsz = 16 ;", result.source)
         self.assertIn("int psz = 8 ;", result.source)
         self.assertIn("int lsz = 8 ;", result.source)
         self.assertIn("int llsz = 8 ;", result.source)
