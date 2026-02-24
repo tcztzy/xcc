@@ -595,7 +595,10 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){struct S; _Atomic struct S *p; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: atomic")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for block-scope object declaration: atomic",
+        )
 
     def test_atomic_function_object_file_scope_error(self) -> None:
         atomic_function_type = TypeSpec(
@@ -606,7 +609,10 @@ class SemaTests(unittest.TestCase):
         unit = TranslationUnit([], [DeclStmt(atomic_function_type, "g", None)])
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: atomic")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for file-scope object declaration: atomic",
+        )
 
     def test_atomic_function_object_block_scope_error(self) -> None:
         atomic_function_type = TypeSpec(
@@ -626,7 +632,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: atomic")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for block-scope object declaration: atomic",
+        )
 
     def test_atomic_void_return_type_error(self) -> None:
         unit = parse(list(lex("_Atomic(void) f(void){return;}")))
@@ -2620,7 +2629,10 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("struct S g; int main(){return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: incomplete")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for file-scope object declaration: incomplete",
+        )
 
     def test_duplicate_file_scope_typedef_declaration(self) -> None:
         unit = parse(list(lex("typedef int T; typedef int T; int main(){return 0;}")))
@@ -2692,7 +2704,10 @@ class SemaTests(unittest.TestCase):
         unit = TranslationUnit([], [DeclStmt(TypeSpec("void"), "g", None)])
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: void")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for file-scope object declaration: void",
+        )
 
     def test_unsupported_file_scope_declaration_node_error(self) -> None:
         unit = TranslationUnit([], [ExprStmt(IntLiteral("1"))])
@@ -3693,13 +3708,19 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){struct Node value; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: incomplete")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for block-scope object declaration: incomplete",
+        )
 
     def test_incomplete_union_object_error(self) -> None:
         unit = parse(list(lex("int main(){union Data value; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: incomplete")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for block-scope object declaration: incomplete",
+        )
 
     def test_incomplete_anonymous_record_object_error(self) -> None:
         unit = TranslationUnit(
@@ -3714,7 +3735,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: incomplete")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for block-scope object declaration: incomplete",
+        )
 
     def test_invalid_record_member_type_void_error(self) -> None:
         unit = TranslationUnit(
@@ -3876,7 +3900,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: void")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for block-scope object declaration: void",
+        )
 
     def test_invalid_parameter_type(self) -> None:
         unit = TranslationUnit(

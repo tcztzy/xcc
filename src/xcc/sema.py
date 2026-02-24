@@ -485,6 +485,9 @@ class Analyzer:
             "with storage class 'extern'"
         )
 
+    def _invalid_object_type_message(self, scope_label: str, type_label: str) -> str:
+        return f"Invalid object type for {scope_label} object declaration: {type_label}"
+
     def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
         if isinstance(declaration, DeclGroupStmt):
             for grouped_decl in declaration.declarations:
@@ -534,11 +537,11 @@ class Analyzer:
             if declaration.name in self._function_signatures:
                 raise SemaError(f"Conflicting declaration: {declaration.name}")
             if self._is_invalid_atomic_type_spec(declaration.type_spec):
-                raise SemaError("Invalid object type: atomic")
+                raise SemaError(self._invalid_object_type_message("file-scope", "atomic"))
             if self._is_invalid_void_object_type(declaration.type_spec):
-                raise SemaError("Invalid object type: void")
+                raise SemaError(self._invalid_object_type_message("file-scope", "void"))
             if self._is_invalid_incomplete_record_object_type(declaration.type_spec):
-                raise SemaError("Invalid object type: incomplete")
+                raise SemaError(self._invalid_object_type_message("file-scope", "incomplete"))
             if self._is_file_scope_vla_type_spec(declaration.type_spec):
                 raise SemaError("Variable length array not allowed at file scope")
             var_type = self._resolve_type(declaration.type_spec)
@@ -1585,11 +1588,11 @@ class Analyzer:
                     raise SemaError(self._missing_object_identifier_message("block-scope", stmt))
                 return
             if self._is_invalid_atomic_type_spec(stmt.type_spec):
-                raise SemaError("Invalid object type: atomic")
+                raise SemaError(self._invalid_object_type_message("block-scope", "atomic"))
             if self._is_invalid_void_object_type(stmt.type_spec):
-                raise SemaError("Invalid object type: void")
+                raise SemaError(self._invalid_object_type_message("block-scope", "void"))
             if self._is_invalid_incomplete_record_object_type(stmt.type_spec):
-                raise SemaError("Invalid object type: incomplete")
+                raise SemaError(self._invalid_object_type_message("block-scope", "incomplete"))
             var_type = self._resolve_type(stmt.type_spec)
             var_alignment = self._alignof_type(var_type)
             if not self._is_valid_explicit_alignment(stmt.alignment, var_alignment):
