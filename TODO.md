@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: hardened sema fallback diagnostics for unexpected AST nodes so unsupported statement/expression fallthroughs are reported as explicit internal-semantic bugs (instead of generic unsupported-node text), added regression assertions for both fallback paths, and documented the behavior in frontend diagnostics notes.
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_unsupported_expression tests.test_sema.SemaTests.test_unsupported_statement_node -q` (pass).
   - Iteration 3 slice: expanded predefined LP64 target-type macro coverage with missing scalar type aliases used by GCC/Clang-compatible headers (`__INTMAX_TYPE__`, `__UINTMAX_TYPE__`, `__CHAR16_TYPE__`, `__CHAR32_TYPE__`), and extended regression coverage for both standard macro expansion and CLI `-U` removal behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: expanded LP64 predefined integer type assumptions with fast-width aliases (`__INT_FAST{8,16,32,64}_TYPE__`, `__UINT_FAST{8,16,32,64}_TYPE__`) so projects depending on GCC/Clang fast-family spellings preprocess consistently; added regression coverage for standard macro expansion and CLI `-U` passthrough behavior, and updated frontend coverage docs.

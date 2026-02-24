@@ -4957,7 +4957,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported expression node: Expr")
+        self.assertEqual(
+            str(ctx.exception),
+            "Unsupported expression node: Expr (internal sema bug: unexpected AST expression node)",
+        )
 
     def test_supported_expression_does_not_hit_fallback(self) -> None:
         expr = IntLiteral("1")
@@ -5017,7 +5020,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported statement node: Stmt")
+        self.assertEqual(
+            str(ctx.exception),
+            "Unsupported statement node: Stmt (internal sema bug: unexpected AST statement node)",
+        )
 
 
 if __name__ == "__main__":
