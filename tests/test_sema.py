@@ -193,6 +193,27 @@ class SemaTests(unittest.TestCase):
             "Invalid declaration specifier for function declaration: '_Thread_local'",
         )
 
+    def test_block_scope_function_rejects_static_storage_class(self) -> None:
+        unit = parse(list(lex("int main(void){ static int f(void); return 0; }")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid storage class for function: 'static'")
+
+    def test_block_scope_function_rejects_register_storage_class(self) -> None:
+        unit = parse(list(lex("int main(void){ register int f(void); return 0; }")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid storage class for function: 'register'")
+
+    def test_block_scope_function_rejects_thread_local_specifier(self) -> None:
+        unit = parse(list(lex("int main(void){ extern _Thread_local int f(void); return 0; }")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid declaration specifier for function declaration: '_Thread_local'",
+        )
+
     def test_file_scope_storage_without_identifier_error(self) -> None:
         unit = parse(list(lex("static struct S;")))
         with self.assertRaises(SemaError) as ctx:

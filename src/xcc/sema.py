@@ -1593,13 +1593,25 @@ class Analyzer:
                 self._analyze_stmt(grouped_decl, scope, return_type)
             return
         if isinstance(stmt, DeclStmt):
+            if self._is_function_object_type(stmt.type_spec):
+                if stmt.storage_class not in {None, "extern"}:
+                    storage_class = stmt.storage_class if stmt.storage_class is not None else "<none>"
+                    raise SemaError(f"Invalid storage class for function: '{storage_class}'")
+                if stmt.is_thread_local:
+                    raise SemaError(
+                        "Invalid declaration specifier for function declaration: '_Thread_local'"
+                    )
             if stmt.storage_class == "typedef":
                 storage_class = stmt.storage_class if stmt.storage_class is not None else "none"
                 raise SemaError(
                     "Invalid storage class for block-scope object declaration: "
                     f"'{storage_class}'"
                 )
-            if stmt.is_thread_local and stmt.storage_class not in {"static", "extern"}:
+            if (
+                not self._is_function_object_type(stmt.type_spec)
+                and stmt.is_thread_local
+                and stmt.storage_class not in {"static", "extern"}
+            ):
                 storage_class = stmt.storage_class if stmt.storage_class is not None else "none"
                 raise SemaError(
                     "Invalid storage class for block-scope thread-local object declaration: "
