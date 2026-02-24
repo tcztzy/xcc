@@ -282,6 +282,12 @@ class SemaTests(unittest.TestCase):
     def test_unnamed_bit_field_zero_width_ok(self) -> None:
         analyze(parse(list(lex("struct S { unsigned :0; unsigned x:1; };"))))
 
+    def test_named_bit_field_zero_width_error(self) -> None:
+        unit = parse(list(lex("struct S { unsigned x:0; };")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Named bit-field width must be greater than zero")
+
     def test_bit_field_non_integer_type_error(self) -> None:
         unit = parse(list(lex("struct S { float x:1; };")))
         with self.assertRaises(SemaError) as ctx:
