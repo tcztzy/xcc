@@ -3032,7 +3032,10 @@ class SemaTests(unittest.TestCase):
         unit = TranslationUnit([], [ExprStmt(IntLiteral("1"))])
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported file-scope declaration node: ExprStmt")
+        self.assertEqual(
+            str(ctx.exception),
+            "Unsupported file-scope declaration node: ExprStmt (internal sema bug: unexpected AST file-scope declaration node)",
+        )
 
     def test_parenthesized_pointer_to_array_typemap(self) -> None:
         source = "int main(){int a[4]; int (*p)[4]=&a; return (*p)[1];}"

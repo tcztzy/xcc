@@ -644,7 +644,10 @@ class Analyzer:
         if isinstance(declaration, StaticAssertDecl):
             self._check_static_assert(declaration, self._file_scope)
             return
-        raise SemaError(f"Unsupported file-scope declaration node: {type(declaration).__name__}")
+        raise SemaError(
+            "Unsupported file-scope declaration node: "
+            f"{type(declaration).__name__} (internal sema bug: unexpected AST file-scope declaration node)"
+        )
 
     def _signature_from(self, func: FunctionDef) -> FunctionSignature:
         if not func.has_prototype:
