@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: tightened parameter-list diagnostics to point at the actual unexpected token after separators (`)` after trailing commas and the first non-`)` token after `...`) and made trailing-comma wording explicit (`Expected parameter declaration after ','`) across both direct function declarations and function-suffix declarators; synced clang-suite parser fixture expectations for all trailing-comma and non-terminal-ellipsis variants.
+  - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_parser -q` (pass).
+  - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_clang_suite.ClangSuiteTests.test_clang_fixtures_match_expected_frontend_stage -q` (expected known unrelated failures remain: `sema-alignas-c11`, `_Complex`-driven `sema-warn-absolute-value-long-long`, C23 `typeof_unqual` case, and static-assert expression-start fixtures).
   - Iteration 3 slice: normalized parser declaration/type-name unsupported-token diagnostics by adding a declaration-context token formatter (`Declaration type cannot start with <token kind>`) and an explicit end-of-input declaration diagnostic (`Declaration type is missing before end of input`), aligning declaration wording with existing type-name diagnostics.
   - Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_unsupported_non_keyword_type_uses_declaration_token_diagnostic tests.test_parser.ParserTests.test_unsupported_declaration_type_reports_end_of_input_message tests.test_parser.ParserTests.test_unsupported_non_keyword_type_uses_type_name_token_diagnostic tests.test_parser.ParserTests.test_unsupported_type_name_reports_end_of_input_message -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_parser -q` (pass).

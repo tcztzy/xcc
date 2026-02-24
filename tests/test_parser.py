@@ -291,27 +291,31 @@ class ParserTests(unittest.TestCase):
     def test_parameter_list_rejects_trailing_comma(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int logf(int level,);")))
-        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+        self.assertEqual(ctx.exception.message, "Expected parameter declaration after ','")
+        self.assertEqual(ctx.exception.token.column, 20)
 
     def test_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int logf(int level, ..., int other);")))
         self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
+        self.assertEqual(ctx.exception.token.column, 26)
 
     def test_function_suffix_parameter_list_rejects_trailing_comma(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("typedef int (*logf_t)(int,);")))
-        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+        self.assertEqual(ctx.exception.message, "Expected parameter declaration after ','")
+        self.assertEqual(ctx.exception.token.column, 27)
 
     def test_function_suffix_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("typedef int (*logf_t)(int, ..., int);")))
         self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
+        self.assertEqual(ctx.exception.token.column, 33)
 
     def test_block_scope_parameter_list_rejects_trailing_comma(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(){int logf(int level,);return 0;}")))
-        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+        self.assertEqual(ctx.exception.message, "Expected parameter declaration after ','")
 
     def test_block_scope_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
         with self.assertRaises(ParserError) as ctx:
@@ -321,7 +325,7 @@ class ParserTests(unittest.TestCase):
     def test_struct_member_parameter_list_rejects_trailing_comma(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("struct S { int logf(int level,); };")))
-        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+        self.assertEqual(ctx.exception.message, "Expected parameter declaration after ','")
 
     def test_struct_member_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
         with self.assertRaises(ParserError) as ctx:
@@ -331,7 +335,7 @@ class ParserTests(unittest.TestCase):
     def test_union_member_parameter_list_rejects_trailing_comma(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("union U { int logf(int level,); };")))
-        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+        self.assertEqual(ctx.exception.message, "Expected parameter declaration after ','")
 
     def test_union_member_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
         with self.assertRaises(ParserError) as ctx:
@@ -341,7 +345,7 @@ class ParserTests(unittest.TestCase):
     def test_block_scope_function_pointer_parameter_list_rejects_trailing_comma(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(){int (*logf)(int level,);return 0;}")))
-        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+        self.assertEqual(ctx.exception.message, "Expected parameter declaration after ','")
 
     def test_block_scope_function_pointer_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
         with self.assertRaises(ParserError) as ctx:
@@ -351,7 +355,7 @@ class ParserTests(unittest.TestCase):
     def test_struct_member_function_pointer_parameter_list_rejects_trailing_comma(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("struct S { int (*logf)(int level,); };")))
-        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+        self.assertEqual(ctx.exception.message, "Expected parameter declaration after ','")
 
     def test_struct_member_function_pointer_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
         with self.assertRaises(ParserError) as ctx:
@@ -361,7 +365,7 @@ class ParserTests(unittest.TestCase):
     def test_union_member_function_pointer_parameter_list_rejects_trailing_comma(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("union U { int (*logf)(int level,); };")))
-        self.assertEqual(ctx.exception.message, "Expected parameter after ','")
+        self.assertEqual(ctx.exception.message, "Expected parameter declaration after ','")
 
     def test_union_member_function_pointer_parameter_list_rejects_non_terminal_ellipsis(self) -> None:
         with self.assertRaises(ParserError) as ctx:
