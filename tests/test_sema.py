@@ -1478,7 +1478,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Duplicate generic association type at position 2 ('int'): previous compatible type was at position 1 ('int')",
+            "Duplicate generic association type at position 2 ('int'): previous compatible type was at position 1 at line 1, column 59 ('int')",
         )
 
     def test_generic_selection_qualified_typedef_alias_duplicate_compatible_type_error(self) -> None:
@@ -1493,7 +1493,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Duplicate generic association type at position 2 ('const int'): previous compatible type was at position 1 ('const int')",
+            "Duplicate generic association type at position 2 ('const int'): previous compatible type was at position 1 at line 1, column 59 ('const int')",
         )
 
     def test_generic_selection_duplicate_default_association_error(self) -> None:
