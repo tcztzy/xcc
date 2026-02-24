@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: added predefined dynamic macro `__INCLUDE_LEVEL__` with nested-include depth tracking (`0` in the main file, incremented for each include nesting level), including CLI `-U` behavior and nested-include regression coverage.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_include_level_macro_tracks_nested_includes tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_include_level_macro tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: expanded predefined C11 macro coverage with `__STDC_IEC_559__=1` so preprocessing now explicitly advertises IEC 60559 floating-point support assumptions alongside the existing `__STDC__`/`__STDC_VERSION__` baseline.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: improved `_Generic` duplicate-association diagnostics with association-order context by reporting both the current and previous association positions for duplicate default associations and duplicate compatible type associations, while keeping selection behavior unchanged.

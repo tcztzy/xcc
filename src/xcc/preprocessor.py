@@ -62,8 +62,9 @@ _PREDEFINED_MACROS = (
     "__PTRDIFF_TYPE__=long",
     "__FILE__=0",
     "__LINE__=0",
+    "__INCLUDE_LEVEL__=0",
 )
-_PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__LINE__"})
+_PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__LINE__", "__INCLUDE_LEVEL__"})
 _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__"})
 _PREDEFINED_MACRO_NAMES = frozenset(item.split("=", 1)[0] for item in _PREDEFINED_MACROS) | frozenset(
     _PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS
@@ -109,6 +110,7 @@ class PreprocessorError(ValueError):
 class _SourceLocation:
     filename: str
     line: int
+    include_level: int = 0
 
 
 def _location_tuple(location: _SourceLocation) -> tuple[str, int]:
@@ -148,12 +150,13 @@ class _OutputBuilder:
 
 
 class _LogicalCursor:
-    def __init__(self, filename: str) -> None:
+    def __init__(self, filename: str, *, include_level: int = 0) -> None:
         self.filename = filename
         self.line = 1
+        self.include_level = include_level
 
     def current(self) -> _SourceLocation:
-        return _SourceLocation(self.filename, self.line)
+        return _SourceLocation(self.filename, self.line, self.include_level)
 
     def advance(self, count: int = 1) -> None:
         self.line += count
@@ -314,7 +317,7 @@ class _Preprocessor:
         if not lines:
             return _ProcessedText(source, ())
         out = _OutputBuilder()
-        logical_cursor = _LogicalCursor(filename)
+        logical_cursor = _LogicalCursor(filename, include_level=max(len(include_stack) - 1, 0))
         stack: list[_ConditionalFrame] = []
         line_index = 0
         while line_index < len(lines):
@@ -968,6 +971,8 @@ def _expand_macro_tokens(
         if token.text in _PREDEFINED_DYNAMIC_MACROS and token.text in macros:
             if token.text == "__LINE__":
                 expanded.append(_MacroToken(TokenKind.INT_CONST, str(location.line)))
+            elif token.text == "__INCLUDE_LEVEL__":
+                expanded.append(_MacroToken(TokenKind.INT_CONST, str(location.include_level)))
             else:
                 expanded.append(
                     _MacroToken(TokenKind.STRING_LITERAL, _quote_string_literal(location.filename))
