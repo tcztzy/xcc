@@ -2352,8 +2352,9 @@ class Parser:
                     association_start_index,
                     association_end_index,
                 )
-                # Keep parser-side duplicate checks focused on canonical spellings.
-                # Associations that reference typedef names are deferred to sema,
+                # Keep parser-side duplicate checks focused on canonical builtin
+                # spellings. Associations that reference typedef names (including
+                # qualified spellings like `const Alias`) are deferred to sema,
                 # which has full compatibility information.
                 if not self._type_name_uses_typedef_alias(
                     association_start_index,
