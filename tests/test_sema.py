@@ -530,7 +530,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid alignment specifier for block-scope object declaration",
+            "Invalid alignment specifier for block-scope object declaration: alignment 1 is weaker than natural alignment 4",
         )
 
     def test_alignas_tag_only_declaration_error(self) -> None:
@@ -548,7 +548,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid alignment specifier for file-scope object declaration",
+            "Invalid alignment specifier for file-scope object declaration: alignment 1 is weaker than natural alignment 4",
         )
 
     def test_alignas_block_scope_tag_only_declaration_error(self) -> None:
@@ -604,7 +604,25 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid alignment specifier for record member declaration",
+            "Invalid alignment specifier for record member declaration: alignment 1 is weaker than natural alignment 4",
+        )
+
+    def test_alignas_rejects_block_scope_non_power_of_two_alignment(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt([DeclStmt(TypeSpec("int"), "x", None, 3), ReturnStmt(IntLiteral(0))]),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid alignment specifier for block-scope object declaration: alignment 3 is not a power of two",
         )
 
     def test_atomic_declaration_typemap(self) -> None:
