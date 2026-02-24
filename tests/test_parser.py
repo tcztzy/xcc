@@ -1173,26 +1173,32 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("int main(void){_Alignas(3) int x; return x;}")))
         self.assertEqual(
             ctx.exception.message,
-            "_Alignas expression operand must evaluate to a power of two",
+            "Invalid alignment specifier: _Alignas expression operand must evaluate to a power of two",
         )
 
     def test_alignas_rejects_non_positive_constant(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){_Alignas(0) int x; return x;}")))
-        self.assertEqual(ctx.exception.message, "_Alignas expression operand must be positive")
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid alignment specifier: _Alignas expression operand must be positive",
+        )
 
     def test_alignas_rejects_non_ice_expression(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){int n; _Alignas(n) int x; return x;}")))
         self.assertEqual(
             ctx.exception.message,
-            "_Alignas expression operand must be an integer constant expression",
+            "Invalid alignment specifier: _Alignas expression operand must be an integer constant expression",
         )
 
     def test_alignas_rejects_void_type_name(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){_Alignas(void) int x; return x;}")))
-        self.assertEqual(ctx.exception.message, "_Alignas type operand must denote an object type")
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid alignment specifier: _Alignas type operand must denote an object type",
+        )
 
     def test_alignas_accepts_constant_expression(self) -> None:
         unit = parse(list(lex("int main(void){_Alignas(1<<4) int x; return x;}")))
