@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined LP64 target-type assumptions with wide-character baseline macros (`__WCHAR_TYPE__=int`, `__WINT_TYPE__=unsigned int`, `__WCHAR_WIDTH__=32`), and added regression coverage for both macro expansion and CLI `-U` removal behavior.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: added GNU `__has_include_next(...)` support in `#if`/`#elif` condition evaluation so include-probing can continue search after the current include directory (mirroring `#include_next` search semantics), while C11 mode keeps rejecting it as an invalid conditional expression; added focused regression coverage for GNU success/failure paths and C11 rejection.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_next_in_gnu11 tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_next_skips_current_directory tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_next_errors_in_c11 -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
