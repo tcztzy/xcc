@@ -1746,9 +1746,11 @@ class Analyzer:
             self._pending_goto_labels.append(stmt.label)
             return
         if isinstance(stmt, IndirectGotoStmt):
-            target_type = self._analyze_expr(stmt.target, scope)
+            target_type = self._decay_array_value(self._analyze_expr(stmt.target, scope))
             if target_type.pointee() is None:
                 raise SemaError("Indirect goto target must be pointer")
+            if not self._is_void_pointer_type(target_type):
+                raise SemaError("Indirect goto target must be pointer to void")
             return
         if isinstance(stmt, CompoundStmt):
             inner_scope = Scope(scope)

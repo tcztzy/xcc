@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: tightened GNU indirect-goto control-flow validation so `goto *expr;` now requires a `void*` target expression (still rejecting non-pointers), closing a compatibility gap where non-void pointers were previously accepted; added focused sema regressions for `int*` and function-pointer operands.
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_indirect_goto_pointer_operand_ok tests.test_sema.SemaTests.test_indirect_goto_requires_pointer_operand tests.test_sema.SemaTests.test_indirect_goto_requires_void_pointer_operand tests.test_sema.SemaTests.test_indirect_goto_rejects_function_pointer_operand -q` (pass).
   - Iteration 3 slice: expanded predefined wide-character target-assumption macros with explicit bounds (`__WCHAR_MAX__`, `__WCHAR_MIN__`, `__WINT_MAX__`, `__WINT_MIN__`) so preprocessing now advertises both width and value-range assumptions for `wchar_t`/`wint_t`; added regression coverage for expansion and CLI `-U` passthrough behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: added GNU-compatible predefined static macro `__TIMESTAMP__` (translation-start timestamp literal) alongside existing `__DATE__`/`__TIME__`, with regression coverage for expansion/macro-table visibility and CLI `-U` passthrough behavior.
