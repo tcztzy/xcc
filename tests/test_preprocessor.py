@@ -557,6 +557,15 @@ class PreprocessorTests(unittest.TestCase):
             )
         self.assertIn("int ok ;", result.source)
 
+    def test_if_expression_with_macro_expanded_has_include_operator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "present.h").write_text("int x;\n", encoding="utf-8")
+            source = "#define HAS(x) __has_include(x)\n#if HAS(\"present.h\")\nint ok;\n#endif\n"
+            result = preprocess_source(source, filename=str(root / "main.c"))
+        self.assertIn("int ok ;", result.source)
+
+
     def test_if_expression_with_has_include_macro_expands_to_invalid_header(self) -> None:
         source = "#define HDR present.h\n#if __has_include(HDR)\nint bad;\n#endif\n"
         with self.assertRaises(PreprocessorError) as ctx:
