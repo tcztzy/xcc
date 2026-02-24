@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: normalized parser declaration/type-name unsupported-token diagnostics by adding a declaration-context token formatter (`Declaration type cannot start with <token kind>`) and an explicit end-of-input declaration diagnostic (`Declaration type is missing before end of input`), aligning declaration wording with existing type-name diagnostics.
+  - Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_unsupported_non_keyword_type_uses_declaration_token_diagnostic tests.test_parser.ParserTests.test_unsupported_declaration_type_reports_end_of_input_message tests.test_parser.ParserTests.test_unsupported_non_keyword_type_uses_type_name_token_diagnostic tests.test_parser.ParserTests.test_unsupported_type_name_reports_end_of_input_message -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_parser -q` (pass).
   - Iteration 3 slice: added preprocessing mode-specific predefined macros so strict `c11` now exposes `__STRICT_ANSI__`, while `gnu11` exposes GNU compatibility version macros (`__GNUC__`, `__GNUC_MINOR__`, `__GNUC_PATCHLEVEL__`, `__VERSION__`); added focused regressions for both presence and absence across language modes.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_strict_mode_defines_strict_ansi_macro tests.test_preprocessor.PreprocessorTests.test_gnu_mode_defines_gnu_version_macros tests.test_preprocessor.PreprocessorTests.test_gnu_mode_does_not_define_strict_ansi_macro tests.test_preprocessor.PreprocessorTests.test_strict_mode_does_not_define_gnu_version_macros -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).

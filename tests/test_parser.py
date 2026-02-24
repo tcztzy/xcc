@@ -1298,7 +1298,15 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("1 value;")))
         self.assertEqual(
             ctx.exception.message,
-            "Unsupported declaration type token (integer constant): '1'",
+            "Declaration type cannot start with integer constant: '1'",
+        )
+
+    def test_unsupported_declaration_type_reports_end_of_input_message(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ typedef")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Declaration type is missing before end of input",
         )
 
     def test_unsupported_declaration_type_punctuator_reports_left_parenthesis_message(self) -> None:
