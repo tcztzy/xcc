@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: made parser void-object rejection diagnostics context-specific by replacing generic parse-time messages with `Invalid object type for object declaration: void` and `Invalid object type for record member declaration: void`, plus focused parser regressions for both declaration contexts.
+  - Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_record_member_rejects_void_object_type_with_contextual_diagnostic tests.test_parser.ParserTests.test_file_scope_declaration_rejects_void_object_type_with_contextual_diagnostic -q` (pass).
   - Iteration 3 slice: implemented CLI macro-include support (`-imacros <header>`) end-to-end (options/CLI/preprocessor) so macro-include files are processed before forced includes, export macro definitions into subsequent preprocessing, and discard non-directive source output; added dedicated diagnostics (`Macro include not found: ...`) and include-trace labeling (`#imacros`).
   - Checks: `.venv/bin/python -m unittest tests.test_options tests.test_cli tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: expanded predefined LP64 pointer-family assumptions with `intptr_t`/`uintptr_t` macro coverage (`__INTPTR_TYPE__=long`, `__UINTPTR_TYPE__=unsigned long`, `__INTPTR_WIDTH__=64`, `__UINTPTR_WIDTH__=64`, `__INTPTR_MAX__=9223372036854775807L`, `__INTPTR_MIN__=-9223372036854775808L`, `__UINTPTR_MAX__=18446744073709551615UL`) and extended regression coverage in both standard-macro expansion and CLI `-U` override paths.

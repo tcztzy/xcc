@@ -1002,7 +1002,10 @@ class Parser:
                     decl_specs.alignment_token or self._current(),
                 )
             if self._is_invalid_void_object_type(member_type):
-                raise ParserError("Invalid member type", self._current())
+                raise ParserError(
+                    self._invalid_object_type_message("record member declaration", "void"),
+                    self._current(),
+                )
             members.append(
                 RecordMemberDecl(
                     member_type,
@@ -1310,7 +1313,10 @@ class Parser:
                 declarations.append(TypedefDecl(decl_type, name))
             else:
                 if self._is_invalid_void_object_type(decl_type):
-                    raise ParserError("Invalid object type", self._current())
+                    raise ParserError(
+                        self._invalid_object_type_message("object declaration", "void"),
+                        self._current(),
+                    )
                 self._define_ordinary_type(name, decl_type)
                 init: Expr | InitList | None = None
                 if self._check_punct("="):
@@ -2536,6 +2542,9 @@ class Parser:
 
     def _invalid_alignment_specifier_message(self, context: str) -> str:
         return f"Invalid alignment specifier for {context}"
+
+    def _invalid_object_type_message(self, context: str, type_label: str) -> str:
+        return f"Invalid object type for {context}: {type_label}"
 
     def _consume_overloadable_gnu_attributes(self) -> bool:
         _, has_overloadable = self._consume_gnu_attributes()
