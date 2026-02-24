@@ -1,5 +1,4 @@
 int main(void) {
-  _Static_assert(1, "ok");
-  <%;
+  _Static_assert(<%, "ok");
   return 0;
 }

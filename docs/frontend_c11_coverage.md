@@ -18,6 +18,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
 - **Parser diagnostic hardening (ongoing)**
   - Type-name contexts now reject accidental declarator identifiers with an explicit diagnostic (`Type name cannot declare identifier '...'`) in cast and `_Atomic(type-name)` parsing.
   - `_Alignas(...)` operand validation now reports operand-specific diagnostics under a shared `Invalid alignment specifier: ...` prefix for non-object type operands, non-ICE expression operands, non-positive values, and non-power-of-two values.
+  - Local clang parser regression fixtures now cover static-assert expression-start diagnostics directly at the `_Static_assert` condition site (including punctuator/digraph/token-paste starts), with manifest checksum and source-location metadata kept in sync.
 - **Sema diagnostic hardening (ongoing)**
   - Function declarations/definitions using `_Thread_local` now emit a declaration-context-specific diagnostic (`Invalid declaration specifier for function declaration: '_Thread_local'`) instead of a generic specifier error.
   - Compound literals now report context-aware invalid object-type diagnostics (`Invalid object type for compound literal: ...`) for `void`, incomplete record, and invalid `_Atomic(...)` object types.
