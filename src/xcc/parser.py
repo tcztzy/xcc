@@ -2323,6 +2323,7 @@ class Parser:
         first_default_index: int | None = None
         first_default_token: Token | None = None
         association_index = 0
+        parsed_type_positions: dict[TypeSpec, tuple[int, Token]] = {}
         while True:
             association_index += 1
             assoc_type: TypeSpec | None
@@ -2342,7 +2343,18 @@ class Parser:
                 self._advance()
                 assoc_type = None
             else:
+                association_type_token = self._current()
                 assoc_type = self._parse_type_name()
+                if assoc_type in parsed_type_positions:
+                    previous_index, previous_token = parsed_type_positions[assoc_type]
+                    raise ParserError(
+                        "Duplicate generic type association at position "
+                        f"{association_index}: previous identical type association "
+                        f"was at position {previous_index} (line {previous_token.line}, "
+                        f"column {previous_token.column})",
+                        association_type_token,
+                    )
+                parsed_type_positions[assoc_type] = (association_index, association_type_token)
             self._expect_punct(":")
             associations.append((assoc_type, self._parse_assignment()))
             if not self._check_punct(","):
