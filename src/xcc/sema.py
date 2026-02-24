@@ -2150,7 +2150,9 @@ class Analyzer:
                     )
                 assoc_type = self._resolve_type(assoc_type_spec)
                 if assoc_type in seen_types:
-                    raise SemaError("Duplicate generic association type")
+                    raise SemaError(
+                        f"Duplicate generic association type: '{assoc_type}'"
+                    )
                 seen_types.add(assoc_type)
                 self._analyze_expr(assoc_expr, scope)
                 if assoc_type == control_type:
@@ -2158,7 +2160,9 @@ class Analyzer:
             if selected_expr is None:
                 selected_expr = default_expr
             if selected_expr is None:
-                raise SemaError("No matching generic association")
+                raise SemaError(
+                    f"No matching generic association for control type '{control_type}'"
+                )
             selected_type = self._type_map.require(selected_expr)
             selected_overload = self._get_overload_expr_name(selected_expr)
             if selected_overload is not None:
