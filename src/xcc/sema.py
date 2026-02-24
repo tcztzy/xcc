@@ -479,6 +479,12 @@ class Analyzer:
             f"with {qualifier_text}"
         )
 
+    def _extern_initializer_message(self, scope_label: str) -> str:
+        return (
+            f"Invalid initializer for {scope_label} object declaration "
+            "with storage class 'extern'"
+        )
+
     def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
         if isinstance(declaration, DeclGroupStmt):
             for grouped_decl in declaration.declarations:
@@ -549,7 +555,7 @@ class Analyzer:
             )
             if declaration.init is not None:
                 if declaration.storage_class == "extern":
-                    raise SemaError("Extern declaration cannot have initializer")
+                    raise SemaError(self._extern_initializer_message("file-scope"))
                 self._analyze_initializer(var_type, declaration.init, self._file_scope)
             return
         if isinstance(declaration, StaticAssertDecl):
@@ -1598,7 +1604,7 @@ class Analyzer:
             )
             if stmt.init is not None:
                 if stmt.storage_class == "extern":
-                    raise SemaError("Extern declaration cannot have initializer")
+                    raise SemaError(self._extern_initializer_message("block-scope"))
                 self._analyze_initializer(var_type, stmt.init, scope)
             return
         if isinstance(stmt, StaticAssertDecl):
