@@ -385,15 +385,25 @@ class _Preprocessor:
         self._base_filename = filename
         base_dir = self._source_dir(filename)
         out = _OutputBuilder()
-        for index, include_name in enumerate(self._options.forced_includes, start=1):
+        command_line_index = 1
+        for include_name in self._options.macro_includes:
+            self._process_macro_include(
+                include_name,
+                location=_SourceLocation("<command line>", command_line_index),
+                base_dir=base_dir,
+                include_stack=(filename,),
+            )
+            command_line_index += 1
+        for include_name in self._options.forced_includes:
             out.extend_processed(
                 self._process_forced_include(
                     include_name,
-                    location=_SourceLocation("<command line>", index),
+                    location=_SourceLocation("<command line>", command_line_index),
                     base_dir=base_dir,
                     include_stack=(filename,),
                 )
             )
+            command_line_index += 1
         out.extend_processed(
             self._process_text(
                 source,
@@ -774,6 +784,68 @@ class _Preprocessor:
                 code=_PP_INCLUDE_READ_ERROR,
             ) from error
         return self._process_text(
+            include_source,
+            filename=include_path_text,
+            source_id=include_path_text,
+            base_dir=include_path.parent,
+            include_stack=(*include_stack, include_path_text),
+        )
+
+    def _process_macro_include(
+        self,
+        include_name: str,
+        *,
+        location: _SourceLocation,
+        base_dir: Path | None,
+        include_stack: tuple[str, ...],
+    ) -> None:
+        include_path, search_roots = self._resolve_include(
+            include_name,
+            is_angled=False,
+            base_dir=base_dir,
+        )
+        if include_path is None:
+            raise PreprocessorError(
+                (
+                    "Macro include not found: "
+                    f'{_format_include_reference(include_name, False)}; searched: '
+                    f"{_format_include_search_roots(search_roots)}"
+                ),
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INCLUDE_NOT_FOUND,
+            )
+        include_path_text = str(include_path)
+        self.include_trace.append(
+            _format_include_trace(
+                location.filename,
+                location.line,
+                include_name,
+                include_path_text,
+                False,
+                directive="imacros",
+            )
+        )
+        if include_path_text in include_stack:
+            raise PreprocessorError(
+                f"Circular include detected: {_format_include_cycle(include_stack, include_path_text)}",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INCLUDE_CYCLE,
+            )
+        try:
+            include_source = include_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise PreprocessorError(
+                f"Unable to read include: {include_name}: {error}",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INCLUDE_READ_ERROR,
+            ) from error
+        self._process_text(
             include_source,
             filename=include_path_text,
             source_id=include_path_text,

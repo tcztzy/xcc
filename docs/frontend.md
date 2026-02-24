@@ -22,6 +22,7 @@ The `xcc` CLI runs the front end and exits non-zero on diagnostics.
 - `xcc --dump-sema <path.c>`: print semantic model.
 - `xcc -I <dir>`, `-iquote <dir>`, `-isystem <dir>`, `-idirafter <dir>`: configure include search roots.
 - `xcc -include <header>`: force-include a header before the main translation unit (repeatable).
+- `xcc -imacros <header>`: load macros from a header before preprocessing the main translation unit, while discarding that header's non-directive output (repeatable).
 
 Diagnostics are stage-tagged (`lex`, `parse`, `sema`) and include source coordinates when available.
 
