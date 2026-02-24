@@ -643,12 +643,17 @@ class Parser:
             return self._unsupported_type_name_token_message(token_text, token_kind)
         if token.kind == TokenKind.PUNCTUATOR:
             return self._unsupported_declaration_type_punctuator_message(token_text)
-        return f"Unsupported declaration type token ({token_kind}): '{token_text}'"
+        return self._unsupported_declaration_type_token_message(token_text, token_kind)
 
     def _unsupported_type_name_token_message(self, token_text: str, token_kind: str) -> str:
         if token_kind == "end of input":
             return "Type name is missing before end of input"
         return f"Type name cannot start with {token_kind}: '{token_text}'"
+
+    def _unsupported_declaration_type_token_message(self, token_text: str, token_kind: str) -> str:
+        if token_kind == "end of input":
+            return "Declaration type is missing before end of input"
+        return f"Declaration type cannot start with {token_kind}: '{token_text}'"
 
     def _unsupported_type_name_punctuator_message(self, punctuator: str) -> str:
         messages = {
