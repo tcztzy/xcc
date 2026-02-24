@@ -328,6 +328,14 @@ class PreprocessorTests(unittest.TestCase):
             "__UINT_LEAST16_TYPE__ ul16;\n"
             "__UINT_LEAST32_TYPE__ ul32;\n"
             "__UINT_LEAST64_TYPE__ ul64;\n"
+            "__INT_FAST8_TYPE__ if8;\n"
+            "__INT_FAST16_TYPE__ if16;\n"
+            "__INT_FAST32_TYPE__ if32;\n"
+            "__INT_FAST64_TYPE__ if64;\n"
+            "__UINT_FAST8_TYPE__ uf8;\n"
+            "__UINT_FAST16_TYPE__ uf16;\n"
+            "__UINT_FAST32_TYPE__ uf32;\n"
+            "__UINT_FAST64_TYPE__ uf64;\n"
             "__WCHAR_TYPE__ w;\n"
         )
         result = preprocess_source(
@@ -431,6 +439,14 @@ class PreprocessorTests(unittest.TestCase):
                     "__UINT_LEAST16_TYPE__",
                     "__UINT_LEAST32_TYPE__",
                     "__UINT_LEAST64_TYPE__",
+                    "__INT_FAST8_TYPE__",
+                    "__INT_FAST16_TYPE__",
+                    "__INT_FAST32_TYPE__",
+                    "__INT_FAST64_TYPE__",
+                    "__UINT_FAST8_TYPE__",
+                    "__UINT_FAST16_TYPE__",
+                    "__UINT_FAST32_TYPE__",
+                    "__UINT_FAST64_TYPE__",
                     "__WCHAR_TYPE__",
                 )
             ),
@@ -530,6 +546,14 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("__UINT_LEAST16_TYPE__ ul16;", result.source)
         self.assertIn("__UINT_LEAST32_TYPE__ ul32;", result.source)
         self.assertIn("__UINT_LEAST64_TYPE__ ul64;", result.source)
+        self.assertIn("__INT_FAST8_TYPE__ if8;", result.source)
+        self.assertIn("__INT_FAST16_TYPE__ if16;", result.source)
+        self.assertIn("__INT_FAST32_TYPE__ if32;", result.source)
+        self.assertIn("__INT_FAST64_TYPE__ if64;", result.source)
+        self.assertIn("__UINT_FAST8_TYPE__ uf8;", result.source)
+        self.assertIn("__UINT_FAST16_TYPE__ uf16;", result.source)
+        self.assertIn("__UINT_FAST32_TYPE__ uf32;", result.source)
+        self.assertIn("__UINT_FAST64_TYPE__ uf64;", result.source)
         self.assertIn("__WCHAR_TYPE__ w;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
@@ -1628,6 +1652,14 @@ class PreprocessorTests(unittest.TestCase):
             "__UINT_LEAST16_TYPE__ ul16;\n"
             "__UINT_LEAST32_TYPE__ ul32;\n"
             "__UINT_LEAST64_TYPE__ ul64;\n"
+            "__INT_FAST8_TYPE__ if8;\n"
+            "__INT_FAST16_TYPE__ if16;\n"
+            "__INT_FAST32_TYPE__ if32;\n"
+            "__INT_FAST64_TYPE__ if64;\n"
+            "__UINT_FAST8_TYPE__ uf8;\n"
+            "__UINT_FAST16_TYPE__ uf16;\n"
+            "__UINT_FAST32_TYPE__ uf32;\n"
+            "__UINT_FAST64_TYPE__ uf64;\n"
             "__WCHAR_TYPE__ wc;\n"
             "__WINT_TYPE__ wi;\n",
             filename="main.c",
@@ -1755,6 +1787,14 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("unsigned short ul16 ;", result.source)
         self.assertIn("unsigned int ul32 ;", result.source)
         self.assertIn("unsigned long ul64 ;", result.source)
+        self.assertIn("signed char if8 ;", result.source)
+        self.assertIn("short if16 ;", result.source)
+        self.assertIn("int if32 ;", result.source)
+        self.assertIn("long if64 ;", result.source)
+        self.assertIn("unsigned char uf8 ;", result.source)
+        self.assertIn("unsigned short uf16 ;", result.source)
+        self.assertIn("unsigned int uf32 ;", result.source)
+        self.assertIn("unsigned long uf64 ;", result.source)
         self.assertIn("int wc ;", result.source)
         self.assertIn("unsigned int wi ;", result.source)
 
