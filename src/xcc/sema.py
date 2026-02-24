@@ -999,6 +999,12 @@ class Analyzer:
     def _is_invalid_generic_association_type_spec(self, type_spec: TypeSpec) -> bool:
         return self._invalid_generic_association_type_reason(type_spec) is not None
 
+    def _describe_generic_association_type(self, type_spec: TypeSpec, resolved_type: Type) -> str:
+        spelled_type = f"{' '.join(type_spec.qualifiers)} {type_spec.name}".strip()
+        if not type_spec.declarator_ops and not type_spec.is_atomic:
+            return spelled_type
+        return str(resolved_type)
+
     def _is_variably_modified_type_spec(self, type_spec: TypeSpec) -> bool:
         for kind, value in type_spec.declarator_ops:
             if kind != "arr":
@@ -2210,7 +2216,7 @@ class Analyzer:
             selected_expr: Expr | None = None
             default_expr: Expr | None = None
             default_association_index: int | None = None
-            seen_type_indices: dict[Type, int] = {}
+            seen_type_associations: dict[Type, tuple[int, str]] = {}
             association_type_names: list[str] = []
             for association_index, (assoc_type_spec, assoc_expr) in enumerate(
                 expr.associations, start=1
@@ -2235,14 +2241,19 @@ class Analyzer:
                         f"Invalid generic association type: {invalid_assoc_reason}"
                     )
                 assoc_type = self._resolve_type(assoc_type_spec)
-                previous_assoc_index = seen_type_indices.get(assoc_type)
-                if previous_assoc_index is not None:
+                assoc_type_label = self._describe_generic_association_type(
+                    assoc_type_spec, assoc_type
+                )
+                previous_assoc = seen_type_associations.get(assoc_type)
+                if previous_assoc is not None:
+                    previous_assoc_index, previous_assoc_label = previous_assoc
                     raise SemaError(
                         "Duplicate generic association type at position "
-                        f"{association_index}: previous compatible type was at position "
-                        f"{previous_assoc_index}: '{assoc_type}'"
+                        f"{association_index} ('{assoc_type_label}'): previous compatible "
+                        f"type was at position {previous_assoc_index} "
+                        f"('{previous_assoc_label}')"
                     )
-                seen_type_indices[assoc_type] = association_index
+                seen_type_associations[assoc_type] = (association_index, assoc_type_label)
                 association_type_names.append(str(assoc_type))
                 self._analyze_expr(assoc_expr, scope)
                 if assoc_type == control_type:
