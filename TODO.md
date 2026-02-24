@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined LP64 integer-width/range assumptions with size/pointer widths and signed/unsigned max-value macros (`__SIZE_WIDTH__`, `__PTRDIFF_WIDTH__`, `__SCHAR_MAX__`, `__SHRT_MAX__`, `__INT_MAX__`, `__LONG_MAX__`, `__UCHAR_MAX__`, `__USHRT_MAX__`, `__UINT_MAX__`, `__ULONG_MAX__`, `__SIZE_MAX__`, `__PTRDIFF_MAX__`), with regression coverage for expansion and CLI `-U` removal behavior.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: added predefined dynamic macro `__COUNTER__` with monotonic expansion semantics (including expansions that occur through user-defined macros) and CLI `-U` override behavior, plus focused regression coverage for increment ordering and undef passthrough.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_counter_macro_increments_per_expansion tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_counter_macro -q` (pass).
   - Iteration 3 slice: upgraded circular-include diagnostics to report the concrete include cycle chain (`a.h -> b.h -> a.h`) instead of a generic cycle message, making recursive-include root-cause triage immediate from a single failure.

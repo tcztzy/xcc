@@ -196,6 +196,10 @@ class PreprocessorTests(unittest.TestCase):
             "#if __STDC_MB_MIGHT_NEQ_WC__\nint mw;\n#endif\n"
             "#if __STDC_NO_THREADS__\nint t;\n#endif\n"
             "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
+            "#if __SIZE_WIDTH__ == 64\nint sw;\n#endif\n"
+            "#if __PTRDIFF_WIDTH__ == 64\nint pw;\n#endif\n"
+            "#if __SIZE_MAX__ > 0\nint sm;\n#endif\n"
+            "#if __PTRDIFF_MAX__ > 0\nint pm;\n#endif\n"
             "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
             "#if defined(__BYTE_ORDER__)\nint e;\n#endif\n"
             "#if defined(__LITTLE_ENDIAN__)\nint le;\n#endif\n"
@@ -216,6 +220,10 @@ class PreprocessorTests(unittest.TestCase):
                     "__STDC_MB_MIGHT_NEQ_WC__",
                     "__STDC_NO_THREADS__",
                     "__SIZEOF_POINTER__",
+                    "__SIZE_WIDTH__",
+                    "__PTRDIFF_WIDTH__",
+                    "__SIZE_MAX__",
+                    "__PTRDIFF_MAX__",
                     "__CHAR_BIT__",
                     "__BYTE_ORDER__",
                     "__LITTLE_ENDIAN__",
@@ -234,6 +242,10 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int mw;", result.source)
         self.assertNotIn("int t;", result.source)
         self.assertNotIn("int z;", result.source)
+        self.assertNotIn("int sw;", result.source)
+        self.assertNotIn("int pw;", result.source)
+        self.assertNotIn("int sm;", result.source)
+        self.assertNotIn("int pm;", result.source)
         self.assertNotIn("int c;", result.source)
         self.assertNotIn("int e;", result.source)
         self.assertNotIn("int le;", result.source)
@@ -845,6 +857,18 @@ class PreprocessorTests(unittest.TestCase):
             "int nv = __STDC_NO_VLA__;\n"
             "int lp = __LP64__;\n"
             "int bits = __CHAR_BIT__;\n"
+            "int szw = __SIZE_WIDTH__;\n"
+            "int pdw = __PTRDIFF_WIDTH__;\n"
+            "int scmax = __SCHAR_MAX__;\n"
+            "int shmax = __SHRT_MAX__;\n"
+            "int imax = __INT_MAX__;\n"
+            "long lmax = __LONG_MAX__;\n"
+            "unsigned int ucmax = __UCHAR_MAX__;\n"
+            "unsigned int usmax = __USHRT_MAX__;\n"
+            "unsigned int uimax = __UINT_MAX__;\n"
+            "unsigned long ulmax = __ULONG_MAX__;\n"
+            "unsigned long szmax = __SIZE_MAX__;\n"
+            "long pdmax = __PTRDIFF_MAX__;\n"
             "int ssz = __SIZEOF_SHORT__;\n"
             "int isz = __SIZEOF_INT__;\n"
             "int psz = __SIZEOF_POINTER__;\n"
@@ -876,6 +900,18 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int nv = 1 ;", result.source)
         self.assertIn("int lp = 1 ;", result.source)
         self.assertIn("int bits = 8 ;", result.source)
+        self.assertIn("int szw = 64 ;", result.source)
+        self.assertIn("int pdw = 64 ;", result.source)
+        self.assertIn("int scmax = 127 ;", result.source)
+        self.assertIn("int shmax = 32767 ;", result.source)
+        self.assertIn("int imax = 2147483647 ;", result.source)
+        self.assertIn("long lmax = 9223372036854775807L ;", result.source)
+        self.assertIn("unsigned int ucmax = 255 ;", result.source)
+        self.assertIn("unsigned int usmax = 65535 ;", result.source)
+        self.assertIn("unsigned int uimax = 4294967295U ;", result.source)
+        self.assertIn("unsigned long ulmax = 18446744073709551615UL ;", result.source)
+        self.assertIn("unsigned long szmax = 18446744073709551615UL ;", result.source)
+        self.assertIn("long pdmax = 9223372036854775807L ;", result.source)
         self.assertIn("int ssz = 2 ;", result.source)
         self.assertIn("int isz = 4 ;", result.source)
         self.assertIn("int psz = 8 ;", result.source)
