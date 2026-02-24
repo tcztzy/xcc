@@ -990,14 +990,16 @@ class PreprocessorTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
 
-    def test_if_expression_with_has_builtin_feature_and_extension_operators(self) -> None:
+    def test_if_expression_with_has_builtin_feature_extension_and_warning_operators(self) -> None:
         result = preprocess_source(
             "#if __has_builtin(__builtin_expect)\nint bad_builtin;\n#endif\n"
             "#if !__has_builtin(__builtin_expect)\nint ok_builtin;\n#endif\n"
             "#if __has_feature(c_static_assert)\nint bad_feature;\n#endif\n"
             "#if !__has_feature(c_static_assert)\nint ok_feature;\n#endif\n"
             "#if __has_extension(attribute_deprecated_with_message)\nint bad_extension;\n#endif\n"
-            "#if !__has_extension(attribute_deprecated_with_message)\nint ok_extension;\n#endif\n",
+            "#if !__has_extension(attribute_deprecated_with_message)\nint ok_extension;\n#endif\n"
+            "#if __has_warning(\"-Wall\")\nint ok_warning;\n#endif\n"
+            "#if __has_warning(\"-Wdoes-not-exist\")\nint bad_warning;\n#endif\n",
             filename="if.c",
         )
         self.assertNotIn("bad_builtin", result.source)
@@ -1006,6 +1008,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("ok_feature", result.source)
         self.assertNotIn("bad_extension", result.source)
         self.assertIn("ok_extension", result.source)
+        self.assertIn("ok_warning", result.source)
+        self.assertNotIn("bad_warning", result.source)
 
     def test_if_expression_with_macro_expanded_has_builtin_operator(self) -> None:
         result = preprocess_source(
@@ -1017,12 +1021,31 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int bad;", result.source)
         self.assertIn("int ok ;", result.source)
 
+    def test_if_expression_with_macro_expanded_has_warning_operator(self) -> None:
+        result = preprocess_source(
+            "#define HAS_WARNING(x) __has_warning(x)\n"
+            "#if HAS_WARNING(\"-Wextra\")\nint ok;\n#endif\n"
+            "#if HAS_WARNING(\"-Wunknown\")\nint bad;\n#endif\n",
+            filename="if.c",
+        )
+        self.assertIn("int ok ;", result.source)
+        self.assertNotIn("int bad;", result.source)
+
     def test_if_expression_with_has_builtin_rejects_non_identifier_operand(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#if __has_builtin(123)\nint x;\n#endif\n", filename="if.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
         self.assertIn(
             "Invalid __has_builtin expression: feature operand must be an identifier",
+            str(ctx.exception),
+        )
+
+    def test_if_expression_with_has_warning_rejects_non_string_operand(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if __has_warning(Wall)\nint x;\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertIn(
+            "Invalid __has_warning expression: warning option operand must be a string literal",
             str(ctx.exception),
         )
 
