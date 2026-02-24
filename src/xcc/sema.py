@@ -884,30 +884,45 @@ class Analyzer:
             raise SemaError("Member access on non-record type")
         return self._lookup_record_member(base_type, member_name)
 
-    def _is_invalid_sizeof_type_spec(self, type_spec: TypeSpec) -> bool:
-        return (
-            self._is_invalid_atomic_type_spec(type_spec)
-            or self._is_invalid_void_object_type(type_spec)
-            or self._is_invalid_incomplete_record_object_type(type_spec)
-            or self._is_function_object_type(type_spec)
-        )
+    def _invalid_sizeof_operand_reason_for_type_spec(self, type_spec: TypeSpec) -> str | None:
+        if self._is_invalid_atomic_type_spec(type_spec):
+            return "atomic type"
+        if self._is_invalid_void_object_type(type_spec):
+            return "void type"
+        if self._is_invalid_incomplete_record_object_type(type_spec):
+            return "incomplete type"
+        if self._is_function_object_type(type_spec):
+            return "function type"
+        return None
 
-    def _is_invalid_sizeof_type(self, type_: Type) -> bool:
+    def _invalid_sizeof_operand_reason_for_type(self, type_: Type) -> str | None:
         if type_ == VOID:
-            return True
+            return "void type"
         if type_.declarator_ops and type_.declarator_ops[0][0] == "fn":
-            return True
+            return "function type"
         if self._is_record_name(type_.name) and not any(
             kind == "ptr" for kind, _ in type_.declarator_ops
-        ):
-            return type_.name not in self._record_definitions
-        return False
+        ) and type_.name not in self._record_definitions:
+            return "incomplete type"
+        return None
+
+    def _invalid_alignof_operand_reason_for_type_spec(self, type_spec: TypeSpec) -> str | None:
+        return self._invalid_sizeof_operand_reason_for_type_spec(type_spec)
+
+    def _invalid_alignof_operand_reason_for_type(self, type_: Type) -> str | None:
+        return self._invalid_sizeof_operand_reason_for_type(type_)
+
+    def _is_invalid_sizeof_type_spec(self, type_spec: TypeSpec) -> bool:
+        return self._invalid_sizeof_operand_reason_for_type_spec(type_spec) is not None
+
+    def _is_invalid_sizeof_type(self, type_: Type) -> bool:
+        return self._invalid_sizeof_operand_reason_for_type(type_) is not None
 
     def _is_invalid_alignof_type_spec(self, type_spec: TypeSpec) -> bool:
-        return self._is_invalid_sizeof_type_spec(type_spec)
+        return self._invalid_alignof_operand_reason_for_type_spec(type_spec) is not None
 
     def _is_invalid_alignof_type(self, type_: Type) -> bool:
-        return self._is_invalid_sizeof_type(type_)
+        return self._invalid_alignof_operand_reason_for_type(type_) is not None
 
     def _is_invalid_generic_association_type_spec(self, type_spec: TypeSpec) -> bool:
         return self._is_invalid_sizeof_type_spec(type_spec) or self._is_variably_modified_type_spec(
@@ -1830,33 +1845,37 @@ class Analyzer:
         if isinstance(expr, SizeofExpr):
             if expr.type_spec is not None:
                 self._register_type_spec(expr.type_spec)
-                if self._is_invalid_sizeof_type_spec(expr.type_spec):
-                    raise SemaError("Invalid sizeof operand")
+                reason = self._invalid_sizeof_operand_reason_for_type_spec(expr.type_spec)
+                if reason is not None:
+                    raise SemaError(f"Invalid sizeof operand: {reason}")
                 self._resolve_type(expr.type_spec)
             else:
                 assert expr.expr is not None
                 operand_type = self._analyze_expr(expr.expr, scope)
-                if self._is_invalid_sizeof_type(operand_type):
-                    raise SemaError("Invalid sizeof operand")
+                reason = self._invalid_sizeof_operand_reason_for_type(operand_type)
+                if reason is not None:
+                    raise SemaError(f"Invalid sizeof operand: {reason}")
             self._type_map.set(expr, INT)
             return INT
         if isinstance(expr, AlignofExpr):
             if expr.type_spec is not None:
                 self._register_type_spec(expr.type_spec)
-                if self._is_invalid_alignof_type_spec(expr.type_spec):
-                    raise SemaError("Invalid alignof operand")
+                reason = self._invalid_alignof_operand_reason_for_type_spec(expr.type_spec)
+                if reason is not None:
+                    raise SemaError(f"Invalid alignof operand: {reason}")
                 resolved = self._resolve_type(expr.type_spec)
                 if self._alignof_type(resolved) is None:
-                    raise SemaError("Invalid alignof operand")
+                    raise SemaError("Invalid alignof operand: unknown or unsupported type")
             else:
                 assert expr.expr is not None
                 if self._std == "c11":
-                    raise SemaError("Invalid alignof operand")
+                    raise SemaError("Invalid alignof operand: expression form requires GNU mode")
                 operand_type = self._analyze_expr(expr.expr, scope)
-                if self._is_invalid_alignof_type(operand_type):
-                    raise SemaError("Invalid alignof operand")
+                reason = self._invalid_alignof_operand_reason_for_type(operand_type)
+                if reason is not None:
+                    raise SemaError(f"Invalid alignof operand: {reason}")
                 if self._alignof_type(operand_type) is None:
-                    raise SemaError("Invalid alignof operand")
+                    raise SemaError("Invalid alignof operand: unknown or unsupported type")
             self._type_map.set(expr, INT)
             return INT
         if isinstance(expr, CastExpr):
