@@ -1205,6 +1205,7 @@ class _Preprocessor:
                 location,
                 base_dir=base_dir,
             )
+            expanded = self._replace_feature_probe_operators(expanded, location)
             expanded = self._expand_macro_text(expanded, location)
             # Run include-operator rewriting again so operators introduced via
             # macro expansion (for example HAS(x) -> __has_include(x)) are handled.
@@ -1213,6 +1214,7 @@ class _Preprocessor:
                 location,
                 base_dir=base_dir,
             )
+            expanded = self._replace_feature_probe_operators(expanded, location)
             py_expr = _translate_expr_to_python(expanded)
             return bool(_safe_eval_pp_expr(py_expr))
         except PreprocessorError:
@@ -1250,6 +1252,97 @@ class _Preprocessor:
             include_next=False,
         )
         return rewritten
+
+    def _replace_feature_probe_operators(self, expr: str, location: _SourceLocation) -> str:
+        rewritten = expr
+        rewritten = self._replace_single_feature_probe_operator(
+            rewritten,
+            marker="__has_builtin",
+            location=location,
+            supported=(),
+        )
+        rewritten = self._replace_single_feature_probe_operator(
+            rewritten,
+            marker="__has_feature",
+            location=location,
+            supported=(),
+        )
+        rewritten = self._replace_single_feature_probe_operator(
+            rewritten,
+            marker="__has_extension",
+            location=location,
+            supported=(),
+        )
+        return rewritten
+
+    def _replace_single_feature_probe_operator(
+        self,
+        expr: str,
+        *,
+        marker: str,
+        location: _SourceLocation,
+        supported: tuple[str, ...],
+    ) -> str:
+        supported_names = frozenset(supported)
+        chunks: list[str] = []
+        index = 0
+        while True:
+            found = expr.find(marker, index)
+            if found < 0:
+                chunks.append(expr[index:])
+                return "".join(chunks)
+            prev = expr[found - 1] if found > 0 else ""
+            next_pos = found + len(marker)
+            next_char = expr[next_pos] if next_pos < len(expr) else ""
+            if (prev and (prev.isalnum() or prev == "_")) or (
+                next_char and (next_char.isalnum() or next_char == "_")
+            ):
+                chunks.append(expr[index : found + len(marker)])
+                index = found + len(marker)
+                continue
+
+            chunks.append(expr[index:found])
+            cursor = next_pos
+            while cursor < len(expr) and expr[cursor].isspace():
+                cursor += 1
+            if cursor >= len(expr) or expr[cursor] != "(":
+                raise PreprocessorError(
+                    f"Invalid {marker} expression: expected '(' after operator",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+            close_paren = self._find_matching_has_include_close(expr, cursor)
+            if close_paren < 0:
+                raise PreprocessorError(
+                    f"Invalid {marker} expression: missing closing ')'",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+
+            operand = expr[cursor + 1 : close_paren].strip()
+            if not operand:
+                raise PreprocessorError(
+                    f"Invalid {marker} expression: missing feature operand",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", operand):
+                raise PreprocessorError(
+                    f"Invalid {marker} expression: feature operand must be an identifier",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+
+            chunks.append("1" if operand in supported_names else "0")
+            index = close_paren + 1
 
     def _replace_single_has_include_operator(
         self,
