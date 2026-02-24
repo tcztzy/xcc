@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: added LP64 predefined macro compatibility aliases `__LP64` and `_LP64` alongside `__LP64__`, so codebases that key off either GCC/Clang alias family now preprocess consistently under xcc; extended predefined-macro expansion and `-U` regression coverage for both aliases.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: implemented `-idirafter` include path support end-to-end (CLI/options/preprocessor), extending angle-include search order to `-I` then `-isystem` then `-idirafter` while preserving quoted include precedence and include-next traversal over the same merged search chain; added focused preprocessor and CLI regressions for `-idirafter` fallback and precedence.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_include_angle_prefers_system_dirs_over_idirafter tests.test_preprocessor.PreprocessorTests.test_include_angle_uses_idirafter_when_earlier_roots_miss tests.test_cli.CliTests.test_main_idirafter_option tests.test_options -q` (pass).
   - Iteration 3 slice: implemented `-iquote` include path support end-to-end (CLI/options/preprocessor) so quoted includes now search source directory, then `-iquote`, then `-I`/`-isystem`, while angle includes continue to skip source/`-iquote`; added focused preprocessor and CLI regressions for quoted/angle precedence behavior.

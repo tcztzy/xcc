@@ -224,6 +224,8 @@ class PreprocessorTests(unittest.TestCase):
             "#if __SHRT_MIN__ < 0\nint shm;\n#endif\n"
             "#if __INT_MIN__ < 0\nint imn;\n#endif\n"
             "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
+            "#if defined(__LP64)\nint lp_alias;\n#endif\n"
+            "#if defined(_LP64)\nint lp_legacy;\n#endif\n"
             "#if defined(__BYTE_ORDER__)\nint e;\n#endif\n"
             "#if defined(__LITTLE_ENDIAN__)\nint le;\n#endif\n"
             "#if defined(__FLOAT_WORD_ORDER__)\nint fwo;\n#endif\n"
@@ -269,6 +271,8 @@ class PreprocessorTests(unittest.TestCase):
                     "__SHRT_MIN__",
                     "__INT_MIN__",
                     "__CHAR_BIT__",
+                    "__LP64",
+                    "_LP64",
                     "__BYTE_ORDER__",
                     "__LITTLE_ENDIAN__",
                     "__FLOAT_WORD_ORDER__",
@@ -312,6 +316,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int shm;", result.source)
         self.assertNotIn("int imn;", result.source)
         self.assertNotIn("int c;", result.source)
+        self.assertNotIn("int lp_alias;", result.source)
+        self.assertNotIn("int lp_legacy;", result.source)
         self.assertNotIn("int e;", result.source)
         self.assertNotIn("int le;", result.source)
         self.assertNotIn("int fwo;", result.source)
@@ -1014,6 +1020,8 @@ class PreprocessorTests(unittest.TestCase):
             "int nt = __STDC_NO_THREADS__;\n"
             "int nv = __STDC_NO_VLA__;\n"
             "int lp = __LP64__;\n"
+            "int lp_alias = __LP64;\n"
+            "int lp_legacy = _LP64;\n"
             "int bits = __CHAR_BIT__;\n"
             "int szw = __SIZE_WIDTH__;\n"
             "int pdw = __PTRDIFF_WIDTH__;\n"
@@ -1084,6 +1092,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int nt = 1 ;", result.source)
         self.assertIn("int nv = 1 ;", result.source)
         self.assertIn("int lp = 1 ;", result.source)
+        self.assertIn("int lp_alias = 1 ;", result.source)
+        self.assertIn("int lp_legacy = 1 ;", result.source)
         self.assertIn("int bits = 8 ;", result.source)
         self.assertIn("int szw = 64 ;", result.source)
         self.assertIn("int pdw = 64 ;", result.source)
