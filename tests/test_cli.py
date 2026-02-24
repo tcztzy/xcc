@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 from xcc import main
@@ -146,6 +147,20 @@ class CliTests(unittest.TestCase):
             path = root / "ok.c"
             path.write_text('#include "inc.h"\nint main(void){return VALUE;}\n', encoding="utf-8")
             code, stdout, stderr = self._run_main([str(path), "-iquote", str(quote_dir)])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(stdout, f"xcc: ok: {path}\n")
+
+    def test_main_cpath_environment_include(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cpath_dir = root / "cpath"
+            cpath_dir.mkdir()
+            (cpath_dir / "inc.h").write_text("#define VALUE 23\n", encoding="utf-8")
+            path = root / "ok.c"
+            path.write_text('#include <inc.h>\nint main(void){return VALUE;}\n', encoding="utf-8")
+            with patch.dict("os.environ", {"CPATH": str(cpath_dir)}, clear=False):
+                code, stdout, stderr = self._run_main([str(path)])
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
