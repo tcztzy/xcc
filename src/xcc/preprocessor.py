@@ -20,6 +20,7 @@ _PP_INT_RE = re.compile(
 _EXPR_TOKEN_RE = re.compile(
     r"0[xX][0-9A-Fa-f]+(?:[uU](?:ll|LL|[lL])?|(?:ll|LL|[lL])[uU]?)?"
     r"|[0-9]+(?:[uU](?:ll|LL|[lL])?|(?:ll|LL|[lL])[uU]?)?"
+    r"|(?:u8|[uUL])?'(?:[^'\\\n]|\\.)+'"
     r"|[A-Za-z_]\w*"
     r"|\|\||&&|==|!=|<=|>=|<<|>>|[()!~+\-*/%<>&^|]"
 )
@@ -1726,6 +1727,10 @@ def _translate_expr_to_python(expr: str) -> str:
             else:
                 mapped.append(str(value))
             continue
+        char_value = _parse_pp_char_literal(token)
+        if char_value is not None:
+            mapped.append(str(char_value))
+            continue
         if _IDENT_RE.fullmatch(token):
             mapped.append("0")
             continue
@@ -1792,6 +1797,24 @@ def _is_unsigned_pp_integer(token: str) -> bool:
     if _PP_INT_RE.fullmatch(token) is None:
         return False
     return any(ch in "uU" for ch in token)
+
+
+def _parse_pp_char_literal(token: str) -> int | None:
+    literal = token
+    for prefix in ("u8", "u", "U", "L"):
+        if literal.startswith(prefix):
+            literal = literal[len(prefix) :]
+            break
+    try:
+        value = ast.literal_eval(literal)
+    except (SyntaxError, ValueError):
+        return None
+    if not isinstance(value, str) or not value:
+        return None
+    result = 0
+    for char in value:
+        result = (result << 8) | (ord(char) & 0xFF)
+    return result
 
 
 def _strip_condition_comments(expr: str) -> str:

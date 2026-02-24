@@ -607,6 +607,23 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source("#if 1 /* keep */\nint x;\n#endif\n", filename="if.c")
         self.assertIn("int x;", result.source)
 
+    def test_if_expression_accepts_character_literals(self) -> None:
+        result = preprocess_source("#if 'A' == 65\nint x;\n#endif\n", filename="if.c")
+        self.assertIn("int x;", result.source)
+
+    def test_if_expression_accepts_multichar_character_literals(self) -> None:
+        result = preprocess_source("#if 'AB' == 0x4142\nint x;\n#endif\n", filename="if.c")
+        self.assertIn("int x;", result.source)
+
+    def test_if_expression_accepts_escaped_character_literals(self) -> None:
+        result = preprocess_source("#if '\\n' == 10\nint x;\n#endif\n", filename="if.c")
+        self.assertIn("int x;", result.source)
+
+    def test_if_expression_rejects_invalid_character_literals(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if '\\x'\nint x;\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+
     def test_if_expression_with_has_include_quoted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
