@@ -2223,10 +2223,21 @@ class Analyzer:
             ):
                 if assoc_type_spec is None:
                     if default_expr is not None and default_association_index is not None:
+                        previous_default_location = None
+                        if default_association_index <= len(expr.association_source_locations):
+                            previous_default_location = expr.association_source_locations[
+                                default_association_index - 1
+                            ]
+                        location_suffix = ""
+                        if previous_default_location is not None:
+                            line, column = previous_default_location
+                            if line is not None and column is not None:
+                                location_suffix = f" at line {line}, column {column}"
                         raise SemaError(
                             "Duplicate default generic association at position "
                             f"{association_index}: previous default was at position "
-                            f"{default_association_index}; only one default association is allowed"
+                            f"{default_association_index}{location_suffix}; only one default "
+                            "association is allowed"
                         )
                     default_expr = assoc_expr
                     default_association_index = association_index

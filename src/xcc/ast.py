@@ -308,6 +308,10 @@ class StatementExpr(Expr):
 class GenericExpr(Expr):
     control: Expr
     associations: tuple[GenericAssociation, ...]
+    association_source_locations: tuple[tuple[int | None, int | None], ...] = field(
+        default_factory=tuple,
+        compare=False,
+    )
 
 
 @dataclass(frozen=True)
