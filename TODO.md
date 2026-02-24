@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: aligned sema file-scope declaration fallback diagnostics with existing unexpected-AST fallback style by marking unsupported top-level declaration nodes as internal semantic bugs (`Unsupported file-scope declaration node: <Node> (internal sema bug: unexpected AST file-scope declaration node)`), added focused sema regression coverage, and documented the fallback scope in frontend diagnostics notes.
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_unsupported_file_scope_declaration_node_error -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
   - Iteration 3 slice: expanded predefined LP64 floating-format assumptions with decimal round-trip precision aliases and denormal support/range macros (`__FLT_DECIMAL_DIG__`, `__DBL_DECIMAL_DIG__`, `__LDBL_DECIMAL_DIG__`, `__DECIMAL_DIG__`, `__FLT_DENORM_MIN__`, `__DBL_DENORM_MIN__`, `__LDBL_DENORM_MIN__`, `__FLT_HAS_DENORM__`, `__DBL_HAS_DENORM__`, `__LDBL_HAS_DENORM__`), added focused regression coverage for both default expansion and CLI `-U` removal behavior, and updated frontend C11 coverage docs.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_floating_decimal_and_denorm_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_float_denorm_and_decimal_macros -q` (pass).
   - Iteration 3 slice: normalized parser `_Alignas(...)` operand diagnostics behind an `Invalid alignment specifier: ...` prefix while preserving reason-specific suffixes (`non-object type`, `non-ICE expression`, `non-positive`, `non-power-of-two`), aligning parse-time wording with sema/context diagnostics and clang fixture expectations.

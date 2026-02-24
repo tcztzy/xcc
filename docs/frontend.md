@@ -27,7 +27,7 @@ The `xcc` CLI runs the front end and exits non-zero on diagnostics.
 - `xcc -imacros <header>`: load macros from a header before preprocessing the main translation unit, while discarding that header's non-directive output (repeatable).
 
 Diagnostics are stage-tagged (`lex`, `parse`, `sema`) and include source coordinates when available.
-Unexpected internal AST-shape failures in semantic analysis are surfaced as explicit internal sema bug diagnostics, so frontend gaps are immediately distinguishable from user-code constraint violations.
+Unexpected internal AST-shape failures in semantic analysis (including expression/statement and file-scope declaration fallbacks) are surfaced as explicit internal sema bug diagnostics, so frontend gaps are immediately distinguishable from user-code constraint violations.
 
 ## Language modes
 
