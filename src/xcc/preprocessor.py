@@ -84,11 +84,12 @@ _PREDEFINED_MACROS = (
     "__WINT_WIDTH__=32",
     "__STDC_ISO_10646__=201706L",
     "__FILE__=0",
+    "__BASE_FILE__=0",
     "__LINE__=0",
     "__INCLUDE_LEVEL__=0",
     "__COUNTER__=0",
 )
-_PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"})
+_PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"})
 _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__"})
 _PREDEFINED_MACRO_NAMES = frozenset(item.split("=", 1)[0] for item in _PREDEFINED_MACROS) | frozenset(
     _PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS
@@ -305,6 +306,7 @@ class _Preprocessor:
         self._date_literal = _quote_string_literal(_format_date_macro(translation_start))
         self._time_literal = _quote_string_literal(translation_start.strftime("%H:%M:%S"))
         self._counter = 0
+        self._base_filename = "<input>"
         self._macros: dict[str, _Macro] = {}
         for define in _PREDEFINED_MACROS:
             macro = self._parse_cli_define(define)
@@ -329,6 +331,7 @@ class _Preprocessor:
         self.macro_table = self._macros
 
     def process(self, source: str, *, filename: str) -> _ProcessedText:
+        self._base_filename = filename
         base_dir = self._source_dir(filename)
         return self._process_text(
             source,
@@ -630,6 +633,8 @@ class _Preprocessor:
     def _resolve_dynamic_macro(self, name: str, location: _SourceLocation) -> _MacroToken:
         if name == "__LINE__":
             return _MacroToken(TokenKind.INT_CONST, str(location.line))
+        if name == "__BASE_FILE__":
+            return _MacroToken(TokenKind.STRING_LITERAL, _quote_string_literal(self._base_filename))
         if name == "__INCLUDE_LEVEL__":
             return _MacroToken(TokenKind.INT_CONST, str(location.include_level))
         if name == "__COUNTER__":
