@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined LP64 floating-format assumptions with radix, mantissa-width, decimal-digit, and exponent-range macro coverage (`__FLT_RADIX__`, `__FLT_MANT_DIG__`, `__DBL_MANT_DIG__`, `__LDBL_MANT_DIG__`, `__FLT_DIG__`, `__DBL_DIG__`, `__LDBL_DIG__`, `__FLT_MIN_EXP__`, `__DBL_MIN_EXP__`, `__LDBL_MIN_EXP__`, `__FLT_MAX_EXP__`, `__DBL_MAX_EXP__`, `__LDBL_MAX_EXP__`), with regression coverage in both standard macro expansion and CLI `-U` removal behavior.
   - Iteration 3 slice: tightened sema typedef-storage-class object-declaration diagnostics by making file-scope and block-scope `DeclStmt(..., storage_class="typedef")` failures action-oriented (`...; use a typedef declaration instead`) instead of generic storage-class rejections; updated focused sema regressions and frontend coverage docs.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_file_scope_object_declaration_rejects_typedef_storage_class tests.test_sema.SemaTests.test_block_scope_object_declaration_rejects_typedef_storage_class -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
