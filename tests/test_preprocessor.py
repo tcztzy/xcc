@@ -204,6 +204,12 @@ class PreprocessorTests(unittest.TestCase):
             "#if __STDC_MB_MIGHT_NEQ_WC__\nint mw;\n#endif\n"
             "#if __STDC_NO_THREADS__\nint t;\n#endif\n"
             "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
+            "#if __SIZEOF_SIZE_T__\nint szz;\n#endif\n"
+            "#if __SIZEOF_PTRDIFF_T__\nint pdz;\n#endif\n"
+            "#if __SIZEOF_INTMAX_T__\nint imz;\n#endif\n"
+            "#if __SIZEOF_UINTMAX_T__\nint umz;\n#endif\n"
+            "#if __SIZEOF_WCHAR_T__\nint wcz;\n#endif\n"
+            "#if __SIZEOF_WINT_T__\nint wiz;\n#endif\n"
             "#if __SIZE_WIDTH__ == 64\nint sw;\n#endif\n"
             "#if __PTRDIFF_WIDTH__ == 64\nint pw;\n#endif\n"
             "#if __INTMAX_WIDTH__ == 64\nint imw;\n#endif\n"
@@ -240,6 +246,12 @@ class PreprocessorTests(unittest.TestCase):
                     "__STDC_MB_MIGHT_NEQ_WC__",
                     "__STDC_NO_THREADS__",
                     "__SIZEOF_POINTER__",
+                    "__SIZEOF_SIZE_T__",
+                    "__SIZEOF_PTRDIFF_T__",
+                    "__SIZEOF_INTMAX_T__",
+                    "__SIZEOF_UINTMAX_T__",
+                    "__SIZEOF_WCHAR_T__",
+                    "__SIZEOF_WINT_T__",
                     "__SIZE_WIDTH__",
                     "__PTRDIFF_WIDTH__",
                     "__INTMAX_WIDTH__",
@@ -274,6 +286,12 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int mw;", result.source)
         self.assertNotIn("int t;", result.source)
         self.assertNotIn("int z;", result.source)
+        self.assertNotIn("int szz;", result.source)
+        self.assertNotIn("int pdz;", result.source)
+        self.assertNotIn("int imz;", result.source)
+        self.assertNotIn("int umz;", result.source)
+        self.assertNotIn("int wcz;", result.source)
+        self.assertNotIn("int wiz;", result.source)
         self.assertNotIn("int sw;", result.source)
         self.assertNotIn("int pw;", result.source)
         self.assertNotIn("int imw;", result.source)
@@ -955,6 +973,12 @@ class PreprocessorTests(unittest.TestCase):
             "int psz = __SIZEOF_POINTER__;\n"
             "int lsz = __SIZEOF_LONG__;\n"
             "int llsz = __SIZEOF_LONG_LONG__;\n"
+            "int szz = __SIZEOF_SIZE_T__;\n"
+            "int pdz = __SIZEOF_PTRDIFF_T__;\n"
+            "int imz = __SIZEOF_INTMAX_T__;\n"
+            "int umz = __SIZEOF_UINTMAX_T__;\n"
+            "int wcz = __SIZEOF_WCHAR_T__;\n"
+            "int wiz = __SIZEOF_WINT_T__;\n"
             "int ord = __ORDER_LITTLE_ENDIAN__;\n"
             "int bo = __BYTE_ORDER__;\n"
             "int le = __LITTLE_ENDIAN__;\n"
@@ -1016,6 +1040,12 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int psz = 8 ;", result.source)
         self.assertIn("int lsz = 8 ;", result.source)
         self.assertIn("int llsz = 8 ;", result.source)
+        self.assertIn("int szz = 8 ;", result.source)
+        self.assertIn("int pdz = 8 ;", result.source)
+        self.assertIn("int imz = 8 ;", result.source)
+        self.assertIn("int umz = 8 ;", result.source)
+        self.assertIn("int wcz = 4 ;", result.source)
+        self.assertIn("int wiz = 4 ;", result.source)
         self.assertIn("int ord = 1234 ;", result.source)
         self.assertIn("int bo = 1234 ;", result.source)
         self.assertIn("int le = 1234 ;", result.source)
