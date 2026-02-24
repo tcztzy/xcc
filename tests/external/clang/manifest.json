@@ -812,9 +812,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-ellipsis-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '...': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "0f52c096cc0d12f03e578c296b9303633e7e1e56c7abd2586259b43b8a88df0c"
+      "line": 2,
+      "column": 18,
+      "sha256": "d923241bc109f2815a8f096647914062d68a4bc61cc6d1ed26a2d5b9d63bb917"
     },
     {
       "id": "parser-xcc-expr-start-rparen-after-static-assert",
@@ -822,9 +822,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-rparen-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with ')': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "ff05bdaf73b5ee01653964769b17d53f2c6c4c1604289801cb8c0a3ccfc93e68"
+      "line": 2,
+      "column": 18,
+      "sha256": "6e6f41a75a43ca640b991904cf60f63677f5c2577fc07c21777e8a01ee816281"
     },
     {
       "id": "parser-xcc-expr-start-comma-after-static-assert",
@@ -832,9 +832,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-comma-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with ',': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "3f3322a13449d2d044a6e79944497bfe388010429ac1acb9b15cc63a83f8d4da"
+      "line": 2,
+      "column": 18,
+      "sha256": "7b90b474018f3442b9fa7a260732dd017eaef1aee4597858cb8816c9699710c0"
     },
     {
       "id": "parser-xcc-expr-start-colon-after-static-assert",
@@ -842,9 +842,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-colon-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with ':': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "276c51a4ba4c53643c0c24c77d2af38e970600171fa9f7aa8b53a8e2cb08217b"
+      "line": 2,
+      "column": 18,
+      "sha256": "97ea80a92984c10ea9e65aeb9ab24c8cf190d94d790b0f5e9b53de0ac2a254a7"
     },
     {
       "id": "parser-xcc-expr-start-question-after-static-assert",
@@ -852,9 +852,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-question-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '?': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "9be0ae1d9f10bd0a613eedaa4e541f0d4741da2e6bca1bc081c59b86d934f19d"
+      "line": 2,
+      "column": 18,
+      "sha256": "15ddabedade36c0d2d5697f83c9f7a674cfe2c2d932438d9fb3d6f6b918b2550"
     },
     {
       "id": "parser-xcc-expr-start-semicolon-after-static-assert",
@@ -862,9 +862,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-semicolon-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with ';': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "ba0fc0a33b2b8704a813bf39283ebd7b9fc24c547add8074e576b8318ae07085"
+      "line": 2,
+      "column": 18,
+      "sha256": "79208f8120702fc4a1a222c9307e0d6aeda6edaabb8c12234a2f0faf945e6f5b"
     },
     {
       "id": "parser-xcc-expr-start-lbrace-after-static-assert",
@@ -872,9 +872,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-lbrace-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '{': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "9805483c06513a5e3489584e2171e99e1662125d2a13c1d1c4d7b8aee2e2544b"
+      "line": 2,
+      "column": 18,
+      "sha256": "3f59100faedb172fc85cd526a99fd6e763bbc0b06b743a9a46d00716a81d4364"
     },
     {
       "id": "parser-xcc-expr-start-rsquare-after-static-assert",
@@ -882,9 +882,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-rsquare-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with ']': expected an operand",
-      "line": 3,
-      "column": 1,
-      "sha256": "95ab6e63bdd81202bbbf712fb206ce6302485278920b55f060247ba58c3ba01e"
+      "line": 2,
+      "column": 18,
+      "sha256": "309248688d43861eb488a82f17c50fd1c902484c837edf24d0ef55b4bf35dc67"
     },
     {
       "id": "parser-xcc-expr-start-rbrace-after-static-assert",
@@ -892,9 +892,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-rbrace-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '}': expected an operand",
-      "line": 3,
-      "column": 8,
-      "sha256": "12f1d5ac24fb7f8aec983b8b5a0da80b94b8d6e060265d62cbe96f0da3f3fb3e"
+      "line": 2,
+      "column": 18,
+      "sha256": "b2ad049ae0be6b66b6f9fc3749546ca6a9851b114d7106f06767a6557c78b7aa"
     },
     {
       "id": "parser-xcc-expr-start-digraph-lsquare-after-static-assert",
@@ -902,9 +902,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-lsquare-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '<:': expected an operand",
-      "line": 3,
-      "column": 1,
-      "sha256": "a9cbcbafa37ec27db350b50fa7dff42b47d42516fc6ad652f01d15740c545546"
+      "line": 2,
+      "column": 18,
+      "sha256": "61ce11e5f94912c7b6e6199b07cdea45703f09dff7a86fcdf05f2a8127f7e079"
     },
     {
       "id": "parser-xcc-expr-start-digraph-rsquare-after-static-assert",
@@ -912,9 +912,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-rsquare-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with ':>': expected an operand",
-      "line": 3,
-      "column": 1,
-      "sha256": "7933592fc41ed1925bb1b90eeef7793de67b0c76972952c746e2f368fa20acae"
+      "line": 2,
+      "column": 18,
+      "sha256": "ff31d1bfaf6e6a5da3484fe4786df245fc41faa7a20e71af0ad8829786c22894"
     },
     {
       "id": "parser-xcc-expr-start-digraph-lbrace-after-static-assert",
@@ -922,9 +922,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-lbrace-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '<%': expected an operand",
-      "line": 3,
-      "column": 1,
-      "sha256": "b949207a74a6bfc2a940d40f55c206d68cbdc624c86ba8d809dddfe9ea58884c"
+      "line": 2,
+      "column": 18,
+      "sha256": "b1e930cdbceb49519c8ad51071c348d64994866e5ca56345ab8b4c675993dae1"
     },
     {
       "id": "parser-xcc-expr-start-digraph-rbrace-after-static-assert",
@@ -932,9 +932,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-rbrace-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '%>': expected an operand",
-      "line": 3,
-      "column": 1,
-      "sha256": "ef7d9c64bbbe2ee677967c15c211efb2b474df6aae11132731bcc6757900bfd6"
+      "line": 2,
+      "column": 18,
+      "sha256": "765e59cf94b3c972773031d53cd1235d4d565b3931e651ae6826b3f7b702d08c"
     },
     {
       "id": "parser-xcc-expr-start-token-paste-after-static-assert",
@@ -942,9 +942,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-token-paste-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '##': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "97333fce12a18ed0d0f6f650cb0bc4534355f9e83464239340c601e9e550f8e5"
+      "line": 2,
+      "column": 18,
+      "sha256": "161d1e016b1f0ce8f9423f3cf5b0dd141be8c18e5a4192504ed312efb31c13cf"
     },
     {
       "id": "parser-xcc-expr-start-digraph-hash-after-static-assert",
@@ -952,9 +952,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-hash-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '%:': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "cea54e264d9bbe2142aa58324e540c713cce703767f341c96f958d09e7413ebb"
+      "line": 2,
+      "column": 18,
+      "sha256": "e9737b21473015a47e8df9e49935f111e6c393f6c60f029cd94b121c9b4211d4"
     },
     {
       "id": "parser-xcc-expr-start-digraph-hash-hash-after-static-assert",
@@ -962,9 +962,9 @@
       "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-digraph-hash-hash-after-static-assert.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with '%:%:': expected an operand",
-      "line": 3,
-      "column": 3,
-      "sha256": "243bd60f4442badad0f1f1e43b4d1b4c28662848fc39620ad437aa018078c8cd"
+      "line": 2,
+      "column": 18,
+      "sha256": "f755587613453119a19576a036a6ea06e1b5f4f8cf3a9652fe69770f48042e1f"
     },
     {
       "id": "parser-xcc-expr-start-rparen-after-return",
