@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded GCC-compatible predefined atomics/synchronization macro coverage with char16/char32/wchar lock-free capability macros (`__GCC_ATOMIC_{CHAR16_T,CHAR32_T,WCHAR_T}_LOCK_FREE`), `__GCC_ATOMIC_TEST_AND_SET_TRUEVAL`, and 16-byte compare-and-swap feature probing (`__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16`); added focused preprocessor regression coverage for expansion and CLI `-U` override behavior, and updated frontend coverage docs.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_atomic_and_sync_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_atomic_and_sync_macros -q` (pass).
   - Iteration 3 slice: added preprocessor `__has_warning("-W...")` support for `#if`/`#elif` feature probes, including macro-expanded operator spellings and strict operand validation (`string literal` only); recognized warning options now return `1` for a curated compatibility set (`-Wall`, `-Wextra`, `-Wpedantic`, `-Wdeprecated-declarations`) and unknown options return `0`.
   - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_builtin_feature_extension_and_warning_operators tests.test_preprocessor.PreprocessorTests.test_if_expression_with_macro_expanded_has_warning_operator tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_warning_rejects_non_string_operand -q` (pass).
   - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
