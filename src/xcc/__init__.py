@@ -28,6 +28,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="system include path",
     )
     parser.add_argument(
+        "-idirafter",
+        dest="after_include_dirs",
+        action="append",
+        default=[],
+        help="post-system include path",
+    )
+    parser.add_argument(
         "--diag-format",
         choices=("human", "json"),
         default="human",
@@ -67,6 +74,7 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None) -> i
         include_dirs=tuple(args.include_dirs),
         quote_include_dirs=tuple(args.quote_include_dirs),
         system_include_dirs=tuple(args.system_include_dirs),
+        after_include_dirs=tuple(args.after_include_dirs),
         defines=tuple(args.defines),
         undefs=tuple(args.undefs),
         diag_format=args.diag_format,

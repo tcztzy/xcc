@@ -25,7 +25,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
   - Conditional directives, `defined`, and `__has_include` checks in `#if`/`#elif` (including macro-expanded header operands).
   - `#if`/`#elif` boolean short-circuit evaluation for `&&`/`||` (including divide-by-zero guard cases).
-  - Include search precedence is validated (`"..."` prefers source directory, then `-iquote`, then `-I`; `<...>` resolves via `-I`/`-isystem` and skips `-iquote`), with cycle/read diagnostics; cycle failures now include the concrete include chain (`a.h -> b.h -> a.h`) for faster root-cause triage.
+  - Include search precedence is validated (`"..."` prefers source directory, then `-iquote`, then `-I`; `<...>` resolves via `-I`/`-isystem`/`-idirafter` and skips `-iquote`), with cycle/read diagnostics; cycle failures now include the concrete include chain (`a.h -> b.h -> a.h`) for faster root-cause triage.
   - Include-not-found diagnostics preserve directive delimiters (`"..."` vs `<...>`) and now enumerate the searched include roots for faster path-debugging; include expansion line-map provenance is regression-tested.
   - `#include` now accepts macro-expanded header operands for both quoted and angle forms, with invalid expansion diagnostics covered.
   - GNU mode supports `#include_next` and `__has_include_next(...)`, both continuing include search after the current include directory (including skipping the source directory for quoted includes).

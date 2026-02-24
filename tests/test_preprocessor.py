@@ -634,6 +634,40 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int from_include;\n")
 
+    def test_include_angle_prefers_system_dirs_over_idirafter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            system_dir = root / "sys"
+            after_dir = root / "after"
+            system_dir.mkdir()
+            after_dir.mkdir()
+            (system_dir / "inc.h").write_text("int from_system;\n", encoding="utf-8")
+            (after_dir / "inc.h").write_text("int from_after;\n", encoding="utf-8")
+            options = FrontendOptions(
+                system_include_dirs=(str(system_dir),),
+                after_include_dirs=(str(after_dir),),
+            )
+            result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_system;\n")
+
+    def test_include_angle_uses_idirafter_when_earlier_roots_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_dir = root / "include"
+            system_dir = root / "sys"
+            after_dir = root / "after"
+            include_dir.mkdir()
+            system_dir.mkdir()
+            after_dir.mkdir()
+            (after_dir / "inc.h").write_text("int from_after;\n", encoding="utf-8")
+            options = FrontendOptions(
+                include_dirs=(str(include_dir),),
+                system_include_dirs=(str(system_dir),),
+                after_include_dirs=(str(after_dir),),
+            )
+            result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_after;\n")
+
     def test_include_quoted_prefers_quote_include_dirs_over_include_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

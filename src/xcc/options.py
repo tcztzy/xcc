@@ -11,6 +11,7 @@ class FrontendOptions:
     include_dirs: tuple[str, ...] = ()
     quote_include_dirs: tuple[str, ...] = ()
     system_include_dirs: tuple[str, ...] = ()
+    after_include_dirs: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
     undefs: tuple[str, ...] = ()
     diag_format: DiagFormat = "human"
