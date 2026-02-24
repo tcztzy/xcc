@@ -2216,7 +2216,7 @@ class Analyzer:
             selected_expr: Expr | None = None
             default_expr: Expr | None = None
             default_association_index: int | None = None
-            seen_type_associations: dict[Type, tuple[int, str]] = {}
+            seen_type_associations: dict[Type, tuple[int, str, str | None]] = {}
             association_type_names: list[str] = []
             for association_index, (assoc_type_spec, assoc_expr) in enumerate(
                 expr.associations, start=1
@@ -2246,14 +2246,30 @@ class Analyzer:
                 )
                 previous_assoc = seen_type_associations.get(assoc_type)
                 if previous_assoc is not None:
-                    previous_assoc_index, previous_assoc_label = previous_assoc
+                    previous_assoc_index, previous_assoc_label, previous_assoc_location = previous_assoc
+                    location_suffix = ""
+                    if previous_assoc_location is not None:
+                        location_suffix = f" at {previous_assoc_location}"
                     raise SemaError(
                         "Duplicate generic association type at position "
                         f"{association_index} ('{assoc_type_label}'): previous compatible "
-                        f"type was at position {previous_assoc_index} "
+                        f"type was at position {previous_assoc_index}{location_suffix} "
                         f"('{previous_assoc_label}')"
                     )
-                seen_type_associations[assoc_type] = (association_index, assoc_type_label)
+                association_location = None
+                if (
+                    assoc_type_spec.source_line is not None
+                    and assoc_type_spec.source_column is not None
+                ):
+                    association_location = (
+                        f"line {assoc_type_spec.source_line}, "
+                        f"column {assoc_type_spec.source_column}"
+                    )
+                seen_type_associations[assoc_type] = (
+                    association_index,
+                    assoc_type_label,
+                    association_location,
+                )
                 association_type_names.append(str(assoc_type))
                 self._analyze_expr(assoc_expr, scope)
                 if assoc_type == control_type:

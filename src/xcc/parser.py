@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Literal, cast
 
@@ -2352,7 +2352,11 @@ class Parser:
             else:
                 association_start_index = self._index
                 association_type_token = self._current()
-                assoc_type = self._parse_type_name()
+                assoc_type = replace(
+                    self._parse_type_name(),
+                    source_line=association_type_token.line,
+                    source_column=association_type_token.column,
+                )
                 association_end_index = self._index
                 association_type_spelling = self._format_token_span(
                     association_start_index,
