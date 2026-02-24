@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: upgraded circular-include diagnostics to report the concrete include cycle chain (`a.h -> b.h -> a.h`) instead of a generic cycle message, making recursive-include root-cause triage immediate from a single failure.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_circular_include tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: expanded predefined C11 wide-character conformance baseline with `__STDC_ISO_10646__=201706L`, so preprocessing now explicitly advertises Unicode scalar value mapping assumptions for `wchar_t` alongside existing wide-character type/width macros; added regression coverage for both expansion and CLI `-U` removal behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: expanded predefined LP64 little-endian target-assumption macros with endian aliases (`__LITTLE_ENDIAN__`, `__BIG_ENDIAN__`) and floating word order (`__FLOAT_WORD_ORDER__`), with regression coverage for macro expansion plus CLI `-U` removal behavior.

@@ -220,6 +220,12 @@ def _format_include_reference(include_name: str, is_angled: bool) -> str:
     return f'"{include_name}"'
 
 
+def _format_include_cycle(include_stack: tuple[str, ...], include_path: str) -> str:
+    cycle_start = include_stack.index(include_path)
+    cycle_chain = (*include_stack[cycle_start:], include_path)
+    return " -> ".join(cycle_chain)
+
+
 def _format_include_search_roots(search_roots: tuple[Path, ...]) -> str:
     if not search_roots:
         return "<none>"
@@ -642,7 +648,7 @@ class _Preprocessor:
         )
         if include_path_text in include_stack:
             raise PreprocessorError(
-                "Circular include detected",
+                f"Circular include detected: {_format_include_cycle(include_stack, include_path_text)}",
                 location.line,
                 1,
                 filename=location.filename,
