@@ -474,3 +474,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 - Iteration 3 slice: updated focused parser regression coverage to assert the new duplicate-default wording for `_Generic` expressions.
 - Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_generic_selection_rejects_duplicate_default tests.test_parser -q` (pass).
 - Next target: mirror the same association-order context pattern into any remaining parser-side `_Generic` diagnostics that still omit prior-association location details.
+- Iteration 3 slice: upgraded parser `_Generic` duplicate-default diagnostics to include the source location of the first default association (`line`/`column`) alongside its association position so duplicate-order context now points to both ordinal and token location.
+- Iteration 3 slice: updated focused parser regression coverage to lock down the new `_Generic` duplicate-default diagnostic wording with source-location context.
+- Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_generic_selection_rejects_duplicate_default -q` (pass); `.venv/bin/python -m unittest tests.test_parser -q` (pass).
+- Next target: audit parser-side `_Generic` diagnostics for duplicate type-association paths and decide whether location-aware context should be surfaced before sema duplicate-compatible-type checks for clearer early failures.
