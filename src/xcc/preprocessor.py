@@ -728,7 +728,16 @@ class _Preprocessor:
                     start_index = index + 1
                     break
 
-        searched_roots = tuple(root.resolve() for root in search_roots[start_index:])
+        searched_roots_list: list[Path] = []
+        seen_roots: set[Path] = set()
+        for root in search_roots[start_index:]:
+            resolved_root = root.resolve()
+            if resolved_root in seen_roots:
+                continue
+            seen_roots.add(resolved_root)
+            searched_roots_list.append(resolved_root)
+
+        searched_roots = tuple(searched_roots_list)
         for root in searched_roots:
             candidate = root / include_name
             if candidate.is_file():
