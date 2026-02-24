@@ -193,6 +193,7 @@ class PreprocessorTests(unittest.TestCase):
         source = (
             "#if __INT_WIDTH__\nint x;\n#endif\n"
             "#if __STDC_UTF_16__\nint y;\n#endif\n"
+            "#if __STDC_MB_MIGHT_NEQ_WC__\nint mw;\n#endif\n"
             "#if __STDC_NO_THREADS__\nint t;\n#endif\n"
             "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
             "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
@@ -207,6 +208,7 @@ class PreprocessorTests(unittest.TestCase):
                 undefs=(
                     "__INT_WIDTH__",
                     "__STDC_UTF_16__",
+                    "__STDC_MB_MIGHT_NEQ_WC__",
                     "__STDC_NO_THREADS__",
                     "__SIZEOF_POINTER__",
                     "__CHAR_BIT__",
@@ -219,6 +221,7 @@ class PreprocessorTests(unittest.TestCase):
         )
         self.assertNotIn("int x;", result.source)
         self.assertNotIn("int y;", result.source)
+        self.assertNotIn("int mw;", result.source)
         self.assertNotIn("int t;", result.source)
         self.assertNotIn("int z;", result.source)
         self.assertNotIn("int c;", result.source)
@@ -770,6 +773,7 @@ class PreprocessorTests(unittest.TestCase):
             "int h = __STDC_HOSTED__;\n"
             "long v = __STDC_VERSION__;\n"
             "int iec = __STDC_IEC_559__;\n"
+            "int mw = __STDC_MB_MIGHT_NEQ_WC__;\n"
             "int u16 = __STDC_UTF_16__;\n"
             "int u32 = __STDC_UTF_32__;\n"
             "int na = __STDC_NO_ATOMICS__;\n"
@@ -793,6 +797,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int h = 1 ;", result.source)
         self.assertIn("long v = 201112L ;", result.source)
         self.assertIn("int iec = 1 ;", result.source)
+        self.assertIn("int mw = 1 ;", result.source)
         self.assertIn("int u16 = 1 ;", result.source)
         self.assertIn("int u32 = 1 ;", result.source)
         self.assertIn("int na = 1 ;", result.source)

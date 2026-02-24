@@ -36,6 +36,7 @@ _PREDEFINED_MACROS = (
     "__STDC_HOSTED__=1",
     "__STDC_VERSION__=201112L",
     "__STDC_IEC_559__=1",
+    "__STDC_MB_MIGHT_NEQ_WC__=1",
     "__STDC_UTF_16__=1",
     "__STDC_UTF_32__=1",
     "__STDC_NO_ATOMICS__=1",
