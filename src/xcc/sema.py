@@ -547,6 +547,12 @@ class Analyzer:
             return "incomplete"
         return None
 
+    def _typedef_storage_class_object_message(self, scope_label: str) -> str:
+        return (
+            f"Invalid storage class for {scope_label} object declaration: 'typedef'; "
+            "use a typedef declaration instead"
+        )
+
     def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
         if isinstance(declaration, DeclGroupStmt):
             for grouped_decl in declaration.declarations:
@@ -577,11 +583,7 @@ class Analyzer:
                     f"'{storage_class}'"
                 )
             if declaration.storage_class == "typedef":
-                storage_class = declaration.storage_class if declaration.storage_class is not None else "none"
-                raise SemaError(
-                    "Invalid storage class for file-scope object declaration: "
-                    f"'{storage_class}'"
-                )
+                raise SemaError(self._typedef_storage_class_object_message("file-scope"))
             self._register_type_spec(declaration.type_spec)
             self._define_enum_members(declaration.type_spec, self._file_scope)
             if declaration.alignment is not None and declaration.name is None:
@@ -1682,11 +1684,7 @@ class Analyzer:
                         "Invalid declaration specifier for function declaration: '_Thread_local'"
                     )
             if stmt.storage_class == "typedef":
-                storage_class = stmt.storage_class if stmt.storage_class is not None else "none"
-                raise SemaError(
-                    "Invalid storage class for block-scope object declaration: "
-                    f"'{storage_class}'"
-                )
+                raise SemaError(self._typedef_storage_class_object_message("block-scope"))
             if (
                 not self._is_function_object_type(stmt.type_spec)
                 and stmt.is_thread_local
