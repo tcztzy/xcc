@@ -2327,6 +2327,7 @@ class Parser:
         control = self._parse_assignment()
         self._expect_punct(",")
         associations: list[tuple[TypeSpec | None, Expr]] = []
+        association_source_locations: list[tuple[int | None, int | None]] = []
         first_default_index: int | None = None
         first_default_token: Token | None = None
         association_index = 0
@@ -2335,6 +2336,7 @@ class Parser:
             association_index += 1
             assoc_type: TypeSpec | None
             if self._check_keyword("default"):
+                default_token = self._current()
                 if first_default_index is not None:
                     assert first_default_token is not None
                     raise ParserError(
@@ -2346,9 +2348,12 @@ class Parser:
                         self._current(),
                     )
                 first_default_index = association_index
-                first_default_token = self._current()
+                first_default_token = default_token
                 self._advance()
                 assoc_type = None
+                association_source_locations.append(
+                    (default_token.line, default_token.column)
+                )
             else:
                 association_start_index = self._index
                 association_type_token = self._current()
@@ -2356,6 +2361,9 @@ class Parser:
                     self._parse_type_name(),
                     source_line=association_type_token.line,
                     source_column=association_type_token.column,
+                )
+                association_source_locations.append(
+                    (association_type_token.line, association_type_token.column)
                 )
                 association_end_index = self._index
                 association_type_spelling = self._format_token_span(
@@ -2399,7 +2407,11 @@ class Parser:
                 break
             self._advance()
         self._expect_punct(")")
-        return GenericExpr(control, tuple(associations))
+        return GenericExpr(
+            control,
+            tuple(associations),
+            tuple(association_source_locations),
+        )
 
     def _parse_statement_expr(self) -> StatementExpr:
         self._expect_punct("(")

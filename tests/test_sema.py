@@ -1516,6 +1516,34 @@ class SemaTests(unittest.TestCase):
             "Duplicate default generic association at position 2: previous default was at position 1; only one default association is allowed",
         )
 
+    def test_generic_selection_duplicate_default_association_error_with_location(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            ReturnStmt(
+                                GenericExpr(
+                                    IntLiteral("0"),
+                                    ((None, IntLiteral("1")), (None, IntLiteral("2"))),
+                                    ((4, 12), (4, 24)),
+                                )
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Duplicate default generic association at position 2: previous default was at position 1 at line 4, column 12; only one default association is allowed",
+        )
+
     def test_generic_selection_void_association_type_error(self) -> None:
         unit = parse(list(lex("int main(void){return _Generic(0, void: 1, default: 2);}")))
         with self.assertRaises(SemaError) as ctx:

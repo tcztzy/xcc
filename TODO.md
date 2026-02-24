@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: improved `_Generic` duplicate-`default` diagnostics end-to-end by recording parser source locations for each generic association and surfacing the earlier `default` line/column in sema failures (for example `previous default was at position 1 at line 4, column 12`); added parser/sema regressions for association-location capture and the enriched semantic error text.
+  - Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_generic_selection_records_association_source_locations tests.test_sema.SemaTests.test_generic_selection_duplicate_default_association_error tests.test_sema.SemaTests.test_generic_selection_duplicate_default_association_error_with_location -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_parser tests.test_sema -q` (pass).
   - Iteration 3 slice: made `__has_include(...)`/`__has_include_next(...)` conditional-expression failures reason-specific by replacing the generic `Invalid __has_include expression` fallback with actionable diagnostics (`expected '(' after operator`, `missing closing ')'`, `missing header operand`, `header operand must be quoted or angled`), and added focused preprocessor regressions for empty/malformed operator operands.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_macro_expands_to_invalid_header tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_invalid_form tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_missing_operand tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_include_missing_closing_paren -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).

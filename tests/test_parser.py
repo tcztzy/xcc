@@ -3878,6 +3878,18 @@ class ParserTests(unittest.TestCase):
             str(ctx.exception),
         )
 
+    def test_generic_selection_records_association_source_locations(self) -> None:
+        unit = parse(
+            list(lex("int main(void){int x=0; return _Generic(x, int: 1, default: 2);}"))
+        )
+        function = unit.functions[0]
+        assert function.body is not None
+        return_stmt = function.body.statements[1]
+        assert isinstance(return_stmt, ReturnStmt)
+        generic_expr = return_stmt.value
+        assert isinstance(generic_expr, GenericExpr)
+        self.assertEqual(generic_expr.association_source_locations, ((1, 44), (1, 52)))
+
     def test_generic_selection_requires_type_name_association(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(void){return _Generic(0, int x:1);}")))
