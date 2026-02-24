@@ -2217,7 +2217,7 @@ class Analyzer:
             default_expr: Expr | None = None
             default_association_index: int | None = None
             seen_type_associations: dict[Type, tuple[int, str, str | None]] = {}
-            association_type_names: list[str] = []
+            association_type_descriptions: list[str] = []
             for association_index, (assoc_type_spec, assoc_expr) in enumerate(
                 expr.associations, start=1
             ):
@@ -2281,18 +2281,20 @@ class Analyzer:
                     assoc_type_label,
                     association_location,
                 )
-                association_type_names.append(str(assoc_type))
+                association_description = (
+                    f"'{assoc_type_label}' at position {association_index}"
+                )
+                if association_location is not None:
+                    association_description += f" ({association_location})"
+                association_type_descriptions.append(association_description)
                 self._analyze_expr(assoc_expr, scope)
                 if assoc_type == control_type:
                     selected_expr = assoc_expr
             if selected_expr is None:
                 selected_expr = default_expr
             if selected_expr is None:
-                if association_type_names:
-                    available_associations = ", ".join(
-                        f"'{association_type_name}'"
-                        for association_type_name in association_type_names
-                    )
+                if association_type_descriptions:
+                    available_associations = ", ".join(association_type_descriptions)
                     raise SemaError(
                         "No matching generic association for control type "
                         f"'{control_type}'; available association types: {available_associations}"

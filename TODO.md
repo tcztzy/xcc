@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: upgraded sema `_Generic` no-match diagnostics to include association position and parser-provided source location context for each available type (`'int' at position 1 (line ..., column ...)`), while preserving location-less fallback wording for manually constructed AST tests.
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_generic_selection_without_match_error tests.test_sema.SemaTests.test_generic_selection_without_match_reports_all_association_types tests.test_sema.SemaTests.test_generic_selection_without_match_reports_position_without_locations -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
   - Iteration 3 slice: improved `_Generic` duplicate-`default` diagnostics end-to-end by recording parser source locations for each generic association and surfacing the earlier `default` line/column in sema failures (for example `previous default was at position 1 at line 4, column 12`); added parser/sema regressions for association-location capture and the enriched semantic error text.
   - Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_generic_selection_records_association_source_locations tests.test_sema.SemaTests.test_generic_selection_duplicate_default_association_error tests.test_sema.SemaTests.test_generic_selection_duplicate_default_association_error_with_location -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_parser tests.test_sema -q` (pass).
