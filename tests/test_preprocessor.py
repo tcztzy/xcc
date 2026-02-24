@@ -281,7 +281,11 @@ class PreprocessorTests(unittest.TestCase):
             "#if __INTPTR_MIN__ < 0\nint ipmin;\n#endif\n"
             "#if __UINTPTR_MAX__ > 0\nint upmax;\n#endif\n"
             "#if __INTMAX_MIN__ < 0\nint imm;\n#endif\n"
+            "#if __LLONG_WIDTH__ == 64\nint llw;\n#endif\n"
             "#if __LONG_LONG_MIN__ < 0\nint llm;\n#endif\n"
+            "#if __LLONG_MIN__ < 0\nint llmin_alias;\n#endif\n"
+            "#if __LLONG_MAX__ > 0\nint llmax_alias;\n#endif\n"
+            "#if __ULLONG_MAX__ > 0\nint ullmax_alias;\n#endif\n"
             "#if __LONG_MIN__ < 0\nint lm;\n#endif\n"
             "#if __SCHAR_MIN__ < 0\nint scm;\n#endif\n"
             "#if __SHRT_MIN__ < 0\nint shm;\n#endif\n"
@@ -363,7 +367,11 @@ class PreprocessorTests(unittest.TestCase):
                     "__INTPTR_MIN__",
                     "__UINTPTR_MAX__",
                     "__INTMAX_MIN__",
+                    "__LLONG_WIDTH__",
                     "__LONG_LONG_MIN__",
+                    "__LLONG_MIN__",
+                    "__LLONG_MAX__",
+                    "__ULLONG_MAX__",
                     "__LONG_MIN__",
                     "__SCHAR_MIN__",
                     "__SHRT_MIN__",
@@ -443,7 +451,11 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int ipmin;", result.source)
         self.assertNotIn("int upmax;", result.source)
         self.assertNotIn("int imm;", result.source)
+        self.assertNotIn("int llw;", result.source)
         self.assertNotIn("int llm;", result.source)
+        self.assertNotIn("int llmin_alias;", result.source)
+        self.assertNotIn("int llmax_alias;", result.source)
+        self.assertNotIn("int ullmax_alias;", result.source)
         self.assertNotIn("int lm;", result.source)
         self.assertNotIn("int scm;", result.source)
         self.assertNotIn("int shm;", result.source)
@@ -1400,6 +1412,7 @@ class PreprocessorTests(unittest.TestCase):
             "int upw = __UINTPTR_WIDTH__;\n"
             "int imw = __INTMAX_WIDTH__;\n"
             "int umw = __UINTMAX_WIDTH__;\n"
+            "int llw = __LLONG_WIDTH__;\n"
             "int scmax = __SCHAR_MAX__;\n"
             "int scmin = __SCHAR_MIN__;\n"
             "int shmax = __SHRT_MAX__;\n"
@@ -1471,6 +1484,9 @@ class PreprocessorTests(unittest.TestCase):
             "long iso = __STDC_ISO_10646__;\n"
             "long long llmax = __LONG_LONG_MAX__;\n"
             "long long llmin = __LONG_LONG_MIN__;\n"
+            "long long llmax_alias = __LLONG_MAX__;\n"
+            "long long llmin_alias = __LLONG_MIN__;\n"
+            "unsigned long long ullmax_alias = __ULLONG_MAX__;\n"
             "long long imx = __INTMAX_MAX__;\n"
             "long long imn = __INTMAX_MIN__;\n"
             "unsigned long long umx = __UINTMAX_MAX__;\n"
@@ -1507,6 +1523,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int upw = 64 ;", result.source)
         self.assertIn("int imw = 64 ;", result.source)
         self.assertIn("int umw = 64 ;", result.source)
+        self.assertIn("int llw = 64 ;", result.source)
         self.assertIn("int scmax = 127 ;", result.source)
         self.assertIn("int scmin = - 128 ;", result.source)
         self.assertIn("int shmax = 32767 ;", result.source)
@@ -1578,6 +1595,9 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("long iso = 201706L ;", result.source)
         self.assertIn("long long llmax = 9223372036854775807LL ;", result.source)
         self.assertIn("long long llmin = - 9223372036854775808LL ;", result.source)
+        self.assertIn("long long llmax_alias = 9223372036854775807LL ;", result.source)
+        self.assertIn("long long llmin_alias = - 9223372036854775808LL ;", result.source)
+        self.assertIn("unsigned long long ullmax_alias = 18446744073709551615ULL ;", result.source)
         self.assertIn("long long imx = 9223372036854775807LL ;", result.source)
         self.assertIn("long long imn = - 9223372036854775808LL ;", result.source)
         self.assertIn("unsigned long long umx = 18446744073709551615ULL ;", result.source)
