@@ -212,6 +212,12 @@ def _format_include_reference(include_name: str, is_angled: bool) -> str:
     return f'"{include_name}"'
 
 
+def _format_include_search_roots(search_roots: tuple[Path, ...]) -> str:
+    if not search_roots:
+        return "<none>"
+    return ", ".join(str(root) for root in search_roots)
+
+
 @dataclass
 class _ConditionalFrame:
     parent_active: bool
@@ -596,7 +602,7 @@ class _Preprocessor:
         include_next: bool = False,
     ) -> _ProcessedText:
         include_name, is_angled = self._parse_include_target(body, location)
-        include_path = self._resolve_include(
+        include_path, search_roots = self._resolve_include(
             include_name,
             is_angled=is_angled,
             base_dir=base_dir,
@@ -604,7 +610,11 @@ class _Preprocessor:
         )
         if include_path is None:
             raise PreprocessorError(
-                f"Include not found: {_format_include_reference(include_name, is_angled)}",
+                (
+                    "Include not found: "
+                    f"{_format_include_reference(include_name, is_angled)}; searched: "
+                    f"{_format_include_search_roots(search_roots)}"
+                ),
                 location.line,
                 1,
                 filename=location.filename,
@@ -703,7 +713,7 @@ class _Preprocessor:
         is_angled: bool,
         base_dir: Path | None,
         include_next_from: Path | None = None,
-    ) -> Path | None:
+    ) -> tuple[Path | None, tuple[Path, ...]]:
         search_roots: list[Path] = []
         if not is_angled and base_dir is not None:
             search_roots.append(base_dir)
@@ -718,11 +728,12 @@ class _Preprocessor:
                     start_index = index + 1
                     break
 
-        for root in search_roots[start_index:]:
+        searched_roots = tuple(root.resolve() for root in search_roots[start_index:])
+        for root in searched_roots:
             candidate = root / include_name
             if candidate.is_file():
-                return candidate.resolve()
-        return None
+                return candidate.resolve(), searched_roots
+        return None, searched_roots
 
     def _parse_cli_define(self, define: str) -> _Macro:
         if "=" in define:
@@ -845,8 +856,12 @@ class _Preprocessor:
                     code=_PP_INVALID_IF_EXPR,
                 ) from error
             cursor = close_paren + 1
-            present = self._resolve_include(include_name, is_angled=is_angled, base_dir=base_dir)
-            chunks.append("1" if present is not None else "0")
+            include_path, _ = self._resolve_include(
+                include_name,
+                is_angled=is_angled,
+                base_dir=base_dir,
+            )
+            chunks.append("1" if include_path is not None else "0")
             index = cursor
 
     def _find_matching_has_include_close(self, expr: str, open_paren: int) -> int:
