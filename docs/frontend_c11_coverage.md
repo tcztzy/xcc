@@ -19,6 +19,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - `_Alignas(...)` operand validation now reports operand-specific diagnostics for non-object type operands, non-ICE expression operands, non-positive values, and non-power-of-two values.
 - **Sema diagnostic hardening (ongoing)**
   - Function declarations/definitions using `_Thread_local` now emit a declaration-context-specific diagnostic (`Invalid declaration specifier for function declaration: '_Thread_local'`) instead of a generic specifier error.
+  - Compound literals now report context-aware invalid object-type diagnostics (`Invalid object type for compound literal: ...`) for `void`, incomplete record, and invalid `_Atomic(...)` object types.
 - **Core preprocessor behavior**
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
   - Conditional directives, `defined`, and `__has_include` checks in `#if`/`#elif` (including macro-expanded header operands).
