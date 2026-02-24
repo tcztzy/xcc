@@ -2502,7 +2502,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int x; return _Alignof(x);}")), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="c11")
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand")
+        self.assertEqual(str(ctx.exception), "Invalid alignof operand: expression form requires GNU mode")
 
     def test_alignof_expression_rejected_in_c11_ast_path(self) -> None:
         unit = TranslationUnit(
@@ -2517,7 +2517,7 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="c11")
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand")
+        self.assertEqual(str(ctx.exception), "Invalid alignof operand: expression form requires GNU mode")
 
     def test_cast_expression_typemap(self) -> None:
         unit = parse(list(lex("int main(){int *p; return (int)p;}")))
@@ -4457,19 +4457,19 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){return sizeof(void);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand: void type")
 
     def test_sizeof_atomic_void_type_error(self) -> None:
         unit = parse(list(lex("int main(void){return sizeof(_Atomic(void));}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand: atomic type")
 
     def test_sizeof_incomplete_record_type_error(self) -> None:
         unit = parse(list(lex("int main(){return sizeof(struct S);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand: incomplete type")
 
     def test_sizeof_function_type_error(self) -> None:
         unit = TranslationUnit(
@@ -4493,31 +4493,31 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand: function type")
 
     def test_sizeof_function_designator_error(self) -> None:
         unit = parse(list(lex("int f(int x){return x;} int main(){return sizeof(f);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand: function type")
 
     def test_sizeof_void_expression_error(self) -> None:
         unit = parse(list(lex("void f(void){return;} int main(){return sizeof(f());}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand: void type")
 
     def test_sizeof_incomplete_record_expression_error(self) -> None:
         unit = parse(list(lex("int main(){struct S *p; return sizeof(*p);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid sizeof operand")
+        self.assertEqual(str(ctx.exception), "Invalid sizeof operand: incomplete type")
 
     def test_alignof_void_type_error(self) -> None:
         unit = parse(list(lex("int main(void){return _Alignof(void);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand")
+        self.assertEqual(str(ctx.exception), "Invalid alignof operand: void type")
 
     def test_alignof_function_designator_error(self) -> None:
         unit = parse(
@@ -4526,7 +4526,7 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand")
+        self.assertEqual(str(ctx.exception), "Invalid alignof operand: function type")
 
     def test_alignof_unknown_type_name_error(self) -> None:
         unit = TranslationUnit(
@@ -4541,7 +4541,7 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand")
+        self.assertEqual(str(ctx.exception), "Invalid alignof operand: unknown or unsupported type")
 
     def test_alignof_unknown_expression_type_error(self) -> None:
         unit = TranslationUnit(
@@ -4561,7 +4561,7 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand")
+        self.assertEqual(str(ctx.exception), "Invalid alignof operand: unknown or unsupported type")
 
     def test_cast_void_expression_to_int_error(self) -> None:
         unit = parse(list(lex("void f(void){return;} int main(){return (int)f();}")))
