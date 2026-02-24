@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: removed parser's silent acceptance of trailing `_Complex` type specifiers (`float _Complex`, `double _Complex`, `long double _Complex`, and integer-base forms) so complex types are now rejected consistently with the existing unsupported `_Complex` baseline, and added parser regressions for both declaration and `sizeof(type-name)` diagnostic contexts.
+  - Checks: `uv run python -m unittest tests.test_parser.ParserTests.test_complex_specifier_is_rejected_after_floating_base_type tests.test_parser.ParserTests.test_complex_specifier_requires_floating_base_type tests.test_parser.ParserTests.test_complex_specifier_is_rejected_after_integer_base_type tests.test_parser.ParserTests.test_unsupported_type_uses_declaration_context_diagnostic tests.test_parser.ParserTests.test_unsupported_type_uses_type_name_context_diagnostic tests.test_parser.ParserTests.test_unsupported_trailing_complex_type_uses_type_name_context_diagnostic -q` (pass).
+  - Checks: `uv run python -m unittest tests.test_parser -q` (pass).
   - Iteration 3 slice: made sema `_Alignas` declaration diagnostics reason-specific by reporting why explicit alignment is invalid (non-positive, non-power-of-two, or weaker than natural alignment) across file-scope objects, block-scope objects, and record members; added focused regressions for weaker/natural and non-power-of-two alignment failures.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_alignas_rejects_weaker_alignment_than_type tests.test_sema.SemaTests.test_alignas_file_scope_weaker_alignment_error tests.test_sema.SemaTests.test_alignas_rejects_member_weaker_than_natural_alignment tests.test_sema.SemaTests.test_alignas_rejects_block_scope_non_power_of_two_alignment -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
