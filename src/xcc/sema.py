@@ -509,6 +509,9 @@ class Analyzer:
     def _invalid_record_member_type_message(self, type_label: str) -> str:
         return f"Invalid object type for record member declaration: {type_label}"
 
+    def _invalid_typedef_type_message(self, scope_kind: Literal["file-scope", "block-scope"]) -> str:
+        return f"Invalid atomic type for {scope_kind} typedef declaration"
+
     def _invalid_alignment_message(
         self,
         context_label: str,
@@ -551,7 +554,7 @@ class Analyzer:
                 raise SemaError(f"Conflicting declaration: {declaration.name}")
             self._register_type_spec(declaration.type_spec)
             if self._is_invalid_atomic_type_spec(declaration.type_spec):
-                raise SemaError("Invalid atomic type")
+                raise SemaError(self._invalid_typedef_type_message("file-scope"))
             self._define_enum_members(declaration.type_spec, self._file_scope)
             typedef_type = self._resolve_type(declaration.type_spec)
             self._ensure_array_size_limit(typedef_type)
@@ -1728,7 +1731,7 @@ class Analyzer:
         if isinstance(stmt, TypedefDecl):
             self._register_type_spec(stmt.type_spec)
             if self._is_invalid_atomic_type_spec(stmt.type_spec):
-                raise SemaError("Invalid atomic type")
+                raise SemaError(self._invalid_typedef_type_message("block-scope"))
             self._define_enum_members(stmt.type_spec, scope)
             typedef_type = self._resolve_type(stmt.type_spec)
             self._ensure_array_size_limit(typedef_type)

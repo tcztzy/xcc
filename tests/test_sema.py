@@ -792,7 +792,10 @@ class SemaTests(unittest.TestCase):
         unit = TranslationUnit([], [TypedefDecl(atomic_function_type, "Fn")])
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid atomic type")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid atomic type for file-scope typedef declaration",
+        )
 
     def test_atomic_invalid_block_typedef_type_error(self) -> None:
         atomic_function_type = TypeSpec(
@@ -812,7 +815,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid atomic type")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid atomic type for block-scope typedef declaration",
+        )
 
     def test_atomic_invalid_member_type_error(self) -> None:
         atomic_function_type = TypeSpec(
