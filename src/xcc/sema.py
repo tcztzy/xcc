@@ -1021,6 +1021,21 @@ class Analyzer:
             return spelled_type
         return str(resolved_type)
 
+    def _format_location_details(self, line: int | None, column: int | None) -> str | None:
+        if line is not None and column is not None:
+            return f"line {line}, column {column}"
+        if line is not None:
+            return f"line {line}"
+        if column is not None:
+            return f"column {column}"
+        return None
+
+    def _format_location_suffix(self, line: int | None, column: int | None) -> str:
+        details = self._format_location_details(line, column)
+        if details is None:
+            return ""
+        return f" at {details}"
+
     def _is_variably_modified_type_spec(self, type_spec: TypeSpec) -> bool:
         for kind, value in type_spec.declarator_ops:
             if kind != "arr":
@@ -2265,13 +2280,11 @@ class Analyzer:
                         current_location_suffix = ""
                         if current_default_location is not None:
                             line, column = current_default_location
-                            if line is not None and column is not None:
-                                current_location_suffix = f" at line {line}, column {column}"
+                            current_location_suffix = self._format_location_suffix(line, column)
                         location_suffix = ""
                         if previous_default_location is not None:
                             line, column = previous_default_location
-                            if line is not None and column is not None:
-                                location_suffix = f" at line {line}, column {column}"
+                            location_suffix = self._format_location_suffix(line, column)
                         raise SemaError(
                             "Duplicate default generic association at position "
                             f"{association_index}{current_location_suffix}: previous default was at position "
@@ -2291,12 +2304,10 @@ class Analyzer:
                     assoc_type_spec
                 )
                 if invalid_assoc_reason is not None:
-                    location_suffix = ""
-                    if association_line is not None and association_column is not None:
-                        location_suffix = (
-                            f" at line {association_line}, "
-                            f"column {association_column}"
-                        )
+                    location_suffix = self._format_location_suffix(
+                        association_line,
+                        association_column,
+                    )
                     raise SemaError(
                         "Invalid generic association type at position "
                         f"{association_index} ('{assoc_type_label}')"
@@ -2305,12 +2316,10 @@ class Analyzer:
                 previous_assoc = seen_type_associations.get(assoc_type)
                 if previous_assoc is not None:
                     previous_assoc_index, previous_assoc_label, previous_assoc_location = previous_assoc
-                    current_location_suffix = ""
-                    if association_line is not None and association_column is not None:
-                        current_location_suffix = (
-                            f" at line {association_line}, "
-                            f"column {association_column}"
-                        )
+                    current_location_suffix = self._format_location_suffix(
+                        association_line,
+                        association_column,
+                    )
                     location_suffix = ""
                     if previous_assoc_location is not None:
                         location_suffix = f" at {previous_assoc_location}"
@@ -2321,12 +2330,10 @@ class Analyzer:
                         f"type was at position {previous_assoc_index}{location_suffix} "
                         f"('{previous_assoc_label}')"
                     )
-                association_location = None
-                if association_line is not None and association_column is not None:
-                    association_location = (
-                        f"line {association_line}, "
-                        f"column {association_column}"
-                    )
+                association_location = self._format_location_details(
+                    association_line,
+                    association_column,
+                )
                 seen_type_associations[assoc_type] = (
                     association_index,
                     assoc_type_label,
