@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: enforced block-scope function-declaration storage/specifier constraints by rejecting non-`extern` storage classes (`static`, `register`, etc.) and `_Thread_local` on function declarations parsed as declaration statements, aligning these paths with existing function-level diagnostics (`Invalid storage class for function: ...` / `Invalid declaration specifier for function declaration: '_Thread_local'`).
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_block_scope_function_rejects_static_storage_class tests.test_sema.SemaTests.test_block_scope_function_rejects_register_storage_class tests.test_sema.SemaTests.test_block_scope_function_rejects_thread_local_specifier -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
   - Iteration 3 slice: tightened file-scope declaration-analysis diagnostics by making `auto`/`register` storage-class rejections object-declaration-specific (`Invalid storage class for file-scope object declaration: ...`) and making tag-only `_Alignas` failures explicitly object-contextual (`Invalid alignment specifier for file-scope object declaration without identifier`), with focused sema regression coverage for both `register` and `auto` file-scope declarations.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_file_scope_invalid_storage_class_error tests.test_sema.SemaTests.test_file_scope_auto_storage_class_error tests.test_sema.SemaTests.test_alignas_tag_only_declaration_error -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
