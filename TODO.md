@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined C11 macro behavior with `__STDC_MB_MIGHT_NEQ_WC__=1` to make multibyte-vs-wide-character encoding assumptions explicit in preprocessing output, including regression coverage for macro expansion and CLI `-U` removal behavior.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: aligned preprocessor include-trace source reporting with logical source mapping (`#line`) by emitting the mapped filename/line for `#include` trace entries instead of the physical include-stack path, with focused regression coverage for mapped include traces.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_include_trace_and_macro_table tests.test_preprocessor.PreprocessorTests.test_include_trace_uses_line_mapped_source_location -q` (pass).
   - Iteration 3 slice: deduplicated preprocessor include search roots after path resolution so include probing and include-not-found diagnostics now report each effective root once even when `-I` entries repeat or alias the same directory (for example via symlinks), with focused regression coverage for both diagnostics and successful include resolution.
