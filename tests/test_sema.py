@@ -566,7 +566,59 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid alignment specifier for block-scope declaration without identifier",
+            "Invalid alignment specifier for block-scope object declaration without identifier",
+        )
+
+    def test_alignas_file_scope_missing_identifier_reports_qualifiers(self) -> None:
+        unit = TranslationUnit(
+            [],
+            [
+                DeclStmt(
+                    TypeSpec("int"),
+                    None,
+                    None,
+                    16,
+                    storage_class="extern",
+                    is_thread_local=True,
+                )
+            ],
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid alignment specifier for file-scope object declaration without identifier "
+            "with storage class 'extern' and '_Thread_local'",
+        )
+
+    def test_alignas_block_scope_missing_identifier_reports_qualifiers(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            DeclStmt(
+                                TypeSpec("int"),
+                                None,
+                                None,
+                                16,
+                                storage_class="extern",
+                                is_thread_local=True,
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid alignment specifier for block-scope object declaration without identifier "
+            "with storage class 'extern' and '_Thread_local'",
         )
 
     def test_alignas_member_increases_record_alignof(self) -> None:

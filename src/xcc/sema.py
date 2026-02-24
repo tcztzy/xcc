@@ -465,17 +465,32 @@ class Analyzer:
             param_type = self._resolve_param_type(param.type_spec)
             scope.define(VarSymbol(param.name, param_type))
 
-    def _missing_object_identifier_message(self, scope_label: str, declaration: DeclStmt) -> str:
+    def _declaration_qualifier_text(self, declaration: DeclStmt) -> str | None:
         qualifiers: list[str] = []
         if declaration.storage_class is not None:
             qualifiers.append(f"storage class '{declaration.storage_class}'")
         if declaration.is_thread_local:
             qualifiers.append("'_Thread_local'")
         if not qualifiers:
+            return None
+        return " and ".join(qualifiers)
+
+    def _missing_object_identifier_message(self, scope_label: str, declaration: DeclStmt) -> str:
+        qualifier_text = self._declaration_qualifier_text(declaration)
+        if qualifier_text is None:
             return f"Expected identifier for {scope_label} object declaration"
-        qualifier_text = " and ".join(qualifiers)
         return (
             f"Expected identifier for {scope_label} object declaration "
+            f"with {qualifier_text}"
+        )
+
+    def _missing_identifier_for_alignment_message(self, scope_label: str, declaration: DeclStmt) -> str:
+        context = f"{scope_label} object declaration"
+        qualifier_text = self._declaration_qualifier_text(declaration)
+        if qualifier_text is None:
+            return f"Invalid alignment specifier for {context} without identifier"
+        return (
+            f"Invalid alignment specifier for {context} without identifier "
             f"with {qualifier_text}"
         )
 
@@ -565,7 +580,7 @@ class Analyzer:
             self._define_enum_members(declaration.type_spec, self._file_scope)
             if declaration.alignment is not None and declaration.name is None:
                 raise SemaError(
-                    "Invalid alignment specifier for file-scope object declaration without identifier"
+                    self._missing_identifier_for_alignment_message("file-scope", declaration)
                 )
             if declaration.name is None:
                 if declaration.storage_class is not None or declaration.is_thread_local:
@@ -1667,7 +1682,7 @@ class Analyzer:
             self._define_enum_members(stmt.type_spec, scope)
             if stmt.alignment is not None and stmt.name is None:
                 raise SemaError(
-                    "Invalid alignment specifier for block-scope declaration without identifier"
+                    self._missing_identifier_for_alignment_message("block-scope", stmt)
                 )
             if stmt.name is None:
                 if stmt.storage_class is not None or stmt.is_thread_local:
