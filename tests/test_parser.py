@@ -3869,7 +3869,7 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){int x=0; return _Generic(x, int: 1, signed int: 2);}")))
         self.assertIn(
-            "Duplicate generic type association at position 2: previous canonical-equivalent type association was at position 1 (line 1, column 44)",
+            "Duplicate generic type association at position 2: previous canonical-equivalent type association was at position 1 (line 1, column 44) (previous spelling: 'int'; current spelling: 'signed int')",
             str(ctx.exception),
         )
 
@@ -3877,7 +3877,7 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){int x=0; return _Generic(x, long: 1, long int: 2);}")))
         self.assertIn(
-            "Duplicate generic type association at position 2: previous canonical-equivalent type association was at position 1 (line 1, column 44)",
+            "Duplicate generic type association at position 2: previous canonical-equivalent type association was at position 1 (line 1, column 44) (previous spelling: 'long'; current spelling: 'long int')",
             str(ctx.exception),
         )
 
@@ -3885,7 +3885,29 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){int x=0; return _Generic(x, unsigned: 1, unsigned int: 2);}")))
         self.assertIn(
-            "Duplicate generic type association at position 2: previous canonical-equivalent type association was at position 1 (line 1, column 44)",
+            "Duplicate generic type association at position 2: previous canonical-equivalent type association was at position 1 (line 1, column 44) (previous spelling: 'unsigned'; current spelling: 'unsigned int')",
+            str(ctx.exception),
+        )
+
+    def test_generic_selection_rejects_duplicate_canonical_short_type_association(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){int x=0; return _Generic(x, short: 1, short int: 2);}")))
+        self.assertIn(
+            "Duplicate generic type association at position 2: previous canonical-equivalent type association was at position 1 (line 1, column 44) (previous spelling: 'short'; current spelling: 'short int')",
+            str(ctx.exception),
+        )
+
+    def test_generic_selection_rejects_duplicate_canonical_qualifier_order_type_association(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(
+                list(
+                    lex(
+                        "int main(void){int x=0; return _Generic(x, const volatile int: 1, volatile const int: 2);}"  # noqa: E501
+                    )
+                )
+            )
+        self.assertIn(
+            "Duplicate generic type association at position 2: previous canonical-equivalent type association was at position 1 (line 1, column 44) (previous spelling: 'const volatile int'; current spelling: 'volatile const int')",
             str(ctx.exception),
         )
 
