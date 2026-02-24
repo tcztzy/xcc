@@ -641,13 +641,41 @@ class PreprocessorTests(unittest.TestCase):
             preprocess_source('#include "missing.h"\n', filename="main.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
         self.assertEqual((ctx.exception.filename, ctx.exception.line), ("main.c", 1))
-        self.assertEqual(ctx.exception.args[0], 'Include not found: "missing.h" at main.c:1:1')
+        self.assertEqual(
+            ctx.exception.args[0],
+            f'Include not found: "missing.h"; searched: {Path.cwd().resolve()} at main.c:1:1',
+        )
 
     def test_include_not_found_for_angle_include_reports_delimiters(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#include <missing.h>\n", filename="main.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
-        self.assertEqual(ctx.exception.args[0], "Include not found: <missing.h> at main.c:1:1")
+        self.assertEqual(
+            ctx.exception.args[0],
+            "Include not found: <missing.h>; searched: <none> at main.c:1:1",
+        )
+
+    def test_include_not_found_reports_search_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_a = root / "inc_a"
+            include_b = root / "inc_b"
+            include_a.mkdir()
+            include_b.mkdir()
+            options = FrontendOptions(
+                include_dirs=(str(include_a),),
+                system_include_dirs=(str(include_b),),
+            )
+            with self.assertRaises(PreprocessorError) as ctx:
+                preprocess_source('#include "missing.h"\n', filename="main.c", options=options)
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+        self.assertEqual(
+            ctx.exception.args[0],
+            (
+                f'Include not found: "missing.h"; searched: {Path.cwd().resolve()}, '
+                f"{include_a.resolve()}, {include_b.resolve()} at main.c:1:1"
+            ),
+        )
 
     def test_invalid_include_directive(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
