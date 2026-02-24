@@ -465,6 +465,20 @@ class Analyzer:
             param_type = self._resolve_param_type(param.type_spec)
             scope.define(VarSymbol(param.name, param_type))
 
+    def _missing_object_identifier_message(self, scope_label: str, declaration: DeclStmt) -> str:
+        qualifiers: list[str] = []
+        if declaration.storage_class is not None:
+            qualifiers.append(f"storage class '{declaration.storage_class}'")
+        if declaration.is_thread_local:
+            qualifiers.append("'_Thread_local'")
+        if not qualifiers:
+            return f"Expected identifier for {scope_label} object declaration"
+        qualifier_text = " and ".join(qualifiers)
+        return (
+            f"Expected identifier for {scope_label} object declaration "
+            f"with {qualifier_text}"
+        )
+
     def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
         if isinstance(declaration, DeclGroupStmt):
             for grouped_decl in declaration.declarations:
@@ -507,7 +521,9 @@ class Analyzer:
                 )
             if declaration.name is None:
                 if declaration.storage_class is not None or declaration.is_thread_local:
-                    raise SemaError("Expected identifier for file-scope object declaration")
+                    raise SemaError(
+                        self._missing_object_identifier_message("file-scope", declaration)
+                    )
                 return
             if declaration.name in self._function_signatures:
                 raise SemaError(f"Conflicting declaration: {declaration.name}")
@@ -1560,7 +1576,7 @@ class Analyzer:
                 )
             if stmt.name is None:
                 if stmt.storage_class is not None or stmt.is_thread_local:
-                    raise SemaError("Expected identifier for block-scope object declaration")
+                    raise SemaError(self._missing_object_identifier_message("block-scope", stmt))
                 return
             if self._is_invalid_atomic_type_spec(stmt.type_spec):
                 raise SemaError("Invalid object type: atomic")
