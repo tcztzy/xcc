@@ -312,6 +312,22 @@ class PreprocessorTests(unittest.TestCase):
             "__SIZE_TYPE__ n;\n"
             "__INTPTR_TYPE__ ip;\n"
             "__UINTPTR_TYPE__ up;\n"
+            "__INT8_TYPE__ i8;\n"
+            "__INT16_TYPE__ i16;\n"
+            "__INT32_TYPE__ i32;\n"
+            "__INT64_TYPE__ i64;\n"
+            "__UINT8_TYPE__ u8;\n"
+            "__UINT16_TYPE__ u16;\n"
+            "__UINT32_TYPE__ u32;\n"
+            "__UINT64_TYPE__ u64;\n"
+            "__INT_LEAST8_TYPE__ il8;\n"
+            "__INT_LEAST16_TYPE__ il16;\n"
+            "__INT_LEAST32_TYPE__ il32;\n"
+            "__INT_LEAST64_TYPE__ il64;\n"
+            "__UINT_LEAST8_TYPE__ ul8;\n"
+            "__UINT_LEAST16_TYPE__ ul16;\n"
+            "__UINT_LEAST32_TYPE__ ul32;\n"
+            "__UINT_LEAST64_TYPE__ ul64;\n"
             "__WCHAR_TYPE__ w;\n"
         )
         result = preprocess_source(
@@ -399,6 +415,22 @@ class PreprocessorTests(unittest.TestCase):
                     "__SIZE_TYPE__",
                     "__INTPTR_TYPE__",
                     "__UINTPTR_TYPE__",
+                    "__INT8_TYPE__",
+                    "__INT16_TYPE__",
+                    "__INT32_TYPE__",
+                    "__INT64_TYPE__",
+                    "__UINT8_TYPE__",
+                    "__UINT16_TYPE__",
+                    "__UINT32_TYPE__",
+                    "__UINT64_TYPE__",
+                    "__INT_LEAST8_TYPE__",
+                    "__INT_LEAST16_TYPE__",
+                    "__INT_LEAST32_TYPE__",
+                    "__INT_LEAST64_TYPE__",
+                    "__UINT_LEAST8_TYPE__",
+                    "__UINT_LEAST16_TYPE__",
+                    "__UINT_LEAST32_TYPE__",
+                    "__UINT_LEAST64_TYPE__",
                     "__WCHAR_TYPE__",
                 )
             ),
@@ -482,6 +514,22 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("__SIZE_TYPE__ n;", result.source)
         self.assertIn("__INTPTR_TYPE__ ip;", result.source)
         self.assertIn("__UINTPTR_TYPE__ up;", result.source)
+        self.assertIn("__INT8_TYPE__ i8;", result.source)
+        self.assertIn("__INT16_TYPE__ i16;", result.source)
+        self.assertIn("__INT32_TYPE__ i32;", result.source)
+        self.assertIn("__INT64_TYPE__ i64;", result.source)
+        self.assertIn("__UINT8_TYPE__ u8;", result.source)
+        self.assertIn("__UINT16_TYPE__ u16;", result.source)
+        self.assertIn("__UINT32_TYPE__ u32;", result.source)
+        self.assertIn("__UINT64_TYPE__ u64;", result.source)
+        self.assertIn("__INT_LEAST8_TYPE__ il8;", result.source)
+        self.assertIn("__INT_LEAST16_TYPE__ il16;", result.source)
+        self.assertIn("__INT_LEAST32_TYPE__ il32;", result.source)
+        self.assertIn("__INT_LEAST64_TYPE__ il64;", result.source)
+        self.assertIn("__UINT_LEAST8_TYPE__ ul8;", result.source)
+        self.assertIn("__UINT_LEAST16_TYPE__ ul16;", result.source)
+        self.assertIn("__UINT_LEAST32_TYPE__ ul32;", result.source)
+        self.assertIn("__UINT_LEAST64_TYPE__ ul64;", result.source)
         self.assertIn("__WCHAR_TYPE__ w;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
@@ -1564,6 +1612,22 @@ class PreprocessorTests(unittest.TestCase):
             "__PTRDIFF_TYPE__ d;\n"
             "__INTPTR_TYPE__ ip;\n"
             "__UINTPTR_TYPE__ up;\n"
+            "__INT8_TYPE__ i8;\n"
+            "__INT16_TYPE__ i16;\n"
+            "__INT32_TYPE__ i32;\n"
+            "__INT64_TYPE__ i64;\n"
+            "__UINT8_TYPE__ u8;\n"
+            "__UINT16_TYPE__ u16;\n"
+            "__UINT32_TYPE__ u32;\n"
+            "__UINT64_TYPE__ u64;\n"
+            "__INT_LEAST8_TYPE__ il8;\n"
+            "__INT_LEAST16_TYPE__ il16;\n"
+            "__INT_LEAST32_TYPE__ il32;\n"
+            "__INT_LEAST64_TYPE__ il64;\n"
+            "__UINT_LEAST8_TYPE__ ul8;\n"
+            "__UINT_LEAST16_TYPE__ ul16;\n"
+            "__UINT_LEAST32_TYPE__ ul32;\n"
+            "__UINT_LEAST64_TYPE__ ul64;\n"
             "__WCHAR_TYPE__ wc;\n"
             "__WINT_TYPE__ wi;\n",
             filename="main.c",
@@ -1675,6 +1739,22 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("long d ;", result.source)
         self.assertIn("long ip ;", result.source)
         self.assertIn("unsigned long up ;", result.source)
+        self.assertIn("signed char i8 ;", result.source)
+        self.assertIn("short i16 ;", result.source)
+        self.assertIn("int i32 ;", result.source)
+        self.assertIn("long i64 ;", result.source)
+        self.assertIn("unsigned char u8 ;", result.source)
+        self.assertIn("unsigned short u16 ;", result.source)
+        self.assertIn("unsigned int u32 ;", result.source)
+        self.assertIn("unsigned long u64 ;", result.source)
+        self.assertIn("signed char il8 ;", result.source)
+        self.assertIn("short il16 ;", result.source)
+        self.assertIn("int il32 ;", result.source)
+        self.assertIn("long il64 ;", result.source)
+        self.assertIn("unsigned char ul8 ;", result.source)
+        self.assertIn("unsigned short ul16 ;", result.source)
+        self.assertIn("unsigned int ul32 ;", result.source)
+        self.assertIn("unsigned long ul64 ;", result.source)
         self.assertIn("int wc ;", result.source)
         self.assertIn("unsigned int wi ;", result.source)
 
