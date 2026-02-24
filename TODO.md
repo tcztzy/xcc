@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined wide-character target-assumption macros with explicit bounds (`__WCHAR_MAX__`, `__WCHAR_MIN__`, `__WINT_MAX__`, `__WINT_MIN__`) so preprocessing now advertises both width and value-range assumptions for `wchar_t`/`wint_t`; added regression coverage for expansion and CLI `-U` passthrough behavior.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: added GNU-compatible predefined static macro `__TIMESTAMP__` (translation-start timestamp literal) alongside existing `__DATE__`/`__TIME__`, with regression coverage for expansion/macro-table visibility and CLI `-U` passthrough behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_date_time_and_timestamp_macros_use_translation_start_time tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_timestamp_macro tests.test_preprocessor.PreprocessorTests.test_predefined_date_and_time_do_not_force_retokenization -q` (pass).
   - Iteration 3 slice: added predefined dynamic macro `__FILE_NAME__` (GNU-compatible basename of the current logical `__FILE__`) so nested includes and `#line`-remapped filenames now expand to just the leaf name, with regression coverage for expansion and CLI `-U` passthrough behavior.
