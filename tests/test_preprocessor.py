@@ -1270,6 +1270,38 @@ class PreprocessorTests(unittest.TestCase):
             "Include not found: <missing.h>; searched: <none> at main.c:1:1",
         )
 
+    def test_include_not_found_uses_line_mapped_source_location(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source('#line 77 "mapped.c"\n#include "missing.h"\n', filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+        self.assertEqual((ctx.exception.filename, ctx.exception.line), ("mapped.c", 77))
+        self.assertEqual(
+            ctx.exception.args[0],
+            f'Include not found: "missing.h"; searched: {Path.cwd().resolve()} at mapped.c:77:1',
+        )
+
+    def test_include_next_not_found_uses_line_mapped_source_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            include_dir = root / "include"
+            source_dir.mkdir()
+            include_dir.mkdir()
+            source_header = source_dir / "inc.h"
+            source_header.write_text(
+                '#line 41 "mapped/header.h"\n#include_next "inc.h"\n',
+                encoding="utf-8",
+            )
+            options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),))
+            with self.assertRaises(PreprocessorError) as ctx:
+                preprocess_source('#include "inc.h"\n', filename=str(source_dir / "main.c"), options=options)
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+        self.assertEqual((ctx.exception.filename, ctx.exception.line), ("mapped/header.h", 41))
+        self.assertEqual(
+            ctx.exception.args[0],
+            f'Include not found via #include_next: "inc.h"; searched: {include_dir.resolve()} at mapped/header.h:41:1',
+        )
+
     def test_include_not_found_reports_search_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
