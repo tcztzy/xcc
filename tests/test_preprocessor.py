@@ -919,6 +919,18 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int mid = 1 ;", result.source)
         self.assertIn("int top = 0 ;", result.source)
 
+    def test_predefined_counter_macro_increments_per_expansion(self) -> None:
+        result = preprocess_source(
+            "int c0 = __COUNTER__;\n"
+            "#define NEXT __COUNTER__\n"
+            "int c1 = NEXT;\n"
+            "int c2 = __COUNTER__;\n",
+            filename="main.c",
+        )
+        self.assertIn("int c0 = 0 ;", result.source)
+        self.assertIn("int c1 = 1 ;", result.source)
+        self.assertIn("int c2 = 2 ;", result.source)
+
     def test_cli_undef_removes_predefined_include_level_macro(self) -> None:
         result = preprocess_source(
             "int level = __INCLUDE_LEVEL__;\n",
@@ -926,6 +938,14 @@ class PreprocessorTests(unittest.TestCase):
             options=FrontendOptions(undefs=("__INCLUDE_LEVEL__",)),
         )
         self.assertEqual(result.source, "int level = __INCLUDE_LEVEL__;\n")
+
+    def test_cli_undef_removes_predefined_counter_macro(self) -> None:
+        result = preprocess_source(
+            "int counter = __COUNTER__;\n",
+            filename="main.c",
+            options=FrontendOptions(undefs=("__COUNTER__",)),
+        )
+        self.assertEqual(result.source, "int counter = __COUNTER__;\n")
 
     def test_predefined_date_and_time_macros_use_translation_start_time(self) -> None:
         with patch("xcc.preprocessor.datetime") as mock_datetime:

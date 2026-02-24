@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: added predefined dynamic macro `__COUNTER__` with monotonic expansion semantics (including expansions that occur through user-defined macros) and CLI `-U` override behavior, plus focused regression coverage for increment ordering and undef passthrough.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_counter_macro_increments_per_expansion tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_counter_macro -q` (pass).
   - Iteration 3 slice: upgraded circular-include diagnostics to report the concrete include cycle chain (`a.h -> b.h -> a.h`) instead of a generic cycle message, making recursive-include root-cause triage immediate from a single failure.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_circular_include tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: expanded predefined C11 wide-character conformance baseline with `__STDC_ISO_10646__=201706L`, so preprocessing now explicitly advertises Unicode scalar value mapping assumptions for `wchar_t` alongside existing wide-character type/width macros; added regression coverage for both expansion and CLI `-U` removal behavior.
