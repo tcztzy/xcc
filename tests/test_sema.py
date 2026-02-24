@@ -20,6 +20,7 @@ from xcc.ast import (
     ExprStmt,
     FunctionDef,
     GenericExpr,
+    FloatLiteral,
     Identifier,
     InitItem,
     InitList,
@@ -1424,7 +1425,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "No matching generic association for control type 'char'; available association types: 'int'",
+            "No matching generic association for control type 'char'; available association types: 'int' at position 1 (line 1, column 45)",
         )
 
     def test_generic_selection_without_match_reports_all_association_types(self) -> None:
@@ -1433,7 +1434,34 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "No matching generic association for control type 'char'; available association types: 'int', 'long'",
+            "No matching generic association for control type 'char'; available association types: 'int' at position 1 (line 1, column 45), 'long' at position 2 (line 1, column 53)",
+        )
+
+    def test_generic_selection_without_match_reports_position_without_locations(self) -> None:
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            ReturnStmt(
+                                GenericExpr(
+                                    FloatLiteral("1.0"),
+                                    ((TypeSpec("int"), IntLiteral("1")),),
+                                )
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "No matching generic association for control type 'double'; available association types: 'int' at position 1",
         )
 
     def test_generic_selection_duplicate_compatible_type_error(self) -> None:
