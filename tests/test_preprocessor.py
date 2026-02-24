@@ -661,6 +661,39 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source('#include "inc.h"\n', filename=str(main), options=options)
         self.assertEqual(result.source, "int from_include;\nint from_source;\n")
 
+    def test_include_next_missing_header_reports_include_next_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            include_dir = root / "include"
+            source_dir.mkdir()
+            include_dir.mkdir()
+            (source_dir / "inc.h").write_text('#include_next "inc.h"\n', encoding="utf-8")
+            main = source_dir / "main.c"
+            options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),))
+            with self.assertRaises(PreprocessorError) as ctx:
+                preprocess_source('#include "inc.h"\n', filename=str(main), options=options)
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+        self.assertEqual(
+            ctx.exception.args[0],
+            f'Include not found via #include_next: "inc.h"; searched: {include_dir.resolve()} at {(source_dir / "inc.h").resolve()}:1:1',
+        )
+
+    def test_include_next_trace_uses_include_next_directive_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first_dir = root / "first"
+            second_dir = root / "second"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            (first_dir / "inc.h").write_text("#include_next <inc.h>\n", encoding="utf-8")
+            (second_dir / "inc.h").write_text("int ok;\n", encoding="utf-8")
+            options = FrontendOptions(std="gnu11", include_dirs=(str(first_dir), str(second_dir)))
+            result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+        self.assertEqual(len(result.include_trace), 2)
+        self.assertIn("main.c:1: #include <inc.h>", result.include_trace[0])
+        self.assertIn(f'{(first_dir / "inc.h").resolve()}:1: #include_next <inc.h>', result.include_trace[1])
+
     def test_include_next_is_rejected_in_c11_mode(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#include_next <inc.h>\n", filename="main.c")
