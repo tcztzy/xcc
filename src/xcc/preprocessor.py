@@ -67,6 +67,7 @@ _PREDEFINED_MACROS = (
     "__WCHAR_TYPE__=int",
     "__WINT_TYPE__=unsigned int",
     "__WCHAR_WIDTH__=32",
+    "__STDC_ISO_10646__=201706L",
     "__FILE__=0",
     "__LINE__=0",
     "__INCLUDE_LEVEL__=0",

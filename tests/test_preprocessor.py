@@ -202,6 +202,7 @@ class PreprocessorTests(unittest.TestCase):
             "#if defined(__FLOAT_WORD_ORDER__)\nint fwo;\n#endif\n"
             "#if __INCLUDE_LEVEL__\nint il;\n#endif\n"
             "#if __WCHAR_WIDTH__ == 32\nint ww;\n#endif\n"
+            "#if defined(__STDC_ISO_10646__)\nint iso;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
             "__WCHAR_TYPE__ w;\n"
         )
@@ -222,6 +223,7 @@ class PreprocessorTests(unittest.TestCase):
                     "__ORDER_LITTLE_ENDIAN__",
                     "__INCLUDE_LEVEL__",
                     "__WCHAR_WIDTH__",
+                    "__STDC_ISO_10646__",
                     "__SIZE_TYPE__",
                     "__WCHAR_TYPE__",
                 )
@@ -238,6 +240,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int fwo;", result.source)
         self.assertNotIn("int il;", result.source)
         self.assertNotIn("int ww;", result.source)
+        self.assertNotIn("int iso;", result.source)
         self.assertIn("__SIZE_TYPE__ n;", result.source)
         self.assertIn("__WCHAR_TYPE__ w;", result.source)
 
@@ -843,6 +846,7 @@ class PreprocessorTests(unittest.TestCase):
             "int be = __BIG_ENDIAN__;\n"
             "int fwo = __FLOAT_WORD_ORDER__;\n"
             "int ww = __WCHAR_WIDTH__;\n"
+            "long iso = __STDC_ISO_10646__;\n"
             "__SIZE_TYPE__ n;\n"
             "__PTRDIFF_TYPE__ d;\n"
             "__WCHAR_TYPE__ wc;\n"
@@ -873,6 +877,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int be = 4321 ;", result.source)
         self.assertIn("int fwo = 1234 ;", result.source)
         self.assertIn("int ww = 32 ;", result.source)
+        self.assertIn("long iso = 201706L ;", result.source)
         self.assertIn("unsigned long n ;", result.source)
         self.assertIn("long d ;", result.source)
         self.assertIn("int wc ;", result.source)
