@@ -231,6 +231,73 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source(source, filename="main.c")
         self.assertIn("int x;", result.source)
 
+    def test_predefined_floating_decimal_and_denorm_macros(self) -> None:
+        source = (
+            "#if __FLT_DECIMAL_DIG__ == 9\nint fd;\n#endif\n"
+            "#if __DBL_DECIMAL_DIG__ == 17\nint dd;\n#endif\n"
+            "#if __LDBL_DECIMAL_DIG__ == 36\nint ldd;\n#endif\n"
+            "#if __DECIMAL_DIG__ == 36\nint dec;\n#endif\n"
+            "#if __FLT_HAS_DENORM__ == 1\nint fhd;\n#endif\n"
+            "#if __DBL_HAS_DENORM__ == 1\nint dhd;\n#endif\n"
+            "#if __LDBL_HAS_DENORM__ == 1\nint lhd;\n#endif\n"
+            "#if defined(__FLT_DENORM_MIN__)\nint fdm;\n#endif\n"
+            "#if defined(__DBL_DENORM_MIN__)\nint ddm;\n#endif\n"
+            "#if defined(__LDBL_DENORM_MIN__)\nint ldm;\n#endif\n"
+        )
+        result = preprocess_source(source, filename="main.c")
+        self.assertIn("int fd;", result.source)
+        self.assertIn("int dd;", result.source)
+        self.assertIn("int ldd;", result.source)
+        self.assertIn("int dec;", result.source)
+        self.assertIn("int fhd;", result.source)
+        self.assertIn("int dhd;", result.source)
+        self.assertIn("int lhd;", result.source)
+        self.assertIn("int fdm;", result.source)
+        self.assertIn("int ddm;", result.source)
+        self.assertIn("int ldm;", result.source)
+
+    def test_cli_undef_removes_predefined_float_denorm_and_decimal_macros(self) -> None:
+        source = (
+            "#if defined(__FLT_DECIMAL_DIG__)\nint fd;\n#endif\n"
+            "#if defined(__DBL_DECIMAL_DIG__)\nint dd;\n#endif\n"
+            "#if defined(__LDBL_DECIMAL_DIG__)\nint ldd;\n#endif\n"
+            "#if defined(__DECIMAL_DIG__)\nint dec;\n#endif\n"
+            "#if defined(__FLT_DENORM_MIN__)\nint fdm;\n#endif\n"
+            "#if defined(__DBL_DENORM_MIN__)\nint ddm;\n#endif\n"
+            "#if defined(__LDBL_DENORM_MIN__)\nint ldm;\n#endif\n"
+            "#if defined(__FLT_HAS_DENORM__)\nint fhd;\n#endif\n"
+            "#if defined(__DBL_HAS_DENORM__)\nint dhd;\n#endif\n"
+            "#if defined(__LDBL_HAS_DENORM__)\nint lhd;\n#endif\n"
+        )
+        result = preprocess_source(
+            source,
+            filename="main.c",
+            options=FrontendOptions(
+                undefs=(
+                    "__FLT_DECIMAL_DIG__",
+                    "__DBL_DECIMAL_DIG__",
+                    "__LDBL_DECIMAL_DIG__",
+                    "__DECIMAL_DIG__",
+                    "__FLT_DENORM_MIN__",
+                    "__DBL_DENORM_MIN__",
+                    "__LDBL_DENORM_MIN__",
+                    "__FLT_HAS_DENORM__",
+                    "__DBL_HAS_DENORM__",
+                    "__LDBL_HAS_DENORM__",
+                )
+            ),
+        )
+        self.assertNotIn("int fd;", result.source)
+        self.assertNotIn("int dd;", result.source)
+        self.assertNotIn("int ldd;", result.source)
+        self.assertNotIn("int dec;", result.source)
+        self.assertNotIn("int fdm;", result.source)
+        self.assertNotIn("int ddm;", result.source)
+        self.assertNotIn("int ldm;", result.source)
+        self.assertNotIn("int fhd;", result.source)
+        self.assertNotIn("int dhd;", result.source)
+        self.assertNotIn("int lhd;", result.source)
+
     def test_cli_undef_removes_predefined_macro(self) -> None:
         source = (
             "#if __INT_WIDTH__\nint x;\n#endif\n"
