@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: deduplicated preprocessor include search roots after path resolution so include probing and include-not-found diagnostics now report each effective root once even when `-I` entries repeat or alias the same directory (for example via symlinks), with focused regression coverage for both diagnostics and successful include resolution.
   - Iteration 3 slice: improved include-not-found diagnostics by appending the ordered searched include roots (`...; searched: <root1>, <root2>` or `<none>`), preserving quoted/angle delimiter reporting while making missing-header failures actionable for include-path debugging.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_include_not_found tests.test_preprocessor.PreprocessorTests.test_include_not_found_for_angle_include_reports_delimiters tests.test_preprocessor.PreprocessorTests.test_include_not_found_reports_search_roots -q` (pass).
   - Iteration 3 slice: added predefined dynamic macro `__INCLUDE_LEVEL__` with nested-include depth tracking (`0` in the main file, incremented for each include nesting level), including CLI `-U` behavior and nested-include regression coverage.

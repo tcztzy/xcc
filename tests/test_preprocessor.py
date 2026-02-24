@@ -677,6 +677,39 @@ class PreprocessorTests(unittest.TestCase):
             ),
         )
 
+    def test_include_search_roots_are_deduplicated_in_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_a = root / "inc_a"
+            include_a.mkdir()
+            include_a_alias = root / "inc_a_alias"
+            include_a_alias.symlink_to(include_a, target_is_directory=True)
+            options = FrontendOptions(
+                include_dirs=(str(include_a), str(include_a_alias), str(include_a)),
+            )
+            with self.assertRaises(PreprocessorError) as ctx:
+                preprocess_source('#include "missing.h"\n', filename="main.c", options=options)
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+        self.assertEqual(
+            ctx.exception.args[0],
+            (
+                f'Include not found: "missing.h"; searched: {Path.cwd().resolve()}, '
+                f"{include_a.resolve()} at main.c:1:1"
+            ),
+        )
+
+    def test_include_search_skips_duplicate_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_a = root / "inc_a"
+            include_a.mkdir()
+            include_a_alias = root / "inc_a_alias"
+            include_a_alias.symlink_to(include_a, target_is_directory=True)
+            (include_a / "present.h").write_text("int from_include;\n", encoding="utf-8")
+            options = FrontendOptions(include_dirs=(str(include_a_alias), str(include_a)))
+            result = preprocess_source('#include "present.h"\n', filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_include;\n")
+
     def test_invalid_include_directive(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#include bad\n", filename="main.c")
