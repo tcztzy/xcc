@@ -526,7 +526,8 @@ class Analyzer:
             if declaration.storage_class in {"auto", "register"}:
                 storage_class = declaration.storage_class if declaration.storage_class is not None else "none"
                 raise SemaError(
-                    f"Invalid storage class for file-scope declaration: '{storage_class}'"
+                    "Invalid storage class for file-scope object declaration: "
+                    f"'{storage_class}'"
                 )
             if declaration.storage_class == "typedef":
                 storage_class = declaration.storage_class if declaration.storage_class is not None else "none"
@@ -538,7 +539,7 @@ class Analyzer:
             self._define_enum_members(declaration.type_spec, self._file_scope)
             if declaration.alignment is not None and declaration.name is None:
                 raise SemaError(
-                    "Invalid alignment specifier for file-scope declaration without identifier"
+                    "Invalid alignment specifier for file-scope object declaration without identifier"
                 )
             if declaration.name is None:
                 if declaration.storage_class is not None or declaration.is_thread_local:

@@ -104,7 +104,16 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid storage class for file-scope declaration: 'register'",
+            "Invalid storage class for file-scope object declaration: 'register'",
+        )
+
+    def test_file_scope_auto_storage_class_error(self) -> None:
+        unit = parse(list(lex("auto int g;")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid storage class for file-scope object declaration: 'auto'",
         )
 
     def test_extern_initializer_error(self) -> None:
@@ -509,7 +518,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid alignment specifier for file-scope declaration without identifier",
+            "Invalid alignment specifier for file-scope object declaration without identifier",
         )
 
     def test_alignas_file_scope_weaker_alignment_error(self) -> None:
