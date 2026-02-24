@@ -193,6 +193,7 @@ class PreprocessorTests(unittest.TestCase):
         source = (
             "#if __INT_WIDTH__\nint x;\n#endif\n"
             "#if __STDC_UTF_16__\nint y;\n#endif\n"
+            "#if __STDC_NO_THREADS__\nint t;\n#endif\n"
             "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
             "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
             "#if defined(__BYTE_ORDER__)\nint e;\n#endif\n"
@@ -205,6 +206,7 @@ class PreprocessorTests(unittest.TestCase):
                 undefs=(
                     "__INT_WIDTH__",
                     "__STDC_UTF_16__",
+                    "__STDC_NO_THREADS__",
                     "__SIZEOF_POINTER__",
                     "__CHAR_BIT__",
                     "__BYTE_ORDER__",
@@ -215,6 +217,7 @@ class PreprocessorTests(unittest.TestCase):
         )
         self.assertNotIn("int x;", result.source)
         self.assertNotIn("int y;", result.source)
+        self.assertNotIn("int t;", result.source)
         self.assertNotIn("int z;", result.source)
         self.assertNotIn("int c;", result.source)
         self.assertNotIn("int e;", result.source)
@@ -704,6 +707,10 @@ class PreprocessorTests(unittest.TestCase):
             "long v = __STDC_VERSION__;\n"
             "int u16 = __STDC_UTF_16__;\n"
             "int u32 = __STDC_UTF_32__;\n"
+            "int na = __STDC_NO_ATOMICS__;\n"
+            "int nc = __STDC_NO_COMPLEX__;\n"
+            "int nt = __STDC_NO_THREADS__;\n"
+            "int nv = __STDC_NO_VLA__;\n"
             "int lp = __LP64__;\n"
             "int bits = __CHAR_BIT__;\n"
             "int ssz = __SIZEOF_SHORT__;\n"
@@ -722,6 +729,10 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("long v = 201112L ;", result.source)
         self.assertIn("int u16 = 1 ;", result.source)
         self.assertIn("int u32 = 1 ;", result.source)
+        self.assertIn("int na = 1 ;", result.source)
+        self.assertIn("int nc = 1 ;", result.source)
+        self.assertIn("int nt = 1 ;", result.source)
+        self.assertIn("int nv = 1 ;", result.source)
         self.assertIn("int lp = 1 ;", result.source)
         self.assertIn("int bits = 8 ;", result.source)
         self.assertIn("int ssz = 2 ;", result.source)
