@@ -102,6 +102,10 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: upgraded sema `_Generic` duplicate diagnostics to include source location for the current association when available, so duplicate-compatible-type failures now report both current and previous association coordinates and duplicate-default failures identify the duplicate default site in addition to the original default.
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_generic_selection_typedef_alias_duplicate_compatible_type_error tests.test_sema.SemaTests.test_generic_selection_qualified_typedef_alias_duplicate_compatible_type_error tests.test_sema.SemaTests.test_generic_selection_duplicate_default_association_error_with_location -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
+  - Next target: audit remaining sema `_Generic` diagnostics for cases where parser-provided source locations are available but not surfaced yet (for example no-match association listings built from manually constructed AST metadata), and extend location-aware wording without regressing location-less fallback tests.
   - Iteration 3 slice: added preprocessor feature-probe operator support for `__has_builtin(...)`, `__has_feature(...)`, and `__has_extension(...)` in `#if`/`#elif` expression evaluation (including macro-expanded operator spellings), with strict operand validation (`identifier` only) and focused regression coverage for success/fallback + invalid-operand diagnostics.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_builtin_feature_and_extension_operators tests.test_preprocessor.PreprocessorTests.test_if_expression_with_macro_expanded_has_builtin_operator tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_builtin_rejects_non_identifier_operand -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
