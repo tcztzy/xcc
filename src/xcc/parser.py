@@ -2352,29 +2352,36 @@ class Parser:
                     association_start_index,
                     association_end_index,
                 )
-                type_key = self._generic_association_type_key(assoc_type)
-                if type_key in parsed_type_positions:
-                    previous_index, previous_token, previous_spelling = parsed_type_positions[type_key]
-                    relationship = "identical"
-                    details = ""
-                    if association_type_spelling != previous_spelling:
-                        relationship = "canonical-equivalent"
-                        details = (
-                            f" (previous spelling: '{previous_spelling}'; "
-                            f"current spelling: '{association_type_spelling}')"
+                # Keep parser-side duplicate checks focused on canonical spellings.
+                # Associations that reference typedef names are deferred to sema,
+                # which has full compatibility information.
+                if not self._type_name_uses_typedef_alias(
+                    association_start_index,
+                    association_end_index,
+                ):
+                    type_key = self._generic_association_type_key(assoc_type)
+                    if type_key in parsed_type_positions:
+                        previous_index, previous_token, previous_spelling = parsed_type_positions[type_key]
+                        relationship = "identical"
+                        details = ""
+                        if association_type_spelling != previous_spelling:
+                            relationship = "canonical-equivalent"
+                            details = (
+                                f" (previous spelling: '{previous_spelling}'; "
+                                f"current spelling: '{association_type_spelling}')"
+                            )
+                        raise ParserError(
+                            "Duplicate generic type association at position "
+                            f"{association_index}: previous {relationship} type association "
+                            f"was at position {previous_index} (line {previous_token.line}, "
+                            f"column {previous_token.column}){details}",
+                            association_type_token,
                         )
-                    raise ParserError(
-                        "Duplicate generic type association at position "
-                        f"{association_index}: previous {relationship} type association "
-                        f"was at position {previous_index} (line {previous_token.line}, "
-                        f"column {previous_token.column}){details}",
+                    parsed_type_positions[type_key] = (
+                        association_index,
                         association_type_token,
+                        association_type_spelling,
                     )
-                parsed_type_positions[type_key] = (
-                    association_index,
-                    association_type_token,
-                    association_type_spelling,
-                )
             self._expect_punct(":")
             associations.append((assoc_type, self._parse_assignment()))
             if not self._check_punct(","):
@@ -2436,6 +2443,12 @@ class Parser:
 
     def _format_token_span(self, start: int, end: int) -> str:
         return " ".join(str(token.lexeme) for token in self._tokens[start:end] if token.lexeme is not None)
+
+    def _type_name_uses_typedef_alias(self, start: int, end: int) -> bool:
+        for token in self._tokens[start:end]:
+            if token.kind == TokenKind.IDENT and self._is_typedef_name(token.lexeme):
+                return True
+        return False
 
     def _generic_association_type_key(self, type_spec: TypeSpec) -> tuple[object, ...]:
         def stable(value: object) -> object:

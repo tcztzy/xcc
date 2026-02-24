@@ -3920,6 +3920,20 @@ class ParserTests(unittest.TestCase):
             str(ctx.exception),
         )
 
+    def test_generic_selection_allows_typedef_alias_duplicates_for_sema(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "typedef int I; int main(void){int x=0; return _Generic(x, int: 1, I: 2);}"
+                )
+            )
+        )
+        return_stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(return_stmt, ReturnStmt)
+        self.assertIsInstance(return_stmt.value, GenericExpr)
+        assert return_stmt.value is not None
+        self.assertEqual(len(return_stmt.value.associations), 2)
+
     def test_typedef_requires_identifier(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){typedef int;}")))
