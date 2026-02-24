@@ -926,6 +926,7 @@ class PreprocessorTests(unittest.TestCase):
             "int ww = __WCHAR_WIDTH__;\n"
             "int wiw = __WINT_WIDTH__;\n"
             "long iso = __STDC_ISO_10646__;\n"
+            "const char *bf = __BASE_FILE__;\n"
             "__SIZE_TYPE__ n;\n"
             "__PTRDIFF_TYPE__ d;\n"
             "__WCHAR_TYPE__ wc;\n"
@@ -972,6 +973,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int ww = 32 ;", result.source)
         self.assertIn("int wiw = 32 ;", result.source)
         self.assertIn("long iso = 201706L ;", result.source)
+        self.assertIn('const char * bf = "main.c" ;', result.source)
         self.assertIn("unsigned long n ;", result.source)
         self.assertIn("long d ;", result.source)
         self.assertIn("int wc ;", result.source)
@@ -979,13 +981,15 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_predefined_file_and_line_macros(self) -> None:
         result = preprocess_source(
-            'const char *f = __FILE__;\nint l = __LINE__;\n#line 42 "mapped.c"\nint m = __LINE__;\n',
+            'const char *f = __FILE__;\nconst char *b = __BASE_FILE__;\nint l = __LINE__;\n#line 42 "mapped.c"\nint m = __LINE__;\nconst char *bm = __BASE_FILE__;\n',
             filename="main.c",
         )
         self.assertIn('const char * f = "main.c" ;', result.source)
-        self.assertIn("int l = 2 ;", result.source)
+        self.assertIn('const char * b = "main.c" ;', result.source)
+        self.assertIn("int l = 3 ;", result.source)
         self.assertIn("int m = 42 ;", result.source)
-        self.assertEqual(result.line_map[-1], ("mapped.c", 42))
+        self.assertIn('const char * bm = "main.c" ;', result.source)
+        self.assertEqual(result.line_map[-1], ("mapped.c", 43))
 
     def test_predefined_include_level_macro_tracks_nested_includes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1030,6 +1034,14 @@ class PreprocessorTests(unittest.TestCase):
             options=FrontendOptions(undefs=("__COUNTER__",)),
         )
         self.assertEqual(result.source, "int counter = __COUNTER__;\n")
+
+    def test_cli_undef_removes_predefined_base_file_macro(self) -> None:
+        result = preprocess_source(
+            "const char *base = __BASE_FILE__;\n",
+            filename="main.c",
+            options=FrontendOptions(undefs=("__BASE_FILE__",)),
+        )
+        self.assertEqual(result.source, "const char *base = __BASE_FILE__;\n")
 
     def test_predefined_date_and_time_macros_use_translation_start_time(self) -> None:
         with patch("xcc.preprocessor.datetime") as mock_datetime:
