@@ -222,9 +222,11 @@ def _format_include_trace(
     include_name: str,
     include_path: str,
     is_angled: bool,
+    *,
+    directive: str = "include",
 ) -> str:
     delim_open, delim_close = ("<", ">") if is_angled else ('"', '"')
-    return f"{source}:{line}: #include {delim_open}{include_name}{delim_close} -> {include_path}"
+    return f"{source}:{line}: #{directive} {delim_open}{include_name}{delim_close} -> {include_path}"
 
 
 def _format_include_reference(include_name: str, is_angled: bool) -> str:
@@ -654,9 +656,10 @@ class _Preprocessor:
             include_next_from=base_dir if include_next else None,
         )
         if include_path is None:
+            prefix = "Include not found via #include_next" if include_next else "Include not found"
             raise PreprocessorError(
                 (
-                    "Include not found: "
+                    f"{prefix}: "
                     f"{_format_include_reference(include_name, is_angled)}; searched: "
                     f"{_format_include_search_roots(search_roots)}"
                 ),
@@ -675,6 +678,7 @@ class _Preprocessor:
                 include_name,
                 include_path_text,
                 is_angled,
+                directive="include_next" if include_next else "include",
             )
         )
         if include_path_text in include_stack:

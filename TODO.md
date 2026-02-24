@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: made include diagnostics/tracing directive-aware for GNU `#include_next` by preserving `#include` wording for normal includes while reporting `Include not found via #include_next: ...` on `#include_next` misses and recording `#include_next` entries in include traces; added focused regression coverage for both the new diagnostic wording and trace labeling.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_include_next_missing_header_reports_include_next_context tests.test_preprocessor.PreprocessorTests.test_include_next_trace_uses_include_next_directive_name tests.test_preprocessor.PreprocessorTests.test_include_next_in_gnu_mode_uses_following_include_directory tests.test_preprocessor.PreprocessorTests.test_include_trace_and_macro_table -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: expanded predefined LP64 integer-width/range assumptions with size/pointer widths and signed/unsigned max-value macros (`__SIZE_WIDTH__`, `__PTRDIFF_WIDTH__`, `__SCHAR_MAX__`, `__SHRT_MAX__`, `__INT_MAX__`, `__LONG_MAX__`, `__UCHAR_MAX__`, `__USHRT_MAX__`, `__UINT_MAX__`, `__ULONG_MAX__`, `__SIZE_MAX__`, `__PTRDIFF_MAX__`), with regression coverage for expansion and CLI `-U` removal behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: added predefined dynamic macro `__COUNTER__` with monotonic expansion semantics (including expansions that occur through user-defined macros) and CLI `-U` override behavior, plus focused regression coverage for increment ordering and undef passthrough.
