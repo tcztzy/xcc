@@ -274,11 +274,19 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){return (void){0};}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: void")
+        self.assertEqual(str(ctx.exception), "Invalid object type for compound literal: void")
         unit = parse(list(lex("int main(void){return (struct S){0};}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid object type: incomplete")
+        self.assertEqual(
+            str(ctx.exception), "Invalid object type for compound literal: incomplete"
+        )
+
+    def test_compound_literal_invalid_atomic_object_type_error(self) -> None:
+        unit = parse(list(lex("int main(void){return (_Atomic(void)){0};}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid object type for compound literal: atomic")
 
     def test_internal_vla_helpers_cover_fallback_paths(self) -> None:
         analyzer = Analyzer()

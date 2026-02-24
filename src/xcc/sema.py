@@ -488,6 +488,18 @@ class Analyzer:
     def _invalid_object_type_message(self, scope_label: str, type_label: str) -> str:
         return f"Invalid object type for {scope_label} object declaration: {type_label}"
 
+    def _invalid_object_type_for_context_message(self, context_label: str, type_label: str) -> str:
+        return f"Invalid object type for {context_label}: {type_label}"
+
+    def _invalid_object_type_label(self, type_spec: TypeSpec) -> str | None:
+        if self._is_invalid_atomic_type_spec(type_spec):
+            return "atomic"
+        if self._is_invalid_void_object_type(type_spec):
+            return "void"
+        if self._is_invalid_incomplete_record_object_type(type_spec):
+            return "incomplete"
+        return None
+
     def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
         if isinstance(declaration, DeclGroupStmt):
             for grouped_decl in declaration.declarations:
@@ -1870,11 +1882,14 @@ class Analyzer:
             return target_type
         if isinstance(expr, CompoundLiteralExpr):
             self._register_type_spec(expr.type_spec)
+            invalid_object_type = self._invalid_object_type_label(expr.type_spec)
+            if invalid_object_type is not None:
+                raise SemaError(
+                    self._invalid_object_type_for_context_message(
+                        "compound literal", invalid_object_type
+                    )
+                )
             target_type = self._resolve_type(expr.type_spec)
-            if self._is_invalid_void_object_type(expr.type_spec):
-                raise SemaError("Invalid object type: void")
-            if self._is_invalid_incomplete_record_object_type(expr.type_spec):
-                raise SemaError("Invalid object type: incomplete")
             self._analyze_initializer(target_type, expr.initializer, scope)
             self._type_map.set(expr, target_type)
             return target_type
