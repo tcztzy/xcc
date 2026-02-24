@@ -2350,7 +2350,8 @@ class Parser:
                     assert first_default_token is not None
                     raise ParserError(
                         "Duplicate default generic association at position "
-                        f"{association_index}: previous default was at position "
+                        f"{association_index} (line {default_token.line}, column "
+                        f"{default_token.column}): previous default was at position "
                         f"{first_default_index} (line {first_default_token.line}, "
                         f"column {first_default_token.column}); only one default "
                         "association is allowed",
