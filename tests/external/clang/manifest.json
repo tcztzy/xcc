@@ -1131,9 +1131,9 @@
       "upstream": "xcc/local/parser-parameter-list-trailing-comma-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma.c",
       "expect": "parse",
-      "message_contains": "Expected parameter after ','",
+      "message_contains": "Expected parameter declaration after ','",
       "line": 1,
-      "column": 22,
+      "column": 20,
       "sha256": "762213419428d57bcbad0c2e147b9a6ba8f5421896107e82baab5844f181f171"
     },
     {
@@ -1141,9 +1141,9 @@
       "upstream": "xcc/local/parser-function-suffix-parameter-list-trailing-comma-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-fnptr-typedef.c",
       "expect": "parse",
-      "message_contains": "Expected parameter after ','",
+      "message_contains": "Expected parameter declaration after ','",
       "line": 1,
-      "column": 32,
+      "column": 27,
       "sha256": "7f1ab7fea1041af59b071903b62b6ee22287f291b5c68f8517cd2854ff753301"
     },
     {
@@ -1153,7 +1153,7 @@
       "expect": "parse",
       "message_contains": "Expected ')' after ... in parameter list",
       "line": 1,
-      "column": 28,
+      "column": 26,
       "sha256": "c12493db332d53cf6a2fb2ecc8a2a1524cca7d08c44db9b7a68786008b147f4f"
     },
     {
@@ -1163,7 +1163,7 @@
       "expect": "parse",
       "message_contains": "Expected ')' after ... in parameter list",
       "line": 1,
-      "column": 38,
+      "column": 33,
       "sha256": "37fcb7fc5fd9b1b4269427ad736157f7a4ae560c3a5bcd6b642fe1a34259b5cc"
     },
     {
@@ -1171,9 +1171,9 @@
       "upstream": "xcc/local/parser-parameter-list-trailing-comma-block-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-block.c",
       "expect": "parse",
-      "message_contains": "Expected parameter after ','",
+      "message_contains": "Expected parameter declaration after ','",
       "line": 1,
-      "column": 30,
+      "column": 31,
       "sha256": "7daedd00512bea58deaf33a43fb24142c5c55dcd9a012b363b6a8a013c1fa7eb"
     },
     {
@@ -1183,7 +1183,7 @@
       "expect": "parse",
       "message_contains": "Expected ')' after ... in parameter list",
       "line": 1,
-      "column": 35,
+      "column": 37,
       "sha256": "d79ef6b296ced22cf752823a77e6960b33cc016bf8420e68b74753b9475c2f90"
     },
     {
@@ -1191,9 +1191,9 @@
       "upstream": "xcc/local/parser-parameter-list-trailing-comma-struct-member-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-struct-member.c",
       "expect": "parse",
-      "message_contains": "Expected parameter after ','",
+      "message_contains": "Expected parameter declaration after ','",
       "line": 1,
-      "column": 30,
+      "column": 31,
       "sha256": "6b58bbfcd5509ab95af52231b758f91c3cff3278a0ddda75a113dae1642f2e7f"
     },
     {
@@ -1203,7 +1203,7 @@
       "expect": "parse",
       "message_contains": "Expected ')' after ... in parameter list",
       "line": 1,
-      "column": 35,
+      "column": 37,
       "sha256": "236f03495455b91f064449f48fbf71ce295a6873c3a1f0d8bd655f84b9322b2d"
     },
     {
@@ -1211,9 +1211,9 @@
       "upstream": "xcc/local/parser-parameter-list-trailing-comma-union-member-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-union-member.c",
       "expect": "parse",
-      "message_contains": "Expected parameter after ','",
+      "message_contains": "Expected parameter declaration after ','",
       "line": 1,
-      "column": 29,
+      "column": 30,
       "sha256": "6147fbac6a488a8bd69437034b50eed9090fe1ca0cf01b3aa06f0aa75fca3ddb"
     },
     {
@@ -1223,7 +1223,7 @@
       "expect": "parse",
       "message_contains": "Expected ')' after ... in parameter list",
       "line": 1,
-      "column": 34,
+      "column": 36,
       "sha256": "b81c3fb26219baf4052bc6c022df37a6fde4ace7b8a998eb1b71484a4ac2f353"
     },
     {
@@ -1231,9 +1231,9 @@
       "upstream": "xcc/local/parser-function-pointer-parameter-list-trailing-comma-block-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-fnptr-block.c",
       "expect": "parse",
-      "message_contains": "Expected parameter after ','",
+      "message_contains": "Expected parameter declaration after ','",
       "line": 1,
-      "column": 25,
+      "column": 27,
       "sha256": "5a7c0a926ffea929cf0f04fd80c9b37bcc2172d6299e286a2c6e9c55df6b8488"
     },
     {
@@ -1243,7 +1243,7 @@
       "expect": "parse",
       "message_contains": "Expected ')' after ... in parameter list",
       "line": 1,
-      "column": 30,
+      "column": 32,
       "sha256": "3f7ae1ae99774bc37fae9de4d9c11ad065e32c2d40f582cc7fd28971ebd65dd7"
     },
     {
@@ -1251,9 +1251,9 @@
       "upstream": "xcc/local/parser-function-pointer-parameter-list-trailing-comma-struct-member-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-fnptr-struct-member.c",
       "expect": "parse",
-      "message_contains": "Expected parameter after ','",
+      "message_contains": "Expected parameter declaration after ','",
       "line": 1,
-      "column": 25,
+      "column": 27,
       "sha256": "8174ca3de8103e0a24ba6df6b12f1801e11fdb871d37fa442eb110298013c47a"
     },
     {
@@ -1263,7 +1263,7 @@
       "expect": "parse",
       "message_contains": "Expected ')' after ... in parameter list",
       "line": 1,
-      "column": 30,
+      "column": 32,
       "sha256": "7b8c19f1ba024e45f4bf0f8b2c8a1330e823664586fa169ae0eb53f0470ca16c"
     },
     {
@@ -1271,9 +1271,9 @@
       "upstream": "xcc/local/parser-function-pointer-parameter-list-trailing-comma-union-member-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-trailing-comma-fnptr-union-member.c",
       "expect": "parse",
-      "message_contains": "Expected parameter after ','",
+      "message_contains": "Expected parameter declaration after ','",
       "line": 1,
-      "column": 24,
+      "column": 26,
       "sha256": "d02e8ddcb080f4d1a26c28bf711819d2f229a60c2d6bf8a081b3b8ea96ba4aab"
     },
     {
@@ -1283,7 +1283,7 @@
       "expect": "parse",
       "message_contains": "Expected ')' after ... in parameter list",
       "line": 1,
-      "column": 29,
+      "column": 31,
       "sha256": "16c7bc14ccca44c50acdc164e4a5db0cb1ae07cd01251cd23579255e1434b0bb"
     }
   ]
