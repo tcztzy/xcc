@@ -126,6 +126,13 @@ _PREDEFINED_DYNAMIC_MACROS = frozenset(
     {"__FILE__", "__FILE_NAME__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"}
 )
 _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__", "__TIMESTAMP__"})
+_STRICT_MODE_PREDEFINED_MACROS = ("__STRICT_ANSI__=1",)
+_GNU_MODE_PREDEFINED_MACROS = (
+    "__GNUC__=4",
+    "__GNUC_MINOR__=2",
+    "__GNUC_PATCHLEVEL__=1",
+    '__VERSION__="xcc gnu11"',
+)
 def _macro_name_from_cli_define(define: str) -> str:
     head = define.split("=", 1)[0].strip()
     if "(" not in head:
@@ -137,9 +144,10 @@ def _macro_name_from_cli_define(define: str) -> str:
     return head[:open_index].strip()
 
 
-_PREDEFINED_MACRO_NAMES = frozenset(_macro_name_from_cli_define(item) for item in _PREDEFINED_MACROS) | frozenset(
-    _PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS
-)
+_PREDEFINED_MACRO_NAMES = frozenset(
+    _macro_name_from_cli_define(item)
+    for item in (*_PREDEFINED_MACROS, *_STRICT_MODE_PREDEFINED_MACROS, *_GNU_MODE_PREDEFINED_MACROS)
+) | frozenset(_PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS)
 
 
 @dataclass(frozen=True)
@@ -356,6 +364,12 @@ class _Preprocessor:
         self._base_filename = "<input>"
         self._macros: dict[str, _Macro] = {}
         for define in _PREDEFINED_MACROS:
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
+        mode_defines = (
+            _GNU_MODE_PREDEFINED_MACROS if options.std == "gnu11" else _STRICT_MODE_PREDEFINED_MACROS
+        )
+        for define in mode_defines:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
         self._macros["__DATE__"] = _Macro(
