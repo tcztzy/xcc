@@ -16,6 +16,7 @@ class FrontendOptionsTests(unittest.TestCase):
         self.assertEqual(options.macro_includes, ())
         self.assertEqual(options.defines, ())
         self.assertEqual(options.undefs, ())
+        self.assertFalse(options.no_standard_includes)
         self.assertEqual(options.diag_format, "human")
         self.assertFalse(options.warn_as_error)
 

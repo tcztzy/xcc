@@ -808,6 +808,25 @@ class PreprocessorTests(unittest.TestCase):
                 result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int from_include;\n")
 
+    def test_nostdinc_disables_environment_include_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cpath_dir = root / "cpath"
+            c_include_dir = root / "c_include"
+            cpath_dir.mkdir()
+            c_include_dir.mkdir()
+            (cpath_dir / "inc.h").write_text("int from_cpath;\n", encoding="utf-8")
+            (c_include_dir / "inc.h").write_text("int from_c_include;\n", encoding="utf-8")
+            options = FrontendOptions(no_standard_includes=True)
+            with patch.dict(
+                "os.environ",
+                {"CPATH": str(cpath_dir), "C_INCLUDE_PATH": str(c_include_dir)},
+                clear=False,
+            ):
+                with self.assertRaises(PreprocessorError) as ctx:
+                    preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+        self.assertIn("Include not found", str(ctx.exception))
+
     def test_include_angle_uses_c_include_path_after_system_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

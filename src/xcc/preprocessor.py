@@ -407,8 +407,12 @@ class _Preprocessor:
                 raise PreprocessorError(f"Invalid macro name in -U: {name}")
             self._macros.pop(name, None)
         self.macro_table = self._macros
-        self._cpath_include_dirs = _env_path_list("CPATH")
-        self._c_include_path_dirs = _env_path_list("C_INCLUDE_PATH")
+        if options.no_standard_includes:
+            self._cpath_include_dirs = ()
+            self._c_include_path_dirs = ()
+        else:
+            self._cpath_include_dirs = _env_path_list("CPATH")
+            self._c_include_path_dirs = _env_path_list("C_INCLUDE_PATH")
 
     def process(self, source: str, *, filename: str) -> _ProcessedText:
         self._base_filename = filename
