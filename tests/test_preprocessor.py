@@ -210,6 +210,10 @@ class PreprocessorTests(unittest.TestCase):
             "#if __UINTMAX_WIDTH__ == 64\nint umw;\n#endif\n"
             "#if __SIZE_MAX__ > 0\nint sm;\n#endif\n"
             "#if __PTRDIFF_MAX__ > 0\nint pm;\n#endif\n"
+            "#if __PTRDIFF_MIN__ < 0\nint pmin;\n#endif\n"
+            "#if __INTMAX_MIN__ < 0\nint imm;\n#endif\n"
+            "#if __LONG_LONG_MIN__ < 0\nint llm;\n#endif\n"
+            "#if __LONG_MIN__ < 0\nint lm;\n#endif\n"
             "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
             "#if defined(__BYTE_ORDER__)\nint e;\n#endif\n"
             "#if defined(__LITTLE_ENDIAN__)\nint le;\n#endif\n"
@@ -242,6 +246,10 @@ class PreprocessorTests(unittest.TestCase):
                     "__UINTMAX_WIDTH__",
                     "__SIZE_MAX__",
                     "__PTRDIFF_MAX__",
+                    "__PTRDIFF_MIN__",
+                    "__INTMAX_MIN__",
+                    "__LONG_LONG_MIN__",
+                    "__LONG_MIN__",
                     "__CHAR_BIT__",
                     "__BYTE_ORDER__",
                     "__LITTLE_ENDIAN__",
@@ -272,6 +280,10 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int umw;", result.source)
         self.assertNotIn("int sm;", result.source)
         self.assertNotIn("int pm;", result.source)
+        self.assertNotIn("int pmin;", result.source)
+        self.assertNotIn("int imm;", result.source)
+        self.assertNotIn("int llm;", result.source)
+        self.assertNotIn("int lm;", result.source)
         self.assertNotIn("int c;", result.source)
         self.assertNotIn("int e;", result.source)
         self.assertNotIn("int le;", result.source)
@@ -930,12 +942,14 @@ class PreprocessorTests(unittest.TestCase):
             "int shmax = __SHRT_MAX__;\n"
             "int imax = __INT_MAX__;\n"
             "long lmax = __LONG_MAX__;\n"
+            "long lmin = __LONG_MIN__;\n"
             "unsigned int ucmax = __UCHAR_MAX__;\n"
             "unsigned int usmax = __USHRT_MAX__;\n"
             "unsigned int uimax = __UINT_MAX__;\n"
             "unsigned long ulmax = __ULONG_MAX__;\n"
             "unsigned long szmax = __SIZE_MAX__;\n"
             "long pdmax = __PTRDIFF_MAX__;\n"
+            "long pdmin = __PTRDIFF_MIN__;\n"
             "int ssz = __SIZEOF_SHORT__;\n"
             "int isz = __SIZEOF_INT__;\n"
             "int psz = __SIZEOF_POINTER__;\n"
@@ -953,6 +967,11 @@ class PreprocessorTests(unittest.TestCase):
             "unsigned int wimax = __WINT_MAX__;\n"
             "unsigned int wimin = __WINT_MIN__;\n"
             "long iso = __STDC_ISO_10646__;\n"
+            "long long llmax = __LONG_LONG_MAX__;\n"
+            "long long llmin = __LONG_LONG_MIN__;\n"
+            "long long imx = __INTMAX_MAX__;\n"
+            "long long imn = __INTMAX_MIN__;\n"
+            "unsigned long long umx = __UINTMAX_MAX__;\n"
             "long long imc = __INTMAX_C(123);\n"
             "unsigned long long umc = __UINTMAX_C(456);\n"
             "const char *bf = __BASE_FILE__;\n"
@@ -984,12 +1003,14 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int shmax = 32767 ;", result.source)
         self.assertIn("int imax = 2147483647 ;", result.source)
         self.assertIn("long lmax = 9223372036854775807L ;", result.source)
+        self.assertIn("long lmin = - 9223372036854775808L ;", result.source)
         self.assertIn("unsigned int ucmax = 255 ;", result.source)
         self.assertIn("unsigned int usmax = 65535 ;", result.source)
         self.assertIn("unsigned int uimax = 4294967295U ;", result.source)
         self.assertIn("unsigned long ulmax = 18446744073709551615UL ;", result.source)
         self.assertIn("unsigned long szmax = 18446744073709551615UL ;", result.source)
         self.assertIn("long pdmax = 9223372036854775807L ;", result.source)
+        self.assertIn("long pdmin = - 9223372036854775808L ;", result.source)
         self.assertIn("int ssz = 2 ;", result.source)
         self.assertIn("int isz = 4 ;", result.source)
         self.assertIn("int psz = 8 ;", result.source)
@@ -1007,6 +1028,11 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("unsigned int wimax = 4294967295U ;", result.source)
         self.assertIn("unsigned int wimin = 0U ;", result.source)
         self.assertIn("long iso = 201706L ;", result.source)
+        self.assertIn("long long llmax = 9223372036854775807LL ;", result.source)
+        self.assertIn("long long llmin = - 9223372036854775808LL ;", result.source)
+        self.assertIn("long long imx = 9223372036854775807LL ;", result.source)
+        self.assertIn("long long imn = - 9223372036854775808LL ;", result.source)
+        self.assertIn("unsigned long long umx = 18446744073709551615ULL ;", result.source)
         self.assertIn("long long imc = 123LL ;", result.source)
         self.assertIn("unsigned long long umc = 456ULL ;", result.source)
         self.assertIn('const char * bf = "main.c" ;', result.source)
