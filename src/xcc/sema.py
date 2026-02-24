@@ -2132,17 +2132,20 @@ class Analyzer:
             control_type = self._decay_array_value(self._analyze_expr(expr.control, scope))
             selected_expr: Expr | None = None
             default_expr: Expr | None = None
-            seen_types: set[Type] = set()
+            default_association_index: int | None = None
+            seen_type_indices: dict[Type, int] = {}
             for association_index, (assoc_type_spec, assoc_expr) in enumerate(
                 expr.associations, start=1
             ):
                 if assoc_type_spec is None:
-                    if default_expr is not None:
+                    if default_expr is not None and default_association_index is not None:
                         raise SemaError(
                             "Duplicate default generic association at position "
-                            f"{association_index}: only one default association is allowed"
+                            f"{association_index}: previous default was at position "
+                            f"{default_association_index}; only one default association is allowed"
                         )
                     default_expr = assoc_expr
+                    default_association_index = association_index
                     self._analyze_expr(assoc_expr, scope)
                     continue
                 self._register_type_spec(assoc_type_spec)
@@ -2154,11 +2157,14 @@ class Analyzer:
                         f"Invalid generic association type: {invalid_assoc_reason}"
                     )
                 assoc_type = self._resolve_type(assoc_type_spec)
-                if assoc_type in seen_types:
+                previous_assoc_index = seen_type_indices.get(assoc_type)
+                if previous_assoc_index is not None:
                     raise SemaError(
-                        f"Duplicate generic association type: '{assoc_type}'"
+                        "Duplicate generic association type at position "
+                        f"{association_index}: previous compatible type was at position "
+                        f"{previous_assoc_index}: '{assoc_type}'"
                     )
-                seen_types.add(assoc_type)
+                seen_type_indices[assoc_type] = association_index
                 self._analyze_expr(assoc_expr, scope)
                 if assoc_type == control_type:
                     selected_expr = assoc_expr
