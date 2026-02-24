@@ -111,7 +111,10 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int f(void){extern int x=1; return x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Extern declaration cannot have initializer")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid initializer for block-scope object declaration with storage class 'extern'",
+        )
 
     def test_invalid_thread_local_storage_class_error(self) -> None:
         unit = parse(list(lex("int f(void){_Thread_local int x; return 0;}")))
@@ -221,7 +224,10 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("extern int x=1;")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Extern declaration cannot have initializer")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid initializer for file-scope object declaration with storage class 'extern'",
+        )
 
     def test_compound_literal_type(self) -> None:
         unit = parse(list(lex("int main(void){int *p=&(int){1}; return *p;}")))
