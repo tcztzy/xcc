@@ -529,11 +529,31 @@ class PreprocessorTests(unittest.TestCase):
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source(source, filename="if.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertIn(
+            "Invalid __has_include expression: header operand must be quoted or angled",
+            str(ctx.exception),
+        )
 
     def test_if_expression_with_has_include_invalid_form(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#if __has_include(MISSING)\nint x;\n#endif\n", filename="if.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertIn(
+            "Invalid __has_include expression: header operand must be quoted or angled",
+            str(ctx.exception),
+        )
+
+    def test_if_expression_with_has_include_missing_operand(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if __has_include()\nint x;\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertIn("Invalid __has_include expression: missing header operand", str(ctx.exception))
+
+    def test_if_expression_with_has_include_missing_closing_paren(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if __has_include(\"x.h\"\nint x;\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertIn("Invalid __has_include expression: missing closing ')'", str(ctx.exception))
 
     def test_if_expression_with_has_include_next_in_gnu11(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
