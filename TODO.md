@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined LP64 pointer-family assumptions with `intptr_t`/`uintptr_t` macro coverage (`__INTPTR_TYPE__=long`, `__UINTPTR_TYPE__=unsigned long`, `__INTPTR_WIDTH__=64`, `__UINTPTR_WIDTH__=64`, `__INTPTR_MAX__=9223372036854775807L`, `__INTPTR_MIN__=-9223372036854775808L`, `__UINTPTR_MAX__=18446744073709551615UL`) and extended regression coverage in both standard-macro expansion and CLI `-U` override paths.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: expanded predefined LP64 target-assumption macro coverage with `sig_atomic_t` assumptions (`__SIG_ATOMIC_TYPE__=int`, `__SIG_ATOMIC_WIDTH__=32`, `__SIG_ATOMIC_MAX__=2147483647`, `__SIG_ATOMIC_MIN__=-2147483648`) and extended regression coverage in both standard-macro expansion and CLI `-U` override paths.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: implemented CLI forced-include support (`-include <header>`) end-to-end (options/CLI/preprocessor), so configured headers are preprocessed before the main translation unit using the quoted-include search chain (`source dir`, `-iquote`, `-I`, `-isystem`, `-idirafter`), with dedicated missing-header diagnostics (`Forced include not found: ...`); added focused preprocessor and CLI regressions.

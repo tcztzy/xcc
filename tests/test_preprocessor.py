@@ -212,11 +212,16 @@ class PreprocessorTests(unittest.TestCase):
             "#if __SIZEOF_WINT_T__\nint wiz;\n#endif\n"
             "#if __SIZE_WIDTH__ == 64\nint sw;\n#endif\n"
             "#if __PTRDIFF_WIDTH__ == 64\nint pw;\n#endif\n"
+            "#if __INTPTR_WIDTH__ == 64\nint ipw;\n#endif\n"
+            "#if __UINTPTR_WIDTH__ == 64\nint upw;\n#endif\n"
             "#if __INTMAX_WIDTH__ == 64\nint imw;\n#endif\n"
             "#if __UINTMAX_WIDTH__ == 64\nint umw;\n#endif\n"
             "#if __SIZE_MAX__ > 0\nint sm;\n#endif\n"
             "#if __PTRDIFF_MAX__ > 0\nint pm;\n#endif\n"
             "#if __PTRDIFF_MIN__ < 0\nint pmin;\n#endif\n"
+            "#if __INTPTR_MAX__ > 0\nint ipmax;\n#endif\n"
+            "#if __INTPTR_MIN__ < 0\nint ipmin;\n#endif\n"
+            "#if __UINTPTR_MAX__ > 0\nint upmax;\n#endif\n"
             "#if __INTMAX_MIN__ < 0\nint imm;\n#endif\n"
             "#if __LONG_LONG_MIN__ < 0\nint llm;\n#endif\n"
             "#if __LONG_MIN__ < 0\nint lm;\n#endif\n"
@@ -242,6 +247,8 @@ class PreprocessorTests(unittest.TestCase):
             "#if defined(__STDC_ISO_10646__)\nint iso;\n#endif\n"
             "#if defined(__FILE_NAME__)\nint fn;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
+            "__INTPTR_TYPE__ ip;\n"
+            "__UINTPTR_TYPE__ up;\n"
             "__WCHAR_TYPE__ w;\n"
         )
         result = preprocess_source(
@@ -262,11 +269,16 @@ class PreprocessorTests(unittest.TestCase):
                     "__SIZEOF_WINT_T__",
                     "__SIZE_WIDTH__",
                     "__PTRDIFF_WIDTH__",
+                    "__INTPTR_WIDTH__",
+                    "__UINTPTR_WIDTH__",
                     "__INTMAX_WIDTH__",
                     "__UINTMAX_WIDTH__",
                     "__SIZE_MAX__",
                     "__PTRDIFF_MAX__",
                     "__PTRDIFF_MIN__",
+                    "__INTPTR_MAX__",
+                    "__INTPTR_MIN__",
+                    "__UINTPTR_MAX__",
                     "__INTMAX_MIN__",
                     "__LONG_LONG_MIN__",
                     "__LONG_MIN__",
@@ -293,6 +305,8 @@ class PreprocessorTests(unittest.TestCase):
                     "__STDC_ISO_10646__",
                     "__FILE_NAME__",
                     "__SIZE_TYPE__",
+                    "__INTPTR_TYPE__",
+                    "__UINTPTR_TYPE__",
                     "__WCHAR_TYPE__",
                 )
             ),
@@ -310,11 +324,16 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int wiz;", result.source)
         self.assertNotIn("int sw;", result.source)
         self.assertNotIn("int pw;", result.source)
+        self.assertNotIn("int ipw;", result.source)
+        self.assertNotIn("int upw;", result.source)
         self.assertNotIn("int imw;", result.source)
         self.assertNotIn("int umw;", result.source)
         self.assertNotIn("int sm;", result.source)
         self.assertNotIn("int pm;", result.source)
         self.assertNotIn("int pmin;", result.source)
+        self.assertNotIn("int ipmax;", result.source)
+        self.assertNotIn("int ipmin;", result.source)
+        self.assertNotIn("int upmax;", result.source)
         self.assertNotIn("int imm;", result.source)
         self.assertNotIn("int llm;", result.source)
         self.assertNotIn("int lm;", result.source)
@@ -340,6 +359,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int iso;", result.source)
         self.assertNotIn("int fn;", result.source)
         self.assertIn("__SIZE_TYPE__ n;", result.source)
+        self.assertIn("__INTPTR_TYPE__ ip;", result.source)
+        self.assertIn("__UINTPTR_TYPE__ up;", result.source)
         self.assertIn("__WCHAR_TYPE__ w;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
@@ -1058,6 +1079,8 @@ class PreprocessorTests(unittest.TestCase):
             "int bits = __CHAR_BIT__;\n"
             "int szw = __SIZE_WIDTH__;\n"
             "int pdw = __PTRDIFF_WIDTH__;\n"
+            "int ipw = __INTPTR_WIDTH__;\n"
+            "int upw = __UINTPTR_WIDTH__;\n"
             "int imw = __INTMAX_WIDTH__;\n"
             "int umw = __UINTMAX_WIDTH__;\n"
             "int scmax = __SCHAR_MAX__;\n"
@@ -1075,6 +1098,9 @@ class PreprocessorTests(unittest.TestCase):
             "unsigned long szmax = __SIZE_MAX__;\n"
             "long pdmax = __PTRDIFF_MAX__;\n"
             "long pdmin = __PTRDIFF_MIN__;\n"
+            "long ipmax = __INTPTR_MAX__;\n"
+            "long ipmin = __INTPTR_MIN__;\n"
+            "unsigned long upmax = __UINTPTR_MAX__;\n"
             "int ssz = __SIZEOF_SHORT__;\n"
             "int isz = __SIZEOF_INT__;\n"
             "int psz = __SIZEOF_POINTER__;\n"
@@ -1112,6 +1138,8 @@ class PreprocessorTests(unittest.TestCase):
             "const char *fn = __FILE_NAME__;\n"
             "__SIZE_TYPE__ n;\n"
             "__PTRDIFF_TYPE__ d;\n"
+            "__INTPTR_TYPE__ ip;\n"
+            "__UINTPTR_TYPE__ up;\n"
             "__WCHAR_TYPE__ wc;\n"
             "__WINT_TYPE__ wi;\n",
             filename="main.c",
@@ -1133,6 +1161,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int bits = 8 ;", result.source)
         self.assertIn("int szw = 64 ;", result.source)
         self.assertIn("int pdw = 64 ;", result.source)
+        self.assertIn("int ipw = 64 ;", result.source)
+        self.assertIn("int upw = 64 ;", result.source)
         self.assertIn("int imw = 64 ;", result.source)
         self.assertIn("int umw = 64 ;", result.source)
         self.assertIn("int scmax = 127 ;", result.source)
@@ -1150,6 +1180,9 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("unsigned long szmax = 18446744073709551615UL ;", result.source)
         self.assertIn("long pdmax = 9223372036854775807L ;", result.source)
         self.assertIn("long pdmin = - 9223372036854775808L ;", result.source)
+        self.assertIn("long ipmax = 9223372036854775807L ;", result.source)
+        self.assertIn("long ipmin = - 9223372036854775808L ;", result.source)
+        self.assertIn("unsigned long upmax = 18446744073709551615UL ;", result.source)
         self.assertIn("int ssz = 2 ;", result.source)
         self.assertIn("int isz = 4 ;", result.source)
         self.assertIn("int psz = 8 ;", result.source)
@@ -1187,6 +1220,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn('const char * fn = "main.c" ;', result.source)
         self.assertIn("unsigned long n ;", result.source)
         self.assertIn("long d ;", result.source)
+        self.assertIn("long ip ;", result.source)
+        self.assertIn("unsigned long up ;", result.source)
         self.assertIn("int wc ;", result.source)
         self.assertIn("unsigned int wi ;", result.source)
 
