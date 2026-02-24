@@ -3012,6 +3012,18 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_union_initializer_rejects_multiple_designated_items_error(self) -> None:
+        unit = parse(list(lex("int main(void){union U { int x; int y; } u = {.x = 1, .y = 2}; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
+    def test_union_initializer_rejects_designated_after_positional_item_error(self) -> None:
+        unit = parse(list(lex("int main(void){union U { int x; int y; } u = {1, .y = 2}; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
     def test_struct_initializer_rejects_too_many_positional_items_error(self) -> None:
         unit = parse(list(lex("int main(void){struct S { int x; } s = {1, 2}; return 0;}")))
         with self.assertRaises(SemaError) as ctx:

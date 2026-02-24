@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: fixed union initializer-list validation so union objects now reject multiple designated initializers (for example `{.x = 1, .y = 2}`) and mixed positional+designated second initializers (`{1, .y = 2}`), matching the single-active-member initialization constraint; added focused sema regressions for both failure shapes.
+  - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_sema.SemaTests.test_union_initializer_rejects_multiple_positional_items_error tests.test_sema.SemaTests.test_union_designated_initializer_ok tests.test_sema.SemaTests.test_union_initializer_rejects_multiple_designated_items_error tests.test_sema.SemaTests.test_union_initializer_rejects_designated_after_positional_item_error -q` (pass).
+  - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_sema -q` (pass).
   - Iteration 3 slice: tightened record-member bit-field constraint enforcement by rejecting named zero-width bit-fields (`struct S { unsigned x:0; };`) while preserving unnamed zero-width separator support (`unsigned :0;`); added focused sema regression coverage for the new named-width diagnostic.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_named_bit_field_zero_width_error tests.test_sema.SemaTests.test_unnamed_bit_field_zero_width_ok tests.test_sema.SemaTests.test_unnamed_bit_field_nonzero_width_error tests.test_sema.SemaTests.test_bit_field_width_exceeds_type_error -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).

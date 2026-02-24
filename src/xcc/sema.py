@@ -1299,6 +1299,8 @@ class Analyzer:
         initialized_union = False
         for item in init.items:
             if item.designators:
+                if is_union and initialized_union:
+                    raise SemaError("Initializer type mismatch")
                 kind, value = item.designators[0]
                 if kind != "member" or not isinstance(value, str):
                     raise SemaError("Record initializer designator must use member")
