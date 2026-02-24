@@ -1355,7 +1355,28 @@ class SemaTests(unittest.TestCase):
         )
 
     def test_generic_selection_duplicate_compatible_type_error(self) -> None:
-        unit = parse(list(lex("int main(void){int x=0; return _Generic(x, int: 1, signed int: 2);}")))
+        unit = TranslationUnit(
+            [
+                FunctionDef(
+                    TypeSpec("int"),
+                    "main",
+                    [],
+                    CompoundStmt(
+                        [
+                            ReturnStmt(
+                                GenericExpr(
+                                    IntLiteral("0"),
+                                    (
+                                        (TypeSpec("int"), IntLiteral("1")),
+                                        (TypeSpec("int"), IntLiteral("2")),
+                                    ),
+                                )
+                            )
+                        ]
+                    ),
+                )
+            ]
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(

@@ -3865,6 +3865,14 @@ class ParserTests(unittest.TestCase):
             str(ctx.exception),
         )
 
+    def test_generic_selection_rejects_duplicate_canonical_integer_type_association(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){int x=0; return _Generic(x, int: 1, signed int: 2);}")))
+        self.assertIn(
+            "Duplicate generic type association at position 2: previous identical type association was at position 1 (line 1, column 44)",
+            str(ctx.exception),
+        )
+
     def test_typedef_requires_identifier(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){typedef int;}")))
