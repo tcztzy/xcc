@@ -178,6 +178,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
 
+    def test_main_nostdinc_disables_environment_include_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cpath_dir = root / "cpath"
+            cpath_dir.mkdir()
+            (cpath_dir / "inc.h").write_text("#define VALUE 31\n", encoding="utf-8")
+            path = root / "ok.c"
+            path.write_text('#include <inc.h>\nint main(void){return VALUE;}\n', encoding="utf-8")
+            with patch.dict("os.environ", {"CPATH": str(cpath_dir)}, clear=False):
+                code, stdout, stderr = self._run_main([str(path), "-nostdinc"])
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("Include not found", stderr)
+
     def test_main_forced_include_option(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

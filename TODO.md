@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: added end-to-end `-nostdinc` support (options/CLI/preprocessor) to disable environment-provided include roots (`CPATH`, `C_INCLUDE_PATH`) for deterministic include resolution while preserving explicit include directories (`-I`, `-iquote`, `-isystem`, `-idirafter`); added focused preprocessor + CLI regressions and frontend docs update.
   - Iteration 3 slice: upgraded sema `_Generic` invalid-association diagnostics to report association position, resolved type label, and parser source location (`line`/`column`) when available (`Invalid generic association type at position N ('type') at line ..., column ...: <reason>`), while preserving a stable fallback message for manually constructed ASTs without location metadata.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_generic_selection_void_association_type_error tests.test_sema.SemaTests.test_generic_selection_atomic_association_type_error tests.test_sema.SemaTests.test_generic_selection_incomplete_record_association_type_error tests.test_sema.SemaTests.test_generic_selection_vla_association_type_error tests.test_sema.SemaTests.test_generic_selection_invalid_association_type_error_without_location -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).

@@ -57,6 +57,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("-D", dest="defines", action="append", default=[], help="define macro")
     parser.add_argument("-U", dest="undefs", action="append", default=[], help="undefine macro")
     parser.add_argument(
+        "-nostdinc",
+        dest="no_standard_includes",
+        action="store_true",
+        help="disable environment-provided standard include search paths",
+    )
+    parser.add_argument(
         "--dump-pp-tokens",
         action="store_true",
         help="print preprocessor token stream",
@@ -93,6 +99,7 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None) -> i
         macro_includes=tuple(args.macro_includes),
         defines=tuple(args.defines),
         undefs=tuple(args.undefs),
+        no_standard_includes=args.no_standard_includes,
         diag_format=args.diag_format,
     )
     try:
