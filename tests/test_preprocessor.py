@@ -240,6 +240,19 @@ class PreprocessorTests(unittest.TestCase):
             "#if __SIZEOF_FLOAT__\nint fsz;\n#endif\n"
             "#if __SIZEOF_DOUBLE__\nint dsz;\n#endif\n"
             "#if __SIZEOF_LONG_DOUBLE__\nint ldsz;\n#endif\n"
+            "#if __FLT_RADIX__ == 2\nint fr;\n#endif\n"
+            "#if __FLT_MANT_DIG__ == 24\nint fm;\n#endif\n"
+            "#if __DBL_MANT_DIG__ == 53\nint dm;\n#endif\n"
+            "#if __LDBL_MANT_DIG__ == 113\nint ldm;\n#endif\n"
+            "#if __FLT_DIG__ == 6\nint fdig;\n#endif\n"
+            "#if __DBL_DIG__ == 15\nint ddig;\n#endif\n"
+            "#if __LDBL_DIG__ == 33\nint lddig;\n#endif\n"
+            "#if __FLT_MIN_EXP__ < 0\nint fminexp;\n#endif\n"
+            "#if __DBL_MIN_EXP__ < 0\nint dminexp;\n#endif\n"
+            "#if __LDBL_MIN_EXP__ < 0\nint ldminexp;\n#endif\n"
+            "#if __FLT_MAX_EXP__ > 0\nint fmaxexp;\n#endif\n"
+            "#if __DBL_MAX_EXP__ > 0\nint dmaxexp;\n#endif\n"
+            "#if __LDBL_MAX_EXP__ > 0\nint ldmaxexp;\n#endif\n"
             "#if __SIZEOF_SIZE_T__\nint szz;\n#endif\n"
             "#if __SIZEOF_PTRDIFF_T__\nint pdz;\n#endif\n"
             "#if __SIZEOF_INTMAX_T__\nint imz;\n#endif\n"
@@ -300,6 +313,19 @@ class PreprocessorTests(unittest.TestCase):
                     "__SIZEOF_FLOAT__",
                     "__SIZEOF_DOUBLE__",
                     "__SIZEOF_LONG_DOUBLE__",
+                    "__FLT_RADIX__",
+                    "__FLT_MANT_DIG__",
+                    "__DBL_MANT_DIG__",
+                    "__LDBL_MANT_DIG__",
+                    "__FLT_DIG__",
+                    "__DBL_DIG__",
+                    "__LDBL_DIG__",
+                    "__FLT_MIN_EXP__",
+                    "__DBL_MIN_EXP__",
+                    "__LDBL_MIN_EXP__",
+                    "__FLT_MAX_EXP__",
+                    "__DBL_MAX_EXP__",
+                    "__LDBL_MAX_EXP__",
                     "__SIZEOF_SIZE_T__",
                     "__SIZEOF_PTRDIFF_T__",
                     "__SIZEOF_INTMAX_T__",
@@ -358,6 +384,19 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int fsz;", result.source)
         self.assertNotIn("int dsz;", result.source)
         self.assertNotIn("int ldsz;", result.source)
+        self.assertNotIn("int fr;", result.source)
+        self.assertNotIn("int fm;", result.source)
+        self.assertNotIn("int dm;", result.source)
+        self.assertNotIn("int ldm;", result.source)
+        self.assertNotIn("int fdig;", result.source)
+        self.assertNotIn("int ddig;", result.source)
+        self.assertNotIn("int lddig;", result.source)
+        self.assertNotIn("int fminexp;", result.source)
+        self.assertNotIn("int dminexp;", result.source)
+        self.assertNotIn("int ldminexp;", result.source)
+        self.assertNotIn("int fmaxexp;", result.source)
+        self.assertNotIn("int dmaxexp;", result.source)
+        self.assertNotIn("int ldmaxexp;", result.source)
         self.assertNotIn("int szz;", result.source)
         self.assertNotIn("int pdz;", result.source)
         self.assertNotIn("int imz;", result.source)
@@ -1357,6 +1396,19 @@ class PreprocessorTests(unittest.TestCase):
             "int fsz = __SIZEOF_FLOAT__;\n"
             "int dsz = __SIZEOF_DOUBLE__;\n"
             "int ldsz = __SIZEOF_LONG_DOUBLE__;\n"
+            "int fr = __FLT_RADIX__;\n"
+            "int fm = __FLT_MANT_DIG__;\n"
+            "int dm = __DBL_MANT_DIG__;\n"
+            "int ldm = __LDBL_MANT_DIG__;\n"
+            "int fdig = __FLT_DIG__;\n"
+            "int ddig = __DBL_DIG__;\n"
+            "int lddig = __LDBL_DIG__;\n"
+            "int fminexp = __FLT_MIN_EXP__;\n"
+            "int dminexp = __DBL_MIN_EXP__;\n"
+            "int ldminexp = __LDBL_MIN_EXP__;\n"
+            "int fmaxexp = __FLT_MAX_EXP__;\n"
+            "int dmaxexp = __DBL_MAX_EXP__;\n"
+            "int ldmaxexp = __LDBL_MAX_EXP__;\n"
             "int psz = __SIZEOF_POINTER__;\n"
             "int lsz = __SIZEOF_LONG__;\n"
             "int llsz = __SIZEOF_LONG_LONG__;\n"
@@ -1442,6 +1494,19 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int fsz = 4 ;", result.source)
         self.assertIn("int dsz = 8 ;", result.source)
         self.assertIn("int ldsz = 16 ;", result.source)
+        self.assertIn("int fr = 2 ;", result.source)
+        self.assertIn("int fm = 24 ;", result.source)
+        self.assertIn("int dm = 53 ;", result.source)
+        self.assertIn("int ldm = 113 ;", result.source)
+        self.assertIn("int fdig = 6 ;", result.source)
+        self.assertIn("int ddig = 15 ;", result.source)
+        self.assertIn("int lddig = 33 ;", result.source)
+        self.assertIn("int fminexp = - 125 ;", result.source)
+        self.assertIn("int dminexp = - 1021 ;", result.source)
+        self.assertIn("int ldminexp = - 16381 ;", result.source)
+        self.assertIn("int fmaxexp = 128 ;", result.source)
+        self.assertIn("int dmaxexp = 1024 ;", result.source)
+        self.assertIn("int ldmaxexp = 16384 ;", result.source)
         self.assertIn("int psz = 8 ;", result.source)
         self.assertIn("int lsz = 8 ;", result.source)
         self.assertIn("int llsz = 8 ;", result.source)
