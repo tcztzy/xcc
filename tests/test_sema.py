@@ -1363,7 +1363,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Duplicate default generic association")
+        self.assertEqual(
+            str(ctx.exception),
+            "Duplicate default generic association at position 2: only one default association is allowed",
+        )
 
     def test_generic_selection_void_association_type_error(self) -> None:
         unit = parse(list(lex("int main(void){return _Generic(0, void: 1, default: 2);}")))
