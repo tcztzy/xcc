@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: made sema `_Thread_local` object-declaration storage diagnostics requirement-oriented by appending explicit fix guidance (`'_Thread_local' requires 'static' or 'extern'`) for both file-scope and block-scope invalid storage-class paths, including missing block-scope storage (`'none'`).
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_invalid_thread_local_storage_class_error tests.test_sema.SemaTests.test_block_scope_thread_local_rejects_register_storage_class tests.test_sema.SemaTests.test_file_scope_thread_local_rejects_invalid_storage_class -q` (pass).
   - Iteration 3 slice: expanded predefined LP64 long-long compatibility aliases with GCC-style macro names (`__LLONG_WIDTH__`, `__LLONG_MAX__`, `__LLONG_MIN__`, `__ULLONG_MAX__`) so projects keyed on alias spellings preprocess consistently; added regression coverage in both standard macro expansion and CLI `-U` removal behavior.
   - Iteration 3 slice: expanded predefined LP64 floating-format assumptions with epsilon and finite-range literal macros (`__FLT_EPSILON__`, `__DBL_EPSILON__`, `__LDBL_EPSILON__`, `__FLT_MIN__`, `__DBL_MIN__`, `__LDBL_MIN__`, `__FLT_MAX__`, `__DBL_MAX__`, `__LDBL_MAX__`) and added regression coverage in both standard macro expansion and CLI `-U` removal behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).

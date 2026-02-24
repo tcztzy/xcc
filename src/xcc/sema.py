@@ -553,6 +553,17 @@ class Analyzer:
             "use a typedef declaration instead"
         )
 
+    def _thread_local_storage_class_message(
+        self,
+        scope_label: str,
+        storage_class: str | None,
+    ) -> str:
+        storage_label = storage_class if storage_class is not None else "none"
+        return (
+            f"Invalid storage class for {scope_label} thread-local object declaration: "
+            f"'{storage_label}'; '_Thread_local' requires 'static' or 'extern'"
+        )
+
     def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
         if isinstance(declaration, DeclGroupStmt):
             for grouped_decl in declaration.declarations:
@@ -571,10 +582,10 @@ class Analyzer:
             return
         if isinstance(declaration, DeclStmt):
             if declaration.is_thread_local and declaration.storage_class not in {None, "static", "extern"}:
-                storage_class = declaration.storage_class if declaration.storage_class is not None else "none"
                 raise SemaError(
-                    "Invalid storage class for file-scope thread-local object declaration: "
-                    f"'{storage_class}'"
+                    self._thread_local_storage_class_message(
+                        "file-scope", declaration.storage_class
+                    )
                 )
             if declaration.storage_class in {"auto", "register"}:
                 storage_class = declaration.storage_class if declaration.storage_class is not None else "none"
@@ -1690,10 +1701,10 @@ class Analyzer:
                 and stmt.is_thread_local
                 and stmt.storage_class not in {"static", "extern"}
             ):
-                storage_class = stmt.storage_class if stmt.storage_class is not None else "none"
                 raise SemaError(
-                    "Invalid storage class for block-scope thread-local object declaration: "
-                    f"'{storage_class}'"
+                    self._thread_local_storage_class_message(
+                        "block-scope", stmt.storage_class
+                    )
                 )
             self._register_type_spec(stmt.type_spec)
             self._define_enum_members(stmt.type_spec, scope)

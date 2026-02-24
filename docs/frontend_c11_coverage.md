@@ -23,6 +23,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - Compound literals now report context-aware invalid object-type diagnostics (`Invalid object type for compound literal: ...`) for `void`, incomplete record, and invalid `_Atomic(...)` object types.
   - `_Generic` association type rejections now report reason-specific diagnostics (`Invalid generic association type: <reason>`) for invalid categories such as `void type`, `atomic type`, `incomplete type`, and `variably modified type`.
   - Object declarations that misuse `typedef` storage class now report action-oriented diagnostics in both file and block scope (`...; use a typedef declaration instead`) rather than the previous context-ambiguous storage-class rejection.
+  - `_Thread_local` object declarations that use invalid or missing block-scope storage classes now report requirement-oriented diagnostics (`...; '_Thread_local' requires 'static' or 'extern'`) so storage-class fixes are explicit.
 - **Core preprocessor behavior**
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
   - Conditional directives, `defined`, and `__has_include` checks in `#if`/`#elif` (including macro-expanded header operands).

@@ -132,7 +132,18 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid storage class for block-scope thread-local object declaration: 'none'",
+            "Invalid storage class for block-scope thread-local object declaration: 'none'; "
+            "'_Thread_local' requires 'static' or 'extern'",
+        )
+
+    def test_block_scope_thread_local_rejects_register_storage_class(self) -> None:
+        unit = parse(list(lex("int f(void){_Thread_local register int x; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid storage class for block-scope thread-local object declaration: 'register'; "
+            "'_Thread_local' requires 'static' or 'extern'",
         )
 
     def test_file_scope_thread_local_rejects_invalid_storage_class(self) -> None:
@@ -141,7 +152,8 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Invalid storage class for file-scope thread-local object declaration: 'auto'",
+            "Invalid storage class for file-scope thread-local object declaration: 'auto'; "
+            "'_Thread_local' requires 'static' or 'extern'",
         )
 
     def test_file_scope_object_declaration_rejects_typedef_storage_class(self) -> None:
