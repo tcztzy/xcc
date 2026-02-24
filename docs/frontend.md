@@ -21,7 +21,7 @@ The `xcc` CLI runs the front end and exits non-zero on diagnostics.
 - `xcc --dump-ast <path.c>`: print parsed AST.
 - `xcc --dump-sema <path.c>`: print semantic model.
 - `xcc -I <dir>`, `-iquote <dir>`, `-isystem <dir>`, `-idirafter <dir>`: configure include search roots.
-- `CPATH` and `C_INCLUDE_PATH`: environment include roots used after `-I` and `-isystem` respectively.
+- `CPATH` and `C_INCLUDE_PATH`: environment include roots used after `-I` and `-isystem` respectively (empty entries map to the current working directory, matching GCC/Clang behavior).
 - `xcc -nostdinc`: disable `CPATH` and `C_INCLUDE_PATH` during include resolution (explicit CLI include paths still apply).
 - `xcc -include <header>`: force-include a header before the main translation unit (repeatable).
 - `xcc -imacros <header>`: load macros from a header before preprocessing the main translation unit, while discarding that header's non-directive output (repeatable).

@@ -1,4 +1,5 @@
 import ast
+import os
 import tempfile
 import unittest
 from datetime import datetime
@@ -885,6 +886,22 @@ class PreprocessorTests(unittest.TestCase):
             with patch.dict("os.environ", {"CPATH": str(cpath_dir)}, clear=False):
                 result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int from_include;\n")
+
+    def test_include_angle_uses_current_directory_for_empty_cpath_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = root / "main.c"
+            header_path = root / "inc.h"
+            source_path.write_text("#include <inc.h>\n", encoding="utf-8")
+            header_path.write_text("int from_cwd;\n", encoding="utf-8")
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                with patch.dict("os.environ", {"CPATH": f"{os.pathsep}"}, clear=False):
+                    result = preprocess_source(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+            finally:
+                os.chdir(previous_cwd)
+        self.assertEqual(result.source, "int from_cwd;\n")
 
     def test_nostdinc_disables_environment_include_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
