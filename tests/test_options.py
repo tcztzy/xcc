@@ -13,6 +13,7 @@ class FrontendOptionsTests(unittest.TestCase):
         self.assertEqual(options.system_include_dirs, ())
         self.assertEqual(options.after_include_dirs, ())
         self.assertEqual(options.forced_includes, ())
+        self.assertEqual(options.macro_includes, ())
         self.assertEqual(options.defines, ())
         self.assertEqual(options.undefs, ())
         self.assertEqual(options.diag_format, "human")

@@ -42,6 +42,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="force include before the main source",
     )
     parser.add_argument(
+        "-imacros",
+        dest="macro_includes",
+        action="append",
+        default=[],
+        help="include file for macro definitions only before the main source",
+    )
+    parser.add_argument(
         "--diag-format",
         choices=("human", "json"),
         default="human",
@@ -83,6 +90,7 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None) -> i
         system_include_dirs=tuple(args.system_include_dirs),
         after_include_dirs=tuple(args.after_include_dirs),
         forced_includes=tuple(args.forced_includes),
+        macro_includes=tuple(args.macro_includes),
         defines=tuple(args.defines),
         undefs=tuple(args.undefs),
         diag_format=args.diag_format,

@@ -898,6 +898,45 @@ class PreprocessorTests(unittest.TestCase):
             preprocess_source("#define HDR bad\n#include HDR\n", filename="main.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0104")
 
+    def test_imacros_applies_macros_before_main_source_without_emitting_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_dir = root / "include"
+            include_dir.mkdir()
+            (include_dir / "defs.h").write_text("#define VALUE 17\nint ignored;\n", encoding="utf-8")
+            options = FrontendOptions(
+                include_dirs=(str(include_dir),),
+                macro_includes=("defs.h",),
+            )
+            result = preprocess_source("VALUE\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "17\n")
+        self.assertIn('#imacros "defs.h" ->', result.include_trace[0])
+
+    def test_imacros_runs_before_forced_include(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_dir = root / "include"
+            include_dir.mkdir()
+            (include_dir / "defs.h").write_text("#define VALUE 17\n", encoding="utf-8")
+            (include_dir / "forced.h").write_text("int from_forced = VALUE;\n", encoding="utf-8")
+            options = FrontendOptions(
+                include_dirs=(str(include_dir),),
+                macro_includes=("defs.h",),
+                forced_includes=("forced.h",),
+            )
+            result = preprocess_source("VALUE\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_forced = 17 ;\n17\n")
+
+    def test_imacros_not_found(self) -> None:
+        options = FrontendOptions(macro_includes=("missing.h",))
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("int x;\n", filename="main.c", options=options)
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+        self.assertEqual(
+            ctx.exception.args[0],
+            f'Macro include not found: "missing.h"; searched: {Path.cwd().resolve()} at <command line>:1:1',
+        )
+
     def test_forced_include_applies_before_main_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

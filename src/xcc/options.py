@@ -13,6 +13,7 @@ class FrontendOptions:
     system_include_dirs: tuple[str, ...] = ()
     after_include_dirs: tuple[str, ...] = ()
     forced_includes: tuple[str, ...] = ()
+    macro_includes: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
     undefs: tuple[str, ...] = ()
     diag_format: DiagFormat = "human"

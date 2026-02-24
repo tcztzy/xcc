@@ -176,6 +176,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
 
+    def test_main_imacros_option(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_dir = root / "inc"
+            include_dir.mkdir()
+            (include_dir / "defs.h").write_text("#define VALUE 17\n", encoding="utf-8")
+            path = root / "ok.c"
+            path.write_text("int main(void){return VALUE;}\n", encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "-I", str(include_dir), "-imacros", "defs.h"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(stdout, f"xcc: ok: {path}\n")
+
     def test_main_undef_option(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "bad.c"
