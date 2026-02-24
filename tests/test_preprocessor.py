@@ -401,6 +401,44 @@ class PreprocessorTests(unittest.TestCase):
             preprocess_source("#if __has_include(MISSING)\nint x;\n#endif\n", filename="if.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
 
+    def test_if_expression_with_has_include_next_in_gnu11(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            include_dir = root / "include"
+            source_dir.mkdir()
+            include_dir.mkdir()
+            (include_dir / "next.h").write_text("\n", encoding="utf-8")
+            source = '#if __has_include_next("next.h")\nint ok;\n#endif\n'
+            result = preprocess_source(
+                source,
+                filename=str(source_dir / "main.c"),
+                options=FrontendOptions(std="gnu11", include_dirs=(str(include_dir),)),
+            )
+        self.assertIn("int ok;", result.source)
+
+    def test_if_expression_with_has_include_next_skips_current_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            source_dir.mkdir()
+            (source_dir / "next.h").write_text("\n", encoding="utf-8")
+            source = '#if __has_include_next("next.h")\nint bad;\n#endif\n'
+            result = preprocess_source(
+                source,
+                filename=str(source_dir / "main.c"),
+                options=FrontendOptions(std="gnu11"),
+            )
+        self.assertNotIn("int bad;", result.source)
+
+    def test_if_expression_with_has_include_next_errors_in_c11(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source(
+                '#if __has_include_next("missing.h")\nint x;\n#endif\n',
+                filename="if.c",
+            )
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+
     def test_unknown_directive_active_errors_in_c11(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#unknown\n", filename="if.c")
