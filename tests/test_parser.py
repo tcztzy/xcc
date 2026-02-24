@@ -1242,6 +1242,22 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("struct S { int; };")))
         self.assertEqual(ctx.exception.message, "Expected identifier before ';'")
 
+    def test_record_member_rejects_void_object_type_with_contextual_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("struct S { void value; };")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid object type for record member declaration: void",
+        )
+
+    def test_file_scope_declaration_rejects_void_object_type_with_contextual_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("void value;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid object type for object declaration: void",
+        )
+
     def test_file_scope_declaration_rejects_missing_declarator_with_token(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int;")))
