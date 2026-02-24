@@ -312,6 +312,10 @@ class PreprocessorTests(unittest.TestCase):
             "__SIZE_TYPE__ n;\n"
             "__INTPTR_TYPE__ ip;\n"
             "__UINTPTR_TYPE__ up;\n"
+            "__INTMAX_TYPE__ imt;\n"
+            "__UINTMAX_TYPE__ umt;\n"
+            "__CHAR16_TYPE__ c16;\n"
+            "__CHAR32_TYPE__ c32;\n"
             "__INT8_TYPE__ i8;\n"
             "__INT16_TYPE__ i16;\n"
             "__INT32_TYPE__ i32;\n"
@@ -423,6 +427,10 @@ class PreprocessorTests(unittest.TestCase):
                     "__SIZE_TYPE__",
                     "__INTPTR_TYPE__",
                     "__UINTPTR_TYPE__",
+                    "__INTMAX_TYPE__",
+                    "__UINTMAX_TYPE__",
+                    "__CHAR16_TYPE__",
+                    "__CHAR32_TYPE__",
                     "__INT8_TYPE__",
                     "__INT16_TYPE__",
                     "__INT32_TYPE__",
@@ -530,6 +538,10 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("__SIZE_TYPE__ n;", result.source)
         self.assertIn("__INTPTR_TYPE__ ip;", result.source)
         self.assertIn("__UINTPTR_TYPE__ up;", result.source)
+        self.assertIn("__INTMAX_TYPE__ imt;", result.source)
+        self.assertIn("__UINTMAX_TYPE__ umt;", result.source)
+        self.assertIn("__CHAR16_TYPE__ c16;", result.source)
+        self.assertIn("__CHAR32_TYPE__ c32;", result.source)
         self.assertIn("__INT8_TYPE__ i8;", result.source)
         self.assertIn("__INT16_TYPE__ i16;", result.source)
         self.assertIn("__INT32_TYPE__ i32;", result.source)
@@ -1636,6 +1648,10 @@ class PreprocessorTests(unittest.TestCase):
             "__PTRDIFF_TYPE__ d;\n"
             "__INTPTR_TYPE__ ip;\n"
             "__UINTPTR_TYPE__ up;\n"
+            "__INTMAX_TYPE__ imt;\n"
+            "__UINTMAX_TYPE__ umt;\n"
+            "__CHAR16_TYPE__ c16;\n"
+            "__CHAR32_TYPE__ c32;\n"
             "__INT8_TYPE__ i8;\n"
             "__INT16_TYPE__ i16;\n"
             "__INT32_TYPE__ i32;\n"
@@ -1771,6 +1787,10 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("long d ;", result.source)
         self.assertIn("long ip ;", result.source)
         self.assertIn("unsigned long up ;", result.source)
+        self.assertIn("long imt ;", result.source)
+        self.assertIn("unsigned long umt ;", result.source)
+        self.assertIn("unsigned short c16 ;", result.source)
+        self.assertIn("unsigned int c32 ;", result.source)
         self.assertIn("signed char i8 ;", result.source)
         self.assertIn("short i16 ;", result.source)
         self.assertIn("int i32 ;", result.source)
