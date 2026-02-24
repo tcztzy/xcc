@@ -187,7 +187,34 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Expected identifier for file-scope object declaration",
+            "Expected identifier for file-scope object declaration with storage class 'static'",
+        )
+
+    def test_file_scope_thread_local_without_identifier_error(self) -> None:
+        unit = parse(list(lex("_Thread_local struct S;")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Expected identifier for file-scope object declaration with '_Thread_local'",
+        )
+
+    def test_block_scope_storage_without_identifier_error(self) -> None:
+        unit = parse(list(lex("int main(void){ extern struct S; return 0; }")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Expected identifier for block-scope object declaration with storage class 'extern'",
+        )
+
+    def test_block_scope_thread_local_without_identifier_error(self) -> None:
+        unit = parse(list(lex("int main(void){ extern _Thread_local struct S; return 0; }")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Expected identifier for block-scope object declaration with storage class 'extern' and '_Thread_local'",
         )
 
     def test_file_scope_extern_initializer_error(self) -> None:
