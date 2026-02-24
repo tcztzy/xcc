@@ -967,6 +967,66 @@
       "sha256": "243bd60f4442badad0f1f1e43b4d1b4c28662848fc39620ad437aa018078c8cd"
     },
     {
+      "id": "parser-xcc-expr-start-rparen-after-return",
+      "upstream": "xcc/local/parser-expression-start-rparen-after-return-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-rparen-after-return.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ')': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "377a809654f780a73d77740b87a8e67bd579cb4fb1ad0e7d68fda0ea3e5770ce"
+    },
+    {
+      "id": "parser-xcc-expr-start-comma-after-return",
+      "upstream": "xcc/local/parser-expression-start-comma-after-return-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-comma-after-return.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ',': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "5d0d86483e87c4b3ec65fd26431b87d232938361ccadaed0ebd7f35c3040cbc9"
+    },
+    {
+      "id": "parser-xcc-expr-start-colon-after-return",
+      "upstream": "xcc/local/parser-expression-start-colon-after-return-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-colon-after-return.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ':': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "9a502306680a052a0ed28a729977c81dcc1f912e3e26eea0ea28641e68ab0a1f"
+    },
+    {
+      "id": "parser-xcc-expr-start-question-after-return",
+      "upstream": "xcc/local/parser-expression-start-question-after-return-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-question-after-return.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '?': expected an operand",
+      "line": 3,
+      "column": 3,
+      "sha256": "943ae4a9233098feb8cfd872173e774076490f6ad91b6b3f7d2b5c2d704d2cd4"
+    },
+    {
+      "id": "parser-xcc-expr-start-semicolon-after-initializer",
+      "upstream": "xcc/local/parser-expression-start-semicolon-after-initializer-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-semicolon-after-initializer.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with ';': expected an operand",
+      "line": 2,
+      "column": 11,
+      "sha256": "908238295db169616aaec0db630fad70d0be92be694797c83e8de20236ca2f03"
+    },
+    {
+      "id": "parser-xcc-expr-start-lbrace-after-return",
+      "upstream": "xcc/local/parser-expression-start-lbrace-after-return-regression",
+      "fixture": "tests/external/clang/fixtures/Parser/xcc-expr-start-lbrace-after-return.c",
+      "expect": "parse",
+      "message_contains": "Expression cannot start with '{': expected an operand",
+      "line": 2,
+      "column": 10,
+      "sha256": "7026a9cc2dfee4a51cce146fbb2fa5cb17a4d0521ab580d3f3dd6ad0515942eb"
+    },
+    {
       "id": "parser-xcc-param-before-ellipsis",
       "upstream": "xcc/local/parser-variadic-requires-parameter-regression",
       "fixture": "tests/external/clang/fixtures/Parser/xcc-param-before-ellipsis.c",
