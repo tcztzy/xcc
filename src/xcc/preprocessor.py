@@ -1077,6 +1077,13 @@ class _Preprocessor:
                 base_dir=base_dir,
             )
             expanded = self._expand_macro_text(expanded, location)
+            # Run include-operator rewriting again so operators introduced via
+            # macro expansion (for example HAS(x) -> __has_include(x)) are handled.
+            expanded = self._replace_has_include_operators(
+                expanded,
+                location,
+                base_dir=base_dir,
+            )
             py_expr = _translate_expr_to_python(expanded)
             return bool(_safe_eval_pp_expr(py_expr))
         except PreprocessorError:
