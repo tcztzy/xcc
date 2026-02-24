@@ -774,12 +774,22 @@ class PreprocessorTests(unittest.TestCase):
     def test_circular_include(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "a.h").write_text('#include "b.h"\n', encoding="utf-8")
-            (root / "b.h").write_text('#include "a.h"\n', encoding="utf-8")
+            a_header = root / "a.h"
+            b_header = root / "b.h"
+            a_header.write_text('#include "b.h"\n', encoding="utf-8")
+            b_header.write_text('#include "a.h"\n', encoding="utf-8")
             source = '#include "a.h"\n'
             with self.assertRaises(PreprocessorError) as ctx:
                 preprocess_source(source, filename=str(root / "main.c"))
             self.assertEqual(ctx.exception.code, "XCC-PP-0302")
+            self.assertEqual(
+                ctx.exception.args[0],
+                (
+                    "Circular include detected: "
+                    f"{a_header.resolve()} -> {b_header.resolve()} -> {a_header.resolve()} "
+                    f"at {b_header.resolve()}:1:1"
+                ),
+            )
 
     def test_include_read_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
