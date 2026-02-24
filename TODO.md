@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: tightened record-member bit-field constraint enforcement by rejecting named zero-width bit-fields (`struct S { unsigned x:0; };`) while preserving unnamed zero-width separator support (`unsigned :0;`); added focused sema regression coverage for the new named-width diagnostic.
+  - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_named_bit_field_zero_width_error tests.test_sema.SemaTests.test_unnamed_bit_field_zero_width_ok tests.test_sema.SemaTests.test_unnamed_bit_field_nonzero_width_error tests.test_sema.SemaTests.test_bit_field_width_exceeds_type_error -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
   - Iteration 3 slice: expanded predefined LP64 signed integer range assumptions with missing narrow-family minimum macros (`__SCHAR_MIN__`, `__SHRT_MIN__`, `__INT_MIN__`) so preprocessing now exposes both max/min bounds consistently across signed integer families; added regression coverage for standard expansion and CLI `-U` removal behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: removed parser's silent acceptance of trailing `_Complex` type specifiers (`float _Complex`, `double _Complex`, `long double _Complex`, and integer-base forms) so complex types are now rejected consistently with the existing unsupported `_Complex` baseline, and added parser regressions for both declaration and `sizeof(type-name)` diagnostic contexts.

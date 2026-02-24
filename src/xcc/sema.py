@@ -750,6 +750,8 @@ class Analyzer:
                     raise SemaError("Bit-field width exceeds type width")
                 if member_name is None and bit_width != 0:
                     raise SemaError("Unnamed bit-field must have zero width")
+                if member_name is not None and bit_width == 0:
+                    raise SemaError("Named bit-field width must be greater than zero")
             natural_alignment = self._alignof_type(resolved_member_type)
             if not self._is_valid_explicit_alignment(member.alignment, natural_alignment):
                 assert member.alignment is not None
