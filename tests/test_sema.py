@@ -752,7 +752,10 @@ class SemaTests(unittest.TestCase):
         unit = TranslationUnit([], [DeclStmt(struct_with_atomic_member, None, None)])
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid member type")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for record member declaration: atomic",
+        )
 
     def test_atomic_invalid_parameter_in_function_pointer_typedef_error(self) -> None:
         atomic_function_type = TypeSpec(
@@ -3826,7 +3829,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid member type")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for record member declaration: void",
+        )
 
     def test_invalid_record_member_function_type_error(self) -> None:
         unit = TranslationUnit(
@@ -3854,7 +3860,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid member type")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for record member declaration: function",
+        )
 
     def test_invalid_record_member_incomplete_type_error(self) -> None:
         unit = TranslationUnit(
@@ -3880,7 +3889,10 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid member type")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid object type for record member declaration: incomplete",
+        )
 
     def test_void_function_return_value_error(self) -> None:
         unit = parse(list(lex("void main(){return 1;}")))

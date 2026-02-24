@@ -491,6 +491,9 @@ class Analyzer:
     def _invalid_object_type_for_context_message(self, context_label: str, type_label: str) -> str:
         return f"Invalid object type for {context_label}: {type_label}"
 
+    def _invalid_record_member_type_message(self, type_label: str) -> str:
+        return f"Invalid object type for record member declaration: {type_label}"
+
     def _invalid_object_type_label(self, type_spec: TypeSpec) -> str | None:
         if self._is_invalid_atomic_type_spec(type_spec):
             return "atomic"
@@ -679,13 +682,13 @@ class Analyzer:
             if member_name is not None:
                 seen_members.add(member_name)
             if self._is_invalid_void_object_type(member_spec):
-                raise SemaError("Invalid member type")
+                raise SemaError(self._invalid_record_member_type_message("void"))
             if self._is_invalid_atomic_type_spec(member_spec):
-                raise SemaError("Invalid member type")
+                raise SemaError(self._invalid_record_member_type_message("atomic"))
             if self._is_function_object_type(member_spec):
-                raise SemaError("Invalid member type")
+                raise SemaError(self._invalid_record_member_type_message("function"))
             if self._is_invalid_incomplete_record_object_type(member_spec):
-                raise SemaError("Invalid member type")
+                raise SemaError(self._invalid_record_member_type_message("incomplete"))
             resolved_member_type = self._resolve_type(member_spec)
             bit_width: int | None = None
             if member.bit_width_expr is not None:
