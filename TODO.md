@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: taught preprocessor `#if`/`#elif` expression evaluation to accept C character literals (including escaped and multicharacter forms) by tokenizing and converting them into integer constant values before safe evaluation, then added focused regressions for valid literals plus invalid-escape rejection paths.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_if_expression_accepts_character_literals tests.test_preprocessor.PreprocessorTests.test_if_expression_accepts_multichar_character_literals tests.test_preprocessor.PreprocessorTests.test_if_expression_accepts_escaped_character_literals tests.test_preprocessor.PreprocessorTests.test_if_expression_rejects_invalid_character_literals -q` (pass).
   - Iteration 3 slice: aligned environment include-path parsing with GCC/Clang semantics by treating empty `CPATH`/`C_INCLUDE_PATH` entries as the current working directory, then added end-to-end preprocessor and CLI regressions for `CPATH=:` current-directory includes.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_include_angle_uses_current_directory_for_empty_cpath_entry tests.test_cli.CliTests.test_main_cpath_empty_entry_uses_current_directory -q` (pass).
   - Iteration 3 slice: expanded preprocessor include-diagnostic mapping coverage with focused regressions proving active `#line` remapping is preserved for both plain `#include` not-found diagnostics and GNU `#include_next` not-found diagnostics (`mapped` filename/line now asserted end-to-end in failure text and error coordinates).
