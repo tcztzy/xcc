@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded the predefined C11 macro baseline with implementation-availability macros (`__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`) so preprocessing now advertises unsupported optional C11 feature families explicitly instead of leaving them implicit.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: enforced block-scope function-declaration storage/specifier constraints by rejecting non-`extern` storage classes (`static`, `register`, etc.) and `_Thread_local` on function declarations parsed as declaration statements, aligning these paths with existing function-level diagnostics (`Invalid storage class for function: ...` / `Invalid declaration specifier for function declaration: '_Thread_local'`).
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_block_scope_function_rejects_static_storage_class tests.test_sema.SemaTests.test_block_scope_function_rejects_register_storage_class tests.test_sema.SemaTests.test_block_scope_function_rejects_thread_local_specifier -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
