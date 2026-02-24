@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: implemented GNU `#elifdef` / `#elifndef` conditional-directive support in preprocessor conditional stacks (including `#... after #else` validation parity with `#elif`), while keeping strict `c11` behavior unchanged by reporting `Unknown preprocessor directive` for those GNU-only directives; added focused regressions for GNU success paths, strict-mode rejection, and `#elifdef after #else` diagnostics.
   - Iteration 3 slice: expanded predefined LP64 target-assumption macros with floating-size coverage (`__SIZEOF_FLOAT__=4`, `__SIZEOF_DOUBLE__=8`, `__SIZEOF_LONG_DOUBLE__=16`) so preprocessor size assumptions now cover scalar floating families in the same way integer and typedef-backed families are already modeled; added regression coverage for both standard expansion and CLI `-U` removal behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).

@@ -434,6 +434,35 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int b;", result.source)
         self.assertNotIn("int c;", result.source)
 
+    def test_elifdef_in_gnu_mode(self) -> None:
+        source = "#if 0\n#elifdef FLAG\nint yes;\n#else\nint no;\n#endif\n"
+        result = preprocess_source(
+            source,
+            filename="if.c",
+            options=FrontendOptions(std="gnu11", defines=("FLAG=1",)),
+        )
+        self.assertIn("int yes", result.source)
+        self.assertNotIn("int no", result.source)
+
+    def test_elifndef_in_gnu_mode(self) -> None:
+        source = "#if 0\n#elifndef FLAG\nint yes;\n#else\nint no;\n#endif\n"
+        result = preprocess_source(
+            source,
+            filename="if.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertIn("int yes", result.source)
+        self.assertNotIn("int no", result.source)
+
+    def test_elifdef_errors_in_c11_mode(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if 0\n#elifdef FLAG\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0101")
+        self.assertEqual(
+            str(ctx.exception),
+            "Unknown preprocessor directive: #elifdef at if.c:2:1",
+        )
+
     def test_nested_conditionals(self) -> None:
         source = "#if 1\n#if 0\nint a;\n#endif\n#endif\n"
         result = preprocess_source(source, filename="if.c")
@@ -453,6 +482,16 @@ class PreprocessorTests(unittest.TestCase):
         source = "#if 0\n#elif 0\n#else\n#elif 1\n#endif\n"
         with self.assertRaises(PreprocessorError):
             preprocess_source(source, filename="if.c")
+
+    def test_elifdef_after_else(self) -> None:
+        source = "#if 0\n#else\n#elifdef FLAG\n#endif\n"
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source(
+                source,
+                filename="if.c",
+                options=FrontendOptions(std="gnu11", defines=("FLAG=1",)),
+            )
+        self.assertEqual(str(ctx.exception), "#elifdef after #else at if.c:3:1")
 
     def test_duplicate_else(self) -> None:
         source = "#if 0\n#else\n#else\n#endif\n"

@@ -593,7 +593,16 @@ class _Preprocessor:
         *,
         base_dir: Path | None,
     ) -> str | None:
-        if name not in {"if", "ifdef", "ifndef", "elif", "else", "endif"}:
+        if name not in {
+            "if",
+            "ifdef",
+            "ifndef",
+            "elif",
+            "elifdef",
+            "elifndef",
+            "else",
+            "endif",
+        }:
             return None
         if name == "if":
             parent_active = _is_active(stack)
@@ -621,10 +630,18 @@ class _Preprocessor:
                 code=_PP_INVALID_DIRECTIVE,
             )
         frame = stack[-1]
-        if name == "elif":
+        if name in {"elif", "elifdef", "elifndef"}:
+            if name in {"elifdef", "elifndef"} and self._options.std == "c11":
+                raise PreprocessorError(
+                    f"Unknown preprocessor directive: #{name}",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_UNKNOWN_DIRECTIVE,
+                )
             if frame.saw_else:
                 raise PreprocessorError(
-                    "#elif after #else",
+                    f"#{name} after #else",
                     location.line,
                     1,
                     filename=location.filename,
@@ -633,7 +650,14 @@ class _Preprocessor:
             if not frame.parent_active or frame.branch_taken:
                 frame.active = False
                 return ""
-            condition = self._eval_condition(body, location, base_dir=base_dir)
+            if name == "elif":
+                condition = self._eval_condition(body, location, base_dir=base_dir)
+            else:
+                macro_name = self._require_macro_name(body, location)
+                if name == "elifdef":
+                    condition = macro_name in self._macros
+                else:
+                    condition = macro_name not in self._macros
             frame.active = condition
             frame.branch_taken = frame.branch_taken or condition
             return ""
