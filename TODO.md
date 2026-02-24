@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined LP64 target-assumption macros with floating-size coverage (`__SIZEOF_FLOAT__=4`, `__SIZEOF_DOUBLE__=8`, `__SIZEOF_LONG_DOUBLE__=16`) so preprocessor size assumptions now cover scalar floating families in the same way integer and typedef-backed families are already modeled; added regression coverage for both standard expansion and CLI `-U` removal behavior.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: fixed `#if`/`#elif` macro-rescanning order for include-probing operators by expanding macros before `__has_include(...)` / `__has_include_next(...)` rewriting, so operator spellings introduced via wrapper macros (for example `#define HAS(x) __has_include(x)`) now evaluate correctly; added focused GNU/C11 preprocessor regressions for macro-expanded `__has_include` and `__has_include_next` operator paths.
   - Iteration 3 slice: tightened parameter-list diagnostics to point at the actual unexpected token after separators (`)` after trailing commas and the first non-`)` token after `...`) and made trailing-comma wording explicit (`Expected parameter declaration after ','`) across both direct function declarations and function-suffix declarators; synced clang-suite parser fixture expectations for all trailing-comma and non-terminal-ellipsis variants.
   - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_parser -q` (pass).
