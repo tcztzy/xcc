@@ -236,6 +236,9 @@ class PreprocessorTests(unittest.TestCase):
             "#if __WCHAR_MIN__ < 0\nint wmin;\n#endif\n"
             "#if __WINT_MAX__ > 0\nint wimax;\n#endif\n"
             "#if defined(__WINT_MIN__)\nint wimin;\n#endif\n"
+            "#if __SIG_ATOMIC_WIDTH__ == 32\nint saw;\n#endif\n"
+            "#if __SIG_ATOMIC_MAX__ > 0\nint samax;\n#endif\n"
+            "#if __SIG_ATOMIC_MIN__ < 0\nint samin;\n#endif\n"
             "#if defined(__STDC_ISO_10646__)\nint iso;\n#endif\n"
             "#if defined(__FILE_NAME__)\nint fn;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
@@ -284,6 +287,9 @@ class PreprocessorTests(unittest.TestCase):
                     "__WCHAR_MIN__",
                     "__WINT_MAX__",
                     "__WINT_MIN__",
+                    "__SIG_ATOMIC_WIDTH__",
+                    "__SIG_ATOMIC_MAX__",
+                    "__SIG_ATOMIC_MIN__",
                     "__STDC_ISO_10646__",
                     "__FILE_NAME__",
                     "__SIZE_TYPE__",
@@ -328,6 +334,9 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int wmin;", result.source)
         self.assertNotIn("int wimax;", result.source)
         self.assertNotIn("int wimin;", result.source)
+        self.assertNotIn("int saw;", result.source)
+        self.assertNotIn("int samax;", result.source)
+        self.assertNotIn("int samin;", result.source)
         self.assertNotIn("int iso;", result.source)
         self.assertNotIn("int fn;", result.source)
         self.assertIn("__SIZE_TYPE__ n;", result.source)
@@ -1088,6 +1097,9 @@ class PreprocessorTests(unittest.TestCase):
             "int wmin = __WCHAR_MIN__;\n"
             "unsigned int wimax = __WINT_MAX__;\n"
             "unsigned int wimin = __WINT_MIN__;\n"
+            "int saw = __SIG_ATOMIC_WIDTH__;\n"
+            "int samax = __SIG_ATOMIC_MAX__;\n"
+            "int samin = __SIG_ATOMIC_MIN__;\n"
             "long iso = __STDC_ISO_10646__;\n"
             "long long llmax = __LONG_LONG_MAX__;\n"
             "long long llmin = __LONG_LONG_MIN__;\n"
@@ -1160,6 +1172,9 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int wmin = - 2147483648 ;", result.source)
         self.assertIn("unsigned int wimax = 4294967295U ;", result.source)
         self.assertIn("unsigned int wimin = 0U ;", result.source)
+        self.assertIn("int saw = 32 ;", result.source)
+        self.assertIn("int samax = 2147483647 ;", result.source)
+        self.assertIn("int samin = - 2147483648 ;", result.source)
         self.assertIn("long iso = 201706L ;", result.source)
         self.assertIn("long long llmax = 9223372036854775807LL ;", result.source)
         self.assertIn("long long llmin = - 9223372036854775808LL ;", result.source)

@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined LP64 target-assumption macro coverage with `sig_atomic_t` assumptions (`__SIG_ATOMIC_TYPE__=int`, `__SIG_ATOMIC_WIDTH__=32`, `__SIG_ATOMIC_MAX__=2147483647`, `__SIG_ATOMIC_MIN__=-2147483648`) and extended regression coverage in both standard-macro expansion and CLI `-U` override paths.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: implemented CLI forced-include support (`-include <header>`) end-to-end (options/CLI/preprocessor), so configured headers are preprocessed before the main translation unit using the quoted-include search chain (`source dir`, `-iquote`, `-I`, `-isystem`, `-idirafter`), with dedicated missing-header diagnostics (`Forced include not found: ...`); added focused preprocessor and CLI regressions.
   - Checks: `.venv/bin/python -m unittest tests.test_options tests.test_cli.CliTests.test_main_forced_include_option tests.test_preprocessor.PreprocessorTests.test_forced_include_applies_before_main_source tests.test_preprocessor.PreprocessorTests.test_forced_include_not_found -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_cli tests.test_preprocessor tests.test_options -q` (pass).
