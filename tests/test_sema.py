@@ -1337,13 +1337,16 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){char c=0; return _Generic(c, int: 1);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "No matching generic association")
+        self.assertEqual(
+            str(ctx.exception),
+            "No matching generic association for control type 'char'",
+        )
 
     def test_generic_selection_duplicate_compatible_type_error(self) -> None:
         unit = parse(list(lex("int main(void){int x=0; return _Generic(x, int: 1, signed int: 2);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Duplicate generic association type")
+        self.assertEqual(str(ctx.exception), "Duplicate generic association type: 'int'")
 
     def test_generic_selection_duplicate_default_association_error(self) -> None:
         unit = TranslationUnit(
