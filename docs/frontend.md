@@ -20,6 +20,8 @@ The `xcc` CLI runs the front end and exits non-zero on diagnostics.
 - `xcc --dump-tokens <path.c>`: print token stream.
 - `xcc --dump-ast <path.c>`: print parsed AST.
 - `xcc --dump-sema <path.c>`: print semantic model.
+- `xcc -I <dir>`, `-iquote <dir>`, `-isystem <dir>`, `-idirafter <dir>`: configure include search roots.
+- `xcc -include <header>`: force-include a header before the main translation unit (repeatable).
 
 Diagnostics are stage-tagged (`lex`, `parse`, `sema`) and include source coordinates when available.
 

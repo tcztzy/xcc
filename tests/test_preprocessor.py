@@ -868,6 +868,30 @@ class PreprocessorTests(unittest.TestCase):
             preprocess_source("#define HDR bad\n#include HDR\n", filename="main.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0104")
 
+    def test_forced_include_applies_before_main_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_dir = root / "include"
+            include_dir.mkdir()
+            (include_dir / "forced.h").write_text("#define VALUE 13\n", encoding="utf-8")
+            options = FrontendOptions(
+                include_dirs=(str(include_dir),),
+                forced_includes=("forced.h",),
+            )
+            result = preprocess_source("VALUE\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "\n13\n")
+        self.assertIn('#include "forced.h" ->', result.include_trace[0])
+
+    def test_forced_include_not_found(self) -> None:
+        options = FrontendOptions(forced_includes=("missing.h",))
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("int x;\n", filename="main.c", options=options)
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+        self.assertEqual(
+            ctx.exception.args[0],
+            f'Forced include not found: "missing.h"; searched: {Path.cwd().resolve()} at <command line>:1:1',
+        )
+
     def test_include_not_found(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source('#include "missing.h"\n', filename="main.c")
