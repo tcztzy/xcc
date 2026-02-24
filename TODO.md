@@ -459,3 +459,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 - Iteration 3 slice: added focused sema regression coverage for single-association and multi-association no-match paths to lock down stable ordering and message formatting for the new `_Generic` diagnostic.
 - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_generic_selection_without_match_error tests.test_sema.SemaTests.test_generic_selection_without_match_reports_all_association_types -q` (pass); `.venv/bin/python -m unittest tests.test_sema -q` (pass).
 - Next target: audit remaining `_Generic` sema diagnostics for places where association context can be surfaced (for example duplicate-compatible-type diagnostics) without making messages noisy.
+- Iteration 3 slice: upgraded parser `_Generic` duplicate-default diagnostics to include both the current and previous default-association positions (`Duplicate default generic association at position N: previous default was at position M; only one default association is allowed`) so parser and sema association-order context now align.
+- Iteration 3 slice: updated focused parser regression coverage to assert the new duplicate-default wording for `_Generic` expressions.
+- Checks: `.venv/bin/python -m unittest tests.test_parser.ParserTests.test_generic_selection_rejects_duplicate_default tests.test_parser -q` (pass).
+- Next target: mirror the same association-order context pattern into any remaining parser-side `_Generic` diagnostics that still omit prior-association location details.

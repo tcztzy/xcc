@@ -3849,7 +3849,7 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){return _Generic(0, default:1, default:2);}")))
         self.assertIn(
-            "Duplicate default generic association at position 2: only one default association is allowed",
+            "Duplicate default generic association at position 2: previous default was at position 1; only one default association is allowed",
             str(ctx.exception),
         )
 
