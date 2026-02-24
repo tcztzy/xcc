@@ -930,6 +930,42 @@ class PreprocessorTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
 
+    def test_if_expression_with_has_builtin_feature_and_extension_operators(self) -> None:
+        result = preprocess_source(
+            "#if __has_builtin(__builtin_expect)\nint bad_builtin;\n#endif\n"
+            "#if !__has_builtin(__builtin_expect)\nint ok_builtin;\n#endif\n"
+            "#if __has_feature(c_static_assert)\nint bad_feature;\n#endif\n"
+            "#if !__has_feature(c_static_assert)\nint ok_feature;\n#endif\n"
+            "#if __has_extension(attribute_deprecated_with_message)\nint bad_extension;\n#endif\n"
+            "#if !__has_extension(attribute_deprecated_with_message)\nint ok_extension;\n#endif\n",
+            filename="if.c",
+        )
+        self.assertNotIn("bad_builtin", result.source)
+        self.assertIn("ok_builtin", result.source)
+        self.assertNotIn("bad_feature", result.source)
+        self.assertIn("ok_feature", result.source)
+        self.assertNotIn("bad_extension", result.source)
+        self.assertIn("ok_extension", result.source)
+
+    def test_if_expression_with_macro_expanded_has_builtin_operator(self) -> None:
+        result = preprocess_source(
+            "#define HAS_BUILTIN(x) __has_builtin(x)\n"
+            "#if HAS_BUILTIN(__builtin_expect)\nint bad;\n#endif\n"
+            "#if !HAS_BUILTIN(__builtin_expect)\nint ok;\n#endif\n",
+            filename="if.c",
+        )
+        self.assertNotIn("int bad;", result.source)
+        self.assertIn("int ok ;", result.source)
+
+    def test_if_expression_with_has_builtin_rejects_non_identifier_operand(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if __has_builtin(123)\nint x;\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertIn(
+            "Invalid __has_builtin expression: feature operand must be an identifier",
+            str(ctx.exception),
+        )
+
     def test_unknown_directive_active_errors_in_c11(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#unknown\n", filename="if.c")

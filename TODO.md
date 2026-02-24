@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: added preprocessor feature-probe operator support for `__has_builtin(...)`, `__has_feature(...)`, and `__has_extension(...)` in `#if`/`#elif` expression evaluation (including macro-expanded operator spellings), with strict operand validation (`identifier` only) and focused regression coverage for success/fallback + invalid-operand diagnostics.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_builtin_feature_and_extension_operators tests.test_preprocessor.PreprocessorTests.test_if_expression_with_macro_expanded_has_builtin_operator tests.test_preprocessor.PreprocessorTests.test_if_expression_with_has_builtin_rejects_non_identifier_operand -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: expanded predefined GCC-compatibility atomics/synchronization macro coverage with memory-order constants (`__ATOMIC_RELAXED`..`__ATOMIC_SEQ_CST`), lock-free capability macros (`__GCC_ATOMIC_{BOOL,CHAR,SHORT,INT,LONG,LLONG,POINTER}_LOCK_FREE`), and compare-and-swap feature macros (`__GCC_HAVE_SYNC_COMPARE_AND_SWAP_{1,2,4,8}`); added focused expansion + CLI `-U` regression tests and updated frontend coverage docs.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_atomic_and_sync_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_atomic_and_sync_macros -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).

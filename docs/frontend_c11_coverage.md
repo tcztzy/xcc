@@ -26,7 +26,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - `_Thread_local` object declarations that use invalid or missing block-scope storage classes now report requirement-oriented diagnostics (`...; '_Thread_local' requires 'static' or 'extern'`) so storage-class fixes are explicit.
 - **Core preprocessor behavior**
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
-  - Conditional directives, `defined`, character-literal operands, and `__has_include` checks in `#if`/`#elif` (including macro-expanded header operands).
+  - Conditional directives, `defined`, character-literal operands, and include/feature probe operators in `#if`/`#elif` (`__has_include`, `__has_builtin`, `__has_feature`, `__has_extension`), including macro-expanded operator spellings and operands.
   - `#if`/`#elif` boolean short-circuit evaluation for `&&`/`||` (including divide-by-zero guard cases).
   - Include search precedence is validated (`"..."` prefers source directory, then `-iquote`, then `-I`; `<...>` resolves via `-I`/`-isystem`/`-idirafter` and skips `-iquote`), with cycle/read diagnostics; cycle failures now include the concrete include chain (`a.h -> b.h -> a.h`) for faster root-cause triage.
   - CLI macro-include files (`-imacros <header>`) are processed before forced includes so macro definitions are available to subsequent includes and the main source while non-directive text from macro-include files is discarded.
