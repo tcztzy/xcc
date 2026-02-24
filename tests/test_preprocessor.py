@@ -1078,17 +1078,27 @@ class PreprocessorTests(unittest.TestCase):
         )
         self.assertEqual(result.source, "const char *name = __FILE_NAME__;\n")
 
-    def test_predefined_date_and_time_macros_use_translation_start_time(self) -> None:
+    def test_cli_undef_removes_predefined_timestamp_macro(self) -> None:
+        result = preprocess_source(
+            "const char *stamp = __TIMESTAMP__;\n",
+            filename="main.c",
+            options=FrontendOptions(undefs=("__TIMESTAMP__",)),
+        )
+        self.assertEqual(result.source, "const char *stamp = __TIMESTAMP__;\n")
+
+    def test_predefined_date_time_and_timestamp_macros_use_translation_start_time(self) -> None:
         with patch("xcc.preprocessor.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2026, 2, 23, 22, 21, 9)
             result = preprocess_source(
-                'const char *d = __DATE__;\nconst char *t = __TIME__;\n',
+                'const char *d = __DATE__;\nconst char *t = __TIME__;\nconst char *ts = __TIMESTAMP__;\n',
                 filename="main.c",
             )
         self.assertIn('const char * d = "Feb 23 2026" ;', result.source)
         self.assertIn('const char * t = "22:21:09" ;', result.source)
+        self.assertIn('const char * ts = "Mon Feb 23 22:21:09 2026" ;', result.source)
         self.assertIn('__DATE__="Feb 23 2026"', result.macro_table)
         self.assertIn('__TIME__="22:21:09"', result.macro_table)
+        self.assertIn('__TIMESTAMP__="Mon Feb 23 22:21:09 2026"', result.macro_table)
 
     def test_predefined_date_and_time_do_not_force_retokenization(self) -> None:
         result = preprocess_source("int keep;\n", filename="main.c")
