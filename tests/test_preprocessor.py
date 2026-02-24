@@ -198,6 +198,8 @@ class PreprocessorTests(unittest.TestCase):
             "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
             "#if __SIZE_WIDTH__ == 64\nint sw;\n#endif\n"
             "#if __PTRDIFF_WIDTH__ == 64\nint pw;\n#endif\n"
+            "#if __INTMAX_WIDTH__ == 64\nint imw;\n#endif\n"
+            "#if __UINTMAX_WIDTH__ == 64\nint umw;\n#endif\n"
             "#if __SIZE_MAX__ > 0\nint sm;\n#endif\n"
             "#if __PTRDIFF_MAX__ > 0\nint pm;\n#endif\n"
             "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
@@ -206,6 +208,7 @@ class PreprocessorTests(unittest.TestCase):
             "#if defined(__FLOAT_WORD_ORDER__)\nint fwo;\n#endif\n"
             "#if __INCLUDE_LEVEL__\nint il;\n#endif\n"
             "#if __WCHAR_WIDTH__ == 32\nint ww;\n#endif\n"
+            "#if __WINT_WIDTH__ == 32\nint wiw;\n#endif\n"
             "#if defined(__STDC_ISO_10646__)\nint iso;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
             "__WCHAR_TYPE__ w;\n"
@@ -222,6 +225,8 @@ class PreprocessorTests(unittest.TestCase):
                     "__SIZEOF_POINTER__",
                     "__SIZE_WIDTH__",
                     "__PTRDIFF_WIDTH__",
+                    "__INTMAX_WIDTH__",
+                    "__UINTMAX_WIDTH__",
                     "__SIZE_MAX__",
                     "__PTRDIFF_MAX__",
                     "__CHAR_BIT__",
@@ -231,6 +236,7 @@ class PreprocessorTests(unittest.TestCase):
                     "__ORDER_LITTLE_ENDIAN__",
                     "__INCLUDE_LEVEL__",
                     "__WCHAR_WIDTH__",
+                    "__WINT_WIDTH__",
                     "__STDC_ISO_10646__",
                     "__SIZE_TYPE__",
                     "__WCHAR_TYPE__",
@@ -244,6 +250,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int z;", result.source)
         self.assertNotIn("int sw;", result.source)
         self.assertNotIn("int pw;", result.source)
+        self.assertNotIn("int imw;", result.source)
+        self.assertNotIn("int umw;", result.source)
         self.assertNotIn("int sm;", result.source)
         self.assertNotIn("int pm;", result.source)
         self.assertNotIn("int c;", result.source)
@@ -252,6 +260,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int fwo;", result.source)
         self.assertNotIn("int il;", result.source)
         self.assertNotIn("int ww;", result.source)
+        self.assertNotIn("int wiw;", result.source)
         self.assertNotIn("int iso;", result.source)
         self.assertIn("__SIZE_TYPE__ n;", result.source)
         self.assertIn("__WCHAR_TYPE__ w;", result.source)
@@ -892,6 +901,8 @@ class PreprocessorTests(unittest.TestCase):
             "int bits = __CHAR_BIT__;\n"
             "int szw = __SIZE_WIDTH__;\n"
             "int pdw = __PTRDIFF_WIDTH__;\n"
+            "int imw = __INTMAX_WIDTH__;\n"
+            "int umw = __UINTMAX_WIDTH__;\n"
             "int scmax = __SCHAR_MAX__;\n"
             "int shmax = __SHRT_MAX__;\n"
             "int imax = __INT_MAX__;\n"
@@ -913,6 +924,7 @@ class PreprocessorTests(unittest.TestCase):
             "int be = __BIG_ENDIAN__;\n"
             "int fwo = __FLOAT_WORD_ORDER__;\n"
             "int ww = __WCHAR_WIDTH__;\n"
+            "int wiw = __WINT_WIDTH__;\n"
             "long iso = __STDC_ISO_10646__;\n"
             "__SIZE_TYPE__ n;\n"
             "__PTRDIFF_TYPE__ d;\n"
@@ -935,6 +947,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int bits = 8 ;", result.source)
         self.assertIn("int szw = 64 ;", result.source)
         self.assertIn("int pdw = 64 ;", result.source)
+        self.assertIn("int imw = 64 ;", result.source)
+        self.assertIn("int umw = 64 ;", result.source)
         self.assertIn("int scmax = 127 ;", result.source)
         self.assertIn("int shmax = 32767 ;", result.source)
         self.assertIn("int imax = 2147483647 ;", result.source)
@@ -956,6 +970,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int be = 4321 ;", result.source)
         self.assertIn("int fwo = 1234 ;", result.source)
         self.assertIn("int ww = 32 ;", result.source)
+        self.assertIn("int wiw = 32 ;", result.source)
         self.assertIn("long iso = 201706L ;", result.source)
         self.assertIn("unsigned long n ;", result.source)
         self.assertIn("long d ;", result.source)
