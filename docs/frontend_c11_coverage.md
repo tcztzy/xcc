@@ -14,6 +14,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - Statement expressions.
   - Computed goto and label-address expressions.
   - GNU asm statement and asm label forms in preprocessing.
+  - GNU `#elifdef` / `#elifndef` conditional directives.
 - **Parser diagnostic hardening (ongoing)**
   - Type-name contexts now reject accidental declarator identifiers with an explicit diagnostic (`Type name cannot declare identifier '...'`) in cast and `_Atomic(type-name)` parsing.
   - `_Alignas(...)` operand validation now reports operand-specific diagnostics for non-object type operands, non-ICE expression operands, non-positive values, and non-power-of-two values.

@@ -30,7 +30,8 @@ Diagnostics are stage-tagged (`lex`, `parse`, `sema`) and include source coordin
 
 - `c11` is strict mode. GNU-only constructs are rejected, including statement expressions,
   computed goto (`goto *expr`, `&&label`), and GNU asm forms.
-- `gnu11` keeps GNU extensions that are currently supported by the front end.
+- `gnu11` keeps GNU extensions that are currently supported by the front end, including
+  GNU preprocessor conditionals like `#elifdef` / `#elifndef`.
 
 ## Lexer
 
