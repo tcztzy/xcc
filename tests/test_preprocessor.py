@@ -199,7 +199,9 @@ class PreprocessorTests(unittest.TestCase):
             "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
             "#if defined(__BYTE_ORDER__)\nint e;\n#endif\n"
             "#if __INCLUDE_LEVEL__\nint il;\n#endif\n"
+            "#if __WCHAR_WIDTH__ == 32\nint ww;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
+            "__WCHAR_TYPE__ w;\n"
         )
         result = preprocess_source(
             source,
@@ -215,7 +217,9 @@ class PreprocessorTests(unittest.TestCase):
                     "__BYTE_ORDER__",
                     "__ORDER_LITTLE_ENDIAN__",
                     "__INCLUDE_LEVEL__",
+                    "__WCHAR_WIDTH__",
                     "__SIZE_TYPE__",
+                    "__WCHAR_TYPE__",
                 )
             ),
         )
@@ -227,7 +231,9 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int c;", result.source)
         self.assertNotIn("int e;", result.source)
         self.assertNotIn("int il;", result.source)
+        self.assertNotIn("int ww;", result.source)
         self.assertIn("__SIZE_TYPE__ n;", result.source)
+        self.assertIn("__WCHAR_TYPE__ w;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
         source = (
@@ -827,8 +833,11 @@ class PreprocessorTests(unittest.TestCase):
             "int llsz = __SIZEOF_LONG_LONG__;\n"
             "int ord = __ORDER_LITTLE_ENDIAN__;\n"
             "int bo = __BYTE_ORDER__;\n"
+            "int ww = __WCHAR_WIDTH__;\n"
             "__SIZE_TYPE__ n;\n"
-            "__PTRDIFF_TYPE__ d;\n",
+            "__PTRDIFF_TYPE__ d;\n"
+            "__WCHAR_TYPE__ wc;\n"
+            "__WINT_TYPE__ wi;\n",
             filename="main.c",
         )
         self.assertIn("int s = 1 ;", result.source)
@@ -851,8 +860,11 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int llsz = 8 ;", result.source)
         self.assertIn("int ord = 1234 ;", result.source)
         self.assertIn("int bo = 1234 ;", result.source)
+        self.assertIn("int ww = 32 ;", result.source)
         self.assertIn("unsigned long n ;", result.source)
         self.assertIn("long d ;", result.source)
+        self.assertIn("int wc ;", result.source)
+        self.assertIn("unsigned int wi ;", result.source)
 
     def test_predefined_file_and_line_macros(self) -> None:
         result = preprocess_source(
