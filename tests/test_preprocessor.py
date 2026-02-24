@@ -240,6 +240,18 @@ class PreprocessorTests(unittest.TestCase):
             "#if __FLT_HAS_DENORM__ == 1\nint fhd;\n#endif\n"
             "#if __DBL_HAS_DENORM__ == 1\nint dhd;\n#endif\n"
             "#if __LDBL_HAS_DENORM__ == 1\nint lhd;\n#endif\n"
+            "#if __FLT_HAS_INFINITY__ == 1\nint fhi;\n#endif\n"
+            "#if __DBL_HAS_INFINITY__ == 1\nint dhi;\n#endif\n"
+            "#if __LDBL_HAS_INFINITY__ == 1\nint lhi;\n#endif\n"
+            "#if __FLT_HAS_QUIET_NAN__ == 1\nint fhq;\n#endif\n"
+            "#if __DBL_HAS_QUIET_NAN__ == 1\nint dhq;\n#endif\n"
+            "#if __LDBL_HAS_QUIET_NAN__ == 1\nint lhq;\n#endif\n"
+            "#if __FLT_MIN_10_EXP__ < 0\nint fmin10;\n#endif\n"
+            "#if __DBL_MIN_10_EXP__ < 0\nint dmin10;\n#endif\n"
+            "#if __LDBL_MIN_10_EXP__ < 0\nint ldmin10;\n#endif\n"
+            "#if __FLT_MAX_10_EXP__ > 0\nint fmax10;\n#endif\n"
+            "#if __DBL_MAX_10_EXP__ > 0\nint dmax10;\n#endif\n"
+            "#if __LDBL_MAX_10_EXP__ > 0\nint ldmax10;\n#endif\n"
             "#if defined(__FLT_DENORM_MIN__)\nint fdm;\n#endif\n"
             "#if defined(__DBL_DENORM_MIN__)\nint ddm;\n#endif\n"
             "#if defined(__LDBL_DENORM_MIN__)\nint ldm;\n#endif\n"
@@ -252,6 +264,18 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int fhd;", result.source)
         self.assertIn("int dhd;", result.source)
         self.assertIn("int lhd;", result.source)
+        self.assertIn("int fhi;", result.source)
+        self.assertIn("int dhi;", result.source)
+        self.assertIn("int lhi;", result.source)
+        self.assertIn("int fhq;", result.source)
+        self.assertIn("int dhq;", result.source)
+        self.assertIn("int lhq;", result.source)
+        self.assertIn("int fmin10;", result.source)
+        self.assertIn("int dmin10;", result.source)
+        self.assertIn("int ldmin10;", result.source)
+        self.assertIn("int fmax10;", result.source)
+        self.assertIn("int dmax10;", result.source)
+        self.assertIn("int ldmax10;", result.source)
         self.assertIn("int fdm;", result.source)
         self.assertIn("int ddm;", result.source)
         self.assertIn("int ldm;", result.source)
@@ -268,6 +292,18 @@ class PreprocessorTests(unittest.TestCase):
             "#if defined(__FLT_HAS_DENORM__)\nint fhd;\n#endif\n"
             "#if defined(__DBL_HAS_DENORM__)\nint dhd;\n#endif\n"
             "#if defined(__LDBL_HAS_DENORM__)\nint lhd;\n#endif\n"
+            "#if defined(__FLT_HAS_INFINITY__)\nint fhi;\n#endif\n"
+            "#if defined(__DBL_HAS_INFINITY__)\nint dhi;\n#endif\n"
+            "#if defined(__LDBL_HAS_INFINITY__)\nint lhi;\n#endif\n"
+            "#if defined(__FLT_HAS_QUIET_NAN__)\nint fhq;\n#endif\n"
+            "#if defined(__DBL_HAS_QUIET_NAN__)\nint dhq;\n#endif\n"
+            "#if defined(__LDBL_HAS_QUIET_NAN__)\nint lhq;\n#endif\n"
+            "#if defined(__FLT_MIN_10_EXP__)\nint fmin10;\n#endif\n"
+            "#if defined(__DBL_MIN_10_EXP__)\nint dmin10;\n#endif\n"
+            "#if defined(__LDBL_MIN_10_EXP__)\nint ldmin10;\n#endif\n"
+            "#if defined(__FLT_MAX_10_EXP__)\nint fmax10;\n#endif\n"
+            "#if defined(__DBL_MAX_10_EXP__)\nint dmax10;\n#endif\n"
+            "#if defined(__LDBL_MAX_10_EXP__)\nint ldmax10;\n#endif\n"
         )
         result = preprocess_source(
             source,
@@ -284,6 +320,18 @@ class PreprocessorTests(unittest.TestCase):
                     "__FLT_HAS_DENORM__",
                     "__DBL_HAS_DENORM__",
                     "__LDBL_HAS_DENORM__",
+                    "__FLT_HAS_INFINITY__",
+                    "__DBL_HAS_INFINITY__",
+                    "__LDBL_HAS_INFINITY__",
+                    "__FLT_HAS_QUIET_NAN__",
+                    "__DBL_HAS_QUIET_NAN__",
+                    "__LDBL_HAS_QUIET_NAN__",
+                    "__FLT_MIN_10_EXP__",
+                    "__DBL_MIN_10_EXP__",
+                    "__LDBL_MIN_10_EXP__",
+                    "__FLT_MAX_10_EXP__",
+                    "__DBL_MAX_10_EXP__",
+                    "__LDBL_MAX_10_EXP__",
                 )
             ),
         )
@@ -297,6 +345,18 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int fhd;", result.source)
         self.assertNotIn("int dhd;", result.source)
         self.assertNotIn("int lhd;", result.source)
+        self.assertNotIn("int fhi;", result.source)
+        self.assertNotIn("int dhi;", result.source)
+        self.assertNotIn("int lhi;", result.source)
+        self.assertNotIn("int fhq;", result.source)
+        self.assertNotIn("int dhq;", result.source)
+        self.assertNotIn("int lhq;", result.source)
+        self.assertNotIn("int fmin10;", result.source)
+        self.assertNotIn("int dmin10;", result.source)
+        self.assertNotIn("int ldmin10;", result.source)
+        self.assertNotIn("int fmax10;", result.source)
+        self.assertNotIn("int dmax10;", result.source)
+        self.assertNotIn("int ldmax10;", result.source)
 
     def test_cli_undef_removes_predefined_macro(self) -> None:
         source = (
