@@ -247,6 +247,15 @@ class PreprocessorTests(unittest.TestCase):
             "#if __FLT_DIG__ == 6\nint fdig;\n#endif\n"
             "#if __DBL_DIG__ == 15\nint ddig;\n#endif\n"
             "#if __LDBL_DIG__ == 33\nint lddig;\n#endif\n"
+            "#if defined(__FLT_EPSILON__)\nint feps;\n#endif\n"
+            "#if defined(__DBL_EPSILON__)\nint deps;\n#endif\n"
+            "#if defined(__LDBL_EPSILON__)\nint ldeps;\n#endif\n"
+            "#if defined(__FLT_MIN__)\nint fmin;\n#endif\n"
+            "#if defined(__DBL_MIN__)\nint dmin;\n#endif\n"
+            "#if defined(__LDBL_MIN__)\nint ldmin;\n#endif\n"
+            "#if defined(__FLT_MAX__)\nint fmax;\n#endif\n"
+            "#if defined(__DBL_MAX__)\nint dmax;\n#endif\n"
+            "#if defined(__LDBL_MAX__)\nint ldmax;\n#endif\n"
             "#if __FLT_MIN_EXP__ < 0\nint fminexp;\n#endif\n"
             "#if __DBL_MIN_EXP__ < 0\nint dminexp;\n#endif\n"
             "#if __LDBL_MIN_EXP__ < 0\nint ldminexp;\n#endif\n"
@@ -320,6 +329,15 @@ class PreprocessorTests(unittest.TestCase):
                     "__FLT_DIG__",
                     "__DBL_DIG__",
                     "__LDBL_DIG__",
+                    "__FLT_EPSILON__",
+                    "__DBL_EPSILON__",
+                    "__LDBL_EPSILON__",
+                    "__FLT_MIN__",
+                    "__DBL_MIN__",
+                    "__LDBL_MIN__",
+                    "__FLT_MAX__",
+                    "__DBL_MAX__",
+                    "__LDBL_MAX__",
                     "__FLT_MIN_EXP__",
                     "__DBL_MIN_EXP__",
                     "__LDBL_MIN_EXP__",
@@ -391,6 +409,15 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int fdig;", result.source)
         self.assertNotIn("int ddig;", result.source)
         self.assertNotIn("int lddig;", result.source)
+        self.assertNotIn("int feps;", result.source)
+        self.assertNotIn("int deps;", result.source)
+        self.assertNotIn("int ldeps;", result.source)
+        self.assertNotIn("int fmin;", result.source)
+        self.assertNotIn("int dmin;", result.source)
+        self.assertNotIn("int ldmin;", result.source)
+        self.assertNotIn("int fmax;", result.source)
+        self.assertNotIn("int dmax;", result.source)
+        self.assertNotIn("int ldmax;", result.source)
         self.assertNotIn("int fminexp;", result.source)
         self.assertNotIn("int dminexp;", result.source)
         self.assertNotIn("int ldminexp;", result.source)
@@ -1403,6 +1430,15 @@ class PreprocessorTests(unittest.TestCase):
             "int fdig = __FLT_DIG__;\n"
             "int ddig = __DBL_DIG__;\n"
             "int lddig = __LDBL_DIG__;\n"
+            "float feps = __FLT_EPSILON__;\n"
+            "double deps = __DBL_EPSILON__;\n"
+            "long double ldeps = __LDBL_EPSILON__;\n"
+            "float fmin = __FLT_MIN__;\n"
+            "double dmin = __DBL_MIN__;\n"
+            "long double ldmin = __LDBL_MIN__;\n"
+            "float fmax = __FLT_MAX__;\n"
+            "double dmax = __DBL_MAX__;\n"
+            "long double ldmax = __LDBL_MAX__;\n"
             "int fminexp = __FLT_MIN_EXP__;\n"
             "int dminexp = __DBL_MIN_EXP__;\n"
             "int ldminexp = __LDBL_MIN_EXP__;\n"
@@ -1501,6 +1537,15 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int fdig = 6 ;", result.source)
         self.assertIn("int ddig = 15 ;", result.source)
         self.assertIn("int lddig = 33 ;", result.source)
+        self.assertIn("float feps = 1.19209290e-7F ;", result.source)
+        self.assertIn("double deps = 2.2204460492503131e-16 ;", result.source)
+        self.assertIn("long double ldeps = 1.08420217248550443401e-19L ;", result.source)
+        self.assertIn("float fmin = 1.17549435e-38F ;", result.source)
+        self.assertIn("double dmin = 2.2250738585072014e-308 ;", result.source)
+        self.assertIn("long double ldmin = 3.36210314311209350626e-4932L ;", result.source)
+        self.assertIn("float fmax = 3.40282347e+38F ;", result.source)
+        self.assertIn("double dmax = 1.7976931348623157e+308 ;", result.source)
+        self.assertIn("long double ldmax = 1.18973149535723176502e+4932L ;", result.source)
         self.assertIn("int fminexp = - 125 ;", result.source)
         self.assertIn("int dminexp = - 1021 ;", result.source)
         self.assertIn("int ldminexp = - 16381 ;", result.source)
