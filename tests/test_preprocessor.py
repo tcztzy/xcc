@@ -194,18 +194,30 @@ class PreprocessorTests(unittest.TestCase):
             "#if __INT_WIDTH__\nint x;\n#endif\n"
             "#if __STDC_UTF_16__\nint y;\n#endif\n"
             "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
+            "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
+            "#if defined(__BYTE_ORDER__)\nint e;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
         )
         result = preprocess_source(
             source,
             filename="main.c",
             options=FrontendOptions(
-                undefs=("__INT_WIDTH__", "__STDC_UTF_16__", "__SIZEOF_POINTER__", "__SIZE_TYPE__")
+                undefs=(
+                    "__INT_WIDTH__",
+                    "__STDC_UTF_16__",
+                    "__SIZEOF_POINTER__",
+                    "__CHAR_BIT__",
+                    "__BYTE_ORDER__",
+                    "__ORDER_LITTLE_ENDIAN__",
+                    "__SIZE_TYPE__",
+                )
             ),
         )
         self.assertNotIn("int x;", result.source)
         self.assertNotIn("int y;", result.source)
         self.assertNotIn("int z;", result.source)
+        self.assertNotIn("int c;", result.source)
+        self.assertNotIn("int e;", result.source)
         self.assertIn("__SIZE_TYPE__ n;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
@@ -693,8 +705,14 @@ class PreprocessorTests(unittest.TestCase):
             "int u16 = __STDC_UTF_16__;\n"
             "int u32 = __STDC_UTF_32__;\n"
             "int lp = __LP64__;\n"
+            "int bits = __CHAR_BIT__;\n"
+            "int ssz = __SIZEOF_SHORT__;\n"
+            "int isz = __SIZEOF_INT__;\n"
             "int psz = __SIZEOF_POINTER__;\n"
             "int lsz = __SIZEOF_LONG__;\n"
+            "int llsz = __SIZEOF_LONG_LONG__;\n"
+            "int ord = __ORDER_LITTLE_ENDIAN__;\n"
+            "int bo = __BYTE_ORDER__;\n"
             "__SIZE_TYPE__ n;\n"
             "__PTRDIFF_TYPE__ d;\n",
             filename="main.c",
@@ -705,8 +723,14 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int u16 = 1 ;", result.source)
         self.assertIn("int u32 = 1 ;", result.source)
         self.assertIn("int lp = 1 ;", result.source)
+        self.assertIn("int bits = 8 ;", result.source)
+        self.assertIn("int ssz = 2 ;", result.source)
+        self.assertIn("int isz = 4 ;", result.source)
         self.assertIn("int psz = 8 ;", result.source)
         self.assertIn("int lsz = 8 ;", result.source)
+        self.assertIn("int llsz = 8 ;", result.source)
+        self.assertIn("int ord = 1234 ;", result.source)
+        self.assertIn("int bo = 1234 ;", result.source)
         self.assertIn("unsigned long n ;", result.source)
         self.assertIn("long d ;", result.source)
 

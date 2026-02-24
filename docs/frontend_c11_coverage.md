@@ -32,7 +32,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - `#line` mapping and diagnostic remapping, including macro-expanded decimal/filename operands.
 - **Predefined macro coverage (current)**
   - `__STDC__`, `__STDC_HOSTED__`, `__STDC_VERSION__`, `__STDC_UTF_16__`, `__STDC_UTF_32__`, `__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`.
-  - Target-assumption baseline macros for LP64 hosts are included and regression-tested (`__LP64__`, `__SIZEOF_POINTER__`, `__SIZEOF_LONG__`, `__SIZE_TYPE__`, `__PTRDIFF_TYPE__`).
+  - Target-assumption baseline macros for LP64 little-endian hosts are included and regression-tested (`__LP64__`, `__CHAR_BIT__`, `__SIZEOF_SHORT__`, `__SIZEOF_INT__`, `__SIZEOF_POINTER__`, `__SIZEOF_LONG__`, `__SIZEOF_LONG_LONG__`, `__ORDER_LITTLE_ENDIAN__`, `__ORDER_BIG_ENDIAN__`, `__BYTE_ORDER__`, `__SIZE_TYPE__`, `__PTRDIFF_TYPE__`).
   - Integer width/value macros already used by tests.
   - Builtin-only preprocessing preserves original line spelling when a line does not reference a macro (no retokenization side effects from predefined macro setup).
 

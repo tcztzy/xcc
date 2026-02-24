@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined LP64 target-assumption macros with endian and fundamental-size coverage (`__CHAR_BIT__`, `__SIZEOF_SHORT__`, `__SIZEOF_INT__`, `__SIZEOF_LONG_LONG__`, `__ORDER_LITTLE_ENDIAN__`, `__ORDER_BIG_ENDIAN__`, `__BYTE_ORDER__`) and added regression coverage for expansion plus CLI `-U` behavior.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: expanded predefined preprocessor target-assumption baseline for LP64 hosts by adding `__LP64__`, `__SIZEOF_POINTER__`, `__SIZEOF_LONG__`, `__SIZE_TYPE__`, and `__PTRDIFF_TYPE__`, with regression coverage for expansion plus CLI `-U` override behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
