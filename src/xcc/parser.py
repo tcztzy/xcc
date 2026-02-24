@@ -2321,11 +2321,16 @@ class Parser:
         self._expect_punct(",")
         associations: list[tuple[TypeSpec | None, Expr]] = []
         saw_default = False
+        association_index = 0
         while True:
+            association_index += 1
             assoc_type: TypeSpec | None
             if self._check_keyword("default"):
                 if saw_default:
-                    raise ParserError("Duplicate default generic association", self._current())
+                    raise ParserError(
+                        f"Duplicate default generic association at position {association_index}: only one default association is allowed",
+                        self._current(),
+                    )
                 saw_default = True
                 self._advance()
                 assoc_type = None

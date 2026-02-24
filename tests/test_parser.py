@@ -3846,8 +3846,12 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("int main(){int x; return (int y)x;}")))
 
     def test_generic_selection_rejects_duplicate_default(self) -> None:
-        with self.assertRaises(ParserError):
+        with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){return _Generic(0, default:1, default:2);}")))
+        self.assertIn(
+            "Duplicate default generic association at position 2: only one default association is allowed",
+            str(ctx.exception),
+        )
 
     def test_generic_selection_requires_type_name_association(self) -> None:
         with self.assertRaises(ParserError):

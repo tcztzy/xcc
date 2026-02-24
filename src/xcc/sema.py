@@ -2133,10 +2133,15 @@ class Analyzer:
             selected_expr: Expr | None = None
             default_expr: Expr | None = None
             seen_types: set[Type] = set()
-            for assoc_type_spec, assoc_expr in expr.associations:
+            for association_index, (assoc_type_spec, assoc_expr) in enumerate(
+                expr.associations, start=1
+            ):
                 if assoc_type_spec is None:
                     if default_expr is not None:
-                        raise SemaError("Duplicate default generic association")
+                        raise SemaError(
+                            "Duplicate default generic association at position "
+                            f"{association_index}: only one default association is allowed"
+                        )
                     default_expr = assoc_expr
                     self._analyze_expr(assoc_expr, scope)
                     continue
