@@ -190,14 +190,23 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int x;", result.source)
 
     def test_cli_undef_removes_predefined_macro(self) -> None:
-        source = "#if __INT_WIDTH__\nint x;\n#endif\n#if __STDC_UTF_16__\nint y;\n#endif\n"
+        source = (
+            "#if __INT_WIDTH__\nint x;\n#endif\n"
+            "#if __STDC_UTF_16__\nint y;\n#endif\n"
+            "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
+            "__SIZE_TYPE__ n;\n"
+        )
         result = preprocess_source(
             source,
             filename="main.c",
-            options=FrontendOptions(undefs=("__INT_WIDTH__", "__STDC_UTF_16__")),
+            options=FrontendOptions(
+                undefs=("__INT_WIDTH__", "__STDC_UTF_16__", "__SIZEOF_POINTER__", "__SIZE_TYPE__")
+            ),
         )
         self.assertNotIn("int x;", result.source)
         self.assertNotIn("int y;", result.source)
+        self.assertNotIn("int z;", result.source)
+        self.assertIn("__SIZE_TYPE__ n;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
         source = (
@@ -682,7 +691,12 @@ class PreprocessorTests(unittest.TestCase):
             "int h = __STDC_HOSTED__;\n"
             "long v = __STDC_VERSION__;\n"
             "int u16 = __STDC_UTF_16__;\n"
-            "int u32 = __STDC_UTF_32__;\n",
+            "int u32 = __STDC_UTF_32__;\n"
+            "int lp = __LP64__;\n"
+            "int psz = __SIZEOF_POINTER__;\n"
+            "int lsz = __SIZEOF_LONG__;\n"
+            "__SIZE_TYPE__ n;\n"
+            "__PTRDIFF_TYPE__ d;\n",
             filename="main.c",
         )
         self.assertIn("int s = 1 ;", result.source)
@@ -690,6 +704,11 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("long v = 201112L ;", result.source)
         self.assertIn("int u16 = 1 ;", result.source)
         self.assertIn("int u32 = 1 ;", result.source)
+        self.assertIn("int lp = 1 ;", result.source)
+        self.assertIn("int psz = 8 ;", result.source)
+        self.assertIn("int lsz = 8 ;", result.source)
+        self.assertIn("unsigned long n ;", result.source)
+        self.assertIn("long d ;", result.source)
 
     def test_predefined_file_and_line_macros(self) -> None:
         result = preprocess_source(

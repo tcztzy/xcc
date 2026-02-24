@@ -43,6 +43,11 @@ _PREDEFINED_MACROS = (
     "__INTMAX_MAX__=9223372036854775807LL",
     "__LONG_LONG_MAX__=9223372036854775807LL",
     "__UINTMAX_MAX__=18446744073709551615ULL",
+    "__LP64__=1",
+    "__SIZEOF_POINTER__=8",
+    "__SIZEOF_LONG__=8",
+    "__SIZE_TYPE__=unsigned long",
+    "__PTRDIFF_TYPE__=long",
     "__FILE__=0",
     "__LINE__=0",
 )

@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined preprocessor target-assumption baseline for LP64 hosts by adding `__LP64__`, `__SIZEOF_POINTER__`, `__SIZEOF_LONG__`, `__SIZE_TYPE__`, and `__PTRDIFF_TYPE__`, with regression coverage for expansion plus CLI `-U` override behavior.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: made `#line` parsing macro-aware by expanding directive operands before validation, accepting decimal line macros and optional filename-string macros while preserving invalid-directive diagnostics for non-decimal expansions.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_line_directive_expands_macro_operands tests.test_preprocessor.PreprocessorTests.test_line_directive_rejects_non_decimal_macro_expansion -q` (pass).
   - Iteration 3 slice: added GNU `#include_next` support in the preprocessor so include search continues after the current include directory (including quoted-include source-dir skipping), while C11 mode keeps rejecting `#include_next` as an unknown directive.
