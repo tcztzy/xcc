@@ -90,6 +90,39 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source(source, filename="main.c")
         self.assertEqual(result.source, "\n\n")
 
+    def test_strict_mode_defines_strict_ansi_macro(self) -> None:
+        result = preprocess_source("int strict = __STRICT_ANSI__;\n", filename="main.c")
+        self.assertIn("int strict = 1 ;", result.source)
+
+    def test_gnu_mode_defines_gnu_version_macros(self) -> None:
+        result = preprocess_source(
+            "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n"
+            'const char *v = __VERSION__;\n',
+            filename="main.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertIn("int g = 4 ;", result.source)
+        self.assertIn("int gm = 2 ;", result.source)
+        self.assertIn("int gp = 1 ;", result.source)
+        self.assertIn('const char * v = "xcc gnu11" ;', result.source)
+
+    def test_gnu_mode_does_not_define_strict_ansi_macro(self) -> None:
+        result = preprocess_source(
+            "#if defined(__STRICT_ANSI__)\nint strict = 1;\n#endif\n",
+            filename="main.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertNotIn("strict", result.source)
+
+    def test_strict_mode_does_not_define_gnu_version_macros(self) -> None:
+        result = preprocess_source(
+            "#if defined(__GNUC__) || defined(__GNUC_MINOR__) || defined(__GNUC_PATCHLEVEL__)\n"
+            "int g = 1;\n"
+            "#endif\n",
+            filename="main.c",
+        )
+        self.assertNotIn("int g", result.source)
+
     def test_variadic_macro_multiple_arguments_keep_commas(self) -> None:
         source = "#define V(...) __VA_ARGS__\nV(1, 2, 3)\n"
         result = preprocess_source(source, filename="main.c")

@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: added preprocessing mode-specific predefined macros so strict `c11` now exposes `__STRICT_ANSI__`, while `gnu11` exposes GNU compatibility version macros (`__GNUC__`, `__GNUC_MINOR__`, `__GNUC_PATCHLEVEL__`, `__VERSION__`); added focused regressions for both presence and absence across language modes.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_strict_mode_defines_strict_ansi_macro tests.test_preprocessor.PreprocessorTests.test_gnu_mode_defines_gnu_version_macros tests.test_preprocessor.PreprocessorTests.test_gnu_mode_does_not_define_strict_ansi_macro tests.test_preprocessor.PreprocessorTests.test_strict_mode_does_not_define_gnu_version_macros -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: upgraded sema `_Generic` no-match diagnostics to include association position and parser-provided source location context for each available type (`'int' at position 1 (line ..., column ...)`), while preserving location-less fallback wording for manually constructed AST tests.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_generic_selection_without_match_error tests.test_sema.SemaTests.test_generic_selection_without_match_reports_all_association_types tests.test_sema.SemaTests.test_generic_selection_without_match_reports_position_without_locations -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
