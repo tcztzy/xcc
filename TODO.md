@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded LP64 predefined target-assumption sizeof coverage for typedef-backed families (`__SIZEOF_SIZE_T__`, `__SIZEOF_PTRDIFF_T__`, `__SIZEOF_INTMAX_T__`, `__SIZEOF_UINTMAX_T__`, `__SIZEOF_WCHAR_T__`, `__SIZEOF_WINT_T__`), with regression coverage in both standard macro expansion and CLI `-U` removal paths.
   - Iteration 3 slice: expanded predefined signed integer range assumptions with explicit minimum macros (`__LONG_MIN__`, `__LONG_LONG_MIN__`, `__INTMAX_MIN__`, `__PTRDIFF_MIN__`) so LP64 target assumptions now publish both max and min bounds for core signed families; added regression coverage for macro expansion and CLI `-U` removal behavior.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: tightened GNU indirect-goto control-flow validation so `goto *expr;` now requires a `void*` target expression (still rejecting non-pointers), closing a compatibility gap where non-void pointers were previously accepted; added focused sema regressions for `int*` and function-pointer operands.
