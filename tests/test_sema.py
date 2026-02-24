@@ -1481,6 +1481,21 @@ class SemaTests(unittest.TestCase):
             "Duplicate generic association type at position 2: previous compatible type was at position 1: 'int'",
         )
 
+    def test_generic_selection_qualified_typedef_alias_duplicate_compatible_type_error(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "typedef int I; int main(void){int x=0; return _Generic(x, const int: 1, const I: 2);}"
+                )
+            )
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Duplicate generic association type at position 2: previous compatible type was at position 1: 'const int'",
+        )
+
     def test_generic_selection_duplicate_default_association_error(self) -> None:
         unit = TranslationUnit(
             [
