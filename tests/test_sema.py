@@ -1346,7 +1346,10 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){int x=0; return _Generic(x, int: 1, signed int: 2);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Duplicate generic association type: 'int'")
+        self.assertEqual(
+            str(ctx.exception),
+            "Duplicate generic association type at position 2: previous compatible type was at position 1: 'int'",
+        )
 
     def test_generic_selection_duplicate_default_association_error(self) -> None:
         unit = TranslationUnit(
@@ -1365,7 +1368,7 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(
             str(ctx.exception),
-            "Duplicate default generic association at position 2: only one default association is allowed",
+            "Duplicate default generic association at position 2: previous default was at position 1; only one default association is allowed",
         )
 
     def test_generic_selection_void_association_type_error(self) -> None:
