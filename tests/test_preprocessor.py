@@ -197,6 +197,7 @@ class PreprocessorTests(unittest.TestCase):
             "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
             "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
             "#if defined(__BYTE_ORDER__)\nint e;\n#endif\n"
+            "#if __INCLUDE_LEVEL__\nint il;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
         )
         result = preprocess_source(
@@ -211,6 +212,7 @@ class PreprocessorTests(unittest.TestCase):
                     "__CHAR_BIT__",
                     "__BYTE_ORDER__",
                     "__ORDER_LITTLE_ENDIAN__",
+                    "__INCLUDE_LEVEL__",
                     "__SIZE_TYPE__",
                 )
             ),
@@ -221,6 +223,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int z;", result.source)
         self.assertNotIn("int c;", result.source)
         self.assertNotIn("int e;", result.source)
+        self.assertNotIn("int il;", result.source)
         self.assertIn("__SIZE_TYPE__ n;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
@@ -756,6 +759,30 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int l = 2 ;", result.source)
         self.assertIn("int m = 42 ;", result.source)
         self.assertEqual(result.line_map[-1], ("mapped.c", 42))
+
+    def test_predefined_include_level_macro_tracks_nested_includes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "leaf.h").write_text("int leaf = __INCLUDE_LEVEL__;\n", encoding="utf-8")
+            (root / "mid.h").write_text(
+                '#include "leaf.h"\nint mid = __INCLUDE_LEVEL__;\n',
+                encoding="utf-8",
+            )
+            source_path = root / "main.c"
+            source_path.write_text('#include "mid.h"\nint top = __INCLUDE_LEVEL__;\n', encoding="utf-8")
+            result = preprocess_source(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+
+        self.assertIn("int leaf = 2 ;", result.source)
+        self.assertIn("int mid = 1 ;", result.source)
+        self.assertIn("int top = 0 ;", result.source)
+
+    def test_cli_undef_removes_predefined_include_level_macro(self) -> None:
+        result = preprocess_source(
+            "int level = __INCLUDE_LEVEL__;\n",
+            filename="main.c",
+            options=FrontendOptions(undefs=("__INCLUDE_LEVEL__",)),
+        )
+        self.assertEqual(result.source, "int level = __INCLUDE_LEVEL__;\n")
 
     def test_predefined_date_and_time_macros_use_translation_start_time(self) -> None:
         with patch("xcc.preprocessor.datetime") as mock_datetime:
