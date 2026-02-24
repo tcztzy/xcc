@@ -2323,7 +2323,7 @@ class Parser:
         first_default_index: int | None = None
         first_default_token: Token | None = None
         association_index = 0
-        parsed_type_positions: dict[TypeSpec, tuple[int, Token, str]] = {}
+        parsed_type_positions: dict[tuple[object, ...], tuple[int, Token, str]] = {}
         while True:
             association_index += 1
             assoc_type: TypeSpec | None
@@ -2351,19 +2351,25 @@ class Parser:
                     association_start_index,
                     association_end_index,
                 )
-                if assoc_type in parsed_type_positions:
-                    previous_index, previous_token, previous_spelling = parsed_type_positions[assoc_type]
+                type_key = self._generic_association_type_key(assoc_type)
+                if type_key in parsed_type_positions:
+                    previous_index, previous_token, previous_spelling = parsed_type_positions[type_key]
                     relationship = "identical"
+                    details = ""
                     if association_type_spelling != previous_spelling:
                         relationship = "canonical-equivalent"
+                        details = (
+                            f" (previous spelling: '{previous_spelling}'; "
+                            f"current spelling: '{association_type_spelling}')"
+                        )
                     raise ParserError(
                         "Duplicate generic type association at position "
                         f"{association_index}: previous {relationship} type association "
                         f"was at position {previous_index} (line {previous_token.line}, "
-                        f"column {previous_token.column})",
+                        f"column {previous_token.column}){details}",
                         association_type_token,
                     )
-                parsed_type_positions[assoc_type] = (
+                parsed_type_positions[type_key] = (
                     association_index,
                     association_type_token,
                     association_type_spelling,
@@ -2429,6 +2435,55 @@ class Parser:
 
     def _format_token_span(self, start: int, end: int) -> str:
         return " ".join(str(token.lexeme) for token in self._tokens[start:end] if token.lexeme is not None)
+
+    def _generic_association_type_key(self, type_spec: TypeSpec) -> tuple[object, ...]:
+        def stable(value: object) -> object:
+            try:
+                hash(value)
+            except TypeError:
+                return repr(value)
+            return value
+
+        def op_key(op: DeclaratorOp) -> tuple[object, ...]:
+            kind, value = op
+            if kind == "arr" and isinstance(value, ArrayDecl):
+                return (
+                    kind,
+                    stable(value.length),
+                    tuple(sorted(value.qualifiers)),
+                    value.has_static_bound,
+                )
+            if kind == "func" and isinstance(value, tuple):
+                params, is_variadic = value
+                param_keys = (
+                    None
+                    if params is None
+                    else tuple(self._generic_association_type_key(param) for param in params)
+                )
+                return (kind, param_keys, is_variadic)
+            return (kind, stable(value))
+
+        return (
+            type_spec.name,
+            tuple(sorted(type_spec.qualifiers)),
+            type_spec.is_atomic,
+            None
+            if type_spec.atomic_target is None
+            else self._generic_association_type_key(type_spec.atomic_target),
+            type_spec.enum_tag,
+            tuple((name, stable(expr)) for name, expr in type_spec.enum_members),
+            type_spec.record_tag,
+            tuple(
+                (
+                    self._generic_association_type_key(member.type_spec),
+                    member.name,
+                    member.alignment,
+                    stable(member.bit_width_expr),
+                )
+                for member in type_spec.record_members
+            ),
+            tuple(op_key(op) for op in type_spec.declarator_ops),
+        )
 
     def _expect(self, kind: TokenKind) -> Token:
         token = self._current()
