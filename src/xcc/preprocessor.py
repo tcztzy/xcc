@@ -55,6 +55,7 @@ _PREDEFINED_MACROS = (
     "__INT_MAX__=2147483647",
     "__LONG_MAX__=9223372036854775807L",
     "__INTMAX_MAX__=9223372036854775807LL",
+    "__INTMAX_C(value)=value##LL",
     "__UCHAR_MAX__=255",
     "__USHRT_MAX__=65535",
     "__UINT_MAX__=4294967295U",
@@ -63,6 +64,7 @@ _PREDEFINED_MACROS = (
     "__PTRDIFF_MAX__=9223372036854775807L",
     "__LONG_LONG_MAX__=9223372036854775807LL",
     "__UINTMAX_MAX__=18446744073709551615ULL",
+    "__UINTMAX_C(value)=value##ULL",
     "__LP64__=1",
     "__CHAR_BIT__=8",
     "__SIZEOF_SHORT__=2",
@@ -91,7 +93,18 @@ _PREDEFINED_MACROS = (
 )
 _PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"})
 _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__"})
-_PREDEFINED_MACRO_NAMES = frozenset(item.split("=", 1)[0] for item in _PREDEFINED_MACROS) | frozenset(
+def _macro_name_from_cli_define(define: str) -> str:
+    head = define.split("=", 1)[0].strip()
+    if "(" not in head:
+        return head
+    open_index = head.find("(")
+    close_index = head.rfind(")")
+    if close_index <= open_index:
+        return head
+    return head[:open_index].strip()
+
+
+_PREDEFINED_MACRO_NAMES = frozenset(_macro_name_from_cli_define(item) for item in _PREDEFINED_MACROS) | frozenset(
     _PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS
 )
 
@@ -803,12 +816,24 @@ class _Preprocessor:
 
     def _parse_cli_define(self, define: str) -> _Macro:
         if "=" in define:
-            name, replacement = define.split("=", 1)
+            head, replacement = define.split("=", 1)
         else:
-            name, replacement = define, "1"
-        if _IDENT_RE.fullmatch(name) is None:
-            raise PreprocessorError(f"Invalid macro definition: {define}", code=_PP_INVALID_MACRO)
-        return _Macro(name, tuple(_tokenize_macro_replacement(replacement.strip())))
+            head, replacement = define, "1"
+
+        parsed_function = _parse_cli_define_head(head)
+        if parsed_function is None:
+            name = head.strip()
+            if _IDENT_RE.fullmatch(name) is None:
+                raise PreprocessorError(f"Invalid macro definition: {define}", code=_PP_INVALID_MACRO)
+            return _Macro(name, tuple(_tokenize_macro_replacement(replacement.strip())))
+
+        name, params, variadic = parsed_function
+        return _Macro(
+            name,
+            tuple(_tokenize_macro_replacement(replacement.strip())),
+            parameters=params,
+            is_variadic=variadic,
+        )
 
     def _require_macro_name(self, body: str, location: _SourceLocation) -> str:
         macro_name = body.strip()
@@ -1019,6 +1044,28 @@ class _Preprocessor:
                 code=_PP_INVALID_DIRECTIVE,
             ) from error
         return line, mapped_filename
+
+
+def _parse_cli_define_head(head: str) -> tuple[str, tuple[str, ...], bool] | None:
+    stripped = head.strip()
+    if "(" not in stripped:
+        return None
+    open_index = stripped.find("(")
+    close_index = stripped.rfind(")")
+    if close_index <= open_index:
+        return None
+    if stripped[close_index + 1 :].strip():
+        return None
+
+    name = stripped[:open_index].strip()
+    if _IDENT_RE.fullmatch(name) is None:
+        return None
+
+    parsed = _parse_macro_parameters(stripped[open_index + 1 : close_index])
+    if parsed is None:
+        return None
+    params, variadic = parsed
+    return name, tuple(params), variadic
 
 
 def _parse_macro_parameters(text: str) -> tuple[list[str], bool] | None:

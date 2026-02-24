@@ -184,6 +184,14 @@ class PreprocessorTests(unittest.TestCase):
         )
         self.assertIn("return 1 ;", result.source)
 
+    def test_cli_define_function_like_macro(self) -> None:
+        result = preprocess_source(
+            "int x = INTMAX_C(12);\n",
+            filename="main.c",
+            options=FrontendOptions(defines=("INTMAX_C(v)=v##LL",)),
+        )
+        self.assertIn("int x = 12LL ;", result.source)
+
     def test_predefined_integer_width_macros(self) -> None:
         source = "#if __INT_WIDTH__ == 32 && __LONG_WIDTH__ > 32\nint x;\n#endif\n"
         result = preprocess_source(source, filename="main.c")
@@ -926,6 +934,8 @@ class PreprocessorTests(unittest.TestCase):
             "int ww = __WCHAR_WIDTH__;\n"
             "int wiw = __WINT_WIDTH__;\n"
             "long iso = __STDC_ISO_10646__;\n"
+            "long long imc = __INTMAX_C(123);\n"
+            "unsigned long long umc = __UINTMAX_C(456);\n"
             "const char *bf = __BASE_FILE__;\n"
             "__SIZE_TYPE__ n;\n"
             "__PTRDIFF_TYPE__ d;\n"
@@ -973,6 +983,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int ww = 32 ;", result.source)
         self.assertIn("int wiw = 32 ;", result.source)
         self.assertIn("long iso = 201706L ;", result.source)
+        self.assertIn("long long imc = 123LL ;", result.source)
+        self.assertIn("unsigned long long umc = 456ULL ;", result.source)
         self.assertIn('const char * bf = "main.c" ;', result.source)
         self.assertIn("unsigned long n ;", result.source)
         self.assertIn("long d ;", result.source)
@@ -1034,6 +1046,14 @@ class PreprocessorTests(unittest.TestCase):
             options=FrontendOptions(undefs=("__COUNTER__",)),
         )
         self.assertEqual(result.source, "int counter = __COUNTER__;\n")
+
+    def test_cli_undef_removes_predefined_intmax_constructor_macros(self) -> None:
+        result = preprocess_source(
+            "int a = __INTMAX_C(7);\nint b = __UINTMAX_C(9);\n",
+            filename="main.c",
+            options=FrontendOptions(undefs=("__INTMAX_C", "__UINTMAX_C")),
+        )
+        self.assertEqual(result.source, "int a = __INTMAX_C(7);\nint b = __UINTMAX_C(9);\n")
 
     def test_cli_undef_removes_predefined_base_file_macro(self) -> None:
         result = preprocess_source(
