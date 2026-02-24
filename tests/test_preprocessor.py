@@ -877,6 +877,15 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("main.c:2: #include", result.include_trace[0])
         self.assertIn("A=1", result.macro_table)
 
+    def test_include_trace_uses_line_mapped_source_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "inc.h").write_text("int x;\n", encoding="utf-8")
+            source = '#line 41 "mapped.c"\n#include "inc.h"\n'
+            result = preprocess_source(source, filename=str(root / "main.c"))
+        self.assertEqual(len(result.include_trace), 1)
+        self.assertIn("mapped.c:41: #include", result.include_trace[0])
+
     def test_translate_expr_to_python_and_tokenizer(self) -> None:
         self.assertEqual(_translate_expr_to_python("A && !B || 1 / 2"), "0 and not 0 or 1 // 2")
         self.assertEqual(_translate_expr_to_python("1UL + 0x10LL"), "u64(1) + 16")

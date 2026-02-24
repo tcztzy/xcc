@@ -625,7 +625,7 @@ class _Preprocessor:
             return _ProcessedText("", ())
         self.include_trace.append(
             _format_include_trace(
-                include_stack[-1],
+                location.filename,
                 location.line,
                 include_name,
                 include_path_text,
