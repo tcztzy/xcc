@@ -169,7 +169,9 @@ def _env_path_list(name: str) -> tuple[str, ...]:
     raw = os.environ.get(name, "")
     if not raw:
         return ()
-    return tuple(part for part in raw.split(os.pathsep) if part)
+    parts = raw.split(os.pathsep)
+    # GCC/Clang treat empty path entries in include env vars as the current working directory.
+    return tuple(part if part else "." for part in parts)
 
 
 def _macro_name_from_cli_define(define: str) -> str:

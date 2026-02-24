@@ -1,4 +1,5 @@
 import io
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -161,6 +162,23 @@ class CliTests(unittest.TestCase):
             path.write_text('#include <inc.h>\nint main(void){return VALUE;}\n', encoding="utf-8")
             with patch.dict("os.environ", {"CPATH": str(cpath_dir)}, clear=False):
                 code, stdout, stderr = self._run_main([str(path)])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(stdout, f"xcc: ok: {path}\n")
+
+    def test_main_cpath_empty_entry_uses_current_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "inc.h").write_text("#define VALUE 37\n", encoding="utf-8")
+            path = root / "ok.c"
+            path.write_text('#include <inc.h>\nint main(void){return VALUE;}\n', encoding="utf-8")
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(root)
+                with patch.dict("os.environ", {"CPATH": f"{os.pathsep}"}, clear=False):
+                    code, stdout, stderr = self._run_main([str(path)])
+            finally:
+                os.chdir(previous_cwd)
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
