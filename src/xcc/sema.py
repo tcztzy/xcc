@@ -1875,7 +1875,10 @@ class Analyzer:
             return
         if isinstance(stmt, NullStmt):
             return
-        raise SemaError(f"Unsupported statement node: {type(stmt).__name__}")
+        node_name = type(stmt).__name__
+        raise SemaError(
+            f"Unsupported statement node: {node_name} (internal sema bug: unexpected AST statement node)"
+        )
 
     def _analyze_expr(self, expr: Expr, scope: Scope) -> Type:
         if isinstance(expr, FloatLiteral):
@@ -2431,7 +2434,10 @@ class Analyzer:
             )
             self._type_map.set(expr, return_type)
             return return_type
-        raise SemaError(f"Unsupported expression node: {type(expr).__name__}")
+        node_name = type(expr).__name__
+        raise SemaError(
+            f"Unsupported expression node: {node_name} (internal sema bug: unexpected AST expression node)"
+        )
 
     def _resolve_call_signature(
         self,
