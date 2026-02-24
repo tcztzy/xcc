@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
 from xcc.lexer import LexerError, TokenKind, lex_pp
 from xcc.options import FrontendOptions, normalize_options
@@ -71,8 +71,9 @@ _PREDEFINED_MACROS = (
     "__FILE__=0",
     "__LINE__=0",
     "__INCLUDE_LEVEL__=0",
+    "__COUNTER__=0",
 )
-_PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__LINE__", "__INCLUDE_LEVEL__"})
+_PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"})
 _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__"})
 _PREDEFINED_MACRO_NAMES = frozenset(item.split("=", 1)[0] for item in _PREDEFINED_MACROS) | frozenset(
     _PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS
@@ -286,6 +287,7 @@ class _Preprocessor:
         translation_start = datetime.now()
         self._date_literal = _quote_string_literal(_format_date_macro(translation_start))
         self._time_literal = _quote_string_literal(translation_start.strftime("%H:%M:%S"))
+        self._counter = 0
         self._macros: dict[str, _Macro] = {}
         for define in _PREDEFINED_MACROS:
             macro = self._parse_cli_define(define)
@@ -599,8 +601,25 @@ class _Preprocessor:
         tokens = _tokenize_macro_text(text)
         if tokens is None:
             return text
-        expanded = _expand_macro_tokens(tokens, self._macros, self._options.std, location)
+        expanded = _expand_macro_tokens(
+            tokens,
+            self._macros,
+            self._options.std,
+            location,
+            dynamic_macro_resolver=self._resolve_dynamic_macro,
+        )
         return _render_macro_tokens(expanded)
+
+    def _resolve_dynamic_macro(self, name: str, location: _SourceLocation) -> _MacroToken:
+        if name == "__LINE__":
+            return _MacroToken(TokenKind.INT_CONST, str(location.line))
+        if name == "__INCLUDE_LEVEL__":
+            return _MacroToken(TokenKind.INT_CONST, str(location.include_level))
+        if name == "__COUNTER__":
+            current = self._counter
+            self._counter += 1
+            return _MacroToken(TokenKind.INT_CONST, str(current))
+        return _MacroToken(TokenKind.STRING_LITERAL, _quote_string_literal(location.filename))
 
     def _handle_undef(self, body: str, location: _SourceLocation) -> None:
         macro_name = self._require_macro_name(body, location)
@@ -1032,6 +1051,7 @@ def _expand_macro_tokens(
     std: str,
     location: _SourceLocation,
     disabled: frozenset[str] = frozenset(),
+    dynamic_macro_resolver: Callable[[str, _SourceLocation], _MacroToken] | None = None,
 ) -> list[_MacroToken]:
     expanded: list[_MacroToken] = []
     index = 0
@@ -1042,14 +1062,10 @@ def _expand_macro_tokens(
             index += 1
             continue
         if token.text in _PREDEFINED_DYNAMIC_MACROS and token.text in macros:
-            if token.text == "__LINE__":
-                expanded.append(_MacroToken(TokenKind.INT_CONST, str(location.line)))
-            elif token.text == "__INCLUDE_LEVEL__":
-                expanded.append(_MacroToken(TokenKind.INT_CONST, str(location.include_level)))
+            if dynamic_macro_resolver is not None:
+                expanded.append(dynamic_macro_resolver(token.text, location))
             else:
-                expanded.append(
-                    _MacroToken(TokenKind.STRING_LITERAL, _quote_string_literal(location.filename))
-                )
+                expanded.append(_MacroToken(TokenKind.INT_CONST, "0"))
             index += 1
             continue
         macro = macros.get(token.text)
@@ -1065,6 +1081,7 @@ def _expand_macro_tokens(
                 std,
                 location,
                 disabled=next_disabled,
+                dynamic_macro_resolver=dynamic_macro_resolver,
             )
             expanded.extend(replacement)
             index += 1
@@ -1082,6 +1099,7 @@ def _expand_macro_tokens(
             std=std,
             location=location,
             disabled=next_disabled,
+            dynamic_macro_resolver=dynamic_macro_resolver,
         )
         replacement = _expand_macro_tokens(
             replacement,
@@ -1089,6 +1107,7 @@ def _expand_macro_tokens(
             std,
             location,
             disabled=next_disabled,
+            dynamic_macro_resolver=dynamic_macro_resolver,
         )
         expanded.extend(replacement)
         index = next_index
@@ -1142,6 +1161,7 @@ def _expand_function_like_macro(
     std: str,
     location: _SourceLocation,
     disabled: frozenset[str],
+    dynamic_macro_resolver: Callable[[str, _SourceLocation], _MacroToken] | None,
 ) -> list[_MacroToken]:
     assert macro.parameters is not None
     expected = len(macro.parameters)
@@ -1164,7 +1184,14 @@ def _expand_function_like_macro(
         )
     raw_named_args = {name: args[index] for index, name in enumerate(macro.parameters)}
     expanded_named_args = {
-        name: _expand_macro_tokens(arg, macros, std, location, disabled=disabled)
+        name: _expand_macro_tokens(
+            arg,
+            macros,
+            std,
+            location,
+            disabled=disabled,
+            dynamic_macro_resolver=dynamic_macro_resolver,
+        )
         for name, arg in raw_named_args.items()
     }
     raw_var_args: list[_MacroToken] = []
@@ -1174,7 +1201,14 @@ def _expand_function_like_macro(
         raw_var_args = _join_macro_arguments(variadic_args)
         expanded_var_args = _join_macro_arguments(
             [
-                _expand_macro_tokens(arg, macros, std, location, disabled=disabled)
+                _expand_macro_tokens(
+                    arg,
+                    macros,
+                    std,
+                    location,
+                    disabled=disabled,
+                    dynamic_macro_resolver=dynamic_macro_resolver,
+                )
                 for arg in variadic_args
             ]
         )

@@ -32,7 +32,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - `#pragma once` include guards are honored so repeated and nested includes of the same header are skipped after the first expansion.
   - `#line` mapping and diagnostic remapping, including macro-expanded decimal/filename operands.
 - **Predefined macro coverage (current)**
-  - `__STDC__`, `__STDC_HOSTED__`, `__STDC_VERSION__`, `__STDC_IEC_559__`, `__STDC_MB_MIGHT_NEQ_WC__`, `__STDC_UTF_16__`, `__STDC_UTF_32__`, `__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`, `__STDC_ISO_10646__`, `__FILE__`, `__LINE__`, `__INCLUDE_LEVEL__`, `__DATE__`, `__TIME__`.
+  - `__STDC__`, `__STDC_HOSTED__`, `__STDC_VERSION__`, `__STDC_IEC_559__`, `__STDC_MB_MIGHT_NEQ_WC__`, `__STDC_UTF_16__`, `__STDC_UTF_32__`, `__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`, `__STDC_ISO_10646__`, `__FILE__`, `__LINE__`, `__INCLUDE_LEVEL__`, `__COUNTER__`, `__DATE__`, `__TIME__`.
   - Target-assumption baseline macros for LP64 little-endian hosts are included and regression-tested (`__LP64__`, `__CHAR_BIT__`, `__SIZEOF_SHORT__`, `__SIZEOF_INT__`, `__SIZEOF_POINTER__`, `__SIZEOF_LONG__`, `__SIZEOF_LONG_LONG__`, `__ORDER_LITTLE_ENDIAN__`, `__ORDER_BIG_ENDIAN__`, `__BYTE_ORDER__`, `__LITTLE_ENDIAN__`, `__BIG_ENDIAN__`, `__FLOAT_WORD_ORDER__`, `__SIZE_TYPE__`, `__PTRDIFF_TYPE__`, `__WCHAR_TYPE__`, `__WINT_TYPE__`, `__WCHAR_WIDTH__`).
   - Integer width/value macros already used by tests.
   - Builtin-only preprocessing preserves original line spelling when a line does not reference a macro (no retokenization side effects from predefined macro setup).
