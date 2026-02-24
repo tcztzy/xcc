@@ -96,7 +96,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("auto int f(void);")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid storage class for function: 'auto'")
+        self.assertEqual(str(ctx.exception), "Invalid storage class for file-scope function declaration: 'auto'")
 
     def test_file_scope_invalid_storage_class_error(self) -> None:
         unit = parse(list(lex("register int g;")))
@@ -197,13 +197,13 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){ static int f(void); return 0; }")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid storage class for function: 'static'")
+        self.assertEqual(str(ctx.exception), "Invalid storage class for block-scope function declaration: 'static'")
 
     def test_block_scope_function_rejects_register_storage_class(self) -> None:
         unit = parse(list(lex("int main(void){ register int f(void); return 0; }")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid storage class for function: 'register'")
+        self.assertEqual(str(ctx.exception), "Invalid storage class for block-scope function declaration: 'register'")
 
     def test_block_scope_function_rejects_thread_local_specifier(self) -> None:
         unit = parse(list(lex("int main(void){ extern _Thread_local int f(void); return 0; }")))
