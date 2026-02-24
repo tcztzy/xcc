@@ -218,6 +218,7 @@ class PreprocessorTests(unittest.TestCase):
             "#if __WCHAR_WIDTH__ == 32\nint ww;\n#endif\n"
             "#if __WINT_WIDTH__ == 32\nint wiw;\n#endif\n"
             "#if defined(__STDC_ISO_10646__)\nint iso;\n#endif\n"
+            "#if defined(__FILE_NAME__)\nint fn;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
             "__WCHAR_TYPE__ w;\n"
         )
@@ -246,6 +247,7 @@ class PreprocessorTests(unittest.TestCase):
                     "__WCHAR_WIDTH__",
                     "__WINT_WIDTH__",
                     "__STDC_ISO_10646__",
+                    "__FILE_NAME__",
                     "__SIZE_TYPE__",
                     "__WCHAR_TYPE__",
                 )
@@ -270,6 +272,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int ww;", result.source)
         self.assertNotIn("int wiw;", result.source)
         self.assertNotIn("int iso;", result.source)
+        self.assertNotIn("int fn;", result.source)
         self.assertIn("__SIZE_TYPE__ n;", result.source)
         self.assertIn("__WCHAR_TYPE__ w;", result.source)
 
@@ -937,6 +940,7 @@ class PreprocessorTests(unittest.TestCase):
             "long long imc = __INTMAX_C(123);\n"
             "unsigned long long umc = __UINTMAX_C(456);\n"
             "const char *bf = __BASE_FILE__;\n"
+            "const char *fn = __FILE_NAME__;\n"
             "__SIZE_TYPE__ n;\n"
             "__PTRDIFF_TYPE__ d;\n"
             "__WCHAR_TYPE__ wc;\n"
@@ -986,6 +990,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("long long imc = 123LL ;", result.source)
         self.assertIn("unsigned long long umc = 456ULL ;", result.source)
         self.assertIn('const char * bf = "main.c" ;', result.source)
+        self.assertIn('const char * fn = "main.c" ;', result.source)
         self.assertIn("unsigned long n ;", result.source)
         self.assertIn("long d ;", result.source)
         self.assertIn("int wc ;", result.source)
@@ -993,15 +998,17 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_predefined_file_and_line_macros(self) -> None:
         result = preprocess_source(
-            'const char *f = __FILE__;\nconst char *b = __BASE_FILE__;\nint l = __LINE__;\n#line 42 "mapped.c"\nint m = __LINE__;\nconst char *bm = __BASE_FILE__;\n',
+            'const char *f = __FILE__;\nconst char *n = __FILE_NAME__;\nconst char *b = __BASE_FILE__;\nint l = __LINE__;\n#line 42 "mapped/path.c"\nint m = __LINE__;\nconst char *nm = __FILE_NAME__;\nconst char *bm = __BASE_FILE__;\n',
             filename="main.c",
         )
         self.assertIn('const char * f = "main.c" ;', result.source)
+        self.assertIn('const char * n = "main.c" ;', result.source)
         self.assertIn('const char * b = "main.c" ;', result.source)
-        self.assertIn("int l = 3 ;", result.source)
+        self.assertIn("int l = 4 ;", result.source)
         self.assertIn("int m = 42 ;", result.source)
+        self.assertIn('const char * nm = "path.c" ;', result.source)
         self.assertIn('const char * bm = "main.c" ;', result.source)
-        self.assertEqual(result.line_map[-1], ("mapped.c", 43))
+        self.assertEqual(result.line_map[-1], ("mapped/path.c", 44))
 
     def test_predefined_include_level_macro_tracks_nested_includes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1062,6 +1069,14 @@ class PreprocessorTests(unittest.TestCase):
             options=FrontendOptions(undefs=("__BASE_FILE__",)),
         )
         self.assertEqual(result.source, "const char *base = __BASE_FILE__;\n")
+
+    def test_cli_undef_removes_predefined_file_name_macro(self) -> None:
+        result = preprocess_source(
+            "const char *name = __FILE_NAME__;\n",
+            filename="main.c",
+            options=FrontendOptions(undefs=("__FILE_NAME__",)),
+        )
+        self.assertEqual(result.source, "const char *name = __FILE_NAME__;\n")
 
     def test_predefined_date_and_time_macros_use_translation_start_time(self) -> None:
         with patch("xcc.preprocessor.datetime") as mock_datetime:

@@ -86,12 +86,15 @@ _PREDEFINED_MACROS = (
     "__WINT_WIDTH__=32",
     "__STDC_ISO_10646__=201706L",
     "__FILE__=0",
+    "__FILE_NAME__=0",
     "__BASE_FILE__=0",
     "__LINE__=0",
     "__INCLUDE_LEVEL__=0",
     "__COUNTER__=0",
 )
-_PREDEFINED_DYNAMIC_MACROS = frozenset({"__FILE__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"})
+_PREDEFINED_DYNAMIC_MACROS = frozenset(
+    {"__FILE__", "__FILE_NAME__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"}
+)
 _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__"})
 def _macro_name_from_cli_define(define: str) -> str:
     head = define.split("=", 1)[0].strip()
@@ -654,6 +657,8 @@ class _Preprocessor:
             current = self._counter
             self._counter += 1
             return _MacroToken(TokenKind.INT_CONST, str(current))
+        if name == "__FILE_NAME__":
+            return _MacroToken(TokenKind.STRING_LITERAL, _quote_string_literal(Path(location.filename).name))
         return _MacroToken(TokenKind.STRING_LITERAL, _quote_string_literal(location.filename))
 
     def _handle_undef(self, body: str, location: _SourceLocation) -> None:

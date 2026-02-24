@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: added predefined dynamic macro `__FILE_NAME__` (GNU-compatible basename of the current logical `__FILE__`) so nested includes and `#line`-remapped filenames now expand to just the leaf name, with regression coverage for expansion and CLI `-U` passthrough behavior.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_predefined_file_and_line_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_file_name_macro tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: added predefined C integer-constructor macros `__INTMAX_C(value)` and `__UINTMAX_C(value)` with token-pasting suffix expansion (`##LL`/`##ULL`) and wired CLI `-D` parsing to accept function-like definitions (`NAME(args)=...`) in addition to object-like defines.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_cli_define_function_like_macro tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_intmax_constructor_macros -q` (pass).
   - Iteration 3 slice: added GNU-compatible predefined dynamic macro `__BASE_FILE__`, wired it to always expand to the primary translation-unit filename (including inside nested includes and after `#line` remapping), and added focused regression coverage for expansion plus CLI `-U` removal behavior.
