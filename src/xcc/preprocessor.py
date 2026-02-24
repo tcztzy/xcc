@@ -817,6 +817,7 @@ class _Preprocessor:
             search_roots.extend(Path(path) for path in self._options.quote_include_dirs)
         search_roots.extend(Path(path) for path in self._options.include_dirs)
         search_roots.extend(Path(path) for path in self._options.system_include_dirs)
+        search_roots.extend(Path(path) for path in self._options.after_include_dirs)
 
         start_index = 0
         if include_next_from is not None:

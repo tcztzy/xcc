@@ -150,6 +150,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
 
+    def test_main_idirafter_option(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            after_dir = root / "after"
+            after_dir.mkdir()
+            (after_dir / "inc.h").write_text("#define VALUE 9\n", encoding="utf-8")
+            path = root / "ok.c"
+            path.write_text('#include <inc.h>\nint main(void){return VALUE;}\n', encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "-idirafter", str(after_dir)])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(stdout, f"xcc: ok: {path}\n")
+
     def test_main_undef_option(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "bad.c"
