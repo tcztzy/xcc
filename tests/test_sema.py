@@ -1366,19 +1366,25 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){return _Generic(0, void: 1, default: 2);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid generic association type")
+        self.assertEqual(str(ctx.exception), "Invalid generic association type: void type")
+
+    def test_generic_selection_atomic_association_type_error(self) -> None:
+        unit = parse(list(lex("int main(void){return _Generic(0, _Atomic(void): 1, default: 2);}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Invalid generic association type: atomic type")
 
     def test_generic_selection_incomplete_record_association_type_error(self) -> None:
         unit = parse(list(lex("struct S; int main(void){return _Generic(0, struct S: 1, default: 2);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid generic association type")
+        self.assertEqual(str(ctx.exception), "Invalid generic association type: incomplete type")
 
     def test_generic_selection_vla_association_type_error(self) -> None:
         unit = parse(list(lex("int f(int n){return _Generic(0, int[n]: 1, default: 2);}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid generic association type")
+        self.assertEqual(str(ctx.exception), "Invalid generic association type: variably modified type")
 
     def test_generic_selection_pointer_to_incomplete_record_association_ok(self) -> None:
         unit = parse(
