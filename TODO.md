@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined LP64 signed integer range assumptions with missing narrow-family minimum macros (`__SCHAR_MIN__`, `__SHRT_MIN__`, `__INT_MIN__`) so preprocessing now exposes both max/min bounds consistently across signed integer families; added regression coverage for standard expansion and CLI `-U` removal behavior.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: removed parser's silent acceptance of trailing `_Complex` type specifiers (`float _Complex`, `double _Complex`, `long double _Complex`, and integer-base forms) so complex types are now rejected consistently with the existing unsupported `_Complex` baseline, and added parser regressions for both declaration and `sizeof(type-name)` diagnostic contexts.
   - Checks: `uv run python -m unittest tests.test_parser.ParserTests.test_complex_specifier_is_rejected_after_floating_base_type tests.test_parser.ParserTests.test_complex_specifier_requires_floating_base_type tests.test_parser.ParserTests.test_complex_specifier_is_rejected_after_integer_base_type tests.test_parser.ParserTests.test_unsupported_type_uses_declaration_context_diagnostic tests.test_parser.ParserTests.test_unsupported_type_uses_type_name_context_diagnostic tests.test_parser.ParserTests.test_unsupported_trailing_complex_type_uses_type_name_context_diagnostic -q` (pass).
   - Checks: `uv run python -m unittest tests.test_parser -q` (pass).

@@ -220,6 +220,9 @@ class PreprocessorTests(unittest.TestCase):
             "#if __INTMAX_MIN__ < 0\nint imm;\n#endif\n"
             "#if __LONG_LONG_MIN__ < 0\nint llm;\n#endif\n"
             "#if __LONG_MIN__ < 0\nint lm;\n#endif\n"
+            "#if __SCHAR_MIN__ < 0\nint scm;\n#endif\n"
+            "#if __SHRT_MIN__ < 0\nint shm;\n#endif\n"
+            "#if __INT_MIN__ < 0\nint imn;\n#endif\n"
             "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
             "#if defined(__BYTE_ORDER__)\nint e;\n#endif\n"
             "#if defined(__LITTLE_ENDIAN__)\nint le;\n#endif\n"
@@ -262,6 +265,9 @@ class PreprocessorTests(unittest.TestCase):
                     "__INTMAX_MIN__",
                     "__LONG_LONG_MIN__",
                     "__LONG_MIN__",
+                    "__SCHAR_MIN__",
+                    "__SHRT_MIN__",
+                    "__INT_MIN__",
                     "__CHAR_BIT__",
                     "__BYTE_ORDER__",
                     "__LITTLE_ENDIAN__",
@@ -302,6 +308,9 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int imm;", result.source)
         self.assertNotIn("int llm;", result.source)
         self.assertNotIn("int lm;", result.source)
+        self.assertNotIn("int scm;", result.source)
+        self.assertNotIn("int shm;", result.source)
+        self.assertNotIn("int imn;", result.source)
         self.assertNotIn("int c;", result.source)
         self.assertNotIn("int e;", result.source)
         self.assertNotIn("int le;", result.source)
@@ -957,8 +966,11 @@ class PreprocessorTests(unittest.TestCase):
             "int imw = __INTMAX_WIDTH__;\n"
             "int umw = __UINTMAX_WIDTH__;\n"
             "int scmax = __SCHAR_MAX__;\n"
+            "int scmin = __SCHAR_MIN__;\n"
             "int shmax = __SHRT_MAX__;\n"
+            "int shmin = __SHRT_MIN__;\n"
             "int imax = __INT_MAX__;\n"
+            "int imin = __INT_MIN__;\n"
             "long lmax = __LONG_MAX__;\n"
             "long lmin = __LONG_MIN__;\n"
             "unsigned int ucmax = __UCHAR_MAX__;\n"
@@ -1024,8 +1036,11 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int imw = 64 ;", result.source)
         self.assertIn("int umw = 64 ;", result.source)
         self.assertIn("int scmax = 127 ;", result.source)
+        self.assertIn("int scmin = - 128 ;", result.source)
         self.assertIn("int shmax = 32767 ;", result.source)
+        self.assertIn("int shmin = - 32768 ;", result.source)
         self.assertIn("int imax = 2147483647 ;", result.source)
+        self.assertIn("int imin = - 2147483648 ;", result.source)
         self.assertIn("long lmax = 9223372036854775807L ;", result.source)
         self.assertIn("long lmin = - 9223372036854775808L ;", result.source)
         self.assertIn("unsigned int ucmax = 255 ;", result.source)
