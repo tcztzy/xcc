@@ -925,10 +925,16 @@ class Analyzer:
     def _is_invalid_alignof_type(self, type_: Type) -> bool:
         return self._invalid_alignof_operand_reason_for_type(type_) is not None
 
+    def _invalid_generic_association_type_reason(self, type_spec: TypeSpec) -> str | None:
+        sizeof_reason = self._invalid_sizeof_operand_reason_for_type_spec(type_spec)
+        if sizeof_reason is not None:
+            return sizeof_reason
+        if self._is_variably_modified_type_spec(type_spec):
+            return "variably modified type"
+        return None
+
     def _is_invalid_generic_association_type_spec(self, type_spec: TypeSpec) -> bool:
-        return self._is_invalid_sizeof_type_spec(type_spec) or self._is_variably_modified_type_spec(
-            type_spec
-        )
+        return self._invalid_generic_association_type_reason(type_spec) is not None
 
     def _is_variably_modified_type_spec(self, type_spec: TypeSpec) -> bool:
         for kind, value in type_spec.declarator_ops:
@@ -2135,8 +2141,13 @@ class Analyzer:
                     self._analyze_expr(assoc_expr, scope)
                     continue
                 self._register_type_spec(assoc_type_spec)
-                if self._is_invalid_generic_association_type_spec(assoc_type_spec):
-                    raise SemaError("Invalid generic association type")
+                invalid_assoc_reason = self._invalid_generic_association_type_reason(
+                    assoc_type_spec
+                )
+                if invalid_assoc_reason is not None:
+                    raise SemaError(
+                        f"Invalid generic association type: {invalid_assoc_reason}"
+                    )
                 assoc_type = self._resolve_type(assoc_type_spec)
                 if assoc_type in seen_types:
                     raise SemaError("Duplicate generic association type")
