@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined GCC-compatibility atomics/synchronization macro coverage with memory-order constants (`__ATOMIC_RELAXED`..`__ATOMIC_SEQ_CST`), lock-free capability macros (`__GCC_ATOMIC_{BOOL,CHAR,SHORT,INT,LONG,LLONG,POINTER}_LOCK_FREE`), and compare-and-swap feature macros (`__GCC_HAVE_SYNC_COMPARE_AND_SWAP_{1,2,4,8}`); added focused expansion + CLI `-U` regression tests and updated frontend coverage docs.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_atomic_and_sync_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_atomic_and_sync_macros -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: aligned sema file-scope declaration fallback diagnostics with existing unexpected-AST fallback style by marking unsupported top-level declaration nodes as internal semantic bugs (`Unsupported file-scope declaration node: <Node> (internal sema bug: unexpected AST file-scope declaration node)`), added focused sema regression coverage, and documented the fallback scope in frontend diagnostics notes.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_unsupported_file_scope_declaration_node_error -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).
