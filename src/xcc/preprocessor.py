@@ -1141,7 +1141,7 @@ class _Preprocessor:
                 cursor += 1
             if cursor >= len(expr) or expr[cursor] != "(":
                 raise PreprocessorError(
-                    f"Invalid {marker} expression",
+                    f"Invalid {marker} expression: expected '(' after operator",
                     location.line,
                     1,
                     filename=location.filename,
@@ -1150,7 +1150,7 @@ class _Preprocessor:
             close_paren = self._find_matching_has_include_close(expr, cursor)
             if close_paren < 0:
                 raise PreprocessorError(
-                    f"Invalid {marker} expression",
+                    f"Invalid {marker} expression: missing closing ')'",
                     location.line,
                     1,
                     filename=location.filename,
@@ -1159,7 +1159,7 @@ class _Preprocessor:
             operand = expr[cursor + 1 : close_paren].strip()
             if not operand:
                 raise PreprocessorError(
-                    f"Invalid {marker} expression",
+                    f"Invalid {marker} expression: missing header operand",
                     location.line,
                     1,
                     filename=location.filename,
@@ -1169,7 +1169,7 @@ class _Preprocessor:
                 include_name, is_angled = self._parse_header_name_operand(operand, location)
             except PreprocessorError as error:
                 raise PreprocessorError(
-                    f"Invalid {marker} expression",
+                    f"Invalid {marker} expression: header operand must be quoted or angled",
                     location.line,
                     1,
                     filename=location.filename,
