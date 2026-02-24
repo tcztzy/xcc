@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded LP64 predefined integer type assumptions with fast-width aliases (`__INT_FAST{8,16,32,64}_TYPE__`, `__UINT_FAST{8,16,32,64}_TYPE__`) so projects depending on GCC/Clang fast-family spellings preprocess consistently; added regression coverage for standard macro expansion and CLI `-U` passthrough behavior, and updated frontend coverage docs.
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
+  - Checks: `.venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: expanded curated clang parser fixture coverage for non-digraph expression-start operand diagnostics in statement-adjacent contexts by adding dedicated local fixtures for `)`/`,`/`:`/`?` after `return`, `;` after initializer `=`, and `{` after `return`; wired all six into the clang manifest with stage/message/line/column expectations and checksums.
   - Checks: `.venv/bin/python - <<'PY' ...` (targeted manifest validation for `parser-xcc-expr-start-{rparen,comma,colon,question}-after-return`, `parser-xcc-expr-start-semicolon-after-initializer`, and `parser-xcc-expr-start-lbrace-after-return`: checksum + frontend stage/message/line/column assertions; pass).
   - Iteration 3 slice: expanded predefined LP64 fixed-width integer type assumptions with GCC-style type macros (`__INT8_TYPE__`, `__INT16_TYPE__`, `__INT32_TYPE__`, `__INT64_TYPE__`, `__UINT8_TYPE__`, `__UINT16_TYPE__`, `__UINT32_TYPE__`, `__UINT64_TYPE__`) plus least-width aliases (`__INT_LEAST{8,16,32,64}_TYPE__`, `__UINT_LEAST{8,16,32,64}_TYPE__`), and extended regression coverage in both standard macro expansion and CLI `-U` override paths.
