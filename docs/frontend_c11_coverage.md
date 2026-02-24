@@ -17,7 +17,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
   - GNU `#elifdef` / `#elifndef` conditional directives.
 - **Parser diagnostic hardening (ongoing)**
   - Type-name contexts now reject accidental declarator identifiers with an explicit diagnostic (`Type name cannot declare identifier '...'`) in cast and `_Atomic(type-name)` parsing.
-  - `_Alignas(...)` operand validation now reports operand-specific diagnostics for non-object type operands, non-ICE expression operands, non-positive values, and non-power-of-two values.
+  - `_Alignas(...)` operand validation now reports operand-specific diagnostics under a shared `Invalid alignment specifier: ...` prefix for non-object type operands, non-ICE expression operands, non-positive values, and non-power-of-two values.
 - **Sema diagnostic hardening (ongoing)**
   - Function declarations/definitions using `_Thread_local` now emit a declaration-context-specific diagnostic (`Invalid declaration specifier for function declaration: '_Thread_local'`) instead of a generic specifier error.
   - Compound literals now report context-aware invalid object-type diagnostics (`Invalid object type for compound literal: ...`) for `void`, incomplete record, and invalid `_Atomic(...)` object types.

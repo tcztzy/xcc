@@ -2708,19 +2708,27 @@ class Parser:
             self._expect_punct(")")
             alignment = self._alignof_type_spec(type_spec)
             if alignment is None:
-                raise ParserError("_Alignas type operand must denote an object type", token)
+                raise ParserError(
+                    "Invalid alignment specifier: _Alignas type operand must denote an object type",
+                    token,
+                )
             return alignment
         expr = self._parse_conditional()
         alignment = self._eval_array_size_expr(expr)
         if alignment is None:
             raise ParserError(
-                "_Alignas expression operand must be an integer constant expression", token
+                "Invalid alignment specifier: _Alignas expression operand must be an integer constant expression",
+                token,
             )
         if alignment <= 0:
-            raise ParserError("_Alignas expression operand must be positive", token)
+            raise ParserError(
+                "Invalid alignment specifier: _Alignas expression operand must be positive",
+                token,
+            )
         if (alignment & (alignment - 1)) != 0:
             raise ParserError(
-                "_Alignas expression operand must evaluate to a power of two", token
+                "Invalid alignment specifier: _Alignas expression operand must evaluate to a power of two",
+                token,
             )
         self._expect_punct(")")
         return alignment
