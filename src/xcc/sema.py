@@ -2244,17 +2244,28 @@ class Analyzer:
                     self._analyze_expr(assoc_expr, scope)
                     continue
                 self._register_type_spec(assoc_type_spec)
-                invalid_assoc_reason = self._invalid_generic_association_type_reason(
-                    assoc_type_spec
-                )
-                if invalid_assoc_reason is not None:
-                    raise SemaError(
-                        f"Invalid generic association type: {invalid_assoc_reason}"
-                    )
                 assoc_type = self._resolve_type(assoc_type_spec)
                 assoc_type_label = self._describe_generic_association_type(
                     assoc_type_spec, assoc_type
                 )
+                invalid_assoc_reason = self._invalid_generic_association_type_reason(
+                    assoc_type_spec
+                )
+                if invalid_assoc_reason is not None:
+                    location_suffix = ""
+                    if (
+                        assoc_type_spec.source_line is not None
+                        and assoc_type_spec.source_column is not None
+                    ):
+                        location_suffix = (
+                            f" at line {assoc_type_spec.source_line}, "
+                            f"column {assoc_type_spec.source_column}"
+                        )
+                    raise SemaError(
+                        "Invalid generic association type at position "
+                        f"{association_index} ('{assoc_type_label}')"
+                        f"{location_suffix}: {invalid_assoc_reason}"
+                    )
                 previous_assoc = seen_type_associations.get(assoc_type)
                 if previous_assoc is not None:
                     previous_assoc_index, previous_assoc_label, previous_assoc_location = previous_assoc
