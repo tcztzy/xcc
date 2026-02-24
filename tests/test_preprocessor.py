@@ -780,6 +780,53 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int from_include;\n")
 
+    def test_include_quoted_uses_cpath_when_include_dirs_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            cpath_dir = root / "cpath"
+            source_dir.mkdir()
+            cpath_dir.mkdir()
+            (cpath_dir / "inc.h").write_text("int from_cpath;\n", encoding="utf-8")
+            main = source_dir / "main.c"
+            main.write_text('#include "inc.h"\n', encoding="utf-8")
+            with patch.dict("os.environ", {"CPATH": str(cpath_dir)}, clear=False):
+                result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main))
+        self.assertEqual(result.source, "int from_cpath;\n")
+
+    def test_include_angle_prefers_include_dirs_over_cpath(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            include_dir = root / "include"
+            cpath_dir = root / "cpath"
+            include_dir.mkdir()
+            cpath_dir.mkdir()
+            (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
+            (cpath_dir / "inc.h").write_text("int from_cpath;\n", encoding="utf-8")
+            options = FrontendOptions(include_dirs=(str(include_dir),))
+            with patch.dict("os.environ", {"CPATH": str(cpath_dir)}, clear=False):
+                result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_include;\n")
+
+    def test_include_angle_uses_c_include_path_after_system_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            system_dir = root / "sys"
+            c_include_dir = root / "c_include"
+            after_dir = root / "after"
+            system_dir.mkdir()
+            c_include_dir.mkdir()
+            after_dir.mkdir()
+            (c_include_dir / "inc.h").write_text("int from_c_include_path;\n", encoding="utf-8")
+            (after_dir / "inc.h").write_text("int from_after;\n", encoding="utf-8")
+            options = FrontendOptions(
+                system_include_dirs=(str(system_dir),),
+                after_include_dirs=(str(after_dir),),
+            )
+            with patch.dict("os.environ", {"C_INCLUDE_PATH": str(c_include_dir)}, clear=False):
+                result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_c_include_path;\n")
+
     def test_include_angle_prefers_system_dirs_over_idirafter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -1,4 +1,5 @@
 import ast
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -136,6 +137,15 @@ _GNU_MODE_PREDEFINED_MACROS = (
     "__GNUC_PATCHLEVEL__=1",
     '__VERSION__="xcc gnu11"',
 )
+
+
+def _env_path_list(name: str) -> tuple[str, ...]:
+    raw = os.environ.get(name, "")
+    if not raw:
+        return ()
+    return tuple(part for part in raw.split(os.pathsep) if part)
+
+
 def _macro_name_from_cli_define(define: str) -> str:
     head = define.split("=", 1)[0].strip()
     if "(" not in head:
@@ -397,6 +407,8 @@ class _Preprocessor:
                 raise PreprocessorError(f"Invalid macro name in -U: {name}")
             self._macros.pop(name, None)
         self.macro_table = self._macros
+        self._cpath_include_dirs = _env_path_list("CPATH")
+        self._c_include_path_dirs = _env_path_list("C_INCLUDE_PATH")
 
     def process(self, source: str, *, filename: str) -> _ProcessedText:
         self._base_filename = filename
@@ -1019,7 +1031,9 @@ class _Preprocessor:
             search_roots.append(base_dir)
             search_roots.extend(Path(path) for path in self._options.quote_include_dirs)
         search_roots.extend(Path(path) for path in self._options.include_dirs)
+        search_roots.extend(Path(path) for path in self._cpath_include_dirs)
         search_roots.extend(Path(path) for path in self._options.system_include_dirs)
+        search_roots.extend(Path(path) for path in self._c_include_path_dirs)
         search_roots.extend(Path(path) for path in self._options.after_include_dirs)
 
         start_index = 0
