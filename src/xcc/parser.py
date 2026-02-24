@@ -2323,7 +2323,7 @@ class Parser:
         first_default_index: int | None = None
         first_default_token: Token | None = None
         association_index = 0
-        parsed_type_positions: dict[TypeSpec, tuple[int, Token]] = {}
+        parsed_type_positions: dict[TypeSpec, tuple[int, Token, str]] = {}
         while True:
             association_index += 1
             assoc_type: TypeSpec | None
@@ -2343,18 +2343,31 @@ class Parser:
                 self._advance()
                 assoc_type = None
             else:
+                association_start_index = self._index
                 association_type_token = self._current()
                 assoc_type = self._parse_type_name()
+                association_end_index = self._index
+                association_type_spelling = self._format_token_span(
+                    association_start_index,
+                    association_end_index,
+                )
                 if assoc_type in parsed_type_positions:
-                    previous_index, previous_token = parsed_type_positions[assoc_type]
+                    previous_index, previous_token, previous_spelling = parsed_type_positions[assoc_type]
+                    relationship = "identical"
+                    if association_type_spelling != previous_spelling:
+                        relationship = "canonical-equivalent"
                     raise ParserError(
                         "Duplicate generic type association at position "
-                        f"{association_index}: previous identical type association "
+                        f"{association_index}: previous {relationship} type association "
                         f"was at position {previous_index} (line {previous_token.line}, "
                         f"column {previous_token.column})",
                         association_type_token,
                     )
-                parsed_type_positions[assoc_type] = (association_index, association_type_token)
+                parsed_type_positions[assoc_type] = (
+                    association_index,
+                    association_type_token,
+                    association_type_spelling,
+                )
             self._expect_punct(":")
             associations.append((assoc_type, self._parse_assignment()))
             if not self._check_punct(","):
@@ -2413,6 +2426,9 @@ class Parser:
 
     def _previous(self) -> Token:
         return self._tokens[self._index - 1]
+
+    def _format_token_span(self, start: int, end: int) -> str:
+        return " ".join(str(token.lexeme) for token in self._tokens[start:end] if token.lexeme is not None)
 
     def _expect(self, kind: TokenKind) -> Token:
         token = self._current()
