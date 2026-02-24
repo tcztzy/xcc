@@ -95,7 +95,7 @@ _PREDEFINED_MACROS = (
 _PREDEFINED_DYNAMIC_MACROS = frozenset(
     {"__FILE__", "__FILE_NAME__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"}
 )
-_PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__"})
+_PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__", "__TIMESTAMP__"})
 def _macro_name_from_cli_define(define: str) -> str:
     head = define.split("=", 1)[0].strip()
     if "(" not in head:
@@ -321,6 +321,7 @@ class _Preprocessor:
         translation_start = datetime.now()
         self._date_literal = _quote_string_literal(_format_date_macro(translation_start))
         self._time_literal = _quote_string_literal(translation_start.strftime("%H:%M:%S"))
+        self._timestamp_literal = _quote_string_literal(_format_timestamp_macro(translation_start))
         self._counter = 0
         self._base_filename = "<input>"
         self._macros: dict[str, _Macro] = {}
@@ -334,6 +335,10 @@ class _Preprocessor:
         self._macros["__TIME__"] = _Macro(
             "__TIME__",
             (_MacroToken(TokenKind.STRING_LITERAL, self._time_literal),),
+        )
+        self._macros["__TIMESTAMP__"] = _Macro(
+            "__TIMESTAMP__",
+            (_MacroToken(TokenKind.STRING_LITERAL, self._timestamp_literal),),
         )
         self.include_trace: list[str] = []
         self._pragma_once_files: set[str] = set()
@@ -1838,6 +1843,25 @@ def _format_date_macro(now: datetime) -> str:
         "Dec",
     )[now.month - 1]
     return f"{month} {now.day:2d} {now.year:04d}"
+
+
+def _format_timestamp_macro(now: datetime) -> str:
+    weekday = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[now.weekday()]
+    month = (
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+    )[now.month - 1]
+    return f"{weekday} {month} {now.day:2d} {now:%H:%M:%S} {now.year:04d}"
 
 
 def _reject_gnu_asm_extensions(
