@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: implemented `-iquote` include path support end-to-end (CLI/options/preprocessor) so quoted includes now search source directory, then `-iquote`, then `-I`/`-isystem`, while angle includes continue to skip source/`-iquote`; added focused preprocessor and CLI regressions for quoted/angle precedence behavior.
+  - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_include_quoted_prefers_quote_include_dirs_over_include_dirs tests.test_preprocessor.PreprocessorTests.test_include_angle_ignores_quote_include_dirs tests.test_cli.CliTests.test_main_iquote_option tests.test_options -q` (pass).
   - Iteration 3 slice: made sema typedef atomic-type diagnostics declaration-context-specific by replacing generic `Invalid atomic type` errors with scope-aware messages (`Invalid atomic type for file-scope typedef declaration` / `Invalid atomic type for block-scope typedef declaration`), and updated focused sema regressions for both typedef contexts.
   - Checks: `.venv/bin/python -m unittest tests.test_sema.SemaTests.test_atomic_invalid_typedef_type_error tests.test_sema.SemaTests.test_atomic_invalid_block_typedef_type_error -q` (pass).
   - Checks: `.venv/bin/python -m unittest tests.test_sema -q` (pass).

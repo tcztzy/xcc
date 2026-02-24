@@ -137,6 +137,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
 
+    def test_main_iquote_option(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            quote_dir = root / "quote"
+            quote_dir.mkdir()
+            (quote_dir / "inc.h").write_text("#define VALUE 7\n", encoding="utf-8")
+            path = root / "ok.c"
+            path.write_text('#include "inc.h"\nint main(void){return VALUE;}\n', encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "-iquote", str(quote_dir)])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(stdout, f"xcc: ok: {path}\n")
+
     def test_main_undef_option(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "bad.c"

@@ -9,6 +9,7 @@ StdMode = Literal["c11", "gnu11"]
 class FrontendOptions:
     std: StdMode = "c11"
     include_dirs: tuple[str, ...] = ()
+    quote_include_dirs: tuple[str, ...] = ()
     system_include_dirs: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
     undefs: tuple[str, ...] = ()
