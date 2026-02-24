@@ -217,6 +217,10 @@ class PreprocessorTests(unittest.TestCase):
             "#if __INCLUDE_LEVEL__\nint il;\n#endif\n"
             "#if __WCHAR_WIDTH__ == 32\nint ww;\n#endif\n"
             "#if __WINT_WIDTH__ == 32\nint wiw;\n#endif\n"
+            "#if __WCHAR_MAX__ > 0\nint wmax;\n#endif\n"
+            "#if __WCHAR_MIN__ < 0\nint wmin;\n#endif\n"
+            "#if __WINT_MAX__ > 0\nint wimax;\n#endif\n"
+            "#if defined(__WINT_MIN__)\nint wimin;\n#endif\n"
             "#if defined(__STDC_ISO_10646__)\nint iso;\n#endif\n"
             "#if defined(__FILE_NAME__)\nint fn;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
@@ -246,6 +250,10 @@ class PreprocessorTests(unittest.TestCase):
                     "__INCLUDE_LEVEL__",
                     "__WCHAR_WIDTH__",
                     "__WINT_WIDTH__",
+                    "__WCHAR_MAX__",
+                    "__WCHAR_MIN__",
+                    "__WINT_MAX__",
+                    "__WINT_MIN__",
                     "__STDC_ISO_10646__",
                     "__FILE_NAME__",
                     "__SIZE_TYPE__",
@@ -271,6 +279,10 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int il;", result.source)
         self.assertNotIn("int ww;", result.source)
         self.assertNotIn("int wiw;", result.source)
+        self.assertNotIn("int wmax;", result.source)
+        self.assertNotIn("int wmin;", result.source)
+        self.assertNotIn("int wimax;", result.source)
+        self.assertNotIn("int wimin;", result.source)
         self.assertNotIn("int iso;", result.source)
         self.assertNotIn("int fn;", result.source)
         self.assertIn("__SIZE_TYPE__ n;", result.source)
@@ -936,6 +948,10 @@ class PreprocessorTests(unittest.TestCase):
             "int fwo = __FLOAT_WORD_ORDER__;\n"
             "int ww = __WCHAR_WIDTH__;\n"
             "int wiw = __WINT_WIDTH__;\n"
+            "int wmax = __WCHAR_MAX__;\n"
+            "int wmin = __WCHAR_MIN__;\n"
+            "unsigned int wimax = __WINT_MAX__;\n"
+            "unsigned int wimin = __WINT_MIN__;\n"
             "long iso = __STDC_ISO_10646__;\n"
             "long long imc = __INTMAX_C(123);\n"
             "unsigned long long umc = __UINTMAX_C(456);\n"
@@ -986,6 +1002,10 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int fwo = 1234 ;", result.source)
         self.assertIn("int ww = 32 ;", result.source)
         self.assertIn("int wiw = 32 ;", result.source)
+        self.assertIn("int wmax = 2147483647 ;", result.source)
+        self.assertIn("int wmin = - 2147483648 ;", result.source)
+        self.assertIn("unsigned int wimax = 4294967295U ;", result.source)
+        self.assertIn("unsigned int wimin = 0U ;", result.source)
         self.assertIn("long iso = 201706L ;", result.source)
         self.assertIn("long long imc = 123LL ;", result.source)
         self.assertIn("unsigned long long umc = 456ULL ;", result.source)
