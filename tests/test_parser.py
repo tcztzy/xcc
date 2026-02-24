@@ -152,15 +152,19 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(func.return_type, TypeSpec("double"))
         self.assertEqual(func.params, [Param(TypeSpec("float"), "x"), Param(TypeSpec("long double"), "y")])
 
-    def test_complex_specifier_is_ignored_in_type_spec(self) -> None:
-        unit = parse(list(lex("float _Complex cabsf(float _Complex x);")))
-        func = unit.functions[0]
-        self.assertEqual(func.return_type, TypeSpec("float"))
-        self.assertEqual(func.params, [Param(TypeSpec("float"), "x")])
+    def test_complex_specifier_is_rejected_after_floating_base_type(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("float _Complex cabsf(float _Complex x);")))
+        self.assertEqual(ctx.exception.message, "Unsupported declaration type: '_Complex'")
 
     def test_complex_specifier_requires_floating_base_type(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(void){_Complex int x; return 0;}")))
+
+    def test_complex_specifier_is_rejected_after_integer_base_type(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int _Complex x;")))
+        self.assertEqual(ctx.exception.message, "Unsupported declaration type: '_Complex'")
 
     def test_extension_marker_allows_file_scope_typedef(self) -> None:
         source = "__extension__ typedef struct { long long int quot; long long int rem; } lldiv_t;"
@@ -1256,6 +1260,11 @@ class ParserTests(unittest.TestCase):
     def test_unsupported_type_uses_type_name_context_diagnostic(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){ return sizeof(_Complex int); }")))
+        self.assertEqual(ctx.exception.message, "Unsupported type name: '_Complex'")
+
+    def test_unsupported_trailing_complex_type_uses_type_name_context_diagnostic(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){ return sizeof(float _Complex); }")))
         self.assertEqual(ctx.exception.message, "Unsupported type name: '_Complex'")
 
     def test_unknown_identifier_type_uses_declaration_context_diagnostic(self) -> None:
