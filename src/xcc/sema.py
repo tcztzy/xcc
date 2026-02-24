@@ -2239,10 +2239,20 @@ class Analyzer:
                 if assoc_type_spec is None:
                     if default_expr is not None and default_association_index is not None:
                         previous_default_location = None
+                        current_default_location = None
                         if default_association_index <= len(expr.association_source_locations):
                             previous_default_location = expr.association_source_locations[
                                 default_association_index - 1
                             ]
+                        if association_index <= len(expr.association_source_locations):
+                            current_default_location = expr.association_source_locations[
+                                association_index - 1
+                            ]
+                        current_location_suffix = ""
+                        if current_default_location is not None:
+                            line, column = current_default_location
+                            if line is not None and column is not None:
+                                current_location_suffix = f" at line {line}, column {column}"
                         location_suffix = ""
                         if previous_default_location is not None:
                             line, column = previous_default_location
@@ -2250,7 +2260,7 @@ class Analyzer:
                                 location_suffix = f" at line {line}, column {column}"
                         raise SemaError(
                             "Duplicate default generic association at position "
-                            f"{association_index}: previous default was at position "
+                            f"{association_index}{current_location_suffix}: previous default was at position "
                             f"{default_association_index}{location_suffix}; only one default "
                             "association is allowed"
                         )
@@ -2284,12 +2294,22 @@ class Analyzer:
                 previous_assoc = seen_type_associations.get(assoc_type)
                 if previous_assoc is not None:
                     previous_assoc_index, previous_assoc_label, previous_assoc_location = previous_assoc
+                    current_location_suffix = ""
+                    if (
+                        assoc_type_spec.source_line is not None
+                        and assoc_type_spec.source_column is not None
+                    ):
+                        current_location_suffix = (
+                            f" at line {assoc_type_spec.source_line}, "
+                            f"column {assoc_type_spec.source_column}"
+                        )
                     location_suffix = ""
                     if previous_assoc_location is not None:
                         location_suffix = f" at {previous_assoc_location}"
                     raise SemaError(
                         "Duplicate generic association type at position "
-                        f"{association_index} ('{assoc_type_label}'): previous compatible "
+                        f"{association_index}{current_location_suffix} ('{assoc_type_label}')"
+                        ": previous compatible "
                         f"type was at position {previous_assoc_index}{location_suffix} "
                         f"('{previous_assoc_label}')"
                     )
