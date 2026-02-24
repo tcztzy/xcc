@@ -822,6 +822,42 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source('#include "inc.h"\n', filename=str(main), options=options)
         self.assertEqual(result.source, "int from_include;\nint from_source;\n")
 
+    def test_include_next_skips_later_duplicate_of_current_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first_dir = root / "first"
+            second_dir = root / "second"
+            first_alias = root / "first_alias"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            first_alias.symlink_to(first_dir, target_is_directory=True)
+            (first_dir / "inc.h").write_text('#include_next "inc.h"\nint from_first;\n', encoding="utf-8")
+            (second_dir / "inc.h").write_text("int from_second;\n", encoding="utf-8")
+            options = FrontendOptions(
+                std="gnu11",
+                include_dirs=(str(first_dir), str(second_dir), str(first_alias)),
+            )
+            result = preprocess_source('#include "inc.h"\n', filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_second;\nint from_first;\n")
+
+    def test_has_include_next_skips_later_duplicate_of_current_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first_dir = root / "first"
+            first_alias = root / "first_alias"
+            first_dir.mkdir()
+            first_alias.symlink_to(first_dir, target_is_directory=True)
+            (first_dir / "inc.h").write_text(
+                "#if __has_include_next(\"inc.h\")\nint has_next;\n#endif\n",
+                encoding="utf-8",
+            )
+            options = FrontendOptions(
+                std="gnu11",
+                include_dirs=(str(first_dir), str(first_alias)),
+            )
+            result = preprocess_source('#include "inc.h"\n', filename="main.c", options=options)
+        self.assertEqual(result.source.strip(), "")
+
     def test_include_next_missing_header_reports_include_next_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

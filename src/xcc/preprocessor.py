@@ -991,6 +991,10 @@ class _Preprocessor:
 
         searched_roots_list: list[Path] = []
         seen_roots: set[Path] = set()
+        if include_next_from is not None:
+            # `#include_next` must not re-enter the same resolved include root,
+            # even if that root appears again later via a duplicate/symlink path.
+            seen_roots.add(include_next_from.resolve())
         for root in search_roots[start_index:]:
             resolved_root = root.resolve()
             if resolved_root in seen_roots:
