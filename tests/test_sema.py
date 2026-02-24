@@ -2154,6 +2154,20 @@ class SemaTests(unittest.TestCase):
             analyze(unit, std="gnu11")
         self.assertEqual(str(ctx.exception), "Indirect goto target must be pointer")
 
+    def test_indirect_goto_requires_void_pointer_operand(self) -> None:
+        source = "int main(void){int x=0; int *target=&x; goto *target; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertEqual(str(ctx.exception), "Indirect goto target must be pointer to void")
+
+    def test_indirect_goto_rejects_function_pointer_operand(self) -> None:
+        source = "int main(void){int (*target)(void)=0; goto *target; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertEqual(str(ctx.exception), "Indirect goto target must be pointer to void")
+
     def test_statement_expression_break_reports_outside_loop(self) -> None:
         source = "int main(int first){switch(({ if(first){ first=0; break; } 1; })){case 2:return 2;default:return 0;}}"
         unit = parse(list(lex(source)), std="gnu11")
