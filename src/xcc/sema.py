@@ -795,7 +795,7 @@ class Analyzer:
         return lookup
 
     def _register_type_spec(self, type_spec: TypeSpec) -> None:
-        if type_spec.name not in {"struct", "union"} or not type_spec.record_members:
+        if type_spec.name not in {"struct", "union"} or not type_spec.has_record_body:
             return
         spec_id = id(type_spec)
         if spec_id in self._seen_record_definitions:
