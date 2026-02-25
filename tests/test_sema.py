@@ -273,6 +273,28 @@ class SemaTests(unittest.TestCase):
             "Invalid initializer for file-scope object declaration with storage class 'extern'",
         )
 
+    def test_extern_then_definition_file_scope(self) -> None:
+        unit = parse(list(lex("extern int x; int x = 42; int f(void){return x;}")))
+        sema = analyze(unit)
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        assert stmt.value is not None
+        self.assertEqual(sema.type_map.require(stmt.value), INT)
+
+    def test_extern_then_definition_thread_local(self) -> None:
+        unit = parse(list(lex("extern _Thread_local int x; _Thread_local int x = 2; int f(void){return x;}")))
+        sema = analyze(unit)
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        assert stmt.value is not None
+        self.assertEqual(sema.type_map.require(stmt.value), INT)
+
+    def test_extern_redecl_type_mismatch_error(self) -> None:
+        unit = parse(list(lex("extern int x; char x;")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: x")
+
     def test_compound_literal_type(self) -> None:
         unit = parse(list(lex("int main(void){int *p=&(int){1}; return *p;}")))
         sema = analyze(unit)

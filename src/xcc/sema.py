@@ -195,6 +195,7 @@ class VarSymbol:
     name: str
     type_: Type
     alignment: int | None = None
+    is_extern: bool = False
 
 
 @dataclass(frozen=True)
@@ -253,7 +254,17 @@ class Scope:
         self._parent = parent
 
     def define(self, symbol: VarSymbol | EnumConstSymbol) -> None:
-        if symbol.name in self._symbols or symbol.name in self._typedefs:
+        existing = self._symbols.get(symbol.name)
+        if existing is not None or symbol.name in self._typedefs:
+            # Allow extern → definition re-declaration with compatible types
+            if (
+                isinstance(existing, VarSymbol)
+                and isinstance(symbol, VarSymbol)
+                and existing.is_extern
+                and existing.type_ == symbol.type_
+            ):
+                self._symbols[symbol.name] = symbol
+                return
             raise SemaError(f"Duplicate declaration: {symbol.name}")
         self._symbols[symbol.name] = symbol
 
@@ -652,6 +663,7 @@ class Analyzer:
                     declaration.name,
                     var_type,
                     declaration.alignment if declaration.alignment is not None else var_alignment,
+                    is_extern=declaration.storage_class == "extern",
                 )
             )
             if declaration.init is not None:
@@ -1874,6 +1886,7 @@ class Analyzer:
                     stmt.name,
                     var_type,
                     stmt.alignment if stmt.alignment is not None else var_alignment,
+                    is_extern=stmt.storage_class == "extern",
                 )
             )
             if stmt.init is not None:
