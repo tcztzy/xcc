@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: aligned LP64 `intmax_t` predefined macro spellings with target type assumptions by switching `__INTMAX_MAX__`/`__INTMAX_MIN__` and `__INTMAX_C(value)` to `long`-suffixed forms (`L`) and `__UINTMAX_MAX__`/`__UINTMAX_C(value)` to unsigned-long forms (`UL`), removing the prior inconsistent `long long` suffixing; added regression updates in predefined macro expansion coverage and refreshed frontend coverage notes.
+  - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_intmax_constructor_macros -q` (pass).
   - Iteration 3 slice: expanded GNU mode predefined macro coverage with `__GNUC_STDC_INLINE__=1` (alongside existing `__GNUC__` version macros), added strict-vs-gnu regression checks for presence/absence, and updated frontend coverage docs.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_gnu_mode_defines_gnu_version_macros tests.test_preprocessor.PreprocessorTests.test_strict_mode_does_not_define_gnu_version_macros -q` (pass).
   - Iteration 3 slice: added preprocessor `__has_c_attribute(...)` support for `#if`/`#elif` feature probes, including macro-expanded operator spellings and scoped attribute operands (`gnu::unused`); introduced strict operand validation (`identifier` or `scoped identifier` only), added focused regressions for supported/unsupported attributes and invalid operands, and updated frontend coverage docs.

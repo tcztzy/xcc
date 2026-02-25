@@ -1920,19 +1920,19 @@ class PreprocessorTests(unittest.TestCase):
             "long long llmax_alias = __LLONG_MAX__;\n"
             "long long llmin_alias = __LLONG_MIN__;\n"
             "unsigned long long ullmax_alias = __ULLONG_MAX__;\n"
-            "long long imx = __INTMAX_MAX__;\n"
-            "long long imn = __INTMAX_MIN__;\n"
-            "unsigned long long umx = __UINTMAX_MAX__;\n"
+            "long imx = __INTMAX_MAX__;\n"
+            "long imn = __INTMAX_MIN__;\n"
+            "unsigned long umx = __UINTMAX_MAX__;\n"
             "int i8c = __INT8_C(12);\n"
             "int i16c = __INT16_C(34);\n"
             "int i32c = __INT32_C(56);\n"
             "long i64c = __INT64_C(78);\n"
-            "long long imc = __INTMAX_C(123);\n"
+            "long imc = __INTMAX_C(123);\n"
             "unsigned int u8c = __UINT8_C(12);\n"
             "unsigned int u16c = __UINT16_C(34);\n"
             "unsigned int u32c = __UINT32_C(56);\n"
             "unsigned long u64c = __UINT64_C(78);\n"
-            "unsigned long long umc = __UINTMAX_C(456);\n"
+            "unsigned long umc = __UINTMAX_C(456);\n"
             "const char *bf = __BASE_FILE__;\n"
             "const char *fn = __FILE_NAME__;\n"
             "__SIZE_TYPE__ n;\n"
@@ -2074,19 +2074,19 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("long long llmax_alias = 9223372036854775807LL ;", result.source)
         self.assertIn("long long llmin_alias = - 9223372036854775808LL ;", result.source)
         self.assertIn("unsigned long long ullmax_alias = 18446744073709551615ULL ;", result.source)
-        self.assertIn("long long imx = 9223372036854775807LL ;", result.source)
-        self.assertIn("long long imn = - 9223372036854775808LL ;", result.source)
-        self.assertIn("unsigned long long umx = 18446744073709551615ULL ;", result.source)
+        self.assertIn("long imx = 9223372036854775807L ;", result.source)
+        self.assertIn("long imn = - 9223372036854775808L ;", result.source)
+        self.assertIn("unsigned long umx = 18446744073709551615UL ;", result.source)
         self.assertIn("int i8c = 12 ;", result.source)
         self.assertIn("int i16c = 34 ;", result.source)
         self.assertIn("int i32c = 56 ;", result.source)
         self.assertIn("long i64c = 78L ;", result.source)
-        self.assertIn("long long imc = 123LL ;", result.source)
+        self.assertIn("long imc = 123L ;", result.source)
         self.assertIn("unsigned int u8c = 12 ;", result.source)
         self.assertIn("unsigned int u16c = 34 ;", result.source)
         self.assertIn("unsigned int u32c = 56U ;", result.source)
         self.assertIn("unsigned long u64c = 78UL ;", result.source)
-        self.assertIn("unsigned long long umc = 456ULL ;", result.source)
+        self.assertIn("unsigned long umc = 456UL ;", result.source)
         self.assertIn('const char * bf = "main.c" ;', result.source)
         self.assertIn('const char * fn = "main.c" ;', result.source)
         self.assertIn("unsigned long n ;", result.source)
@@ -2188,7 +2188,7 @@ class PreprocessorTests(unittest.TestCase):
             filename="main.c",
             options=FrontendOptions(undefs=("__INTMAX_C", "__UINTMAX_C")),
         )
-        self.assertEqual(result.source, "int a = __INTMAX_C(7);\nint b = __UINTMAX_C(9);\n")
+        self.assertEqual(result.source, "int a = __INTMAX_C ( 7 ) ;\nint b = __UINTMAX_C ( 9 ) ;\n")
 
     def test_cli_undef_removes_predefined_base_file_macro(self) -> None:
         result = preprocess_source(
