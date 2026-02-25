@@ -249,6 +249,8 @@ class Parser:
         self._typedef_qualified_scopes: list[dict[str, bool]] = [{}]
         self._ordinary_name_scopes: list[set[str]] = [set()]
         self._ordinary_type_scopes: list[dict[str, TypeSpec]] = [{}]
+        self._capture_next_fn_params: bool = False
+        self._function_def_info: tuple[list[Param], bool, bool] | None = None
 
     def _push_scope(
         self,
@@ -375,7 +377,14 @@ class Parser:
             self._parse_type_spec()
             self._skip_gnu_attributes()
             if self._current().kind != TokenKind.IDENT:
-                return False
+                # Complex declarator case (e.g. function returning function pointer)
+                name, ops = self._parse_declarator(allow_abstract=False)
+                if name is None:
+                    return False
+                if not ops or ops[0][0] != "fn":
+                    return False
+                self._skip_gnu_attributes()
+                return self._check_punct("{") or self._check_punct(";")
             self._advance()
             self._skip_gnu_attributes()
             if not self._check_punct("("):
@@ -406,30 +415,51 @@ class Parser:
             context="function declaration",
             allow=False,
         )
-        return_type = self._parse_type_spec()
+        base_type = self._parse_type_spec()
         is_overloadable = self._consume_overloadable_gnu_attributes()
-        name = self._expect(TokenKind.IDENT).lexeme
-        function_name = str(name)
-        if self._consume_overloadable_gnu_attributes():
-            is_overloadable = True
-        self._expect_punct("(")
-        params, has_prototype, is_variadic = self._parse_params()
-        self._expect_punct(")")
-        self._skip_gnu_attributes()
-        # Parse K&R-style parameter declarations between ')' and '{'.
-        is_knr = not has_prototype and params
-        if is_knr and not self._check_punct("{") and not self._check_punct(";"):
-            params = self._parse_knr_declarations(params)
-        param_types = tuple(param.type_spec for param in params) if has_prototype else None
-        function_type = self._build_declarator_type(
-            return_type,
-            (
+
+        # Detect simple vs complex declarator.
+        # Simple: bare IDENT (possibly followed by GNU attributes) then '('.
+        # Complex: starts with '*' or '(' (e.g. function returning function pointer).
+        if self._current().kind == TokenKind.IDENT:
+            # Simple case: NAME ( params )
+            name_token = self._expect(TokenKind.IDENT)
+            function_name = str(name_token.lexeme)
+            if self._consume_overloadable_gnu_attributes():
+                is_overloadable = True
+            self._expect_punct("(")
+            params, has_prototype, is_variadic = self._parse_params()
+            self._expect_punct(")")
+            self._skip_gnu_attributes()
+            # Parse K&R-style parameter declarations between ')' and '{'.
+            is_knr = not has_prototype and params
+            if is_knr and not self._check_punct("{") and not self._check_punct(";"):
+                params = self._parse_knr_declarations(params)
+            param_types = tuple(param.type_spec for param in params) if has_prototype else None
+            function_type = self._build_declarator_type(
+                base_type,
                 (
-                    "fn",
-                    (param_types, is_variadic),
+                    (
+                        "fn",
+                        (param_types, is_variadic),
+                    ),
                 ),
-            ),
-        )
+            )
+            return_type = base_type
+        else:
+            # Complex declarator (e.g. function returning function pointer).
+            self._capture_next_fn_params = True
+            self._function_def_info = None
+            decl_name, declarator_ops = self._parse_declarator(allow_abstract=False)
+            assert decl_name is not None
+            function_name = str(decl_name)
+            assert self._function_def_info is not None
+            params, has_prototype, is_variadic = self._function_def_info
+            self._skip_gnu_attributes()
+            function_type = self._build_declarator_type(base_type, declarator_ops)
+            # Build the return type from base + all ops except the first (fn) op.
+            return_type = self._build_declarator_type(base_type, declarator_ops[1:])
+
         self._define_ordinary_type(function_name, function_type)
         if self._check_punct(";"):
             self._advance()
@@ -2067,9 +2097,17 @@ class Parser:
                 continue
             if self._check_punct("("):
                 self._advance()
-                function_declarator = self._parse_function_suffix_params()
-                self._expect_punct(")")
-                ops = ops + (("fn", function_declarator),)
+                if self._capture_next_fn_params and name is not None:
+                    self._capture_next_fn_params = False
+                    params, has_prototype, is_variadic = self._parse_params()
+                    self._expect_punct(")")
+                    param_types = tuple(p.type_spec for p in params) if has_prototype else None
+                    self._function_def_info = (params, has_prototype, is_variadic)
+                    ops = ops + (("fn", (param_types, is_variadic)),)
+                else:
+                    function_declarator = self._parse_function_suffix_params()
+                    self._expect_punct(")")
+                    ops = ops + (("fn", function_declarator),)
                 continue
             break
         return name, ops

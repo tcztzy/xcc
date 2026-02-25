@@ -4447,6 +4447,57 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(func.params[0].type_spec.name, "int")
         self.assertEqual(func.params[1].type_spec.name, "int")
 
+    def test_function_returning_function_pointer_definition(self) -> None:
+        """Function definition with complex declarator returning function pointer."""
+        unit = parse(list(lex(
+            "int *(*make_handler(void))(int *) { return 0; }"
+        )))
+        self.assertEqual(len(unit.functions), 1)
+        func = unit.functions[0]
+        self.assertEqual(func.name, "make_handler")
+        self.assertEqual(len(func.params), 0)
+        self.assertTrue(func.has_prototype)
+        self.assertIsNotNone(func.body)
+
+    def test_function_returning_function_pointer_declaration(self) -> None:
+        """Forward declaration with complex declarator returning function pointer."""
+        unit = parse(list(lex(
+            "int *(*make_handler(void))(int *);"
+        )))
+        self.assertEqual(len(unit.functions), 1)
+        func = unit.functions[0]
+        self.assertEqual(func.name, "make_handler")
+        self.assertIsNone(func.body)
+
+    def test_function_returning_function_pointer_with_params(self) -> None:
+        """Function returning function pointer, with named parameters."""
+        unit = parse(list(lex(
+            "int (*get_op(int code))(int, int) { return 0; }"
+        )))
+        self.assertEqual(len(unit.functions), 1)
+        func = unit.functions[0]
+        self.assertEqual(func.name, "get_op")
+        self.assertEqual(len(func.params), 1)
+        self.assertEqual(func.params[0].name, "code")
+        self.assertIsNotNone(func.body)
+
+    def test_pointer_variable_declaration_not_function(self) -> None:
+        """A pointer variable declaration should not be parsed as a function."""
+        unit = parse(list(lex("int *p;")))
+        self.assertEqual(len(unit.functions), 0)
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_global_pointer_to_array_declaration(self) -> None:
+        """Top-level pointer-to-array declaration is not mistaken for a function."""
+        unit = parse(list(lex("int (*arr)[10];")))
+        self.assertEqual(len(unit.functions), 0)
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_abstract_declarator_not_function(self) -> None:
+        """Abstract function pointer at top level is a parse error, not a function."""
+        with self.assertRaises(ParserError):
+            parse(list(lex("int (*)(void);")))
+
 
 if __name__ == "__main__":
     unittest.main()
