@@ -739,6 +739,21 @@ class _Preprocessor:
             )
         return out.build()
 
+    def _require_empty_conditional_tail(
+        self,
+        directive: str,
+        body: str,
+        location: _SourceLocation,
+    ) -> None:
+        if _strip_condition_comments(body).strip():
+            raise PreprocessorError(
+                f"Unexpected tokens after #{directive}",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_DIRECTIVE,
+            )
+
     def _handle_conditional(
         self,
         name: str,
@@ -817,6 +832,7 @@ class _Preprocessor:
             frame.branch_taken = frame.branch_taken or condition
             return ""
         if name == "else":
+            self._require_empty_conditional_tail("else", body, location)
             if frame.saw_else:
                 raise PreprocessorError(
                     "Duplicate #else",
@@ -829,6 +845,7 @@ class _Preprocessor:
             frame.active = frame.parent_active and not frame.branch_taken
             frame.branch_taken = True
             return ""
+        self._require_empty_conditional_tail("endif", body, location)
         stack.pop()
         return ""
 

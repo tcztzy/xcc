@@ -848,6 +848,30 @@ class PreprocessorTests(unittest.TestCase):
         with self.assertRaises(PreprocessorError):
             preprocess_source(source, filename="if.c")
 
+    def test_else_rejects_trailing_tokens(self) -> None:
+        source = "#if 0\n#else unexpected\n#endif\n"
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source(source, filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+        self.assertEqual(str(ctx.exception), "Unexpected tokens after #else at if.c:2:1")
+
+    def test_else_allows_trailing_comment(self) -> None:
+        source = "#if 0\n#else /* comment */\nint ok;\n#endif\n"
+        result = preprocess_source(source, filename="if.c")
+        self.assertIn("int ok ;", result.source)
+
+    def test_endif_rejects_trailing_tokens(self) -> None:
+        source = "#if 1\nint ok;\n#endif trailing\n"
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source(source, filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+        self.assertEqual(str(ctx.exception), "Unexpected tokens after #endif at if.c:3:1")
+
+    def test_endif_allows_trailing_comment(self) -> None:
+        source = "#if 1\nint ok;\n#endif // comment\n"
+        result = preprocess_source(source, filename="if.c")
+        self.assertIn("int ok ;", result.source)
+
     def test_unterminated_conditional(self) -> None:
         with self.assertRaises(PreprocessorError):
             preprocess_source("#if 1\nint a;\n", filename="if.c")

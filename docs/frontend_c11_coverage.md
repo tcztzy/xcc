@@ -30,6 +30,7 @@ living checklist for parser/sema/preprocessor behavior and regression tests.
 - **Core preprocessor behavior**
   - Macro expansion (`#define`, function-like, variadic, token paste, stringize).
   - Conditional directives, `defined`, character-literal operands, and include/feature probe operators in `#if`/`#elif` (`__has_include`, `__has_builtin`, `__has_feature`, `__has_extension`, `__has_warning`, `__has_c_attribute`), including macro-expanded operator spellings and operands.
+  - `#else`/`#endif` now enforce empty directive tails (while still allowing trailing comments), matching C11 directive syntax and preventing silent acceptance of stray tokens.
   - `#if`/`#elif` boolean short-circuit evaluation for `&&`/`||` (including divide-by-zero guard cases).
   - Include search precedence is validated (`"..."` prefers source directory, then `-iquote`, then `-I`; `<...>` resolves via `-I`/`-isystem`/`-idirafter` and skips `-iquote`), with cycle/read diagnostics; cycle failures now include the concrete include chain (`a.h -> b.h -> a.h`) for faster root-cause triage.
   - CLI macro-include files (`-imacros <header>`) are processed before forced includes so macro definitions are available to subsequent includes and the main source while non-directive text from macro-include files is discarded.
