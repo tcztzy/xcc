@@ -66,6 +66,7 @@ class TypeSpec:
     record_members: tuple[RecordMemberDecl, ...] = ()
     source_line: int | None = field(default=None, compare=False)
     source_column: int | None = field(default=None, compare=False)
+    typeof_expr: "Expr | None" = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         if self.declarator_ops:

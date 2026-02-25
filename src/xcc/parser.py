@@ -1627,9 +1627,9 @@ class Parser:
             type_spec = self._parse_type_name()
             self._expect_punct(")")
             return type_spec
-        self._parse_expression()
+        expr = self._parse_expression()
         self._expect_punct(")")
-        return TypeSpec("typeof")
+        return TypeSpec("typeof", typeof_expr=expr)
 
     def _parse_cast_expr(self) -> CastExpr:
         type_spec = self._parse_parenthesized_type_name()
