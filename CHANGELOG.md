@@ -4,6 +4,9 @@ This file records implementation progress and validation history.
 
 ## 2026-02-25
 
+- Expanded `scripts/cpython_trial.py` from 25 to 108 CPython-style snippets (GNU/C11 parser + sema patterns) while keeping the original 25 cases unchanged; latest trial result: 71 pass / 37 fail.
+- Updated `TODO.md` blocker frequencies from the new trial buckets (`B001`-`B018`, total `108` snippets).
+- Checks: `UV_CACHE_DIR=/tmp/uv-cache uv run python scripts/cpython_trial.py` and `UV_CACHE_DIR=/tmp/uv-cache uv run tox -e py311,lint,type` (pass).
 - Restructured project management: switched from sprint-based planning to failure-driven continuous development loop.
 - Fixed preprocessor spacing regression, lint errors (24), and type errors (2).
 - Quality gates: lint ✅ type ✅ py311 2 pre-existing clang fixture failures remain.
