@@ -371,7 +371,7 @@ class SemaTests(unittest.TestCase):
                 TypeSpec("int", declarator_ops=(("arr", ArrayDecl(1)),))
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             analyzer._is_file_scope_vla_type_spec(
                 TypeSpec("int", declarator_ops=(("arr", ArrayDecl(None)),))
             )
@@ -3436,6 +3436,27 @@ class SemaTests(unittest.TestCase):
     def test_nested_member_designated_initializer_ok(self) -> None:
         source = "int main(void){struct T { struct S { int x; } s; } t = {.s.x = 1}; return t.s.x;}"
         unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_incomplete_array_initializer_ok(self) -> None:
+        unit = parse(list(lex("int main(void){int a[] = {1, 2, 3}; return a[0];}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_incomplete_array_initializer_with_designator_ok(self) -> None:
+        unit = parse(list(lex("int main(void){int a[] = {[2] = 5, 1}; return a[0];}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_incomplete_array_with_member_designator_error(self) -> None:
+        unit = parse(list(lex("int main(void){int a[] = {.x = 1}; return 0;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Array initializer designator must use index")
+
+    def test_incomplete_array_file_scope_ok(self) -> None:
+        unit = parse(list(lex("int g[] = {10, 20}; int main(void){return g[0];}")))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 

@@ -1367,6 +1367,25 @@ class Analyzer:
         _, length_value = target_type.declarator_ops[0]
         assert isinstance(length_value, int)
         length = length_value
+        # Incomplete array (e.g. int a[] = {1,2,3}): infer length from initializer
+        incomplete = length < 0
+        if incomplete:
+            # Pre-scan to determine the array size from initializer items
+            max_index = 0
+            next_idx = 0
+            for item in init.items:
+                if item.designators:
+                    kind, value = item.designators[0]
+                    if kind == "index":
+                        assert isinstance(value, Expr)
+                        idx = self._eval_initializer_index(value, scope)
+                        next_idx = idx + 1
+                    else:
+                        next_idx += 1  # non-index designator; will error in main loop
+                else:
+                    next_idx += 1
+                max_index = max(max_index, next_idx)
+            length = max_index
         element_type = target_type.element_type()
         assert element_type is not None
         next_index = 0
@@ -1739,7 +1758,7 @@ class Analyzer:
             if not isinstance(value, ArrayDecl):
                 return True
             if value.length is None:
-                return True
+                continue  # incomplete array (e.g. int a[]), not a VLA
             if isinstance(value.length, int):
                 continue
             if self._eval_int_constant_expr(value.length, self._file_scope) is None:
