@@ -2361,9 +2361,7 @@ class Parser:
                 first_default_token = default_token
                 self._advance()
                 assoc_type = None
-                association_source_locations.append(
-                    (default_token.line, default_token.column)
-                )
+                association_source_locations.append((default_token.line, default_token.column))
             else:
                 association_start_index = self._index
                 association_type_token = self._current()
@@ -2390,7 +2388,9 @@ class Parser:
                 ):
                     type_key = self._generic_association_type_key(assoc_type)
                     if type_key in parsed_type_positions:
-                        previous_index, previous_token, previous_spelling = parsed_type_positions[type_key]
+                        previous_index, previous_token, previous_spelling = parsed_type_positions[
+                            type_key
+                        ]
                         relationship = "identical"
                         details = ""
                         if association_type_spelling != previous_spelling:
@@ -2477,11 +2477,17 @@ class Parser:
         return self._tokens[self._index - 1]
 
     def _format_token_span(self, start: int, end: int) -> str:
-        return " ".join(str(token.lexeme) for token in self._tokens[start:end] if token.lexeme is not None)
+        return " ".join(
+            str(token.lexeme) for token in self._tokens[start:end] if token.lexeme is not None
+        )
 
     def _type_name_uses_typedef_alias(self, start: int, end: int) -> bool:
         for token in self._tokens[start:end]:
-            if token.kind == TokenKind.IDENT and self._is_typedef_name(token.lexeme):
+            if (
+                token.kind == TokenKind.IDENT
+                and isinstance(token.lexeme, str)
+                and self._is_typedef_name(token.lexeme)
+            ):
                 return True
         return False
 
@@ -2503,12 +2509,13 @@ class Parser:
                     value.has_static_bound,
                 )
             if kind == "func" and isinstance(value, tuple):
-                params, is_variadic = value
-                param_keys = (
-                    None
-                    if params is None
-                    else tuple(self._generic_association_type_key(param) for param in params)
-                )
+                params, is_variadic = cast(FunctionDeclarator, value)
+                if params is None:
+                    param_keys = None
+                else:
+                    param_keys = tuple(
+                        self._generic_association_type_key(param) for param in params
+                    )
                 return (kind, param_keys, is_variadic)
             return (kind, stable(value))
 
@@ -2720,7 +2727,8 @@ class Parser:
         alignment = self._eval_array_size_expr(expr)
         if alignment is None:
             raise ParserError(
-                "Invalid alignment specifier: _Alignas expression operand must be an integer constant expression",
+                "Invalid alignment specifier: _Alignas expression operand must be an "
+                "integer constant expression",
                 token,
             )
         if alignment <= 0:
@@ -2730,7 +2738,8 @@ class Parser:
             )
         if (alignment & (alignment - 1)) != 0:
             raise ParserError(
-                "Invalid alignment specifier: _Alignas expression operand must evaluate to a power of two",
+                "Invalid alignment specifier: _Alignas expression operand must evaluate "
+                "to a power of two",
                 token,
             )
         self._expect_punct(")")

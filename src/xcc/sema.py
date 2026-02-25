@@ -327,8 +327,7 @@ class Analyzer:
         if func.storage_class not in {None, "static", "extern"}:
             storage_class = func.storage_class if func.storage_class is not None else "<none>"
             raise SemaError(
-                "Invalid storage class for file-scope function declaration: "
-                f"'{storage_class}'"
+                f"Invalid storage class for file-scope function declaration: '{storage_class}'"
             )
         if func.is_thread_local:
             raise SemaError(
@@ -482,25 +481,22 @@ class Analyzer:
         qualifier_text = self._declaration_qualifier_text(declaration)
         if qualifier_text is None:
             return f"Expected identifier for {scope_label} object declaration"
-        return (
-            f"Expected identifier for {scope_label} object declaration "
-            f"with {qualifier_text}"
-        )
+        return f"Expected identifier for {scope_label} object declaration with {qualifier_text}"
 
-    def _missing_identifier_for_alignment_message(self, scope_label: str, declaration: DeclStmt) -> str:
+    def _missing_identifier_for_alignment_message(
+        self,
+        scope_label: str,
+        declaration: DeclStmt,
+    ) -> str:
         context = f"{scope_label} object declaration"
         qualifier_text = self._declaration_qualifier_text(declaration)
         if qualifier_text is None:
             return f"Invalid alignment specifier for {context} without identifier"
-        return (
-            f"Invalid alignment specifier for {context} without identifier "
-            f"with {qualifier_text}"
-        )
+        return f"Invalid alignment specifier for {context} without identifier with {qualifier_text}"
 
     def _extern_initializer_message(self, scope_label: str) -> str:
         return (
-            f"Invalid initializer for {scope_label} object declaration "
-            "with storage class 'extern'"
+            f"Invalid initializer for {scope_label} object declaration with storage class 'extern'"
         )
 
     def _invalid_object_type_message(self, scope_label: str, type_label: str) -> str:
@@ -512,7 +508,10 @@ class Analyzer:
     def _invalid_record_member_type_message(self, type_label: str) -> str:
         return f"Invalid object type for record member declaration: {type_label}"
 
-    def _invalid_typedef_type_message(self, scope_kind: Literal["file-scope", "block-scope"]) -> str:
+    def _invalid_typedef_type_message(
+        self,
+        scope_kind: Literal["file-scope", "block-scope"],
+    ) -> str:
         return f"Invalid atomic type for {scope_kind} typedef declaration"
 
     def _invalid_alignment_message(
@@ -581,17 +580,22 @@ class Analyzer:
             self._file_scope.define_typedef(declaration.name, typedef_type)
             return
         if isinstance(declaration, DeclStmt):
-            if declaration.is_thread_local and declaration.storage_class not in {None, "static", "extern"}:
+            if declaration.is_thread_local and declaration.storage_class not in {
+                None,
+                "static",
+                "extern",
+            }:
                 raise SemaError(
                     self._thread_local_storage_class_message(
                         "file-scope", declaration.storage_class
                     )
                 )
             if declaration.storage_class in {"auto", "register"}:
-                storage_class = declaration.storage_class if declaration.storage_class is not None else "none"
+                storage_class = (
+                    declaration.storage_class if declaration.storage_class is not None else "none"
+                )
                 raise SemaError(
-                    "Invalid storage class for file-scope object declaration: "
-                    f"'{storage_class}'"
+                    f"Invalid storage class for file-scope object declaration: '{storage_class}'"
                 )
             if declaration.storage_class == "typedef":
                 raise SemaError(self._typedef_storage_class_object_message("file-scope"))
@@ -646,7 +650,8 @@ class Analyzer:
             return
         raise SemaError(
             "Unsupported file-scope declaration node: "
-            f"{type(declaration).__name__} (internal sema bug: unexpected AST file-scope declaration node)"
+            f"{type(declaration).__name__} (internal sema bug: unexpected AST "
+            "file-scope declaration node)"
         )
 
     def _signature_from(self, func: FunctionDef) -> FunctionSignature:
@@ -980,9 +985,11 @@ class Analyzer:
             return "void type"
         if type_.declarator_ops and type_.declarator_ops[0][0] == "fn":
             return "function type"
-        if self._is_record_name(type_.name) and not any(
-            kind == "ptr" for kind, _ in type_.declarator_ops
-        ) and type_.name not in self._record_definitions:
+        if (
+            self._is_record_name(type_.name)
+            and not any(kind == "ptr" for kind, _ in type_.declarator_ops)
+            and type_.name not in self._record_definitions
+        ):
             return "incomplete type"
         return None
 
@@ -1703,7 +1710,9 @@ class Analyzer:
         if isinstance(stmt, DeclStmt):
             if self._is_function_object_type(stmt.type_spec):
                 if stmt.storage_class not in {None, "extern"}:
-                    storage_class = stmt.storage_class if stmt.storage_class is not None else "<none>"
+                    storage_class = (
+                        stmt.storage_class if stmt.storage_class is not None else "<none>"
+                    )
                     raise SemaError(
                         "Invalid storage class for block-scope function declaration: "
                         f"'{storage_class}'"
@@ -1720,16 +1729,12 @@ class Analyzer:
                 and stmt.storage_class not in {"static", "extern"}
             ):
                 raise SemaError(
-                    self._thread_local_storage_class_message(
-                        "block-scope", stmt.storage_class
-                    )
+                    self._thread_local_storage_class_message("block-scope", stmt.storage_class)
                 )
             self._register_type_spec(stmt.type_spec)
             self._define_enum_members(stmt.type_spec, scope)
             if stmt.alignment is not None and stmt.name is None:
-                raise SemaError(
-                    self._missing_identifier_for_alignment_message("block-scope", stmt)
-                )
+                raise SemaError(self._missing_identifier_for_alignment_message("block-scope", stmt))
             if stmt.name is None:
                 if stmt.storage_class is not None or stmt.is_thread_local:
                     raise SemaError(self._missing_object_identifier_message("block-scope", stmt))
@@ -1895,7 +1900,8 @@ class Analyzer:
             return
         node_name = type(stmt).__name__
         raise SemaError(
-            f"Unsupported statement node: {node_name} (internal sema bug: unexpected AST statement node)"
+            f"Unsupported statement node: {node_name} (internal sema bug: unexpected "
+            "AST statement node)"
         )
 
     def _analyze_expr(self, expr: Expr, scope: Scope) -> Type:
@@ -2256,15 +2262,16 @@ class Analyzer:
                 if assoc_type_spec is not None:
                     association_line = assoc_type_spec.source_line
                     association_column = assoc_type_spec.source_column
-                if association_line is None or association_column is None:
-                    if association_index <= len(expr.association_source_locations):
-                        mapped_line, mapped_column = expr.association_source_locations[
-                            association_index - 1
-                        ]
-                        if association_line is None:
-                            association_line = mapped_line
-                        if association_column is None:
-                            association_column = mapped_column
+                if (
+                    association_line is None or association_column is None
+                ) and association_index <= len(expr.association_source_locations):
+                    mapped_line, mapped_column = expr.association_source_locations[
+                        association_index - 1
+                    ]
+                    if association_line is None:
+                        association_line = mapped_line
+                    if association_column is None:
+                        association_column = mapped_column
                 if assoc_type_spec is None:
                     if default_expr is not None and default_association_index is not None:
                         previous_default_location = None
@@ -2287,7 +2294,8 @@ class Analyzer:
                             location_suffix = self._format_location_suffix(line, column)
                         raise SemaError(
                             "Duplicate default generic association at position "
-                            f"{association_index}{current_location_suffix}: previous default was at position "
+                            f"{association_index}{current_location_suffix}: previous "
+                            "default was at position "
                             f"{default_association_index}{location_suffix}; only one default "
                             "association is allowed"
                         )
@@ -2315,7 +2323,11 @@ class Analyzer:
                     )
                 previous_assoc = seen_type_associations.get(assoc_type)
                 if previous_assoc is not None:
-                    previous_assoc_index, previous_assoc_label, previous_assoc_location = previous_assoc
+                    (
+                        previous_assoc_index,
+                        previous_assoc_label,
+                        previous_assoc_location,
+                    ) = previous_assoc
                     current_location_suffix = self._format_location_suffix(
                         association_line,
                         association_column,
@@ -2339,9 +2351,7 @@ class Analyzer:
                     assoc_type_label,
                     association_location,
                 )
-                association_description = (
-                    f"'{assoc_type_label}' at position {association_index}"
-                )
+                association_description = f"'{assoc_type_label}' at position {association_index}"
                 if association_location is not None:
                     association_description += f" ({association_location})"
                 association_type_descriptions.append(association_description)
@@ -2471,7 +2481,8 @@ class Analyzer:
             return return_type
         node_name = type(expr).__name__
         raise SemaError(
-            f"Unsupported expression node: {node_name} (internal sema bug: unexpected AST expression node)"
+            f"Unsupported expression node: {node_name} (internal sema bug: unexpected "
+            "AST expression node)"
         )
 
     def _resolve_call_signature(
