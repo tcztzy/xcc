@@ -1,10 +1,11 @@
 import ast
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, cast
+from typing import cast
 
 from xcc.lexer import LexerError, TokenKind, lex_pp
 from xcc.options import FrontendOptions, normalize_options
@@ -296,7 +297,7 @@ def _macro_name_from_cli_define(define: str) -> str:
 _PREDEFINED_MACRO_NAMES = frozenset(
     _macro_name_from_cli_define(item)
     for item in (*_PREDEFINED_MACROS, *_STRICT_MODE_PREDEFINED_MACROS, *_GNU_MODE_PREDEFINED_MACROS)
-) | frozenset(_PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS)
+) | frozenset(_PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS | {"__STDC_HOSTED__"})
 
 
 @dataclass(frozen=True)
@@ -433,7 +434,9 @@ def _format_include_trace(
     directive: str = "include",
 ) -> str:
     delim_open, delim_close = ("<", ">") if is_angled else ('"', '"')
-    return f"{source}:{line}: #{directive} {delim_open}{include_name}{delim_close} -> {include_path}"
+    return (
+        f"{source}:{line}: #{directive} {delim_open}{include_name}{delim_close} -> {include_path}"
+    )
 
 
 def _format_include_reference(include_name: str, is_angled: bool) -> str:
@@ -519,7 +522,9 @@ class _Preprocessor:
         hosted_macro = self._parse_cli_define(hosted_define)
         self._macros[hosted_macro.name] = hosted_macro
         mode_defines = (
-            _GNU_MODE_PREDEFINED_MACROS if options.std == "gnu11" else _STRICT_MODE_PREDEFINED_MACROS
+            _GNU_MODE_PREDEFINED_MACROS
+            if options.std == "gnu11"
+            else _STRICT_MODE_PREDEFINED_MACROS
         )
         for define in mode_defines:
             macro = self._parse_cli_define(define)
@@ -929,7 +934,10 @@ class _Preprocessor:
             self._counter += 1
             return _MacroToken(TokenKind.INT_CONST, str(current))
         if name == "__FILE_NAME__":
-            return _MacroToken(TokenKind.STRING_LITERAL, _quote_string_literal(Path(location.filename).name))
+            return _MacroToken(
+                TokenKind.STRING_LITERAL,
+                _quote_string_literal(Path(location.filename).name),
+            )
         return _MacroToken(TokenKind.STRING_LITERAL, _quote_string_literal(location.filename))
 
     def _handle_undef(self, body: str, location: _SourceLocation) -> None:
@@ -980,7 +988,10 @@ class _Preprocessor:
         )
         if include_path_text in include_stack:
             raise PreprocessorError(
-                f"Circular include detected: {_format_include_cycle(include_stack, include_path_text)}",
+                (
+                    "Circular include detected: "
+                    f"{_format_include_cycle(include_stack, include_path_text)}"
+                ),
                 location.line,
                 1,
                 filename=location.filename,
@@ -1021,7 +1032,7 @@ class _Preprocessor:
             raise PreprocessorError(
                 (
                     "Macro include not found: "
-                    f'{_format_include_reference(include_name, False)}; searched: '
+                    f"{_format_include_reference(include_name, False)}; searched: "
                     f"{_format_include_search_roots(search_roots)}"
                 ),
                 location.line,
@@ -1042,7 +1053,10 @@ class _Preprocessor:
         )
         if include_path_text in include_stack:
             raise PreprocessorError(
-                f"Circular include detected: {_format_include_cycle(include_stack, include_path_text)}",
+                (
+                    "Circular include detected: "
+                    f"{_format_include_cycle(include_stack, include_path_text)}"
+                ),
                 location.line,
                 1,
                 filename=location.filename,
@@ -1083,7 +1097,7 @@ class _Preprocessor:
             raise PreprocessorError(
                 (
                     "Forced include not found: "
-                    f'{_format_include_reference(include_name, False)}; searched: '
+                    f"{_format_include_reference(include_name, False)}; searched: "
                     f"{_format_include_search_roots(search_roots)}"
                 ),
                 location.line,
@@ -1106,7 +1120,10 @@ class _Preprocessor:
         )
         if include_path_text in include_stack:
             raise PreprocessorError(
-                f"Circular include detected: {_format_include_cycle(include_stack, include_path_text)}",
+                (
+                    "Circular include detected: "
+                    f"{_format_include_cycle(include_stack, include_path_text)}"
+                ),
                 location.line,
                 1,
                 filename=location.filename,
@@ -1234,7 +1251,10 @@ class _Preprocessor:
         if parsed_function is None:
             name = head.strip()
             if _IDENT_RE.fullmatch(name) is None:
-                raise PreprocessorError(f"Invalid macro definition: {define}", code=_PP_INVALID_MACRO)
+                raise PreprocessorError(
+                    f"Invalid macro definition: {define}",
+                    code=_PP_INVALID_MACRO,
+                )
             return _Macro(name, tuple(_tokenize_macro_replacement(replacement.strip())))
 
         name, params, variadic = parsed_function
@@ -1555,7 +1575,8 @@ class _Preprocessor:
                 )
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*", operand):
                 raise PreprocessorError(
-                    f"Invalid {marker} expression: attribute operand must be an identifier or scoped identifier",
+                    f"Invalid {marker} expression: attribute operand must be an "
+                    "identifier or scoped identifier",
                     location.line,
                     1,
                     filename=location.filename,
