@@ -102,6 +102,9 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded LP64 predefined target-assumption coverage with boolean/pointer width and size aliases (`__BOOL_WIDTH__`, `__POINTER_WIDTH__`, `__SIZEOF_BOOL__`), added regression coverage in both standard macro expansion and CLI `-U` override paths, and updated frontend coverage docs.
+  - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
+  - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_preprocessor -q` (pass).
   - Iteration 3 slice: expanded GCC-compatible predefined atomics/synchronization macro coverage with char16/char32/wchar lock-free capability macros (`__GCC_ATOMIC_{CHAR16_T,CHAR32_T,WCHAR_T}_LOCK_FREE`), `__GCC_ATOMIC_TEST_AND_SET_TRUEVAL`, and 16-byte compare-and-swap feature probing (`__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16`); added focused preprocessor regression coverage for expansion and CLI `-U` override behavior, and updated frontend coverage docs.
   - Checks: `.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_atomic_and_sync_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_atomic_and_sync_macros -q` (pass).
   - Iteration 3 slice: added preprocessor `__has_warning("-W...")` support for `#if`/`#elif` feature probes, including macro-expanded operator spellings and strict operand validation (`string literal` only); recognized warning options now return `1` for a curated compatibility set (`-Wall`, `-Wextra`, `-Wpedantic`, `-Wdeprecated-declarations`) and unknown options return `0`.
