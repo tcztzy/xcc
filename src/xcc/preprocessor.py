@@ -1849,7 +1849,7 @@ def _expand_macro_tokens(
             macros,
             std=std,
             location=location,
-            disabled=next_disabled,
+            disabled=disabled,
             dynamic_macro_resolver=dynamic_macro_resolver,
         )
         replacement = _expand_macro_tokens(
