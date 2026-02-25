@@ -22,6 +22,7 @@ from xcc.ast import (
     DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
+    DesignatorRange,
     DoWhileStmt,
     Expr,
     ExprStmt,
@@ -1445,8 +1446,8 @@ class Parser:
         self._expect_punct("}")
         return InitList(tuple(items))
 
-    def _parse_designator_list(self) -> tuple[tuple[str, Expr | str], ...]:
-        designators: list[tuple[str, Expr | str]] = []
+    def _parse_designator_list(self) -> tuple[tuple[str, Expr | str | DesignatorRange], ...]:
+        designators: list[tuple[str, Expr | str | DesignatorRange]] = []
         while True:
             if self._check_punct("."):
                 self._advance()
@@ -1457,8 +1458,14 @@ class Parser:
             if self._check_punct("["):
                 self._advance()
                 index_expr = self._parse_conditional()
-                self._expect_punct("]")
-                designators.append(("index", index_expr))
+                if self._check_punct("..."):
+                    self._advance()
+                    high_expr = self._parse_conditional()
+                    self._expect_punct("]")
+                    designators.append(("range", DesignatorRange(index_expr, high_expr)))
+                else:
+                    self._expect_punct("]")
+                    designators.append(("index", index_expr))
                 continue
             break
         return tuple(designators)

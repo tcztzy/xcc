@@ -20,6 +20,7 @@ from xcc.ast import (
     DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
+    DesignatorRange,
     DoWhileStmt,
     ExprStmt,
     Expr,
@@ -902,6 +903,17 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(item, InitItem)
         self.assertEqual(item.designators, (("index", IntLiteral("2")),))
         self.assertIsInstance(item.initializer, IntLiteral)
+
+    def test_designated_range_initializer(self) -> None:
+        unit = parse(list(lex("int a[6] = {[0 ... 3] = 8, [4] = 1};")))
+        init = unit.declarations[0].init
+        self.assertIsInstance(init, InitList)
+        self.assertEqual(len(init.items), 2)
+        kind, value = init.items[0].designators[0]
+        self.assertEqual(kind, "range")
+        self.assertIsInstance(value, DesignatorRange)
+        self.assertEqual(value.low, IntLiteral("0"))
+        self.assertEqual(value.high, IntLiteral("3"))
 
     def test_designated_struct_initializer(self) -> None:
         source = "int main(){struct S { int x; int y; } s = { .y = 2, .x = 1 }; return s.x + s.y;}"

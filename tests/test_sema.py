@@ -3340,6 +3340,24 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_designated_range_initializer_ok(self) -> None:
+        unit = parse(list(lex("int a[6] = {[0 ... 3] = 8, [4] = 1, [5] = 2};")))
+        analyze(unit)
+
+    def test_designated_range_incomplete_array_ok(self) -> None:
+        unit = parse(list(lex("int a[] = {[0 ... 3] = 8, [4] = 1};")))
+        analyze(unit)
+
+    def test_designated_range_out_of_bounds_error(self) -> None:
+        with self.assertRaises(SemaError) as ctx:
+            unit = parse(list(lex("int a[4] = {[0 ... 5] = 8};")))
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer range out of bounds")
+
+    def test_designated_range_nested_in_multidim_array(self) -> None:
+        unit = parse(list(lex("int a[2][3] = {[0 ... 1] = {1, 2, 3}};")))
+        analyze(unit)
+
     def test_designated_struct_initializer_ok(self) -> None:
         source = "int main(){struct S { int x; int y; } s = {.y = 2, .x = 1}; return s.x + s.y;}"
         unit = parse(list(lex(source)))
