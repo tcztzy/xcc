@@ -847,6 +847,7 @@ class Parser:
             enum_members=type_spec.enum_members,
             record_tag=type_spec.record_tag,
             record_members=type_spec.record_members,
+            typeof_expr=type_spec.typeof_expr,
         )
 
     def _reject_optional_complex_specifier(self, context: str) -> None:
@@ -1872,6 +1873,7 @@ class Parser:
             enum_members=base_type.enum_members,
             record_tag=base_type.record_tag,
             record_members=base_type.record_members,
+            typeof_expr=base_type.typeof_expr,
         )
 
     def _mark_atomic_type_spec(self, type_spec: TypeSpec) -> TypeSpec:
@@ -1887,6 +1889,7 @@ class Parser:
             enum_members=type_spec.enum_members,
             record_tag=type_spec.record_tag,
             record_members=type_spec.record_members,
+            typeof_expr=type_spec.typeof_expr,
         )
 
     def _format_invalid_atomic_type_message(

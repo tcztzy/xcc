@@ -879,6 +879,22 @@ class Analyzer:
             return UINT
         if type_spec.name == "void" and is_unqualified_scalar:
             return VOID
+        if type_spec.name == "typeof" and type_spec.typeof_expr is not None:
+            assert self._current_scope is not None
+            expr_type = self._analyze_expr(type_spec.typeof_expr, self._current_scope)
+            # Apply declarator ops on top of the resolved expression type
+            if type_spec.declarator_ops:
+                base = expr_type
+                for kind, value in type_spec.declarator_ops:
+                    if kind == "ptr":
+                        base = base.pointer_to()
+                    elif kind == "arr":
+                        bound = self._resolve_array_bound(value)
+                        base = base.array_of(bound)
+                    else:  # pragma: no cover
+                        pass  # fn or other ops not expected in typeof
+                return base
+            return expr_type
         if type_spec.name == "enum" and is_unqualified_scalar:
             return INT
         if type_spec.name in {"struct", "union"} and not type_spec.declarator_ops:
