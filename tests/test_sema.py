@@ -5328,5 +5328,43 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "No matching generic association for control type 'int'")
 
 
+    def test_typeof_expression_resolves_variable_type(self) -> None:
+        unit = parse(list(lex("int f(int x) { typeof(x) y = x + 3; return y; }")), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_typeof_dunder_expression_resolves_variable_type(self) -> None:
+        unit = parse(list(lex("int f(long x) { __typeof__(x) y = x + 4; return (int)y; }")), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_typeof_type_name_resolves(self) -> None:
+        unit = parse(list(lex("int f(void) { typeof(int) y = 42; return y; }")), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_typeof_with_pointer(self) -> None:
+        unit = parse(list(lex("int f(int *p) { typeof(p) q = p; return *q; }")), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_typeof_declarator_ops_pointer(self) -> None:
+        unit = parse(list(lex("int f(int x) { typeof(x) *p = &x; return *p; }")), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_typeof_declarator_ops_array(self) -> None:
+        unit = parse(list(lex("int f(void) { int x; typeof(x) a[3]; a[0] = 1; return a[0]; }")), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_typeof_declarator_ops_pointer_and_array(self) -> None:
+        """Cover the loop-back branch in typeof declarator_ops."""
+        unit = parse(list(lex("void f(int x) { typeof(x) a[2][3]; (void)a; }")), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+        self.assertIsNotNone(sema)
+
+
 if __name__ == "__main__":
     unittest.main()
