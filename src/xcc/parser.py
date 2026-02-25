@@ -9,6 +9,7 @@ from xcc.ast import (
     AssignExpr,
     BinaryExpr,
     BreakStmt,
+    BuiltinOffsetofExpr,
     CallExpr,
     CaseStmt,
     CastExpr,
@@ -2315,6 +2316,8 @@ class Parser:
             return self._parse_generic_expr()
         if token.kind == TokenKind.STRING_LITERAL:
             return self._parse_string_literal()
+        if token.kind == TokenKind.IDENT and token.lexeme == "__builtin_offsetof":
+            return self._parse_builtin_offsetof()
         if token.kind == TokenKind.IDENT:
             self._advance()
             assert isinstance(token.lexeme, str)
@@ -2384,6 +2387,29 @@ class Parser:
                 self._current(),
             )
         return self._build_declarator_type(base_type, declarator_ops)
+
+    def _parse_builtin_offsetof(self) -> BuiltinOffsetofExpr:
+        self._advance()  # consume '__builtin_offsetof'
+        self._expect_punct("(")
+        type_spec = self._parse_type_name()
+        self._expect_punct(",")
+        # Parse member-designator: a dotted identifier chain like "a.b.c"
+        token = self._current()
+        if token.kind != TokenKind.IDENT:
+            raise ParserError("Expected member name in __builtin_offsetof", token)
+        assert isinstance(token.lexeme, str)
+        parts: list[str] = [token.lexeme]
+        self._advance()
+        while self._check_punct("."):
+            self._advance()
+            token = self._current()
+            if token.kind != TokenKind.IDENT:
+                raise ParserError("Expected member name after '.' in __builtin_offsetof", token)
+            assert isinstance(token.lexeme, str)
+            parts.append(token.lexeme)
+            self._advance()
+        self._expect_punct(")")
+        return BuiltinOffsetofExpr(type_spec=type_spec, member=".".join(parts))
 
     def _parse_generic_expr(self) -> GenericExpr:
         self._advance()

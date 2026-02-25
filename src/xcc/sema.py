@@ -8,6 +8,7 @@ from xcc.ast import (
     AssignExpr,
     BinaryExpr,
     BreakStmt,
+    BuiltinOffsetofExpr,
     CallExpr,
     CaseStmt,
     CastExpr,
@@ -2096,6 +2097,11 @@ class Analyzer:
                     raise SemaError("Invalid alignof operand: unknown or unsupported type")
             self._type_map.set(expr, INT)
             return INT
+        if isinstance(expr, BuiltinOffsetofExpr):
+            self._register_type_spec(expr.type_spec)
+            self._resolve_type(expr.type_spec)
+            self._type_map.set(expr, ULONG)
+            return ULONG
         if isinstance(expr, CastExpr):
             self._register_type_spec(expr.type_spec)
             target_type = self._resolve_type(expr.type_spec)
@@ -2773,6 +2779,8 @@ class Analyzer:
             if self._is_invalid_alignof_type_spec(expr.type_spec):
                 return None
             return self._alignof_type(self._resolve_type(expr.type_spec))
+        if isinstance(expr, BuiltinOffsetofExpr):
+            return None  # not evaluated as constant for now
         if isinstance(expr, GenericExpr):
             selected_expr: Expr | None = None
             default_expr: Expr | None = None

@@ -346,6 +346,12 @@ class LabelAddressExpr(Expr):
 
 
 @dataclass(frozen=True)
+class BuiltinOffsetofExpr(Expr):
+    type_spec: TypeSpec
+    member: str
+
+
+@dataclass(frozen=True)
 class NullStmt(Stmt):
     pass
 
