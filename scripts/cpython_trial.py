@@ -1270,6 +1270,75 @@ int null_conditional(void *p, int fallback) {
 }
 """,
         ),
+        TrialCase(
+            "function_returning_function_pointer",
+            """
+int (*get_handler(int code))(int, int) {
+    return 0;
+}
+""",
+        ),
+        TrialCase(
+            "function_returning_function_pointer_fwd",
+            """
+int (*get_handler(void))(int);
+""",
+        ),
+        TrialCase(
+            "global_pointer_to_array",
+            """
+int (*matrix_row)[4];
+""",
+        ),
+        TrialCase(
+            "enum_with_trailing_comma",
+            """
+enum color { RED, GREEN, BLUE, };
+""",
+        ),
+        TrialCase(
+            "compound_literal_in_expression",
+            """
+int sum_pair(void) {
+    int *p = (int []){1, 2};
+    return p[0] + p[1];
+}
+""",
+        ),
+        TrialCase(
+            "static_inline_function",
+            """
+static inline int square(int x) { return x * x; }
+""",
+        ),
+        TrialCase(
+            "do_while_with_macro_pattern",
+            """
+int safe_inc(int *p) {
+    do { *p += 1; } while (0);
+    return *p;
+}
+""",
+        ),
+        TrialCase(
+            "multiple_declarators_single_stmt",
+            """
+int a = 1, b = 2, c = 3;
+""",
+        ),
+        TrialCase(
+            "nested_function_pointer_typedef",
+            """
+typedef int (*cmp_fn)(const void *, const void *);
+cmp_fn global_cmp;
+""",
+        ),
+        TrialCase(
+            "extern_array_incomplete",
+            """
+extern int table[];
+""",
+        ),
     ]
 
 
