@@ -258,6 +258,18 @@ _SUPPORTED_WARNINGS = frozenset(
         "-Wdeprecated-declarations",
     }
 )
+_SUPPORTED_C_ATTRIBUTES = frozenset(
+    {
+        "deprecated",
+        "fallthrough",
+        "maybe_unused",
+        "nodiscard",
+        "noreturn",
+        "reproducible",
+        "unsequenced",
+        "gnu::unused",
+    }
+)
 
 
 def _env_path_list(name: str) -> tuple[str, ...]:
@@ -1321,6 +1333,12 @@ class _Preprocessor:
             location=location,
             supported=_SUPPORTED_WARNINGS,
         )
+        rewritten = self._replace_single_attribute_probe_operator(
+            rewritten,
+            marker="__has_c_attribute",
+            location=location,
+            supported=_SUPPORTED_C_ATTRIBUTES,
+        )
         return rewritten
 
     def _replace_single_feature_probe_operator(
@@ -1459,6 +1477,74 @@ class _Preprocessor:
 
             option = operand[1:-1]
             chunks.append("1" if option in supported else "0")
+            index = close_paren + 1
+
+    def _replace_single_attribute_probe_operator(
+        self,
+        expr: str,
+        *,
+        marker: str,
+        location: _SourceLocation,
+        supported: frozenset[str],
+    ) -> str:
+        chunks: list[str] = []
+        index = 0
+        while True:
+            found = expr.find(marker, index)
+            if found < 0:
+                chunks.append(expr[index:])
+                return "".join(chunks)
+            prev = expr[found - 1] if found > 0 else ""
+            next_pos = found + len(marker)
+            next_char = expr[next_pos] if next_pos < len(expr) else ""
+            if (prev and (prev.isalnum() or prev == "_")) or (
+                next_char and (next_char.isalnum() or next_char == "_")
+            ):
+                chunks.append(expr[index : found + len(marker)])
+                index = found + len(marker)
+                continue
+
+            chunks.append(expr[index:found])
+            cursor = next_pos
+            while cursor < len(expr) and expr[cursor].isspace():
+                cursor += 1
+            if cursor >= len(expr) or expr[cursor] != "(":
+                raise PreprocessorError(
+                    f"Invalid {marker} expression: expected '(' after operator",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+            close_paren = self._find_matching_has_include_close(expr, cursor)
+            if close_paren < 0:
+                raise PreprocessorError(
+                    f"Invalid {marker} expression: missing closing ')'",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+
+            operand = expr[cursor + 1 : close_paren].strip()
+            if not operand:
+                raise PreprocessorError(
+                    f"Invalid {marker} expression: missing attribute operand",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*", operand):
+                raise PreprocessorError(
+                    f"Invalid {marker} expression: attribute operand must be an identifier or scoped identifier",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_IF_EXPR,
+                )
+
+            chunks.append("1" if operand in supported else "0")
             index = close_paren + 1
 
     def _replace_single_has_include_operator(

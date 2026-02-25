@@ -1106,6 +1106,36 @@ class PreprocessorTests(unittest.TestCase):
             str(ctx.exception),
         )
 
+    def test_if_expression_with_has_c_attribute_operator(self) -> None:
+        result = preprocess_source(
+            "#if __has_c_attribute(nodiscard)\nint ok_plain;\n#endif\n"
+            "#if __has_c_attribute(gnu::unused)\nint ok_scoped;\n#endif\n"
+            "#if __has_c_attribute(nonexistent_attribute)\nint bad;\n#endif\n",
+            filename="if.c",
+        )
+        self.assertIn("ok_plain", result.source)
+        self.assertIn("ok_scoped", result.source)
+        self.assertNotIn("int bad;", result.source)
+
+    def test_if_expression_with_macro_expanded_has_c_attribute_operator(self) -> None:
+        result = preprocess_source(
+            "#define HAS_C_ATTR(x) __has_c_attribute(x)\n"
+            "#if HAS_C_ATTR(nodiscard)\nint ok;\n#endif\n"
+            "#if HAS_C_ATTR(missing_attr)\nint bad;\n#endif\n",
+            filename="if.c",
+        )
+        self.assertIn("int ok ;", result.source)
+        self.assertNotIn("int bad;", result.source)
+
+    def test_if_expression_with_has_c_attribute_rejects_non_identifier_operand(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if __has_c_attribute(\"nodiscard\")\nint x;\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertIn(
+            "Invalid __has_c_attribute expression: attribute operand must be an identifier or scoped identifier",
+            str(ctx.exception),
+        )
+
     def test_unknown_directive_active_errors_in_c11(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#unknown\n", filename="if.c")
