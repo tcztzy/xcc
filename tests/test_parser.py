@@ -4299,6 +4299,48 @@ class ParserTests(unittest.TestCase):
             "Invalid declaration specifier for parameter: '_Noreturn'",
         )
 
+    def test_builtin_offsetof_simple(self) -> None:
+        unit = parse(
+            list(lex("struct S { int a; long b; }; unsigned long f(void) { return __builtin_offsetof(struct S, b); }")),
+            std="gnu11",
+        )
+        from xcc.ast import BuiltinOffsetofExpr
+        func = unit.functions[0]
+        ret = func.body.statements[0]
+        assert hasattr(ret, "value")
+        expr = ret.value
+        self.assertIsInstance(expr, BuiltinOffsetofExpr)
+        self.assertEqual(expr.member, "b")
+
+    def test_builtin_offsetof_nested_member(self) -> None:
+        unit = parse(
+            list(lex("struct I { int leaf; }; struct O { int tag; struct I in; }; unsigned long f(void) { return __builtin_offsetof(struct O, in.leaf); }")),
+            std="gnu11",
+        )
+        from xcc.ast import BuiltinOffsetofExpr
+        func = unit.functions[0]
+        ret = func.body.statements[0]
+        assert hasattr(ret, "value")
+        expr = ret.value
+        self.assertIsInstance(expr, BuiltinOffsetofExpr)
+        self.assertEqual(expr.member, "in.leaf")
+
+    def test_builtin_offsetof_missing_member(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(
+                list(lex("struct S { int a; }; unsigned long f(void) { return __builtin_offsetof(struct S, ); }")),
+                std="gnu11",
+            )
+        self.assertIn("Expected member name", ctx.exception.message)
+
+    def test_builtin_offsetof_bad_dot_member(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(
+                list(lex("struct S { int a; }; unsigned long f(void) { return __builtin_offsetof(struct S, a.); }")),
+                std="gnu11",
+            )
+        self.assertIn("Expected member name after '.'", ctx.exception.message)
+
 
 if __name__ == "__main__":
     unittest.main()

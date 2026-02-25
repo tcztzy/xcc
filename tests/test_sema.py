@@ -5386,6 +5386,35 @@ class SemaTests(unittest.TestCase):
         self.assertIsNotNone(sema)
         self.assertIsNotNone(sema)
 
+    def test_builtin_offsetof_returns_ulong(self) -> None:
+        unit = parse(
+            list(lex("struct S { int a; long b; }; unsigned long f(void) { return __builtin_offsetof(struct S, b); }")),
+            std="gnu11",
+        )
+        sema = analyze(unit, std="gnu11")
+        ret = _body(unit.functions[0]).statements[0].value
+        assert ret is not None
+        self.assertEqual(sema.type_map.get(ret), ULONG)
+
+    def test_builtin_offsetof_nested_member_returns_ulong(self) -> None:
+        unit = parse(
+            list(lex("struct I { int leaf; }; struct O { int tag; struct I in; }; unsigned long f(void) { return __builtin_offsetof(struct O, in.leaf); }")),
+            std="gnu11",
+        )
+        sema = analyze(unit, std="gnu11")
+        ret = _body(unit.functions[0]).statements[0].value
+        assert ret is not None
+        self.assertEqual(sema.type_map.get(ret), ULONG)
+
+    def test_builtin_offsetof_in_constant_expr_context(self) -> None:
+        """offsetof in array size triggers _eval_int_constant_expr path (returns None → VLA)."""
+        unit = parse(
+            list(lex("struct S { int a; long b; }; void f(void) { int arr[__builtin_offsetof(struct S, b)]; (void)arr; }")),
+            std="gnu11",
+        )
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
 
 if __name__ == "__main__":
     unittest.main()
