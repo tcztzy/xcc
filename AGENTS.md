@@ -54,6 +54,13 @@ Notes:
 
 External specs (PDF/TXT/HTML) are cached under `docs/_sources/` for convenience, but **must not be committed** (the directory is gitignored).
 
+## Project Notes File Organization
+
+- `TODO.md`: planning and prioritization only (milestones, open tasks, sprint priorities, exit criteria).
+- `CHANGELOG.md`: chronological implementation progress, validation commands/results, and notable behavior changes.
+- Keep each file single-purpose: do not put progress logs in `TODO.md`.
+- When shipping a slice, update code/tests/docs plus `CHANGELOG.md` together in the same commit.
+
 ## Lessons Log
 
 - Review `LESSONS.md` before major compiler or testing changes.
