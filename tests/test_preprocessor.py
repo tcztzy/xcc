@@ -451,6 +451,14 @@ class PreprocessorTests(unittest.TestCase):
             "#if __SIG_ATOMIC_MIN__ < 0\nint samin;\n#endif\n"
             "#if defined(__STDC_ISO_10646__)\nint iso;\n#endif\n"
             "#if defined(__FILE_NAME__)\nint fn;\n#endif\n"
+            "#if defined(__INT8_C)\nint i8c;\n#endif\n"
+            "#if defined(__INT16_C)\nint i16c;\n#endif\n"
+            "#if defined(__INT32_C)\nint i32c;\n#endif\n"
+            "#if defined(__INT64_C)\nint i64c;\n#endif\n"
+            "#if defined(__UINT8_C)\nint u8c;\n#endif\n"
+            "#if defined(__UINT16_C)\nint u16c;\n#endif\n"
+            "#if defined(__UINT32_C)\nint u32c;\n#endif\n"
+            "#if defined(__UINT64_C)\nint u64c;\n#endif\n"
             "__SIZE_TYPE__ n;\n"
             "__INTPTR_TYPE__ ip;\n"
             "__UINTPTR_TYPE__ up;\n"
@@ -569,6 +577,14 @@ class PreprocessorTests(unittest.TestCase):
                     "__SIG_ATOMIC_MIN__",
                     "__STDC_ISO_10646__",
                     "__FILE_NAME__",
+                    "__INT8_C",
+                    "__INT16_C",
+                    "__INT32_C",
+                    "__INT64_C",
+                    "__UINT8_C",
+                    "__UINT16_C",
+                    "__UINT32_C",
+                    "__UINT64_C",
                     "__SIZE_TYPE__",
                     "__INTPTR_TYPE__",
                     "__UINTPTR_TYPE__",
@@ -683,38 +699,46 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int samin;", result.source)
         self.assertNotIn("int iso;", result.source)
         self.assertNotIn("int fn;", result.source)
-        self.assertIn("__SIZE_TYPE__ n;", result.source)
-        self.assertIn("__INTPTR_TYPE__ ip;", result.source)
-        self.assertIn("__UINTPTR_TYPE__ up;", result.source)
-        self.assertIn("__INTMAX_TYPE__ imt;", result.source)
-        self.assertIn("__UINTMAX_TYPE__ umt;", result.source)
-        self.assertIn("__CHAR16_TYPE__ c16;", result.source)
-        self.assertIn("__CHAR32_TYPE__ c32;", result.source)
-        self.assertIn("__INT8_TYPE__ i8;", result.source)
-        self.assertIn("__INT16_TYPE__ i16;", result.source)
-        self.assertIn("__INT32_TYPE__ i32;", result.source)
-        self.assertIn("__INT64_TYPE__ i64;", result.source)
-        self.assertIn("__UINT8_TYPE__ u8;", result.source)
-        self.assertIn("__UINT16_TYPE__ u16;", result.source)
-        self.assertIn("__UINT32_TYPE__ u32;", result.source)
-        self.assertIn("__UINT64_TYPE__ u64;", result.source)
-        self.assertIn("__INT_LEAST8_TYPE__ il8;", result.source)
-        self.assertIn("__INT_LEAST16_TYPE__ il16;", result.source)
-        self.assertIn("__INT_LEAST32_TYPE__ il32;", result.source)
-        self.assertIn("__INT_LEAST64_TYPE__ il64;", result.source)
-        self.assertIn("__UINT_LEAST8_TYPE__ ul8;", result.source)
-        self.assertIn("__UINT_LEAST16_TYPE__ ul16;", result.source)
-        self.assertIn("__UINT_LEAST32_TYPE__ ul32;", result.source)
-        self.assertIn("__UINT_LEAST64_TYPE__ ul64;", result.source)
-        self.assertIn("__INT_FAST8_TYPE__ if8;", result.source)
-        self.assertIn("__INT_FAST16_TYPE__ if16;", result.source)
-        self.assertIn("__INT_FAST32_TYPE__ if32;", result.source)
-        self.assertIn("__INT_FAST64_TYPE__ if64;", result.source)
-        self.assertIn("__UINT_FAST8_TYPE__ uf8;", result.source)
-        self.assertIn("__UINT_FAST16_TYPE__ uf16;", result.source)
-        self.assertIn("__UINT_FAST32_TYPE__ uf32;", result.source)
-        self.assertIn("__UINT_FAST64_TYPE__ uf64;", result.source)
-        self.assertIn("__WCHAR_TYPE__ w;", result.source)
+        self.assertNotIn("int i8c;", result.source)
+        self.assertNotIn("int i16c;", result.source)
+        self.assertNotIn("int i32c;", result.source)
+        self.assertNotIn("int i64c;", result.source)
+        self.assertNotIn("int u8c;", result.source)
+        self.assertNotIn("int u16c;", result.source)
+        self.assertNotIn("int u32c;", result.source)
+        self.assertNotIn("int u64c;", result.source)
+        self.assertIn("__SIZE_TYPE__ n ;", result.source)
+        self.assertIn("__INTPTR_TYPE__ ip ;", result.source)
+        self.assertIn("__UINTPTR_TYPE__ up ;", result.source)
+        self.assertIn("__INTMAX_TYPE__ imt ;", result.source)
+        self.assertIn("__UINTMAX_TYPE__ umt ;", result.source)
+        self.assertIn("__CHAR16_TYPE__ c16 ;", result.source)
+        self.assertIn("__CHAR32_TYPE__ c32 ;", result.source)
+        self.assertIn("__INT8_TYPE__ i8 ;", result.source)
+        self.assertIn("__INT16_TYPE__ i16 ;", result.source)
+        self.assertIn("__INT32_TYPE__ i32 ;", result.source)
+        self.assertIn("__INT64_TYPE__ i64 ;", result.source)
+        self.assertIn("__UINT8_TYPE__ u8 ;", result.source)
+        self.assertIn("__UINT16_TYPE__ u16 ;", result.source)
+        self.assertIn("__UINT32_TYPE__ u32 ;", result.source)
+        self.assertIn("__UINT64_TYPE__ u64 ;", result.source)
+        self.assertIn("__INT_LEAST8_TYPE__ il8 ;", result.source)
+        self.assertIn("__INT_LEAST16_TYPE__ il16 ;", result.source)
+        self.assertIn("__INT_LEAST32_TYPE__ il32 ;", result.source)
+        self.assertIn("__INT_LEAST64_TYPE__ il64 ;", result.source)
+        self.assertIn("__UINT_LEAST8_TYPE__ ul8 ;", result.source)
+        self.assertIn("__UINT_LEAST16_TYPE__ ul16 ;", result.source)
+        self.assertIn("__UINT_LEAST32_TYPE__ ul32 ;", result.source)
+        self.assertIn("__UINT_LEAST64_TYPE__ ul64 ;", result.source)
+        self.assertIn("__INT_FAST8_TYPE__ if8 ;", result.source)
+        self.assertIn("__INT_FAST16_TYPE__ if16 ;", result.source)
+        self.assertIn("__INT_FAST32_TYPE__ if32 ;", result.source)
+        self.assertIn("__INT_FAST64_TYPE__ if64 ;", result.source)
+        self.assertIn("__UINT_FAST8_TYPE__ uf8 ;", result.source)
+        self.assertIn("__UINT_FAST16_TYPE__ uf16 ;", result.source)
+        self.assertIn("__UINT_FAST32_TYPE__ uf32 ;", result.source)
+        self.assertIn("__UINT_FAST64_TYPE__ uf64 ;", result.source)
+        self.assertIn("__WCHAR_TYPE__ w ;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
         source = (
@@ -1850,7 +1874,15 @@ class PreprocessorTests(unittest.TestCase):
             "long long imx = __INTMAX_MAX__;\n"
             "long long imn = __INTMAX_MIN__;\n"
             "unsigned long long umx = __UINTMAX_MAX__;\n"
+            "int i8c = __INT8_C(12);\n"
+            "int i16c = __INT16_C(34);\n"
+            "int i32c = __INT32_C(56);\n"
+            "long i64c = __INT64_C(78);\n"
             "long long imc = __INTMAX_C(123);\n"
+            "unsigned int u8c = __UINT8_C(12);\n"
+            "unsigned int u16c = __UINT16_C(34);\n"
+            "unsigned int u32c = __UINT32_C(56);\n"
+            "unsigned long u64c = __UINT64_C(78);\n"
             "unsigned long long umc = __UINTMAX_C(456);\n"
             "const char *bf = __BASE_FILE__;\n"
             "const char *fn = __FILE_NAME__;\n"
@@ -1992,7 +2024,15 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("long long imx = 9223372036854775807LL ;", result.source)
         self.assertIn("long long imn = - 9223372036854775808LL ;", result.source)
         self.assertIn("unsigned long long umx = 18446744073709551615ULL ;", result.source)
+        self.assertIn("int i8c = 12 ;", result.source)
+        self.assertIn("int i16c = 34 ;", result.source)
+        self.assertIn("int i32c = 56 ;", result.source)
+        self.assertIn("long i64c = 78L ;", result.source)
         self.assertIn("long long imc = 123LL ;", result.source)
+        self.assertIn("unsigned int u8c = 12 ;", result.source)
+        self.assertIn("unsigned int u16c = 34 ;", result.source)
+        self.assertIn("unsigned int u32c = 56U ;", result.source)
+        self.assertIn("unsigned long u64c = 78UL ;", result.source)
         self.assertIn("unsigned long long umc = 456ULL ;", result.source)
         self.assertIn('const char * bf = "main.c" ;', result.source)
         self.assertIn('const char * fn = "main.c" ;', result.source)

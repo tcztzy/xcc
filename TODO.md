@@ -102,6 +102,8 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined integer constructor macro coverage with GCC/Clang-compatible fixed-width families (`__INT{8,16,32,64}_C(value)` and `__UINT{8,16,32,64}_C(value)`), including suffix-aware LP64 mappings (`__INT64_C -> value##L`, `__UINT32_C -> value##U`, `__UINT64_C -> value##UL`); added regression assertions for macro expansion and CLI `-U` undef behavior, and updated frontend coverage docs.
+  - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: added hosted/freestanding environment modeling for predefined macro behavior by wiring CLI `-fhosted` / `-ffreestanding` through frontend options into preprocessor setup so `__STDC_HOSTED__` now expands to `1` (hosted, default) or `0` (freestanding) deterministically; added focused preprocessor and CLI regressions, plus frontend docs updates.
   - Checks: `.venv/bin/python -m unittest tests.test_options tests.test_preprocessor.PreprocessorTests.test_hosted_mode_defines_stdc_hosted_as_one tests.test_preprocessor.PreprocessorTests.test_freestanding_mode_defines_stdc_hosted_as_zero tests.test_cli.CliTests.test_main_ffreestanding_sets_stdc_hosted_to_zero -q` (pass).
   - Iteration 3 slice: expanded LP64 predefined target-assumption coverage with boolean/pointer width and size aliases (`__BOOL_WIDTH__`, `__POINTER_WIDTH__`, `__SIZEOF_BOOL__`), added regression coverage in both standard macro expansion and CLI `-U` override paths, and updated frontend coverage docs.
