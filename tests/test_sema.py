@@ -309,11 +309,9 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Bit-field width exceeds type width")
 
-    def test_unnamed_bit_field_nonzero_width_error(self) -> None:
-        unit = parse(list(lex("struct S { unsigned :1; };")))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unnamed bit-field must have zero width")
+    def test_unnamed_bit_field_nonzero_width_ok(self) -> None:
+        # C11 allows unnamed bit-fields with non-zero width (padding)
+        analyze(parse(list(lex("struct S { unsigned :1; };"))))
 
     def test_unnamed_bit_field_zero_width_ok(self) -> None:
         analyze(parse(list(lex("struct S { unsigned :0; unsigned x:1; };"))))

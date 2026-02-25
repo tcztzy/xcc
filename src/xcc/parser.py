@@ -252,6 +252,12 @@ class Parser:
         self._capture_next_fn_params: bool = False
         self._function_def_info: tuple[list[Param], bool, bool] | None = None
 
+        # Register compiler built-in typedefs
+        self._define_typedef(
+            "__builtin_va_list",
+            TypeSpec(name="__builtin_va_list"),
+        )
+
     def _push_scope(
         self,
         names: set[str] | None = None,
