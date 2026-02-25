@@ -365,6 +365,7 @@ class PreprocessorTests(unittest.TestCase):
             "#if __STDC_MB_MIGHT_NEQ_WC__\nint mw;\n#endif\n"
             "#if __STDC_NO_THREADS__\nint t;\n#endif\n"
             "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
+            "#if __SIZEOF_BOOL__\nint bsz;\n#endif\n"
             "#if __SIZEOF_FLOAT__\nint fsz;\n#endif\n"
             "#if __SIZEOF_DOUBLE__\nint dsz;\n#endif\n"
             "#if __SIZEOF_LONG_DOUBLE__\nint ldsz;\n#endif\n"
@@ -400,6 +401,8 @@ class PreprocessorTests(unittest.TestCase):
             "#if __PTRDIFF_WIDTH__ == 64\nint pw;\n#endif\n"
             "#if __INTPTR_WIDTH__ == 64\nint ipw;\n#endif\n"
             "#if __UINTPTR_WIDTH__ == 64\nint upw;\n#endif\n"
+            "#if __POINTER_WIDTH__ == 64\nint pww;\n#endif\n"
+            "#if __BOOL_WIDTH__ == 8\nint bw;\n#endif\n"
             "#if __INTMAX_WIDTH__ == 64\nint imw;\n#endif\n"
             "#if __UINTMAX_WIDTH__ == 64\nint umw;\n#endif\n"
             "#if __SIZE_MAX__ > 0\nint sm;\n#endif\n"
@@ -479,6 +482,7 @@ class PreprocessorTests(unittest.TestCase):
                     "__STDC_MB_MIGHT_NEQ_WC__",
                     "__STDC_NO_THREADS__",
                     "__SIZEOF_POINTER__",
+                    "__SIZEOF_BOOL__",
                     "__SIZEOF_FLOAT__",
                     "__SIZEOF_DOUBLE__",
                     "__SIZEOF_LONG_DOUBLE__",
@@ -514,6 +518,8 @@ class PreprocessorTests(unittest.TestCase):
                     "__PTRDIFF_WIDTH__",
                     "__INTPTR_WIDTH__",
                     "__UINTPTR_WIDTH__",
+                    "__POINTER_WIDTH__",
+                    "__BOOL_WIDTH__",
                     "__INTMAX_WIDTH__",
                     "__UINTMAX_WIDTH__",
                     "__SIZE_MAX__",
@@ -591,6 +597,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int mw;", result.source)
         self.assertNotIn("int t;", result.source)
         self.assertNotIn("int z;", result.source)
+        self.assertNotIn("int bsz;", result.source)
         self.assertNotIn("int fsz;", result.source)
         self.assertNotIn("int dsz;", result.source)
         self.assertNotIn("int ldsz;", result.source)
@@ -626,6 +633,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int pw;", result.source)
         self.assertNotIn("int ipw;", result.source)
         self.assertNotIn("int upw;", result.source)
+        self.assertNotIn("int pww;", result.source)
+        self.assertNotIn("int bw;", result.source)
         self.assertNotIn("int imw;", result.source)
         self.assertNotIn("int umw;", result.source)
         self.assertNotIn("int sm;", result.source)
@@ -1746,6 +1755,8 @@ class PreprocessorTests(unittest.TestCase):
             "int pdw = __PTRDIFF_WIDTH__;\n"
             "int ipw = __INTPTR_WIDTH__;\n"
             "int upw = __UINTPTR_WIDTH__;\n"
+            "int pww = __POINTER_WIDTH__;\n"
+            "int bw = __BOOL_WIDTH__;\n"
             "int imw = __INTMAX_WIDTH__;\n"
             "int umw = __UINTMAX_WIDTH__;\n"
             "int llw = __LLONG_WIDTH__;\n"
@@ -1767,6 +1778,7 @@ class PreprocessorTests(unittest.TestCase):
             "long ipmax = __INTPTR_MAX__;\n"
             "long ipmin = __INTPTR_MIN__;\n"
             "unsigned long upmax = __UINTPTR_MAX__;\n"
+            "int bsz = __SIZEOF_BOOL__;\n"
             "int ssz = __SIZEOF_SHORT__;\n"
             "int isz = __SIZEOF_INT__;\n"
             "int fsz = __SIZEOF_FLOAT__;\n"
@@ -1885,6 +1897,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int pdw = 64 ;", result.source)
         self.assertIn("int ipw = 64 ;", result.source)
         self.assertIn("int upw = 64 ;", result.source)
+        self.assertIn("int pww = 64 ;", result.source)
+        self.assertIn("int bw = 8 ;", result.source)
         self.assertIn("int imw = 64 ;", result.source)
         self.assertIn("int umw = 64 ;", result.source)
         self.assertIn("int llw = 64 ;", result.source)
@@ -1906,6 +1920,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("long ipmax = 9223372036854775807L ;", result.source)
         self.assertIn("long ipmin = - 9223372036854775808L ;", result.source)
         self.assertIn("unsigned long upmax = 18446744073709551615UL ;", result.source)
+        self.assertIn("int bsz = 1 ;", result.source)
         self.assertIn("int ssz = 2 ;", result.source)
         self.assertIn("int isz = 4 ;", result.source)
         self.assertIn("int fsz = 4 ;", result.source)
