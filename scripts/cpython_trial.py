@@ -1695,6 +1695,113 @@ static inline int min(int a, int b) { return a < b ? a : b; }
 int clamp(int v, int lo, int hi) { return min(max(v, lo), hi); }
 """,
         ),
+        TrialCase(
+            "compound_literal",
+            """
+struct point { int x; int y; };
+struct point *get_origin(void) {
+    static struct point p = {0, 0};
+    return &p;
+}
+void use(void) { struct point q = (struct point){3, 4}; }
+""",
+        ),
+        TrialCase(
+            "designated_init_array",
+            """
+int table[256] = { [0] = -1, [255] = -1, [' '] = 1, ['\\n'] = 2 };
+""",
+        ),
+        TrialCase(
+            "static_assert_declaration",
+            """
+_Static_assert(sizeof(int) >= 4, "int too small");
+typedef struct { int x; } Foo;
+_Static_assert(sizeof(Foo) >= 4, "Foo too small");
+""",
+        ),
+        TrialCase(
+            "function_returning_struct",
+            """
+struct pair { int a; int b; };
+struct pair make_pair(int x, int y) {
+    struct pair p;
+    p.a = x;
+    p.b = y;
+    return p;
+}
+int sum_pair(void) { struct pair p = make_pair(1, 2); return p.a + p.b; }
+""",
+        ),
+        TrialCase(
+            "pointer_to_incomplete_struct",
+            """
+struct node;
+struct node *alloc_node(void);
+struct node {
+    int value;
+    struct node *next;
+};
+struct node *alloc_node(void) { static struct node n; return &n; }
+""",
+        ),
+        TrialCase(
+            "complex_macro_expansion",
+            """
+#define CONCAT(a, b) a ## b
+#define MAKE_NAME(prefix, id) CONCAT(prefix, id)
+int MAKE_NAME(var_, 1) = 10;
+int MAKE_NAME(var_, 2) = 20;
+int total(void) { return var_1 + var_2; }
+""",
+        ),
+        TrialCase(
+            "enum_with_explicit_values",
+            """
+enum http_status {
+    HTTP_OK = 200,
+    HTTP_NOT_FOUND = 404,
+    HTTP_INTERNAL = 500
+};
+int is_error(enum http_status s) { return s >= 400; }
+""",
+        ),
+        TrialCase(
+            "nested_struct_initializer",
+            """
+struct inner { int x; int y; };
+struct outer { struct inner a; struct inner b; };
+struct outer make(void) {
+    struct outer o = { {1, 2}, {3, 4} };
+    return o;
+}
+""",
+        ),
+        TrialCase(
+            "switch_fallthrough",
+            """
+int classify(int c) {
+    switch (c) {
+    case 'a': case 'e': case 'i': case 'o': case 'u':
+        return 1;
+    case '0': case '1': case '2': case '3': case '4':
+    case '5': case '6': case '7': case '8': case '9':
+        return 2;
+    default:
+        return 0;
+    }
+}
+""",
+        ),
+        TrialCase(
+            "const_volatile_pointer",
+            """
+void process(const volatile int *reg) {
+    int val = *reg;
+    while (*reg != val) { val = *reg; }
+}
+""",
+        ),
     ]
 
 
