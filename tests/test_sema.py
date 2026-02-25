@@ -421,6 +421,44 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(member.alignment, 8)
         self.assertEqual(member.bit_width_expr, IntLiteral("1"))
 
+    def test_record_member_lookup_anonymous_edge_paths(self) -> None:
+        analyzer = Analyzer()
+        self.assertEqual(analyzer._flatten_hoisted_record_members(Type("struct Missing"), 0), [])
+        analyzer._record_definitions["struct Inner"] = (
+            RecordMemberInfo("x", INT),
+            RecordMemberInfo(None, INT, bit_width=0),
+        )
+        self.assertEqual(analyzer._record_member_lookup("struct Inner"), {"x": (INT, 0)})
+        analyzer._record_definitions["struct Outer"] = (
+            RecordMemberInfo("x", INT),
+            RecordMemberInfo(None, Type("struct Inner")),
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyzer._record_member_lookup("struct Outer")
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: x")
+
+    def test_register_type_spec_handles_missing_nested_lookup_entry(self) -> None:
+        analyzer = Analyzer()
+        original_lookup = analyzer._record_member_lookup
+        analyzer._record_member_lookup = lambda _record_name: None  # type: ignore[method-assign]
+        try:
+            analyzer._register_type_spec(
+                TypeSpec(
+                    "struct",
+                    record_members=(
+                        (
+                            TypeSpec(
+                                "struct",
+                                record_members=((TypeSpec("int"), "x"),),
+                            ),
+                            None,
+                        ),
+                    ),
+                )
+            )
+        finally:
+            analyzer._record_member_lookup = original_lookup  # type: ignore[method-assign]
+
     def test_type_helper_methods(self) -> None:
         analyzer = Analyzer()
         array = Type("int").array_of(4)
@@ -2916,6 +2954,39 @@ class SemaTests(unittest.TestCase):
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
 
+    def test_anonymous_struct_union_member_access_typemap(self) -> None:
+        source = (
+            "struct holder { union { struct { int x; int y; }; long packed; }; };"
+            "int main(void){struct holder value; value.x=1; value.y=2; return value.x + value.y;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[3].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_anonymous_struct_in_union_member_access_typemap(self) -> None:
+        source = (
+            "union cell { struct { int x; int y; }; long pair; };"
+            "int main(void){union cell value; value.x=1; value.y=2; return value.x + value.y;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[3].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_anonymous_union_in_struct_member_access_typemap(self) -> None:
+        source = (
+            "struct holder { union { int x; int y; }; long packed; };"
+            "int main(void){struct holder value; value.x=1; value.packed=2; return value.x;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[3].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
     def test_member_assignment_is_allowed(self) -> None:
         source = "int main(){struct S { int x; } s; s.x=1; return s.x;}"
         unit = parse(list(lex(source)))
@@ -4489,6 +4560,13 @@ class SemaTests(unittest.TestCase):
                 )
             ]
         )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: x")
+
+    def test_duplicate_hoisted_record_member_name_error(self) -> None:
+        source = "struct S { int x; struct { int x; }; };"
+        unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: x")

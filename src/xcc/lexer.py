@@ -60,6 +60,8 @@ KEYWORDS = {
     "_Noreturn",
     "_Static_assert",
     "_Thread_local",
+    "typeof",
+    "__typeof__",
     "__extension__",
 }
 
