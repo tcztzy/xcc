@@ -4345,6 +4345,15 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate definition: struct S")
 
+    def test_typedef_struct_reuse_no_duplicate_error(self) -> None:
+        src = (
+            "typedef struct _object { long ob_refcnt; } PyObject;"
+            "PyObject *borrow(PyObject *o) { return o; }"
+        )
+        unit = parse(list(lex(src)))
+        result = analyze(unit)
+        self.assertIsNotNone(result)
+
     def test_incomplete_struct_object_error(self) -> None:
         unit = parse(list(lex("int main(){struct Node value; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
