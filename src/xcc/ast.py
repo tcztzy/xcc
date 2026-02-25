@@ -72,6 +72,7 @@ class TypeSpec:
     enum_members: tuple[EnumMember, ...] = ()
     record_tag: str | None = None
     record_members: tuple[RecordMemberDecl, ...] = ()
+    has_record_body: bool = False
     source_line: int | None = field(default=None, compare=False)
     source_column: int | None = field(default=None, compare=False)
     typeof_expr: "Expr | None" = field(default=None, compare=False)
@@ -111,6 +112,8 @@ class TypeSpec:
                     continue
                 raise TypeError("Invalid record member declaration")
             object.__setattr__(self, "record_members", tuple(normalized_members))
+        if self.record_members and not self.has_record_body:
+            object.__setattr__(self, "has_record_body", True)
 
 
 @dataclass(frozen=True)

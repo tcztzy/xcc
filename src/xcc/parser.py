@@ -703,7 +703,9 @@ class Parser:
                 enum_members=enum_members,
             )
         if token.lexeme in {"struct", "union"}:
-            record_tag, record_members = self._parse_record_spec(token, str(token.lexeme))
+            record_tag, record_members, has_record_body = self._parse_record_spec(
+                token, str(token.lexeme)
+            )
             pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
             return TypeSpec(
                 str(token.lexeme),
@@ -711,6 +713,7 @@ class Parser:
                 qualifiers=qualifiers,
                 record_tag=record_tag,
                 record_members=record_members,
+                has_record_body=has_record_body,
             )
         raise ParserError(self._unsupported_type_message(context, token), token)
 
@@ -1040,7 +1043,7 @@ class Parser:
         self,
         token: Token,
         kind: str,
-    ) -> tuple[str | None, tuple[RecordMemberDecl, ...]]:
+    ) -> tuple[str | None, tuple[RecordMemberDecl, ...], bool]:
         self._skip_gnu_attributes()
         record_tag: str | None = None
         if self._current().kind == TokenKind.IDENT:
@@ -1048,16 +1051,19 @@ class Parser:
             assert isinstance(ident.lexeme, str)
             record_tag = ident.lexeme
         record_members: tuple[RecordMemberDecl, ...] = ()
+        has_record_body = False
         if self._check_punct("{"):
+            has_record_body = True
             record_members = self._parse_record_members()
-        if record_tag is None and not record_members:
+        if record_tag is None and not record_members and not has_record_body:
             raise ParserError(f"Expected {kind} tag or definition", token)
-        return record_tag, record_members
+        return record_tag, record_members, has_record_body
 
     def _parse_record_members(self) -> tuple[RecordMemberDecl, ...]:
         self._expect_punct("{")
-        if self._check_punct("}"):
+        if self._check_punct("}") and self._std == "c11":
             raise ParserError("Expected member declaration", self._current())
+        # GNU extension: empty struct/union is allowed in gnu11 mode
         members: list[RecordMemberDecl] = []
         while not self._check_punct("}"):
             members.extend(self._parse_record_member_declaration())

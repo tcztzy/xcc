@@ -4363,6 +4363,16 @@ class SemaTests(unittest.TestCase):
             "Invalid object type for block-scope object declaration: incomplete",
         )
 
+    def test_empty_struct_gnu11_is_complete(self) -> None:
+        source = "struct E {}; int main(){struct E e; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        analyze(unit, std="gnu11")  # should not raise
+
+    def test_empty_union_gnu11_is_complete(self) -> None:
+        source = "union U {}; int main(){union U u; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        analyze(unit, std="gnu11")  # should not raise
+
     def test_incomplete_anonymous_record_object_error(self) -> None:
         unit = TranslationUnit(
             [
