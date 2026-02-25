@@ -719,6 +719,31 @@ class Analyzer:
             self._record_definitions[record_name] = normalized
         return normalized
 
+    def _is_anonymous_record_member(self, member: RecordMemberInfo) -> bool:
+        return (
+            member.name is None
+            and member.bit_width is None
+            and not member.type_.declarator_ops
+            and self._is_record_name(member.type_.name)
+        )
+
+    def _flatten_hoisted_record_members(
+        self,
+        record_type: Type,
+        owner_index: int,
+    ) -> list[tuple[str, tuple[Type, int]]]:
+        nested_members = self._record_members(record_type.name)
+        if nested_members is None:
+            return []
+        flattened: list[tuple[str, tuple[Type, int]]] = []
+        for nested in nested_members:
+            if nested.name is not None:
+                flattened.append((nested.name, (nested.type_, owner_index)))
+                continue
+            if self._is_anonymous_record_member(nested):
+                flattened.extend(self._flatten_hoisted_record_members(nested.type_, owner_index))
+        return flattened
+
     def _record_member_lookup(
         self,
         record_name: str,
@@ -729,11 +754,17 @@ class Analyzer:
         cached = self._record_member_lookup_cache.get(record_name)
         if cached is not None and cached[0] is members:
             return cached[1]
-        lookup = {
-            member.name: (member.type_, index)
-            for index, member in enumerate(members)
-            if member.name is not None
-        }
+        lookup: dict[str, tuple[Type, int]] = {}
+        for index, member in enumerate(members):
+            flattened: list[tuple[str, tuple[Type, int]]] = []
+            if member.name is not None:
+                flattened.append((member.name, (member.type_, index)))
+            elif self._is_anonymous_record_member(member):
+                flattened = self._flatten_hoisted_record_members(member.type_, index)
+            for member_name, member_info in flattened:
+                if member_name in lookup:
+                    raise SemaError(f"Duplicate declaration: {member_name}")
+                lookup[member_name] = member_info
         self._record_member_lookup_cache[record_name] = (members, lookup)
         return lookup
 
@@ -789,6 +820,18 @@ class Analyzer:
                         natural_alignment,
                     )
                 )
+            if (
+                member_name is None
+                and bit_width is None
+                and not resolved_member_type.declarator_ops
+                and self._is_record_name(resolved_member_type.name)
+            ):
+                nested_lookup = self._record_member_lookup(resolved_member_type.name)
+                if nested_lookup is not None:
+                    for nested_name in nested_lookup:
+                        if nested_name in seen_members:
+                            raise SemaError(f"Duplicate declaration: {nested_name}")
+                        seen_members.add(nested_name)
             member_types.append(
                 RecordMemberInfo(
                     member_name,
@@ -941,12 +984,12 @@ class Analyzer:
         return name.startswith("struct ") or name.startswith("union ")
 
     def _lookup_record_member(self, record_type: Type, member_name: str) -> Type:
-        members = self._record_members(record_type.name)
-        if members is None:
+        lookup = self._record_member_lookup(record_type.name)
+        if lookup is None:
             raise SemaError("Member access on incomplete type")
-        for member in members:
-            if member.name == member_name:
-                return member.type_
+        member = lookup.get(member_name)
+        if member is not None:
+            return member[0]
         raise SemaError(f"No such member: {member_name}")
 
     def _resolve_member_type(

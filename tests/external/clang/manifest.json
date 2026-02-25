@@ -332,10 +332,7 @@
       "id": "sema-align-x86-64-ulonglong",
       "upstream": "clang/test/Sema/align-x86-64.c",
       "fixture": "tests/external/clang/fixtures/Sema/align-x86-64.c",
-      "expect": "parse",
-      "message_contains": "Unknown declaration type name: '__attribute__'",
-      "line": 5,
-      "column": 9,
+      "expect": "sema",
       "sha256": "413255386b93b447bb95e8dff0e9cb047cf5e0f78c3c98897151584450cadfb5"
     },
     {

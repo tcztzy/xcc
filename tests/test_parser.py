@@ -1253,6 +1253,33 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("struct S { int; };")))
         self.assertEqual(ctx.exception.message, "Expected identifier before ';'")
 
+    def test_anonymous_struct_union_member_parses(self) -> None:
+        source = "struct holder { union { struct { int x; int y; }; long packed; }; };"
+        unit = parse(list(lex(source)))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        member = declaration.type_spec.record_members[0]
+        self.assertIsNone(member.name)
+        self.assertEqual(member.type_spec.name, "union")
+
+    def test_anonymous_struct_in_union_member_parses(self) -> None:
+        source = "union cell { struct { int x; int y; }; long pair; };"
+        unit = parse(list(lex(source)))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        member = declaration.type_spec.record_members[0]
+        self.assertIsNone(member.name)
+        self.assertEqual(member.type_spec.name, "struct")
+
+    def test_anonymous_union_in_struct_member_parses(self) -> None:
+        source = "struct holder { union { int x; int y; }; long packed; };"
+        unit = parse(list(lex(source)))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        member = declaration.type_spec.record_members[0]
+        self.assertIsNone(member.name)
+        self.assertEqual(member.type_spec.name, "union")
+
     def test_record_member_rejects_void_object_type_with_contextual_diagnostic(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("struct S { void value; };")))
@@ -2859,6 +2886,42 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(){int x; return _Alignof(x);}")), std="c11")
         self.assertEqual(ctx.exception.message, "Invalid alignof operand")
+
+    def test_typeof_type_name_declaration(self) -> None:
+        unit = parse(list(lex("int main(void){typeof(int*) p; return 0;}")), std="gnu11")
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+
+    def test_typeof_expression_declaration(self) -> None:
+        unit = parse(list(lex("int main(void){int x; typeof(x) y; return 0;}")), std="gnu11")
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec.name, "typeof")
+
+    def test_typeof_prefers_typedef_name_operand(self) -> None:
+        source = "int main(void){typedef long T; typeof(T) x; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("long"))
+
+    def test___typeof___type_name_declaration(self) -> None:
+        unit = parse(list(lex("int main(void){__typeof__(int) x; return 0;}")), std="gnu11")
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int"))
+
+    def test_typeof_type_name_with_trailing_pointer(self) -> None:
+        unit = parse(list(lex("int main(void){typeof(int) *p; return 0;}")), std="gnu11")
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+
+    def test_typeof_rejected_in_c11(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){typeof(int) x; return 0;}")), std="c11")
+        self.assertEqual(ctx.exception.message, "typeof is a GNU extension")
 
     def test_generic_selection_expression(self) -> None:
         unit = parse(list(lex("int main(){int x=0; return _Generic(x, int: 1, default: 2);}")))

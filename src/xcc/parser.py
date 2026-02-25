@@ -66,14 +66,19 @@ ASSIGNMENT_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "
 INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
 SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | FLOATING_TYPE_KEYWORDS | {"void"}
-PAREN_TYPE_NAME_KEYWORDS = SIMPLE_TYPE_SPEC_KEYWORDS | {
-    "_Atomic",
-    "_Bool",
-    "_Complex",
-    "enum",
-    "struct",
-    "union",
-}
+TYPEOF_KEYWORDS = {"typeof", "__typeof__"}
+PAREN_TYPE_NAME_KEYWORDS = (
+    SIMPLE_TYPE_SPEC_KEYWORDS
+    | {
+        "_Atomic",
+        "_Bool",
+        "_Complex",
+        "enum",
+        "struct",
+        "union",
+    }
+    | TYPEOF_KEYWORDS
+)
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 STORAGE_CLASS_KEYWORDS = {"auto", "register", "static", "extern", "typedef"}
 EXTERNAL_STATEMENT_KEYWORDS = {
@@ -577,6 +582,17 @@ class Parser:
         if token.kind != TokenKind.KEYWORD:
             raise ParserError(self._unsupported_type_message(context, token), token)
         self._advance()
+        if token.lexeme in TYPEOF_KEYWORDS:
+            if self._std == "c11":
+                raise ParserError("typeof is a GNU extension", token)
+            type_spec = self._parse_typeof_type_spec()
+            pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
+            if pointer_depth:
+                type_spec = self._build_declarator_type(
+                    type_spec,
+                    (POINTER_OP,) * pointer_depth,
+                )
+            return self._apply_type_qualifiers(type_spec, qualifiers)
         if token.lexeme == "_Complex":
             if self._check_keyword("float") or self._check_keyword("double"):
                 complex_base = self._advance()
@@ -1001,6 +1017,9 @@ class Parser:
                     self._invalid_alignment_specifier_message("record member declaration"),
                     decl_specs.alignment_token or self._current(),
                 )
+            if base_type.name in {"struct", "union"}:
+                self._advance()
+                return [RecordMemberDecl(base_type, None)]
             raise self._expected_identifier_error()
         members: list[RecordMemberDecl] = []
         while True:
@@ -1115,6 +1134,8 @@ class Parser:
             or self._check_keyword("_Bool")
             or self._check_keyword("_Atomic")
             or self._check_keyword("_Complex")
+            or self._check_keyword("typeof")
+            or self._check_keyword("__typeof__")
             or self._check_keyword("enum")
             or self._check_keyword("struct")
             or self._check_keyword("union")
@@ -1599,6 +1620,16 @@ class Parser:
             raise ParserError("Invalid alignof operand", token)
         operand = self._parse_unary()
         return AlignofExpr(operand, None)
+
+    def _parse_typeof_type_spec(self) -> TypeSpec:
+        self._expect_punct("(")
+        if self._try_parse_type_name():
+            type_spec = self._parse_type_name()
+            self._expect_punct(")")
+            return type_spec
+        self._parse_expression()
+        self._expect_punct(")")
+        return TypeSpec("typeof")
 
     def _parse_cast_expr(self) -> CastExpr:
         type_spec = self._parse_parenthesized_type_name()
@@ -2651,7 +2682,11 @@ class Parser:
         is_thread_local = False
         is_inline = False
         is_noreturn = False
-        while self._current().kind == TokenKind.KEYWORD:
+        while True:
+            # Skip leading/interleaved GNU __attribute__ specifiers
+            self._skip_gnu_attributes()
+            if self._current().kind != TokenKind.KEYWORD:
+                break
             lexeme = str(self._current().lexeme)
             if lexeme in STORAGE_CLASS_KEYWORDS:
                 if storage_class is not None:
