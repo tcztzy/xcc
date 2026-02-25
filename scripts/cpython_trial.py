@@ -1592,6 +1592,109 @@ void increment(void) { counter++; }
 int read_counter(void) { return counter; }
 """,
         ),
+        TrialCase(
+            "bitfield_struct",
+            """
+struct Flags {
+    unsigned int readable : 1;
+    unsigned int writable : 1;
+    unsigned int executable : 1;
+    unsigned int pad : 29;
+};
+int check(struct Flags f) { return f.readable && f.writable; }
+""",
+        ),
+        TrialCase(
+            "anonymous_struct_in_union",
+            """
+union Value {
+    int i;
+    double d;
+    struct { char *ptr; int len; };
+};
+int get_len(union Value *v) { return v->len; }
+""",
+        ),
+        TrialCase(
+            "variadic_declaration",
+            """
+int printf(const char *fmt, ...);
+int sprintf(char *buf, const char *fmt, ...);
+typedef int (*formatter_fn)(const char *, ...);
+""",
+        ),
+        TrialCase(
+            "flexible_array_member",
+            """
+struct Buffer {
+    int size;
+    char data[];
+};
+int buf_size(struct Buffer *b) { return b->size; }
+""",
+        ),
+        TrialCase(
+            "nested_union_in_struct",
+            """
+struct Token {
+    int kind;
+    union {
+        long ival;
+        double fval;
+        char *sval;
+    } u;
+};
+long get_ival(struct Token *t) { return t->u.ival; }
+""",
+        ),
+        TrialCase(
+            "typedef_chain",
+            """
+typedef int Int32;
+typedef Int32 MyInt;
+typedef MyInt *MyIntPtr;
+MyInt add(MyIntPtr a, MyIntPtr b) { return *a + *b; }
+""",
+        ),
+        TrialCase(
+            "extern_declaration",
+            """
+extern int errno;
+extern const char *strerror(int errnum);
+int get_errno(void) { return errno; }
+""",
+        ),
+        TrialCase(
+            "do_while_loop",
+            """
+int count_digits(int n) {
+    int count = 0;
+    do { count++; n /= 10; } while (n != 0);
+    return count;
+}
+""",
+        ),
+        TrialCase(
+            "goto_statement",
+            """
+int find_nonzero(int *arr, int n) {
+    int i;
+    for (i = 0; i < n; i++)
+        if (arr[i] != 0) goto found;
+    return -1;
+found:
+    return i;
+}
+""",
+        ),
+        TrialCase(
+            "inline_function",
+            """
+static inline int max(int a, int b) { return a > b ? a : b; }
+static inline int min(int a, int b) { return a < b ? a : b; }
+int clamp(int v, int lo, int hi) { return min(max(v, lo), hi); }
+""",
+        ),
     ]
 
 
