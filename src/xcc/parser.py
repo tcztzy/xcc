@@ -381,10 +381,18 @@ class Parser:
             if not self._check_punct("("):
                 return False
             self._advance()
-            self._parse_params()
+            params, has_prototype, _ = self._parse_params()
             self._expect_punct(")")
             self._skip_gnu_attributes()
-            return self._check_punct("{") or self._check_punct(";")
+            if self._check_punct("{") or self._check_punct(";"):
+                return True
+            # K&R: declarations follow ')' before '{'.
+            if not has_prototype and params:
+                # Skip K&R declarations until we find '{'.
+                while not self._check_punct("{") and self._current().kind != TokenKind.EOF:
+                    self._advance()
+                return self._check_punct("{")
+            return False
         except ParserError:
             return False
         finally:
@@ -408,6 +416,10 @@ class Parser:
         params, has_prototype, is_variadic = self._parse_params()
         self._expect_punct(")")
         self._skip_gnu_attributes()
+        # Parse K&R-style parameter declarations between ')' and '{'.
+        is_knr = not has_prototype and params
+        if is_knr and not self._check_punct("{") and not self._check_punct(";"):
+            params = self._parse_knr_declarations(params)
         param_types = tuple(param.type_spec for param in params) if has_prototype else None
         function_type = self._build_declarator_type(
             return_type,
@@ -458,6 +470,50 @@ class Parser:
             is_overloadable=is_overloadable,
         )
 
+    def _is_knr_identifier_list(self) -> bool:
+        """Check if the current position starts a K&R identifier list (bare names)."""
+        token = self._current()
+        if token.kind != TokenKind.IDENT:
+            return False
+        name = str(token.lexeme)
+        # If it's a known typedef, it's a typed parameter, not K&R.
+        if self._lookup_typedef(name) is not None:
+            return False
+        # K&R identifier must be followed by ',' or ')'.
+        next_tok = self._peek()
+        return next_tok.kind == TokenKind.PUNCTUATOR and next_tok.lexeme in (",", ")")
+
+    def _parse_knr_identifier_list(self) -> list[Param]:
+        """Parse K&R identifier list: (a, b, c)."""
+        int_type = TypeSpec("int", 0)
+        names: list[str] = []
+        names.append(str(self._expect(TokenKind.IDENT).lexeme))
+        while self._check_punct(","):
+            self._advance()
+            names.append(str(self._expect(TokenKind.IDENT).lexeme))
+        return [Param(int_type, name) for name in names]
+
+    def _parse_knr_declarations(self, params: list[Param]) -> list[Param]:
+        """Parse K&R parameter type declarations and update param types."""
+        param_types: dict[str, TypeSpec] = {}
+        # Parse declarations until we hit '{'.
+        while not self._check_punct("{"):
+            self._consume_decl_specifiers()
+            base_type = self._parse_type_spec()
+            # Parse comma-separated declarators.
+            while True:
+                name, declarator_ops = self._parse_declarator(allow_abstract=False)
+                assert name is not None  # allow_abstract=False guarantees a name
+                decl_type = self._build_declarator_type(base_type, declarator_ops)
+                param_types[name] = decl_type
+                if self._check_punct(","):
+                    self._advance()
+                else:
+                    break
+            self._expect_punct(";")
+        int_type = TypeSpec("int", 0)
+        return [Param(param_types.get(str(p.name), int_type), p.name) for p in params]
+
     def _parse_params(self) -> tuple[list[Param], bool, bool]:
         if self._check_punct(")"):
             return [], False, False
@@ -466,6 +522,10 @@ class Parser:
             return [], True, False
         if self._check_punct("..."):
             raise ParserError("Expected parameter before ...", self._current())
+        # Detect K&R-style identifier list.
+        if self._is_knr_identifier_list():
+            params = self._parse_knr_identifier_list()
+            return params, False, False
         params = [self._parse_param()]
         is_variadic = False
         while self._check_punct(","):
