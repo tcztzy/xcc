@@ -248,6 +248,7 @@ _GNU_MODE_PREDEFINED_MACROS = (
     "__GNUC__=4",
     "__GNUC_MINOR__=2",
     "__GNUC_PATCHLEVEL__=1",
+    "__GNUC_STDC_INLINE__=1",
     '__VERSION__="xcc gnu11"',
 )
 _SUPPORTED_WARNINGS = frozenset(
