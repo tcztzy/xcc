@@ -1431,6 +1431,87 @@ int classify(int c) {
 }
 """,
         ),
+        TrialCase(
+            "designated_initializer_struct",
+            """
+struct point { int x; int y; int z; };
+struct point p = { .y = 10, .x = 5, .z = 20 };
+""",
+        ),
+        TrialCase(
+            "designated_initializer_array",
+            """
+int arr[10] = { [3] = 30, [7] = 70 };
+""",
+        ),
+        TrialCase(
+            "compound_literal_as_argument",
+            """
+struct pair { int a; int b; };
+int sum_pair(struct pair p) { return p.a + p.b; }
+int test(void) { return sum_pair((struct pair){1, 2}); }
+""",
+        ),
+        TrialCase(
+            "static_assert_basic",
+            """
+_Static_assert(sizeof(int) >= 4, "int too small");
+_Static_assert(1, "always true");
+""",
+        ),
+        TrialCase(
+            "generic_selection_expr",
+            """
+#define type_name(x) _Generic((x), \
+    int: "int", \
+    double: "double", \
+    default: "other")
+const char *s = type_name(42);
+""",
+        ),
+        TrialCase(
+            "alignof_alignas",
+            """
+_Alignas(16) int aligned_var;
+int align = _Alignof(double);
+""",
+        ),
+        TrialCase(
+            "nested_designated_init",
+            """
+struct inner { int a; int b; };
+struct outer { struct inner i; int c; };
+struct outer o = { .i = { .a = 1, .b = 2 }, .c = 3 };
+""",
+        ),
+        TrialCase(
+            "pointer_to_array_of_pointers",
+            """
+typedef int (*func_t)(void);
+func_t (*table)[4];
+int call_first(func_t (*t)[4]) { return (*t)[0](); }
+""",
+        ),
+        TrialCase(
+            "comma_operator_in_for",
+            """
+int f(void) {
+    int i, j;
+    for (i = 0, j = 10; i < j; i++, j--)
+        ;
+    return i;
+}
+""",
+        ),
+        TrialCase(
+            "sizeof_vla_expression",
+            """
+int f(int n) {
+    int arr[n];
+    return sizeof(arr) / sizeof(arr[0]);
+}
+""",
+        ),
     ]
 
 
