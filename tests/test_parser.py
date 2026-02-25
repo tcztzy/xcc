@@ -3149,6 +3149,22 @@ class ParserTests(unittest.TestCase):
             parser._parse_array_size_expr(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1))
         self.assertEqual(parser._parse_array_size_expr_or_vla(Identifier("n"), Token(TokenKind.IDENT, "n", 1, 1)), -1)
 
+    def test_gnu11_zero_length_array_allowed(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)], std="gnu11")
+        self.assertEqual(parser._parse_array_size_expr(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1)), 0)
+        self.assertEqual(parser._parse_array_size(Token(TokenKind.INT_CONST, "0", 1, 1)), 0)
+        self.assertEqual(parser._parse_array_size_expr_or_vla(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1)), 0)
+
+    def test_gnu11_zero_length_array_struct_member(self) -> None:
+        src = "struct s { int n; char data[0]; };"
+        tu = parse(lex(src), std="gnu11")
+        self.assertEqual(len(tu.declarations), 1)
+
+    def test_c11_zero_length_array_rejected(self) -> None:
+        src = "struct s { int n; char data[0]; };"
+        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
+            parse(lex(src), std="c11")
+
     def test_sizeof_type_spec_handles_array_decl_forms(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
         self.assertIsNone(parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", object()),))))

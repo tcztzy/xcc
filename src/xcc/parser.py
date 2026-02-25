@@ -2116,7 +2116,7 @@ class Parser:
             if message is not None:
                 raise ParserError(message, size_token)
         size = self._eval_array_size_expr(size_expr)
-        if size is not None and size <= 0:
+        if size is not None and (size < 0 or (size == 0 and self._std == "c11")):
             raise ParserError("Array size must be positive", size_token)
         if allow_parameter_arrays and (qualifiers or has_static_bound):
             return ArrayDecl(size_expr, tuple(qualifiers), has_static_bound)
@@ -2138,7 +2138,7 @@ class Parser:
             raise ParserError(message, token)
         size = _parse_int_literal_value(lexeme)
         assert size is not None
-        if size <= 0:
+        if size < 0 or (size == 0 and self._std == "c11"):
             raise ParserError("Array size must be positive", token)
         return size
 
@@ -2146,7 +2146,7 @@ class Parser:
         size = self._eval_array_size_expr(expr)
         if size is None:
             raise ParserError(_array_size_non_ice_error(expr, self._eval_array_size_expr), token)
-        if size <= 0:
+        if size < 0 or (size == 0 and self._std == "c11"):
             raise ParserError("Array size must be positive", token)
         return size
 
@@ -2154,7 +2154,7 @@ class Parser:
         size = self._eval_array_size_expr(expr)
         if size is None:
             return -1
-        if size <= 0:
+        if size < 0 or (size == 0 and self._std == "c11"):
             raise ParserError("Array size must be positive", token)
         return size
 
