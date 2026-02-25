@@ -382,9 +382,9 @@
       "upstream": "clang/test/Sema/alloc-align-attr.c",
       "fixture": "tests/external/clang/fixtures/Sema/alloc-align-attr.c",
       "expect": "parse",
-      "message_contains": "Invalid object type",
-      "line": 4,
-      "column": 34,
+      "message_contains": "Expected ';'",
+      "line": 13,
+      "column": 33,
       "sha256": "ec04251a069c45374e8afcdfc9dd02be910d45760b4442185869f7fa1fb253b4"
     },
     {

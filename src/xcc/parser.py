@@ -376,6 +376,7 @@ class Parser:
             self._advance()
             self._parse_params()
             self._expect_punct(")")
+            self._skip_gnu_attributes()
             return self._check_punct("{") or self._check_punct(";")
         except ParserError:
             return False
@@ -399,6 +400,7 @@ class Parser:
         self._expect_punct("(")
         params, has_prototype, is_variadic = self._parse_params()
         self._expect_punct(")")
+        self._skip_gnu_attributes()
         param_types = tuple(param.type_spec for param in params) if has_prototype else None
         function_type = self._build_declarator_type(
             return_type,
@@ -564,6 +566,12 @@ class Parser:
             if type_spec is None:
                 raise ParserError(self._unsupported_type_message(context, token), token)
             self._advance()
+            pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
+            if pointer_depth:
+                type_spec = self._build_declarator_type(
+                    type_spec,
+                    (POINTER_OP,) * pointer_depth,
+                )
             return self._apply_type_qualifiers(type_spec, qualifiers)
         token = self._current()
         if token.kind != TokenKind.KEYWORD:
@@ -954,6 +962,7 @@ class Parser:
         token: Token,
         kind: str,
     ) -> tuple[str | None, tuple[RecordMemberDecl, ...]]:
+        self._skip_gnu_attributes()
         record_tag: str | None = None
         if self._current().kind == TokenKind.IDENT:
             ident = self._advance()
@@ -1325,6 +1334,7 @@ class Parser:
                         self._current(),
                     )
                 self._define_ordinary_type(name, decl_type)
+                self._skip_gnu_attributes()
                 init: Expr | InitList | None = None
                 if self._check_punct("="):
                     self._advance()
