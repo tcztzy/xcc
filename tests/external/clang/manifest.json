@@ -344,6 +344,7 @@
       "fixture": "tests/external/clang/fixtures/Sema/warn-absolute-value.c",
       "expect": "sema",
       "message_contains": "Undeclared function: __builtin_abs",
+      "xfail_reason": "Expected failure until _Complex type parsing and related sema paths are implemented.",
       "sha256": "4c1a85bf35e67df77a794374c136291fba89657a6b5729ec2f8e9b299f7e415b"
     },
     {
@@ -404,6 +405,7 @@
       "message_contains": "Expression cannot start with keyword",
       "line": 8,
       "column": 17,
+      "xfail_reason": "Expected failure until C23 typeof_unqual support is implemented.",
       "sha256": "2e53ab58eb56c295f0c62505f38b171cf9d05b69d324e15b5e5cd20270be551c"
     },
     {

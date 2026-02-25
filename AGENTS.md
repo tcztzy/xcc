@@ -23,6 +23,13 @@ This repository aims to become a C11 compiler written in modern Python (CPython 
 - Run local tests: `tox -e py311` (coverage is enforced).
 - Run lint/type checks: `tox -e lint` and `tox -e type`.
 
+## Continuous Development Loop
+
+- Development loop: CPython trial -> failure bucket -> pick the highest-frequency blocker -> implement fix with tests -> verify `tox` is green -> commit -> repeat.
+- Every agent task must name one concrete failure to fix, provide its verification command, and leave `tox` green before handoff.
+- No speculative feature work: each change must trace to a concrete CPython compilation failure.
+- Cron-job guidelines: run every 30 minutes, focus on one failure category per run, require green `tox` before commit, and auto-rollback when verification fails.
+
 ## Commit Discipline
 
 - Prefer **slice commits**: a single commit should bundle the behavior change with its tests/fixtures and any required doc updates, and keep the tree green (lint/type/tests + 100% coverage).

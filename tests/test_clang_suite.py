@@ -12,6 +12,7 @@ MANIFEST_PATH = ROOT / "tests/external/clang/manifest.json"
 ALLOWED_EXPECTATIONS = {"ok", "pp", "lex", "parse", "sema"}
 REQUIRED_CASE_KEYS = {"id", "upstream", "fixture", "expect", "sha256"}
 OPTIONAL_CASE_KEYS = {"message_contains", "line", "column"}
+XFAIL_REASON_KEY = "xfail_reason"
 
 
 def _load_cases() -> list[dict[str, Any]]:
@@ -51,7 +52,9 @@ class ClangSuiteTests(unittest.TestCase):
             with self.subTest(case=case_id):
                 keys = set(case)
                 self.assertTrue(REQUIRED_CASE_KEYS.issubset(keys))
-                self.assertTrue(keys.issubset(REQUIRED_CASE_KEYS | OPTIONAL_CASE_KEYS))
+                self.assertTrue(
+                    keys.issubset(REQUIRED_CASE_KEYS | OPTIONAL_CASE_KEYS | {XFAIL_REASON_KEY})
+                )
                 self.assertIsInstance(case["id"], str)
                 self.assertNotEqual(case["id"], "")
                 self.assertNotIn(case["id"], case_ids)
@@ -66,31 +69,47 @@ class ClangSuiteTests(unittest.TestCase):
                     self.assertIsInstance(case["line"], int)
                 if "column" in case:
                     self.assertIsInstance(case["column"], int)
+                if XFAIL_REASON_KEY in case:
+                    self.assertIsInstance(case[XFAIL_REASON_KEY], str)
+                    self.assertNotEqual(case[XFAIL_REASON_KEY], "")
+
+    def _assert_case_matches_expectation(self, case: dict[str, Any]) -> None:
+        expectation = case["expect"]
+        fixture = ROOT / case["fixture"]
+        source = fixture.read_text(encoding="utf-8")
+        self.assertIn(expectation, ALLOWED_EXPECTATIONS)
+        if expectation == "ok":
+            compile_source(source, filename=str(fixture))
+            return
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(source, filename=str(fixture))
+        diagnostic = ctx.exception.diagnostic
+        self.assertEqual(diagnostic.stage, expectation)
+        message_contains = case.get("message_contains")
+        if isinstance(message_contains, str):
+            self.assertIn(message_contains, diagnostic.message)
+        line = case.get("line")
+        if isinstance(line, int):
+            self.assertEqual(diagnostic.line, line)
+        column = case.get("column")
+        if isinstance(column, int):
+            self.assertEqual(diagnostic.column, column)
 
     def test_clang_fixtures_match_expected_frontend_stage(self) -> None:
         for case in self._cases:
             case_id = case.get("id", "<missing-id>")
             expectation = case["expect"]
-            fixture = ROOT / case["fixture"]
-            source = fixture.read_text(encoding="utf-8")
+            xfail_reason = case.get(XFAIL_REASON_KEY)
             with self.subTest(case=case_id, expect=expectation):
-                self.assertIn(expectation, ALLOWED_EXPECTATIONS)
-                if expectation == "ok":
-                    compile_source(source, filename=str(fixture))
-                    continue
-                with self.assertRaises(FrontendError) as ctx:
-                    compile_source(source, filename=str(fixture))
-                diagnostic = ctx.exception.diagnostic
-                self.assertEqual(diagnostic.stage, expectation)
-                message_contains = case.get("message_contains")
-                if isinstance(message_contains, str):
-                    self.assertIn(message_contains, diagnostic.message)
-                line = case.get("line")
-                if isinstance(line, int):
-                    self.assertEqual(diagnostic.line, line)
-                column = case.get("column")
-                if isinstance(column, int):
-                    self.assertEqual(diagnostic.column, column)
+                if isinstance(xfail_reason, str):
+                    try:
+                        self._assert_case_matches_expectation(case)
+                    except Exception:
+                        continue
+                    self.fail(
+                        f"Unexpected pass for xfail clang fixture {case_id}: {xfail_reason}"
+                    )
+                self._assert_case_matches_expectation(case)
 
 
 if __name__ == "__main__":

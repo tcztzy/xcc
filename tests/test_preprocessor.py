@@ -7,9 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
+from xcc.lexer import TokenKind
 from xcc.options import FrontendOptions
 from xcc.preprocessor import (
     PreprocessorError,
+    _Macro,
+    _MacroToken,
     _Preprocessor,
     _DirectiveCursor,
     _LineMapBuilder,
@@ -18,9 +21,13 @@ from xcc.preprocessor import (
     _blank_line,
     _eval_node,
     _eval_pp_node,
+    _expand_macro_tokens,
     _expand_object_like_macros,
     _is_unsigned_pp_integer,
+    _macro_name_from_cli_define,
+    _parse_cli_define_head,
     _parse_macro_parameters,
+    _parse_pp_char_literal,
     _parse_pp_integer_literal,
     _parse_directive,
     _paste_token_pair,
@@ -2578,6 +2585,292 @@ class PreprocessorTests(unittest.TestCase):
         )
         stripped = _strip_gnu_asm_extensions(source)
         self.assertEqual(stripped.splitlines(), ["", "int x  = 0;", "", "", ""])
+
+    def test_macro_name_from_cli_define_handles_unclosed_parameter_list(self) -> None:
+        self.assertEqual(_macro_name_from_cli_define("FUNC("), "FUNC(")
+
+    def test_pragma_non_once_does_not_enable_pragma_once_tracking(self) -> None:
+        result = preprocess_source(
+            "#pragma region\nint x;\n",
+            filename="main.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertEqual(result.source, "\nint x;\n")
+
+    def test_macro_include_cycle_reports_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "loop.h").write_text('#include "loop.h"\n', encoding="utf-8")
+            with self.assertRaises(PreprocessorError) as ctx:
+                preprocess_source(
+                    "int x;\n",
+                    filename=str(root / "main.c"),
+                    options=FrontendOptions(macro_includes=("loop.h",)),
+                )
+        self.assertEqual(ctx.exception.code, "XCC-PP-0302")
+
+    def test_macro_include_cycle_from_command_line_stack_reports_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            header = root / "defs.h"
+            header.write_text("#define A 1\n", encoding="utf-8")
+            processor = _Preprocessor(FrontendOptions())
+            include_path = str(header.resolve())
+            with self.assertRaises(PreprocessorError) as ctx:
+                processor._process_macro_include(
+                    "defs.h",
+                    location=_SourceLocation("main.c", 1),
+                    base_dir=root,
+                    include_stack=(include_path,),
+                )
+        self.assertEqual(ctx.exception.code, "XCC-PP-0302")
+
+    def test_macro_include_read_error_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "macros.h").write_text("#define A 1\n", encoding="utf-8")
+            processor = _Preprocessor(FrontendOptions())
+            with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
+                with self.assertRaises(PreprocessorError) as ctx:
+                    processor._process_macro_include(
+                        "macros.h",
+                        location=_SourceLocation("main.c", 1),
+                        base_dir=root,
+                        include_stack=(),
+                    )
+        self.assertEqual(ctx.exception.code, "XCC-PP-0301")
+
+    def test_forced_include_skips_files_already_marked_with_pragma_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            header = root / "forced.h"
+            header.write_text("int forced;\n", encoding="utf-8")
+            processor = _Preprocessor(FrontendOptions())
+            processor._pragma_once_files.add(str(header.resolve()))
+            processed = processor._process_forced_include(
+                "forced.h",
+                location=_SourceLocation("main.c", 1),
+                base_dir=root,
+                include_stack=(),
+            )
+        self.assertEqual(processed.source, "")
+        self.assertEqual(processed.line_map, ())
+
+    def test_forced_include_cycle_reports_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            header = root / "forced.h"
+            header.write_text("int forced;\n", encoding="utf-8")
+            processor = _Preprocessor(FrontendOptions())
+            include_path = str(header.resolve())
+            with self.assertRaises(PreprocessorError) as ctx:
+                processor._process_forced_include(
+                    "forced.h",
+                    location=_SourceLocation("main.c", 1),
+                    base_dir=root,
+                    include_stack=(include_path,),
+                )
+        self.assertEqual(ctx.exception.code, "XCC-PP-0302")
+
+    def test_forced_include_read_error_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "forced.h").write_text("int forced;\n", encoding="utf-8")
+            processor = _Preprocessor(FrontendOptions())
+            with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
+                with self.assertRaises(PreprocessorError) as ctx:
+                    processor._process_forced_include(
+                        "forced.h",
+                        location=_SourceLocation("main.c", 1),
+                        base_dir=root,
+                        include_stack=(),
+                    )
+        self.assertEqual(ctx.exception.code, "XCC-PP-0301")
+
+    def test_parse_header_name_operand_rejects_invalid_macro_expansion(self) -> None:
+        processor = _Preprocessor(FrontendOptions())
+        with patch.object(processor, "_expand_macro_text", return_value="@"):
+            with self.assertRaises(PreprocessorError) as ctx:
+                processor._parse_header_name_operand("HDR", _SourceLocation("main.c", 1))
+        self.assertIn("Invalid #include directive", str(ctx.exception))
+
+    def test_resolve_include_next_handles_missing_and_matched_start_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first"
+            second = root / "second"
+            first.mkdir()
+            second.mkdir()
+            (first / "h.h").write_text("int first;\n", encoding="utf-8")
+            processor = _Preprocessor(
+                FrontendOptions(include_dirs=(str(first), str(second))),
+            )
+            include_path, searched_roots = processor._resolve_include(
+                "h.h",
+                is_angled=False,
+                base_dir=None,
+                include_next_from=root / "missing",
+            )
+            self.assertEqual(include_path, (first / "h.h").resolve())
+            self.assertEqual(
+                searched_roots,
+                ((first / "h.h").parent.resolve(), (second / "h.h").parent.resolve()),
+            )
+
+            next_path, next_roots = processor._resolve_include(
+                "h.h",
+                is_angled=False,
+                base_dir=None,
+                include_next_from=second,
+            )
+            self.assertIsNone(next_path)
+            self.assertEqual(next_roots, ())
+
+    def test_feature_warning_attribute_and_include_probe_error_paths(self) -> None:
+        processor = _Preprocessor(FrontendOptions(std="gnu11"))
+        location = _SourceLocation("main.c", 1)
+        self.assertEqual(
+            processor._replace_single_feature_probe_operator(
+                "x__has_builtin(foo)",
+                marker="__has_builtin",
+                location=location,
+                supported=("foo",),
+            ),
+            "x__has_builtin(foo)",
+        )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_feature_probe_operator(
+                "__has_builtin foo",
+                marker="__has_builtin",
+                location=location,
+                supported=("foo",),
+            )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_feature_probe_operator(
+                "__has_builtin(foo",
+                marker="__has_builtin",
+                location=location,
+                supported=("foo",),
+            )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_feature_probe_operator(
+                "__has_builtin()",
+                marker="__has_builtin",
+                location=location,
+                supported=("foo",),
+            )
+
+        self.assertEqual(
+            processor._replace_single_warning_probe_operator(
+                'x__has_warning("-Wall")',
+                marker="__has_warning",
+                location=location,
+                supported=frozenset({"-Wall"}),
+            ),
+            'x__has_warning("-Wall")',
+        )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_warning_probe_operator(
+                '__has_warning "-Wall"',
+                marker="__has_warning",
+                location=location,
+                supported=frozenset({"-Wall"}),
+            )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_warning_probe_operator(
+                '__has_warning("-Wall"',
+                marker="__has_warning",
+                location=location,
+                supported=frozenset({"-Wall"}),
+            )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_warning_probe_operator(
+                "__has_warning()",
+                marker="__has_warning",
+                location=location,
+                supported=frozenset({"-Wall"}),
+            )
+
+        self.assertEqual(
+            processor._replace_single_attribute_probe_operator(
+                "x__has_c_attribute(gnu::unused)",
+                marker="__has_c_attribute",
+                location=location,
+                supported=frozenset({"gnu::unused"}),
+            ),
+            "x__has_c_attribute(gnu::unused)",
+        )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_attribute_probe_operator(
+                "__has_c_attribute gnu::unused",
+                marker="__has_c_attribute",
+                location=location,
+                supported=frozenset({"gnu::unused"}),
+            )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_attribute_probe_operator(
+                "__has_c_attribute(gnu::unused",
+                marker="__has_c_attribute",
+                location=location,
+                supported=frozenset({"gnu::unused"}),
+            )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_attribute_probe_operator(
+                "__has_c_attribute()",
+                marker="__has_c_attribute",
+                location=location,
+                supported=frozenset({"gnu::unused"}),
+            )
+
+        self.assertEqual(
+            processor._replace_single_has_include_operator(
+                'x__has_include("a.h")',
+                marker="__has_include",
+                location=location,
+                base_dir=None,
+                include_next=False,
+            ),
+            'x__has_include("a.h")',
+        )
+        with self.assertRaises(PreprocessorError):
+            processor._replace_single_has_include_operator(
+                '__has_include "a.h"',
+                marker="__has_include",
+                location=location,
+                base_dir=None,
+                include_next=False,
+            )
+        self.assertEqual(processor._find_matching_has_include_close("((x))", 0), 4)
+
+    def test_parse_line_directive_rejects_invalid_filename_literal_escape(self) -> None:
+        processor = _Preprocessor(FrontendOptions())
+        with self.assertRaises(PreprocessorError) as ctx:
+            processor._parse_line_directive('1 "bad\\xZZ"', _SourceLocation("main.c", 1))
+        self.assertIn("Invalid #line directive", str(ctx.exception))
+
+    def test_parse_cli_define_head_rejects_invalid_forms(self) -> None:
+        self.assertIsNone(_parse_cli_define_head("F("))
+        self.assertIsNone(_parse_cli_define_head("F(x) trailing"))
+        self.assertIsNone(_parse_cli_define_head("1F(x)"))
+        self.assertIsNone(_parse_cli_define_head("F(x, ..., y)"))
+
+    def test_expand_macro_tokens_dynamic_macro_without_resolver_defaults_to_zero(self) -> None:
+        expanded = _expand_macro_tokens(
+            [_MacroToken(TokenKind.IDENT, "__COUNTER__")],
+            {"__COUNTER__": _Macro("__COUNTER__", ())},
+            "c11",
+            _SourceLocation("main.c", 1),
+        )
+        self.assertEqual(expanded, [_MacroToken(TokenKind.INT_CONST, "0")])
+
+    def test_parse_pp_char_literal_covers_prefix_and_empty_literal(self) -> None:
+        self.assertEqual(_parse_pp_char_literal("u8'A'"), ord("A"))
+        self.assertIsNone(_parse_pp_char_literal("''"))
+
+    def test_eval_node_boolean_paths_cover_and_or_outcomes(self) -> None:
+        self.assertEqual(_eval_node(ast.BoolOp(op=ast.And(), values=[ast.Constant(1), ast.Constant(2)])), 1)
+        self.assertEqual(_eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(2)])), 1)
+        self.assertEqual(_eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(0)])), 0)
 
 
 if __name__ == "__main__":

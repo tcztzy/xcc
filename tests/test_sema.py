@@ -64,6 +64,7 @@ from xcc.types import (
     ULLONG,
     ULONG,
     USHORT,
+    VOID,
     Type,
 )
 
@@ -5201,6 +5202,52 @@ class SemaTests(unittest.TestCase):
             str(ctx.exception),
             "Unsupported statement node: Stmt (internal sema bug: unexpected AST statement node)",
         )
+
+    def test_missing_file_scope_identifier_message_without_qualifiers(self) -> None:
+        analyzer = Analyzer()
+        message = analyzer._missing_object_identifier_message(
+            "file-scope",
+            DeclStmt(TypeSpec("int"), None, None),
+        )
+        self.assertEqual(message, "Expected identifier for file-scope object declaration")
+
+    def test_invalid_alignment_message_helper_paths(self) -> None:
+        analyzer = Analyzer()
+        self.assertEqual(
+            analyzer._invalid_alignment_message("file-scope object declaration", 0, natural_alignment=4),
+            "Invalid alignment specifier for file-scope object declaration: alignment must be positive",
+        )
+        self.assertEqual(
+            analyzer._invalid_alignment_message("file-scope object declaration", 8, natural_alignment=None),
+            "Invalid alignment specifier for file-scope object declaration: cannot determine natural alignment",
+        )
+
+    def test_sizeof_alignof_and_generic_invalid_type_helpers(self) -> None:
+        analyzer = Analyzer()
+        self.assertTrue(analyzer._is_invalid_sizeof_type(VOID))
+        self.assertTrue(analyzer._is_invalid_alignof_type(VOID))
+        self.assertTrue(analyzer._is_invalid_generic_association_type_spec(TypeSpec("void")))
+
+    def test_generic_association_location_fallback_mixed_partial_coordinates(self) -> None:
+        analyzer = Analyzer()
+        scope = Scope()
+        expr = GenericExpr(
+            IntLiteral("1"),
+            (
+                (TypeSpec("long", source_line=10, source_column=None), IntLiteral("2")),
+                (TypeSpec("char", source_line=None, source_column=11), IntLiteral("3")),
+            ),
+            association_source_locations=((100, 20), (200, 30)),
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyzer._analyze_expr(expr, scope)
+        self.assertIn("No matching generic association for control type", str(ctx.exception))
+
+    def test_generic_expr_without_associations_reports_plain_no_match_error(self) -> None:
+        analyzer = Analyzer()
+        with self.assertRaises(SemaError) as ctx:
+            analyzer._analyze_expr(GenericExpr(IntLiteral("1"), ()), Scope())
+        self.assertEqual(str(ctx.exception), "No matching generic association for control type 'int'")
 
 
 if __name__ == "__main__":

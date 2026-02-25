@@ -55,6 +55,7 @@ from xcc.ast import (
 )
 from xcc.lexer import Token, TokenKind, lex
 from xcc.parser import (
+    DeclSpecInfo,
     Parser,
     ParserError,
     _array_size_non_ice_error,
@@ -4069,6 +4070,91 @@ class ParserTests(unittest.TestCase):
     def test_empty_translation_unit(self) -> None:
         unit = parse(list(lex("")))
         self.assertEqual(unit.functions, [])
+
+    def test_expected_identifier_error_helper_covers_eof_and_missing_lexeme(self) -> None:
+        parser = Parser(list(lex("")))
+        eof_error = parser._expected_identifier_error()
+        self.assertEqual(eof_error.message, "Expected identifier before end of input")
+        punct_error = parser._expected_identifier_error(Token(TokenKind.PUNCTUATOR, None, 1, 1))
+        self.assertEqual(punct_error.message, "Expected identifier")
+
+    def test_parameter_list_rejects_comma_after_ellipsis(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int logf(int level, ...,);")))
+        self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
+        self.assertEqual(ctx.exception.token.column, 25)
+
+    def test_function_suffix_parameter_list_rejects_comma_after_ellipsis(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef int (*logf_t)(int, ...,);")))
+        self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
+        self.assertEqual(ctx.exception.token.column, 32)
+
+    def test_parameter_list_rejects_type_after_ellipsis(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int logf(int level, ... int other);")))
+        self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
+
+    def test_function_suffix_parameter_list_rejects_type_after_ellipsis(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef int (*logf_t)(int, ... int other);")))
+        self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
+
+    def test_invalid_decl_specifier_message_helper_without_marker(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(
+            parser._invalid_decl_specifier_message("parameter", DeclSpecInfo()),
+            "Invalid declaration specifier for parameter",
+        )
+
+    def test_complex_leading_specifier_parses_float_and_long_double(self) -> None:
+        unit = parse(list(lex("_Complex float a; _Complex long double b;")))
+        first = unit.declarations[0]
+        second = unit.declarations[1]
+        self.assertIsInstance(first, DeclStmt)
+        self.assertIsInstance(second, DeclStmt)
+        self.assertEqual(first.type_spec.name, "float")
+        self.assertEqual(second.type_spec.name, "long double")
+
+    def test_sizeof_unsized_array_type_name_uses_vla_declarator(self) -> None:
+        unit = parse(list(lex("int main(void){return sizeof(int []);}")))
+        return_stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(return_stmt, ReturnStmt)
+        self.assertIsInstance(return_stmt.value, SizeofExpr)
+        type_spec = return_stmt.value.type_spec
+        assert type_spec is not None
+        op_kind, op_value = type_spec.declarator_ops[0]
+        self.assertEqual(op_kind, "arr")
+        self.assertIsInstance(op_value, ArrayDecl)
+        self.assertIsNone(op_value.length)
+
+    def test_generic_association_type_key_handles_unhashable_and_function_declarators(self) -> None:
+        parser = Parser(list(lex("int x;")))
+        unhashable_array_type = TypeSpec("int", declarator_ops=(("arr", ArrayDecl([])),))
+        unhashable_key = parser._generic_association_type_key(unhashable_array_type)
+        declarator_keys = unhashable_key[-1]
+        self.assertEqual(declarator_keys[0][0], "arr")
+        self.assertIn("[]", declarator_keys[0][1])
+
+        no_proto_fn_type = TypeSpec("int", declarator_ops=(("func", (None, True)),))
+        no_proto_key = parser._generic_association_type_key(no_proto_fn_type)
+        self.assertEqual(no_proto_key[-1][0], ("func", None, True))
+
+        proto_fn_type = TypeSpec(
+            "int",
+            declarator_ops=(("func", ((TypeSpec("int"), TypeSpec("long")), False)),),
+        )
+        proto_key = parser._generic_association_type_key(proto_fn_type)
+        self.assertEqual(proto_key[-1][0][0], "func")
+        self.assertIsNotNone(proto_key[-1][0][1])
+
+    def test_parameter_rejects_noreturn_specifier(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int f(_Noreturn int x){return x;}")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid declaration specifier for parameter: '_Noreturn'",
+        )
 
 
 if __name__ == "__main__":
