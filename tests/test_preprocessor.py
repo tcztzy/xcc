@@ -95,6 +95,18 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source("int strict = __STRICT_ANSI__;\n", filename="main.c")
         self.assertIn("int strict = 1 ;", result.source)
 
+    def test_hosted_mode_defines_stdc_hosted_as_one(self) -> None:
+        result = preprocess_source("int hosted = __STDC_HOSTED__;\n", filename="main.c")
+        self.assertIn("int hosted = 1 ;", result.source)
+
+    def test_freestanding_mode_defines_stdc_hosted_as_zero(self) -> None:
+        result = preprocess_source(
+            "int hosted = __STDC_HOSTED__;\n",
+            filename="main.c",
+            options=FrontendOptions(hosted=False),
+        )
+        self.assertIn("int hosted = 0 ;", result.source)
+
     def test_gnu_mode_defines_gnu_version_macros(self) -> None:
         result = preprocess_source(
             "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n"

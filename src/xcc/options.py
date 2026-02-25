@@ -8,6 +8,7 @@ StdMode = Literal["c11", "gnu11"]
 @dataclass(frozen=True)
 class FrontendOptions:
     std: StdMode = "c11"
+    hosted: bool = True
     include_dirs: tuple[str, ...] = ()
     quote_include_dirs: tuple[str, ...] = ()
     system_include_dirs: tuple[str, ...] = ()

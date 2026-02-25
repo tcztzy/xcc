@@ -8,6 +8,7 @@ class FrontendOptionsTests(unittest.TestCase):
     def test_defaults(self) -> None:
         options = FrontendOptions()
         self.assertEqual(options.std, "c11")
+        self.assertTrue(options.hosted)
         self.assertEqual(options.include_dirs, ())
         self.assertEqual(options.quote_include_dirs, ())
         self.assertEqual(options.system_include_dirs, ())
@@ -31,7 +32,7 @@ class FrontendOptionsTests(unittest.TestCase):
     def test_normalize_options(self) -> None:
         normalized = normalize_options(None)
         self.assertEqual(normalized, FrontendOptions())
-        options = FrontendOptions(std="gnu11")
+        options = FrontendOptions(std="gnu11", hosted=False)
         self.assertIs(normalize_options(options), options)
 
 
