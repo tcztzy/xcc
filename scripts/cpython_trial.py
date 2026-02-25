@@ -1512,6 +1512,86 @@ int f(int n) {
 }
 """,
         ),
+        TrialCase(
+            "cast_to_void_pointer",
+            """
+int x = 42;
+void *p = (void *)&x;
+int *q = (int *)p;
+""",
+        ),
+        TrialCase(
+            "multiline_macro_with_do_while",
+            """
+#define SWAP(a, b) do { int _t = (a); (a) = (b); (b) = _t; } while(0)
+int f(void) { int x = 1, y = 2; SWAP(x, y); return x; }
+""",
+        ),
+        TrialCase(
+            "nested_ternary_expression",
+            """
+int clamp(int v, int lo, int hi) {
+    return v < lo ? lo : v > hi ? hi : v;
+}
+""",
+        ),
+        TrialCase(
+            "array_of_function_pointers",
+            """
+typedef int (*op_fn)(int, int);
+int add(int a, int b) { return a + b; }
+int sub(int a, int b) { return a - b; }
+op_fn ops[2] = { add, sub };
+""",
+        ),
+        TrialCase(
+            "string_literal_concatenation",
+            """
+const char *msg = "hello" " " "world";
+""",
+        ),
+        TrialCase(
+            "struct_assignment_copy",
+            """
+struct Point { int x; int y; };
+struct Point copy_point(struct Point p) {
+    struct Point q;
+    q = p;
+    return q;
+}
+""",
+        ),
+        TrialCase(
+            "enum_arithmetic",
+            """
+enum Color { RED, GREEN, BLUE };
+int next_color(enum Color c) { return (c + 1) % 3; }
+""",
+        ),
+        TrialCase(
+            "typedef_to_pointer_type",
+            """
+typedef struct Node { int val; struct Node *next; } Node;
+typedef Node *NodePtr;
+NodePtr make(int v) { return (NodePtr)0; }
+""",
+        ),
+        TrialCase(
+            "multi_dimensional_array",
+            """
+int matrix[3][4];
+void set(int r, int c, int v) { matrix[r][c] = v; }
+int get(int r, int c) { return matrix[r][c]; }
+""",
+        ),
+        TrialCase(
+            "void_function_with_side_effect",
+            """
+static int counter;
+void increment(void) { counter++; }
+int read_counter(void) { return counter; }
+""",
+        ),
     ]
 
 
