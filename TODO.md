@@ -12,6 +12,9 @@ This file tracks failure-driven work toward the M0 frontend baseline.
 
 | ID | Category (pp/lex/parse/sema) | Description | Frequency | Status |
 | --- | --- | --- | --- | --- |
+| B001 | parse | Expected `;` (examples: `typedef_pyobject`, `gcc_attribute_unused`) | 2 / 25 | [ ] |
+| B002 | parse | Array size is required in this context (examples: `flexible_array_member`) | 1 / 25 | [ ] |
+| B003 | parse | Expected identifier before `;` (examples: `anonymous_struct_union`) | 1 / 25 | [ ] |
 
 ## Backlog (reference)
 
