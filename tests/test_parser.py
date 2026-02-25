@@ -2447,6 +2447,66 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int test __attribute__((overloadable))(int);")))
         self.assertTrue(unit.functions[0].is_overloadable)
 
+    def test_gnu_attribute_unused_after_parameter_list(self) -> None:
+        source = (
+            "static int helper(int x) __attribute__((unused));"
+            "static int helper(int x){return x;}"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        self.assertEqual(len(unit.functions), 2)
+        self.assertIsNone(unit.functions[0].body)
+        self.assertIsNotNone(unit.functions[1].body)
+
+    def test_gnu_attribute_visibility_after_function_parameter_list(self) -> None:
+        source = (
+            'int api_export(int x) __attribute__((visibility("default")));'
+            "int api_export(int x){return x + 1;}"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        self.assertEqual(len(unit.functions), 2)
+        self.assertEqual(unit.functions[0].name, "api_export")
+        self.assertEqual(unit.functions[1].name, "api_export")
+
+    def test_gnu_attribute_format_after_variadic_function_parameter_list(self) -> None:
+        source = (
+            "int py_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));"
+            "int py_printf(const char *fmt, ...){return fmt != 0;}"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        self.assertEqual(len(unit.functions), 2)
+        self.assertTrue(unit.functions[0].is_variadic)
+        self.assertTrue(unit.functions[1].is_variadic)
+
+    def test_gnu_attribute_between_struct_keyword_and_tag(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "struct __attribute__((packed)) packed_header {char tag; int value;};"
+                    "int read_packed(struct packed_header h){return h.value;}"
+                )
+            ),
+            std="gnu11",
+        )
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.type_spec.record_tag, "packed_header")
+        self.assertEqual(len(declaration.type_spec.record_members), 2)
+
+    def test_gnu_attribute_after_variable_declarator_name(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "static int aligned_global __attribute__((aligned(64))) = 1;"
+                    "int read_aligned_global(void){return aligned_global;}"
+                )
+            ),
+            std="gnu11",
+        )
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.name, "aligned_global")
+        self.assertIsNotNone(declaration.init)
+
     def test_unterminated_gnu_attribute_reports_parser_error(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("typedef _Atomic int __attribute__((address_space(1)) Ptr;")))
@@ -3174,6 +3234,18 @@ class ParserTests(unittest.TestCase):
         decl_stmt = _body(func).statements[0]
         self.assertIsInstance(decl_stmt, DeclStmt)
         self.assertEqual(decl_stmt.type_spec, TypeSpec("int"))
+
+    def test_file_scope_typedef_function_pointer_return_and_cast(self) -> None:
+        source = "typedef int Foo; Foo *bar(void){return (Foo*)0;}"
+        unit = parse(list(lex(source)))
+        self.assertEqual(len(unit.functions), 1)
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("int", 1))
+        return_stmt = _body(func).statements[0]
+        self.assertIsInstance(return_stmt, ReturnStmt)
+        return_expr = return_stmt.value
+        self.assertIsInstance(return_expr, CastExpr)
+        self.assertEqual(return_expr.type_spec, TypeSpec("int", 1))
 
     def test_file_scope_typedef_chain(self) -> None:
         unit = parse(list(lex("typedef int T; typedef T U; U main(){return 0;}")))
