@@ -2401,8 +2401,10 @@ class Parser:
                             )
                         raise ParserError(
                             "Duplicate generic type association at position "
-                            f"{association_index}: previous {relationship} type association "
-                            f"was at position {previous_index} (line {previous_token.line}, "
+                            f"{association_index} (line {association_type_token.line}, "
+                            f"column {association_type_token.column}): previous "
+                            f"{relationship} type association was at position "
+                            f"{previous_index} (line {previous_token.line}, "
                             f"column {previous_token.column}){details}",
                             association_type_token,
                         )
