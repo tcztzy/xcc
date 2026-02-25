@@ -4354,5 +4354,73 @@ class ParserTests(unittest.TestCase):
         self.assertIn("Expected member name after '.'", ctx.exception.message)
 
 
+    # --- K&R (old-style) function definition tests ---
+
+    def test_knr_function_definition(self) -> None:
+        unit = parse(
+            list(lex("int add(a, b) int a; int b; { return a + b; }")),
+            std="gnu11",
+        )
+        func = unit.functions[0]
+        self.assertEqual(func.name, "add")
+        self.assertFalse(func.has_prototype)
+        self.assertEqual(len(func.params), 2)
+        self.assertEqual(func.params[0].name, "a")
+        self.assertEqual(func.params[0].type_spec.name, "int")
+        self.assertEqual(func.params[1].name, "b")
+        self.assertEqual(func.params[1].type_spec.name, "int")
+
+    def test_knr_with_forward_declaration(self) -> None:
+        unit = parse(
+            list(lex(
+                "int sub(); int sub(a, b) int a; int b;"
+                " { return a - b; }"
+            )),
+            std="gnu11",
+        )
+        # First is the declaration (no body), second is K&R definition.
+        func = unit.functions[1]
+        self.assertEqual(func.name, "sub")
+        self.assertFalse(func.has_prototype)
+        self.assertEqual(len(func.params), 2)
+
+    def test_knr_no_param_declaration_defaults_int(self) -> None:
+        unit = parse(
+            list(lex("int identity(x) { return x; }")),
+            std="gnu11",
+        )
+        func = unit.functions[0]
+        self.assertEqual(func.params[0].name, "x")
+        self.assertEqual(func.params[0].type_spec.name, "int")
+
+    def test_knr_looks_like_function(self) -> None:
+        """_looks_like_function should detect K&R definitions."""
+        unit = parse(
+            list(lex(
+                "int f(a, b) int a; int b; { return a + b; }"
+            )),
+            std="gnu11",
+        )
+        self.assertEqual(len(unit.functions), 1)
+
+    def test_knr_missing_declarator_in_declaration(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(
+                list(lex("int f(a) int; { return a; }")),
+                std="gnu11",
+            )
+
+    def test_knr_multiple_params_same_type(self) -> None:
+        """K&R declaration with comma-separated names: int a, b;"""
+        unit = parse(
+            list(lex("int add(a, b) int a, b; { return a + b; }")),
+            std="gnu11",
+        )
+        func = unit.functions[0]
+        self.assertEqual(len(func.params), 2)
+        self.assertEqual(func.params[0].type_spec.name, "int")
+        self.assertEqual(func.params[1].type_spec.name, "int")
+
+
 if __name__ == "__main__":
     unittest.main()
