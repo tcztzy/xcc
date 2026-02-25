@@ -409,6 +409,8 @@ class PreprocessorTests(unittest.TestCase):
             "#if __SIZEOF_UINTMAX_T__\nint umz;\n#endif\n"
             "#if __SIZEOF_WCHAR_T__\nint wcz;\n#endif\n"
             "#if __SIZEOF_WINT_T__\nint wiz;\n#endif\n"
+            "#if __SIZEOF_CHAR16_T__\nint c16z;\n#endif\n"
+            "#if __SIZEOF_CHAR32_T__\nint c32z;\n#endif\n"
             "#if __SIZE_WIDTH__ == 64\nint sw;\n#endif\n"
             "#if __PTRDIFF_WIDTH__ == 64\nint pw;\n#endif\n"
             "#if __INTPTR_WIDTH__ == 64\nint ipw;\n#endif\n"
@@ -442,6 +444,8 @@ class PreprocessorTests(unittest.TestCase):
             "#if __INCLUDE_LEVEL__\nint il;\n#endif\n"
             "#if __WCHAR_WIDTH__ == 32\nint ww;\n#endif\n"
             "#if __WINT_WIDTH__ == 32\nint wiw;\n#endif\n"
+            "#if __CHAR16_WIDTH__ == 16\nint c16w;\n#endif\n"
+            "#if __CHAR32_WIDTH__ == 32\nint c32w;\n#endif\n"
             "#if __WCHAR_MAX__ > 0\nint wmax;\n#endif\n"
             "#if __WCHAR_MIN__ < 0\nint wmin;\n#endif\n"
             "#if __WINT_MAX__ > 0\nint wimax;\n#endif\n"
@@ -534,6 +538,8 @@ class PreprocessorTests(unittest.TestCase):
                     "__SIZEOF_UINTMAX_T__",
                     "__SIZEOF_WCHAR_T__",
                     "__SIZEOF_WINT_T__",
+                    "__SIZEOF_CHAR16_T__",
+                    "__SIZEOF_CHAR32_T__",
                     "__SIZE_WIDTH__",
                     "__PTRDIFF_WIDTH__",
                     "__INTPTR_WIDTH__",
@@ -568,6 +574,8 @@ class PreprocessorTests(unittest.TestCase):
                     "__INCLUDE_LEVEL__",
                     "__WCHAR_WIDTH__",
                     "__WINT_WIDTH__",
+                    "__CHAR16_WIDTH__",
+                    "__CHAR32_WIDTH__",
                     "__WCHAR_MAX__",
                     "__WCHAR_MIN__",
                     "__WINT_MAX__",
@@ -657,6 +665,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int umz;", result.source)
         self.assertNotIn("int wcz;", result.source)
         self.assertNotIn("int wiz;", result.source)
+        self.assertNotIn("int c16z;", result.source)
+        self.assertNotIn("int c32z;", result.source)
         self.assertNotIn("int sw;", result.source)
         self.assertNotIn("int pw;", result.source)
         self.assertNotIn("int ipw;", result.source)
@@ -690,6 +700,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("int il;", result.source)
         self.assertNotIn("int ww;", result.source)
         self.assertNotIn("int wiw;", result.source)
+        self.assertNotIn("int c16w;", result.source)
+        self.assertNotIn("int c32w;", result.source)
         self.assertNotIn("int wmax;", result.source)
         self.assertNotIn("int wmin;", result.source)
         self.assertNotIn("int wimax;", result.source)
@@ -1851,6 +1863,8 @@ class PreprocessorTests(unittest.TestCase):
             "int umz = __SIZEOF_UINTMAX_T__;\n"
             "int wcz = __SIZEOF_WCHAR_T__;\n"
             "int wiz = __SIZEOF_WINT_T__;\n"
+            "int c16z = __SIZEOF_CHAR16_T__;\n"
+            "int c32z = __SIZEOF_CHAR32_T__;\n"
             "int ord = __ORDER_LITTLE_ENDIAN__;\n"
             "int bo = __BYTE_ORDER__;\n"
             "int le = __LITTLE_ENDIAN__;\n"
@@ -1858,6 +1872,8 @@ class PreprocessorTests(unittest.TestCase):
             "int fwo = __FLOAT_WORD_ORDER__;\n"
             "int ww = __WCHAR_WIDTH__;\n"
             "int wiw = __WINT_WIDTH__;\n"
+            "int c16w = __CHAR16_WIDTH__;\n"
+            "int c32w = __CHAR32_WIDTH__;\n"
             "int wmax = __WCHAR_MAX__;\n"
             "int wmin = __WCHAR_MIN__;\n"
             "unsigned int wimax = __WINT_MAX__;\n"
@@ -2001,6 +2017,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int umz = 8 ;", result.source)
         self.assertIn("int wcz = 4 ;", result.source)
         self.assertIn("int wiz = 4 ;", result.source)
+        self.assertIn("int c16z = 2 ;", result.source)
+        self.assertIn("int c32z = 4 ;", result.source)
         self.assertIn("int ord = 1234 ;", result.source)
         self.assertIn("int bo = 1234 ;", result.source)
         self.assertIn("int le = 1234 ;", result.source)
@@ -2008,6 +2026,8 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int fwo = 1234 ;", result.source)
         self.assertIn("int ww = 32 ;", result.source)
         self.assertIn("int wiw = 32 ;", result.source)
+        self.assertIn("int c16w = 16 ;", result.source)
+        self.assertIn("int c32w = 32 ;", result.source)
         self.assertIn("int wmax = 2147483647 ;", result.source)
         self.assertIn("int wmin = - 2147483648 ;", result.source)
         self.assertIn("unsigned int wimax = 4294967295U ;", result.source)

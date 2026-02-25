@@ -102,6 +102,7 @@ This file tracks remaining work toward a production-ready C11 compiler. It inclu
 
 - Iteration: `codex/m0-conversion-01`
 - Done:
+  - Iteration 3 slice: expanded predefined LP64 character-family target assumptions with `char16_t`/`char32_t` size and width macros (`__SIZEOF_CHAR16_T__`, `__SIZEOF_CHAR32_T__`, `__CHAR16_WIDTH__`, `__CHAR32_WIDTH__`), and added regression coverage for both standard expansion and CLI `-U` removal behavior; updated frontend coverage docs.
   - Iteration 3 slice: expanded predefined integer constructor macro coverage with GCC/Clang-compatible fixed-width families (`__INT{8,16,32,64}_C(value)` and `__UINT{8,16,32,64}_C(value)`), including suffix-aware LP64 mappings (`__INT64_C -> value##L`, `__UINT32_C -> value##U`, `__UINT64_C -> value##UL`); added regression assertions for macro expansion and CLI `-U` undef behavior, and updated frontend coverage docs.
   - Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_predefined_standard_macros tests.test_preprocessor.PreprocessorTests.test_cli_undef_removes_predefined_macro -q` (pass).
   - Iteration 3 slice: added hosted/freestanding environment modeling for predefined macro behavior by wiring CLI `-fhosted` / `-ffreestanding` through frontend options into preprocessor setup so `__STDC_HOSTED__` now expands to `1` (hosted, default) or `0` (freestanding) deterministically; added focused preprocessor and CLI regressions, plus frontend docs updates.
