@@ -24,7 +24,15 @@ EnumMember = tuple[str, "Expr | None"]
 DeclaratorValue = int | ArrayDecl | FunctionDeclarator
 DeclaratorOp = tuple[str, DeclaratorValue]
 GenericAssociation = tuple["TypeSpec | None", "Expr"]
-Designator = tuple[str, "Expr | str"]
+
+
+@dataclass(frozen=True)
+class DesignatorRange:
+    low: "Expr"
+    high: "Expr"
+
+
+Designator = tuple[str, "Expr | str | DesignatorRange"]
 
 
 def _ops_from_legacy(

@@ -21,6 +21,7 @@ from xcc.ast import (
     DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
+    DesignatorRange,
     DoWhileStmt,
     Expr,
     ExprStmt,
@@ -1381,6 +1382,10 @@ class Analyzer:
                         assert isinstance(value, Expr)
                         idx = self._eval_initializer_index(value, scope)
                         next_idx = idx + 1
+                    elif kind == "range":
+                        assert isinstance(value, DesignatorRange)
+                        high = self._eval_initializer_index(value.high, scope)
+                        next_idx = high + 1
                     else:
                         next_idx += 1  # non-index designator; will error in main loop
                 else:
@@ -1393,6 +1398,21 @@ class Analyzer:
         for item in init.items:
             if item.designators:
                 kind, value = item.designators[0]
+                if kind == "range":
+                    assert isinstance(value, DesignatorRange)
+                    low = self._eval_initializer_index(value.low, scope)
+                    high = self._eval_initializer_index(value.high, scope)
+                    if low < 0 or high >= length or low > high:
+                        raise SemaError("Initializer range out of bounds")
+                    for _i in range(low, high + 1):
+                        self._analyze_designated_initializer(
+                            element_type,
+                            item.designators[1:],
+                            item.initializer,
+                            scope,
+                        )
+                    next_index = high + 1
+                    continue
                 if kind != "index":
                     raise SemaError("Array initializer designator must use index")
                 assert isinstance(value, Expr)
