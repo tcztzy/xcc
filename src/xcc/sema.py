@@ -868,7 +868,10 @@ class Analyzer:
             )
         key = self._record_type_name(type_spec)
         if key in self._record_definitions:
-            raise SemaError(f"Duplicate definition: {key}")
+            existing = self._record_definitions[key]
+            if existing != tuple(member_types):
+                raise SemaError(f"Duplicate definition: {key}")
+            return
         self._record_definitions[key] = tuple(member_types)
 
     def _resolve_type(self, type_spec: TypeSpec) -> Type:
