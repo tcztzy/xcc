@@ -110,6 +110,7 @@ class PreprocessorTests(unittest.TestCase):
     def test_gnu_mode_defines_gnu_version_macros(self) -> None:
         result = preprocess_source(
             "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n"
+            "int gsi = __GNUC_STDC_INLINE__;\n"
             'const char *v = __VERSION__;\n',
             filename="main.c",
             options=FrontendOptions(std="gnu11"),
@@ -117,6 +118,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int g = 4 ;", result.source)
         self.assertIn("int gm = 2 ;", result.source)
         self.assertIn("int gp = 1 ;", result.source)
+        self.assertIn("int gsi = 1 ;", result.source)
         self.assertIn('const char * v = "xcc gnu11" ;', result.source)
 
     def test_gnu_mode_does_not_define_strict_ansi_macro(self) -> None:
@@ -129,7 +131,8 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_strict_mode_does_not_define_gnu_version_macros(self) -> None:
         result = preprocess_source(
-            "#if defined(__GNUC__) || defined(__GNUC_MINOR__) || defined(__GNUC_PATCHLEVEL__)\n"
+            "#if defined(__GNUC__) || defined(__GNUC_MINOR__) || defined(__GNUC_PATCHLEVEL__) || "
+            "defined(__GNUC_STDC_INLINE__)\n"
             "int g = 1;\n"
             "#endif\n",
             filename="main.c",
