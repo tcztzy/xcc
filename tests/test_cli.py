@@ -236,6 +236,15 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
 
+    def test_main_ffreestanding_sets_stdc_hosted_to_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.c"
+            path.write_text("#if __STDC_HOSTED__ != 0\n#error hosted\n#endif\nint main(void){return 0;}\n", encoding="utf-8")
+            code, stdout, stderr = self._run_main([str(path), "-ffreestanding"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(stdout, f"xcc: ok: {path}\n")
+
     def test_main_undef_option(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "bad.c"

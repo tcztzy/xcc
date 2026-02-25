@@ -12,6 +12,21 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the XCC frontend pipeline on C source input.")
     parser.add_argument("input", help="path to a C source file, or - to read from stdin")
     parser.add_argument("-std", choices=("c11", "gnu11"), default="c11", help="language mode")
+    parser.add_argument(
+        "-fhosted",
+        dest="hosted",
+        action="store_const",
+        const=True,
+        default=True,
+        help="compile for a hosted C environment (__STDC_HOSTED__=1)",
+    )
+    parser.add_argument(
+        "-ffreestanding",
+        dest="hosted",
+        action="store_const",
+        const=False,
+        help="compile for a freestanding C environment (__STDC_HOSTED__=0)",
+    )
     parser.add_argument("-I", dest="include_dirs", action="append", default=[], help="include path")
     parser.add_argument(
         "-iquote",
@@ -91,6 +106,7 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None) -> i
         return cast(int, error.code)
     options = FrontendOptions(
         std=args.std,
+        hosted=args.hosted,
         include_dirs=tuple(args.include_dirs),
         quote_include_dirs=tuple(args.quote_include_dirs),
         system_include_dirs=tuple(args.system_include_dirs),

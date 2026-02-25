@@ -35,7 +35,6 @@ _PP_INCLUDE_READ_ERROR = "XCC-PP-0301"
 _PP_INCLUDE_CYCLE = "XCC-PP-0302"
 _PREDEFINED_MACROS = (
     "__STDC__=1",
-    "__STDC_HOSTED__=1",
     "__STDC_VERSION__=201112L",
     "__STDC_IEC_559__=1",
     "__STDC_MB_MIGHT_NEQ_WC__=1",
@@ -491,6 +490,9 @@ class _Preprocessor:
         for define in _PREDEFINED_MACROS:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
+        hosted_define = "__STDC_HOSTED__=1" if options.hosted else "__STDC_HOSTED__=0"
+        hosted_macro = self._parse_cli_define(hosted_define)
+        self._macros[hosted_macro.name] = hosted_macro
         mode_defines = (
             _GNU_MODE_PREDEFINED_MACROS if options.std == "gnu11" else _STRICT_MODE_PREDEFINED_MACROS
         )

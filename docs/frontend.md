@@ -25,6 +25,7 @@ The `xcc` CLI runs the front end and exits non-zero on diagnostics.
 - `xcc -nostdinc`: disable `CPATH` and `C_INCLUDE_PATH` during include resolution (explicit CLI include paths still apply).
 - `xcc -include <header>`: force-include a header before the main translation unit (repeatable).
 - `xcc -imacros <header>`: load macros from a header before preprocessing the main translation unit, while discarding that header's non-directive output (repeatable).
+- `xcc -fhosted` / `xcc -ffreestanding`: set hosted-environment assumptions by defining `__STDC_HOSTED__` to `1` or `0`.
 
 Diagnostics are stage-tagged (`lex`, `parse`, `sema`) and include source coordinates when available.
 Unexpected internal AST-shape failures in semantic analysis (including expression/statement and file-scope declaration fallbacks) are surfaced as explicit internal sema bug diagnostics, so frontend gaps are immediately distinguishable from user-code constraint violations.
