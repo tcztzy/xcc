@@ -1,48 +1,22 @@
 # TODO
 
-This file tracks remaining work toward a production-ready C11 compiler. It includes both frontend and backend scope, but only the frontend section is expanded for now.
+This file tracks failure-driven work toward the M0 frontend baseline.
 
-## 0. Milestone View
+## M0 Definition of Done
 
-- [ ] M0: Complete C11 frontend conformance baseline.
-- [ ] M1: Add minimal IR and code generation for macOS arm64.
-- [ ] M2: Add Linux/ELF backend path (mold + glibc/musl).
-- [ ] M3: Compile CPython core with no source modifications.
-- [ ] M4: Harden diagnostics, compatibility, and performance.
+- [ ] `tox -e py311,lint,type` is green with 0 failures.
+- [ ] Coverage is 100% line + branch (`fail-under=100`).
+- [ ] Frontend (`preprocess + lex + parse + sema`) succeeds on 10 selected CPython `.c` files without errors.
 
-## Sprint Mode (2026-02-25 -> 2026-03-10)
+## Current Blockers
 
-M4 remains the final target. This sprint does **not** redefine success; it accelerates the path to M4 by forcing strict prioritization and parallel closure.
+| ID | Category (pp/lex/parse/sema) | Description | Frequency | Status |
+| --- | --- | --- | --- | --- |
 
-### Sprint Rules (quality-preserving acceleration)
+## Backlog (reference)
 
-- [ ] Keep M4 as the final acceptance target (no scope downgrade).
-- [ ] Every change is test-first: add/adjust failing test before behavior change.
-- [ ] No merge without green scoped checks + no unrelated regressions.
-- [ ] Daily failure-bucket triage from CPython/frontend fixture runs (preprocessor/parser/sema/diagnostics/backend).
-- [ ] Prioritize blockers by impact-frequency, not by local convenience.
-- [ ] Keep docs and TODO status updated in the same commit as code/tests.
-
-### Two-Week Top Priorities (ordered)
-
-- [ ] P0: Stabilize baseline quality gates in active dev env (`py311`, `lint`, `type`, `clang_suite`) and eliminate known environment/baseline red states.
-- [ ] P1: Close remaining C11 preprocessor macro replacement/rescanning edge cases and directive-tail strictness gaps.
-- [ ] P2: Complete parser coverage for remaining unsupported declarator/array-size/initializer grammar paths required by C11.
-- [ ] P3: Remove remaining sema `Unsupported statement/expression` fallbacks by implementing required semantic branches.
-- [ ] P4: Finish high-risk conversion/type-compatibility gaps (usual arithmetic conversions, pointer compatibility, assignment constraints).
-- [ ] P5: Normalize and lock actionable diagnostics for all high-frequency rejection paths (with stable source context).
-- [ ] P6: Expand curated clang fixtures + local regressions to cover all newly closed diagnostic/grammar paths.
-- [ ] P7: Run recurring CPython-driven frontend trials and convert each failure bucket into reproducible tests before implementation.
-- [ ] P8: Define and freeze M1 minimal IR/lowering contract so frontend outputs are backend-ready (without blocking M0 closure).
-
-### Sprint Exit Criteria
-
-- [ ] M0 risk ledger updated with no unknown-severity blockers.
-- [ ] All sprint P0-P7 items either completed or explicitly deferred with owner + rationale.
-- [ ] Continuous green runs for `tox -e py311`, `tox -e lint`, `tox -e type`, and `tox -e clang_suite` on sprint branch tip.
-- [ ] CPython frontend trial report produced with categorized pass/fail trend and next blocking set.
-
-## 1. Frontend (Expanded)
+<details>
+<summary>Legacy detailed TODO items (1.1 through 3)</summary>
 
 ### 1.1 Preprocessor Conformance
 
@@ -130,7 +104,4 @@ M4 remains the final target. This sprint does **not** redefine success; it accel
 - [ ] Track lessons learned in `LESSONS.md` for each major compiler/testing change.
 - [ ] Keep docs in sync with implementation status after each milestone.
 
-## Progress Log
-
-- Progress entries were moved to `CHANGELOG.md` to keep this file focused on planning and prioritization.
-- Add new implementation logs to `CHANGELOG.md` in the same commit as code/tests/docs updates.
+</details>

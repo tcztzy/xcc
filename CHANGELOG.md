@@ -2,6 +2,12 @@
 
 This file records implementation progress and validation history.
 
+## 2026-02-25
+
+- Restructured project management: switched from sprint-based planning to failure-driven continuous development loop.
+- Fixed preprocessor spacing regression, lint errors (24), and type errors (2).
+- Quality gates: lint ✅ type ✅ py311 2 pre-existing clang fixture failures remain.
+
 ## Progress Log (moved from TODO.md)
 
 - Iteration: `codex/m0-conversion-01`
