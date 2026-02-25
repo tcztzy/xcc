@@ -4337,6 +4337,12 @@ class ParserTests(unittest.TestCase):
             "Invalid declaration specifier for parameter: '_Noreturn'",
         )
 
+    def test_builtin_va_list_typedef(self) -> None:
+        unit = parse(
+            list(lex("typedef __builtin_va_list va_list;")),
+        )
+        self.assertEqual(len(unit.declarations), 1)
+
     def test_builtin_offsetof_simple(self) -> None:
         unit = parse(
             list(lex("struct S { int a; long b; }; unsigned long f(void) { return __builtin_offsetof(struct S, b); }")),

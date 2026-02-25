@@ -832,8 +832,7 @@ class Analyzer:
                 assert max_width is not None
                 if bit_width > max_width * 8:
                     raise SemaError("Bit-field width exceeds type width")
-                if member_name is None and bit_width != 0:
-                    raise SemaError("Unnamed bit-field must have zero width")
+                # Unnamed bit-fields with non-zero width are valid padding in C11
                 if member_name is not None and bit_width == 0:
                     raise SemaError("Named bit-field width must be greater than zero")
             natural_alignment = self._alignof_type(resolved_member_type)

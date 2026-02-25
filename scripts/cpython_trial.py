@@ -1339,6 +1339,98 @@ cmp_fn global_cmp;
 extern int table[];
 """,
         ),
+        TrialCase(
+            "variadic_function_with_va_list",
+            """
+typedef __builtin_va_list va_list;
+int vprintf(const char *fmt, va_list ap);
+""",
+        ),
+        TrialCase(
+            "bitfield_in_struct",
+            """
+struct Flags {
+    unsigned int readable : 1;
+    unsigned int writable : 1;
+    unsigned int executable : 1;
+    unsigned int : 5;
+    unsigned int dirty : 1;
+};
+""",
+        ),
+        TrialCase(
+            "anonymous_struct_in_union",
+            """
+typedef union {
+    struct { int x; int y; };
+    int coords[2];
+} Point;
+""",
+        ),
+        TrialCase(
+            "flexible_array_member",
+            """
+struct Buffer {
+    int length;
+    char data[];
+};
+""",
+        ),
+        TrialCase(
+            "self_referential_linked_list",
+            """
+struct Node {
+    int value;
+    struct Node *next;
+};
+struct Node *list_prepend(struct Node *head, int val);
+""",
+        ),
+        TrialCase(
+            "typedef_function_pointer_variadic",
+            """
+typedef int (*printf_fn)(const char *, ...);
+""",
+        ),
+        TrialCase(
+            "enum_as_array_size",
+            """
+enum { MAX_ITEMS = 256 };
+int items[MAX_ITEMS];
+""",
+        ),
+        TrialCase(
+            "nested_struct_with_pointer",
+            """
+struct Outer {
+    struct Inner {
+        int *data;
+        int count;
+    } inner;
+    struct Outer *parent;
+};
+""",
+        ),
+        TrialCase(
+            "const_volatile_pointer",
+            """
+void mmio_write(volatile int * const reg, int value) {
+    *reg = value;
+}
+""",
+        ),
+        TrialCase(
+            "switch_with_default_fallthrough",
+            """
+int classify(int c) {
+    switch (c) {
+    case 0: case 1: return 0;
+    case 2: return 1;
+    default: return -1;
+    }
+}
+""",
+        ),
     ]
 
 
