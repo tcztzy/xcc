@@ -310,6 +310,7 @@ class Analyzer:
         self._function_labels: set[str] = set()
         self._pending_goto_labels: list[str] = []
         self._current_return_type: Type | None = None
+        self._current_scope: Scope | None = None
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]
@@ -1746,6 +1747,7 @@ class Analyzer:
             self._analyze_stmt(item, scope, return_type)
 
     def _analyze_stmt(self, stmt: Stmt, scope: Scope, return_type: Type) -> None:
+        self._current_scope = scope
         if isinstance(stmt, DeclGroupStmt):
             for grouped_decl in stmt.declarations:
                 self._analyze_stmt(grouped_decl, scope, return_type)
