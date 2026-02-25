@@ -1024,7 +1024,10 @@ class Parser:
             raise self._expected_identifier_error()
         members: list[RecordMemberDecl] = []
         while True:
-            name, declarator_ops = self._parse_declarator(allow_abstract=True)
+            name, declarator_ops = self._parse_declarator(
+                allow_abstract=True,
+                allow_flexible_array=True,
+            )
             bit_width_expr: Expr | None = None
             if self._check_punct(":"):
                 self._advance()
@@ -1931,6 +1934,7 @@ class Parser:
         *,
         allow_vla: bool = False,
         allow_parameter_arrays: bool = False,
+        allow_flexible_array: bool = False,
     ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
         self._skip_type_qualifiers()
         pointer_count = 0
@@ -1942,6 +1946,7 @@ class Parser:
             allow_abstract,
             allow_vla=allow_vla,
             allow_parameter_arrays=allow_parameter_arrays,
+            allow_flexible_array=allow_flexible_array,
         )
         if pointer_count:
             ops = ops + (POINTER_OP,) * pointer_count
@@ -1953,6 +1958,7 @@ class Parser:
         *,
         allow_vla: bool = False,
         allow_parameter_arrays: bool = False,
+        allow_flexible_array: bool = False,
     ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
         name: str | None
         ops: tuple[DeclaratorOp, ...]
@@ -1967,6 +1973,7 @@ class Parser:
                 allow_abstract=True,
                 allow_vla=allow_vla,
                 allow_parameter_arrays=allow_parameter_arrays,
+                allow_flexible_array=allow_flexible_array,
             )
             self._expect_punct(")")
         elif allow_abstract:
@@ -1980,6 +1987,7 @@ class Parser:
                 array_decl = self._parse_array_declarator(
                     allow_vla=allow_vla,
                     allow_parameter_arrays=allow_parameter_arrays,
+                    allow_flexible_array=allow_flexible_array,
                 )
                 ops = ops + (("arr", array_decl),)
                 continue
@@ -1997,6 +2005,7 @@ class Parser:
         *,
         allow_vla: bool,
         allow_parameter_arrays: bool,
+        allow_flexible_array: bool = False,
     ) -> int | ArrayDecl:
         qualifiers: list[str] = []
         seen_qualifiers: set[str] = set()
@@ -2028,6 +2037,8 @@ class Parser:
             if allow_parameter_arrays:
                 return ArrayDecl(None, tuple(qualifiers), False)
             if allow_vla:
+                return ArrayDecl(None)
+            if allow_flexible_array:
                 return ArrayDecl(None)
             raise ParserError("Array size is required in this context", size_token)
         if isinstance(size_expr, IntLiteral):

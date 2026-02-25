@@ -1088,6 +1088,14 @@ class ParserTests(unittest.TestCase):
             ),
         )
 
+    def test_flexible_array_member(self) -> None:
+        unit = parse(list(lex("int main(){struct S { int n; int data[]; } s; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        members = stmt.type_spec.record_members
+        self.assertEqual(len(members), 2)
+        self.assertEqual(members[1].name, "data")
+
     def test_pointer_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){int *p;return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
