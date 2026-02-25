@@ -313,6 +313,17 @@ class Analyzer:
         self._pending_goto_labels: list[str] = []
         self._current_return_type: Type | None = None
         self._current_scope: Scope | None = None
+        if std == "gnu11":
+            self._register_gcc_builtins()
+
+    def _register_gcc_builtins(self) -> None:
+        """Pre-register GCC/Clang builtin functions for gnu11 mode."""
+        self._function_signatures["__builtin_expect"] = FunctionSignature(
+            return_type=LONG, params=(LONG, LONG), is_variadic=False
+        )
+        self._function_signatures["__builtin_unreachable"] = FunctionSignature(
+            return_type=VOID, params=(), is_variadic=False
+        )
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]

@@ -5434,5 +5434,18 @@ class SemaTests(unittest.TestCase):
         self.assertIsNotNone(sema)
 
 
+    def test_builtin_expect_accepted_in_gnu11(self) -> None:
+        source = "int f(int x) { if (__builtin_expect(x == 0, 0)) return -1; return x; }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_builtin_unreachable_accepted_in_gnu11(self) -> None:
+        source = "int f(int x) { switch(x) { case 0: return 0; default: __builtin_unreachable(); } }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+
 if __name__ == "__main__":
     unittest.main()
