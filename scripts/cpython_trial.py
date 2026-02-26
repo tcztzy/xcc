@@ -2186,6 +2186,122 @@ int classify(int x) {
 }
 """,
         ),
+        TrialCase(
+            "bitfield_struct",
+            """
+struct Flags {
+    unsigned int readable : 1;
+    unsigned int writable : 1;
+    unsigned int executable : 1;
+    unsigned int : 5;
+    unsigned int type : 8;
+};
+int get_type(struct Flags f) { return f.type; }
+""",
+        ),
+        TrialCase(
+            "flexible_array_member",
+            """
+typedef struct {
+    int length;
+    char data[];
+} Buffer;
+int buf_len(Buffer *b) { return b->length; }
+""",
+        ),
+        TrialCase(
+            "anonymous_union_in_struct",
+            """
+struct Value {
+    int kind;
+    union {
+        int i;
+        double d;
+        const char *s;
+    };
+};
+int get_int(struct Value *v) { return v->i; }
+""",
+        ),
+        TrialCase(
+            "variadic_function_declaration",
+            """
+int printf(const char *fmt, ...);
+int sprintf(char *buf, const char *fmt, ...);
+typedef int (*formatter_t)(char *, const char *, ...);
+""",
+        ),
+        TrialCase(
+            "typedef_chain_and_pointer_to_array",
+            """
+typedef int IntArray[10];
+typedef IntArray *IntArrayPtr;
+typedef const IntArrayPtr ConstIntArrayPtr;
+int first(ConstIntArrayPtr p) { return (*p)[0]; }
+""",
+        ),
+        TrialCase(
+            "comma_operator_in_for_loop",
+            """
+int sum_range(int n) {
+    int s, i;
+    for (s = 0, i = 0; i < n; s += i, i++)
+        ;
+    return s;
+}
+""",
+        ),
+        TrialCase(
+            "nested_switch_statement",
+            """
+int dispatch(int a, int b) {
+    switch (a) {
+    case 0:
+        switch (b) {
+        case 0: return 0;
+        case 1: return 1;
+        }
+        return -1;
+    case 1: return 10;
+    default: return -2;
+    }
+}
+""",
+        ),
+        TrialCase(
+            "sizeof_expression_variants",
+            """
+typedef struct { int x; double y; } Pair;
+int sizes(void) {
+    int a = sizeof(int);
+    int b = sizeof(Pair);
+    Pair p;
+    int c = sizeof p;
+    int d = sizeof(int *);
+    return a + b + c + d;
+}
+""",
+        ),
+        TrialCase(
+            "ternary_with_side_effects",
+            """
+int abs_val(int x) {
+    return x >= 0 ? x : -x;
+}
+int max3(int a, int b, int c) {
+    return a > b ? (a > c ? a : c) : (b > c ? b : c);
+}
+""",
+        ),
+        TrialCase(
+            "extern_and_static_linkage",
+            """
+extern int global_count;
+static int local_count = 0;
+static int increment(void) { return ++local_count; }
+extern int get_global(void);
+""",
+        ),
     ]
 
 
