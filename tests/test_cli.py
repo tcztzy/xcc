@@ -1,5 +1,7 @@
+import importlib
 import io
 import os
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -253,6 +255,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
         self.assertIn("Undeclared identifier: ZERO", stderr)
+
+
+    def test_python_m_xcc(self) -> None:
+        """``python -m xcc`` should work (via __main__.py)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.c"
+            path.write_text("int main(void){return 0;}\n", encoding="utf-8")
+            with patch("xcc.main", return_value=0) as mock_main:
+                with self.assertRaises(SystemExit) as cm:
+                    import importlib
+                    import xcc.__main__  # noqa: F401
+                    importlib.reload(sys.modules["xcc.__main__"])
+                self.assertEqual(cm.exception.code, 0)
+                mock_main.assert_called_once()
 
 
 if __name__ == "__main__":
