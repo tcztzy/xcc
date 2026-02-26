@@ -1251,6 +1251,30 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int z;\n")
 
+    def test_host_system_include_dirs_are_searched_for_angle_includes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            include_dir = Path(tmp)
+            (include_dir / "xcc_host.h").write_text("int ok;\n", encoding="utf-8")
+            with patch(
+                "xcc.preprocessor.host_system_include_dirs",
+                return_value=(str(include_dir),),
+            ):
+                result = preprocess_source("#include <xcc_host.h>\n", filename="main.c")
+        self.assertEqual(result.source, "int ok;\n")
+
+    def test_nostdinc_disables_host_system_include_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            include_dir = Path(tmp)
+            (include_dir / "xcc_host.h").write_text("int ok;\n", encoding="utf-8")
+            options = FrontendOptions(no_standard_includes=True)
+            with patch(
+                "xcc.preprocessor.host_system_include_dirs",
+                return_value=(str(include_dir),),
+            ):
+                with self.assertRaises(PreprocessorError) as ctx:
+                    preprocess_source("#include <xcc_host.h>\n", filename="main.c", options=options)
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+
     def test_include_angle_prefers_include_dirs_over_system_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1546,7 +1570,7 @@ class PreprocessorTests(unittest.TestCase):
             include_dir.mkdir()
             (source_dir / "inc.h").write_text('#include_next "inc.h"\n', encoding="utf-8")
             main = source_dir / "main.c"
-            options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),))
+            options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),), no_standard_includes=True)
             with self.assertRaises(PreprocessorError) as ctx:
                 preprocess_source('#include "inc.h"\n', filename=str(main), options=options)
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
@@ -1643,7 +1667,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(result.source, "int from_forced = 17 ;\n17\n")
 
     def test_imacros_not_found(self) -> None:
-        options = FrontendOptions(macro_includes=("missing.h",))
+        options = FrontendOptions(macro_includes=("missing.h",), no_standard_includes=True)
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("int x;\n", filename="main.c", options=options)
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
@@ -1667,7 +1691,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn('#include "forced.h" ->', result.include_trace[0])
 
     def test_forced_include_not_found(self) -> None:
-        options = FrontendOptions(forced_includes=("missing.h",))
+        options = FrontendOptions(forced_includes=("missing.h",), no_standard_includes=True)
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("int x;\n", filename="main.c", options=options)
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
@@ -1677,8 +1701,9 @@ class PreprocessorTests(unittest.TestCase):
         )
 
     def test_include_not_found(self) -> None:
+        options = FrontendOptions(no_standard_includes=True)
         with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source('#include "missing.h"\n', filename="main.c")
+            preprocess_source('#include "missing.h"\n', filename="main.c", options=options)
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
         self.assertEqual((ctx.exception.filename, ctx.exception.line), ("main.c", 1))
         self.assertEqual(
@@ -1687,8 +1712,9 @@ class PreprocessorTests(unittest.TestCase):
         )
 
     def test_include_not_found_for_angle_include_reports_delimiters(self) -> None:
+        options = FrontendOptions(no_standard_includes=True)
         with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source("#include <missing.h>\n", filename="main.c")
+            preprocess_source("#include <missing.h>\n", filename="main.c", options=options)
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
         self.assertEqual(
             ctx.exception.args[0],
@@ -1696,8 +1722,9 @@ class PreprocessorTests(unittest.TestCase):
         )
 
     def test_include_not_found_uses_line_mapped_source_location(self) -> None:
+        options = FrontendOptions(no_standard_includes=True)
         with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source('#line 77 "mapped.c"\n#include "missing.h"\n', filename="main.c")
+            preprocess_source('#line 77 "mapped.c"\n#include "missing.h"\n', filename="main.c", options=options)
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
         self.assertEqual((ctx.exception.filename, ctx.exception.line), ("mapped.c", 77))
         self.assertEqual(
@@ -1717,7 +1744,7 @@ class PreprocessorTests(unittest.TestCase):
                 '#line 41 "mapped/header.h"\n#include_next "inc.h"\n',
                 encoding="utf-8",
             )
-            options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),))
+            options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),), no_standard_includes=True)
             with self.assertRaises(PreprocessorError) as ctx:
                 preprocess_source('#include "inc.h"\n', filename=str(source_dir / "main.c"), options=options)
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
@@ -1737,6 +1764,7 @@ class PreprocessorTests(unittest.TestCase):
             options = FrontendOptions(
                 include_dirs=(str(include_a),),
                 system_include_dirs=(str(include_b),),
+                no_standard_includes=True,
             )
             with self.assertRaises(PreprocessorError) as ctx:
                 preprocess_source('#include "missing.h"\n', filename="main.c", options=options)
@@ -1758,6 +1786,7 @@ class PreprocessorTests(unittest.TestCase):
             include_a_alias.symlink_to(include_a, target_is_directory=True)
             options = FrontendOptions(
                 include_dirs=(str(include_a), str(include_a_alias), str(include_a)),
+                no_standard_includes=True,
             )
             with self.assertRaises(PreprocessorError) as ctx:
                 preprocess_source('#include "missing.h"\n', filename="main.c", options=options)
@@ -2703,7 +2732,7 @@ class PreprocessorTests(unittest.TestCase):
             second.mkdir()
             (first / "h.h").write_text("int first;\n", encoding="utf-8")
             processor = _Preprocessor(
-                FrontendOptions(include_dirs=(str(first), str(second))),
+                FrontendOptions(include_dirs=(str(first), str(second)), no_standard_includes=True),
             )
             include_path, searched_roots = processor._resolve_include(
                 "h.h",
