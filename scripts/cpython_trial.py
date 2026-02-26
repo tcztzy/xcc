@@ -2473,6 +2473,112 @@ struct node *list_append(struct node *head, int val);
 struct node sentinel = { .value = -1, .next = &sentinel, .prev = &sentinel };
 """,
         ),
+        TrialCase(
+            "variadic_macro_with_va_args",
+            """
+#define PY_DEBUG_LOG(fmt, ...) ((void)0)
+void foo(void) { PY_DEBUG_LOG("hello %d", 42); }
+""",
+        ),
+        TrialCase(
+            "enum_with_trailing_comma",
+            """
+enum PyMemberType {
+    T_SHORT = 0,
+    T_INT,
+    T_LONG,
+    T_FLOAT,
+    T_DOUBLE,
+    T_STRING,
+};
+""",
+        ),
+        TrialCase(
+            "flexible_array_member",
+            """
+typedef struct {
+    long ob_refcnt;
+    int ob_size;
+    char ob_val[];
+} PyBytesObject;
+""",
+        ),
+        TrialCase(
+            "anonymous_union_in_struct",
+            """
+struct PyValue {
+    int kind;
+    union {
+        long i;
+        double d;
+        void *p;
+    };
+};
+void use(struct PyValue *v) { v->i = 42; }
+""",
+        ),
+        TrialCase(
+            "bit_field_declarations",
+            """
+struct PyFlags {
+    unsigned int optimized : 1;
+    unsigned int nested : 1;
+    unsigned int generator : 1;
+    unsigned int coroutine : 1;
+    unsigned int : 4;
+    unsigned int reserved : 24;
+};
+""",
+        ),
+        TrialCase(
+            "do_while_zero_macro",
+            """
+#define Py_INCREF(op) do { (op)->ob_refcnt++; } while (0)
+struct _object { long ob_refcnt; };
+void inc(struct _object *o) { Py_INCREF(o); }
+""",
+        ),
+        TrialCase(
+            "conditional_include_guard",
+            """
+#ifndef Py_OBJECT_H
+#define Py_OBJECT_H
+typedef struct _object { long ob_refcnt; } PyObject;
+#endif
+#ifndef Py_OBJECT_H
+typedef int SHOULD_NOT_APPEAR;
+#endif
+PyObject x;
+""",
+        ),
+        TrialCase(
+            "const_volatile_pointer_chain",
+            """
+const volatile int * const * volatile pp;
+void f(const char * const *argv) { (void)argv; }
+""",
+        ),
+        TrialCase(
+            "array_of_function_pointers",
+            """
+typedef int (*initproc)(void *, void *, void *);
+typedef void (*destructor)(void *);
+typedef struct {
+    initproc tp_init;
+    destructor tp_dealloc;
+} slotdef;
+slotdef slots[] = { {0, 0}, {0, 0} };
+""",
+        ),
+        TrialCase(
+            "inline_function_definition",
+            """
+static inline int _Py_IsNone(const void *ob) {
+    return ob == 0;
+}
+int check(void *o) { return _Py_IsNone(o); }
+""",
+        ),
     ]
 
 
