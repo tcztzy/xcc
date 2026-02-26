@@ -2,6 +2,17 @@
 
 This file records implementation progress and validation history.
 
+## 2026-02-26
+
+- Added OpenClaw cron smoke runner plumbing: `scripts/openclaw_cron_smoke.sh` now launches `xcc.openclaw_cron` with `set -euo pipefail`; the smoke logic auto-selects milestone checks (`CC=xcc ./configure` when CPython checkout is present, otherwise `python -m unittest discover -v`) with timeout handling, concise status reporting, and explicit exit codes (`0`/`1`/`2`).
+- Added targeted `unittest` coverage for smoke check selection, timeout behavior, report formatting, and CLI return-code propagation in `tests/test_openclaw_cron.py`.
+- Documented OpenClaw cron installation for isolated mode with `Asia/Shanghai` timezone and announce-to-last-route delivery in `README.md`.
+- Checks: `./scripts/openclaw_cron_smoke.sh --cpython-dir "$(mktemp -d)" --timeout-seconds 30 --max-log-lines 5` (sanity path exercised with a temporary `configure` stub) and `UV_CACHE_DIR=/tmp/uv-cache uv run tox -e py311,lint,type` (pass).
+- Added deterministic blocker-runner script `scripts/xcc_blocker_crusher.py` for unattended CPython trial loops: clean-tree enforcement (`fail`/`stash`), trial execution, stable blocker-code classification, deterministic top-blocker selection, targeted fixer dispatch, `tox -q` verification, rollback on verify failure, and concise auto-commit.
+- Made `scripts/cpython_trial.py` directly runnable from the repo root by inserting `src/` into `sys.path`, so `python scripts/cpython_trial.py` does not require a preinstalled `xcc`.
+- Expanded README OpenClaw docs with local blocker-crusher cron instructions (30-minute example schedule) and fail-fast behavior for unsupported blocker codes.
+- Checks: `UV_CACHE_DIR=/tmp/uv-cache uv run python scripts/cpython_trial.py` and `UV_CACHE_DIR=/tmp/uv-cache uv run tox -q` (pass).
+
 ## 2026-02-25
 
 - Fixed anonymous struct/union member handling in record declarations: parser now accepts `struct/union { ... };` members without declarators (instead of `Expected identifier before ';'`), and sema now hoists anonymous struct/union fields into the containing record for direct member access; added parser+sema regressions for `anonymous_struct_union`, `anonymous_struct_in_union`, `anonymous_union_in_struct`, plus duplicate-hoisted-member diagnostics and lookup edge-path coverage.
