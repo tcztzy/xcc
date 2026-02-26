@@ -2094,6 +2094,98 @@ void f(void) {
 }
 """,
         ),
+        TrialCase(
+            "conditional_include_guards",
+            """
+#ifndef MY_HEADER_H
+#define MY_HEADER_H
+typedef int MyInt;
+#endif
+MyInt x;
+""",
+        ),
+        TrialCase(
+            "multiline_macro_with_do_while",
+            """
+#define SAFE_FREE(p) do { if (p) { p = (void*)0; } } while (0)
+void f(void) { int *p = 0; SAFE_FREE(p); }
+""",
+        ),
+        TrialCase(
+            "nested_struct_pointer_chain",
+            """
+struct A { int val; };
+struct B { struct A *a; };
+struct C { struct B *b; };
+int get(struct C *c) { return c->b->a->val; }
+""",
+        ),
+        TrialCase(
+            "array_of_function_pointers",
+            """
+typedef int (*op_fn)(int, int);
+int add(int a, int b) { return a + b; }
+int sub(int a, int b) { return a - b; }
+op_fn ops[2] = { add, sub };
+""",
+        ),
+        TrialCase(
+            "enum_with_explicit_values",
+            """
+enum color { RED = 1, GREEN = 2, BLUE = 4, WHITE = RED | GREEN | BLUE };
+int f(void) { return WHITE; }
+""",
+        ),
+        TrialCase(
+            "recursive_struct_with_typedef",
+            """
+typedef struct node {
+    int data;
+    struct node *left;
+    struct node *right;
+} Node;
+Node *make(int d) { Node n; n.data = d; n.left = 0; n.right = 0; (void)n; return 0; }
+""",
+        ),
+        TrialCase(
+            "void_pointer_arithmetic_cast",
+            """
+void f(void) {
+    char buf[100];
+    void *p = buf;
+    char *q = (char *)p + 10;
+    (void)q;
+}
+""",
+        ),
+        TrialCase(
+            "static_inline_function",
+            """
+static inline int max(int a, int b) { return a > b ? a : b; }
+int f(void) { return max(3, 5); }
+""",
+        ),
+        TrialCase(
+            "const_volatile_pointer",
+            """
+void f(void) {
+    const volatile int * const p = 0;
+    (void)p;
+}
+""",
+        ),
+        TrialCase(
+            "switch_fallthrough_default",
+            """
+int classify(int x) {
+    switch (x) {
+    case 0: case 1: return 0;
+    case 2: return 1;
+    default: return -1;
+    }
+}
+""",
+        ),
     ]
 
 
