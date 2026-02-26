@@ -2579,6 +2579,97 @@ static inline int _Py_IsNone(const void *ob) {
 int check(void *o) { return _Py_IsNone(o); }
 """,
         ),
+        TrialCase(
+            "designated_initializer_nested_struct",
+            """
+struct point { int x; int y; };
+struct rect { struct point tl; struct point br; };
+struct rect r = { .tl = { .x = 0, .y = 0 }, .br = { .x = 10, .y = 20 } };
+""",
+        ),
+        TrialCase(
+            "compound_literal_in_expression",
+            """
+struct pair { int a; int b; };
+int sum(void) {
+    struct pair p = (struct pair){ .a = 3, .b = 4 };
+    return p.a + p.b;
+}
+""",
+        ),
+        TrialCase(
+            "static_assert_declaration",
+            """
+_Static_assert(sizeof(int) >= 4, "int too small");
+_Static_assert(1, "always true");
+""",
+        ),
+        TrialCase(
+            "generic_selection_expression",
+            """
+#define type_name(x) _Generic((x), \
+    int: "int", \
+    double: "double", \
+    default: "other")
+const char *name = type_name(42);
+""",
+        ),
+        TrialCase(
+            "variadic_function_declaration",
+            """
+int printf(const char *fmt, ...);
+int snprintf(char *buf, unsigned long size, const char *fmt, ...);
+void log_msg(const char *level, const char *fmt, ...);
+""",
+        ),
+        TrialCase(
+            "union_with_anonymous_members",
+            """
+struct value {
+    int kind;
+    union {
+        int i;
+        double d;
+        const char *s;
+    };
+};
+int get_int(struct value v) { return v.i; }
+""",
+        ),
+        TrialCase(
+            "pointer_to_array_parameter",
+            """
+void fill(int (*arr)[10]) {
+    for (int i = 0; i < 10; i++)
+        (*arr)[i] = i;
+}
+""",
+        ),
+        TrialCase(
+            "function_returning_function_pointer",
+            """
+typedef int (*binop)(int, int);
+int add(int a, int b) { return a + b; }
+binop get_op(void) { return add; }
+""",
+        ),
+        TrialCase(
+            "complex_macro_token_pasting",
+            """
+#define CONCAT(a, b) a##b
+#define MAKE_FUNC(name) int CONCAT(func_, name)(void) { return 0; }
+MAKE_FUNC(alpha)
+MAKE_FUNC(beta)
+""",
+        ),
+        TrialCase(
+            "atomic_type_qualifier",
+            """
+_Atomic int counter;
+_Atomic(unsigned long) flags;
+void inc(void) { counter = counter + 1; }
+""",
+        ),
     ]
 
 
