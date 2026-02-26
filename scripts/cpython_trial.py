@@ -1910,6 +1910,107 @@ void f(void) {
 }
 """,
         ),
+        TrialCase(
+            "variadic_macro_with_va_args",
+            """
+#define DEBUG_PRINT(fmt, ...) ((void)0)
+#define LOG(msg, ...) DEBUG_PRINT(msg, __VA_ARGS__)
+void f(void) { LOG("hello %d", 42); }
+""",
+        ),
+        TrialCase(
+            "anonymous_struct_in_union",
+            """
+typedef struct {
+    union {
+        struct { int x; int y; };
+        int coords[2];
+    };
+} Point;
+void f(void) { Point p; p.x = 1; p.coords[0] = 2; }
+""",
+        ),
+        TrialCase(
+            "flexible_array_member",
+            """
+typedef struct {
+    int len;
+    char data[];
+} Buffer;
+void f(Buffer *b) { b->data[0] = 'a'; }
+""",
+        ),
+        TrialCase(
+            "bitfield_declaration",
+            """
+struct Flags {
+    unsigned int readable : 1;
+    unsigned int writable : 1;
+    unsigned int executable : 1;
+    unsigned int : 5;
+    unsigned int type : 8;
+};
+void f(void) { struct Flags fl; fl.readable = 1; }
+""",
+        ),
+        TrialCase(
+            "computed_goto_labels_as_values",
+            """
+void dispatch(int op) {
+    static void *table[] = { &&L0, &&L1 };
+    goto *table[op];
+L0: return;
+L1: return;
+}
+""",
+            std="gnu11",
+        ),
+        TrialCase(
+            "typeof_extension",
+            """
+int f(void) {
+    int x = 42;
+    __typeof__(x) y = x + 1;
+    return y;
+}
+""",
+            std="gnu11",
+        ),
+        TrialCase(
+            "statement_expression",
+            """
+#define MAX(a, b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a : _b; })
+int f(void) { return MAX(3, 5); }
+""",
+            std="gnu11",
+        ),
+        TrialCase(
+            "attribute_syntax",
+            """
+__attribute__((unused)) static int helper(void) { return 0; }
+__attribute__((noreturn)) void die(void);
+int __attribute__((aligned(16))) aligned_var;
+""",
+            std="gnu11",
+        ),
+        TrialCase(
+            "offsetof_macro",
+            """
+typedef struct { int a; char b; double c; } S;
+#define MY_OFFSETOF(type, member) ((unsigned long)&((type *)0)->member)
+unsigned long f(void) { return MY_OFFSETOF(S, c); }
+""",
+        ),
+        TrialCase(
+            "nested_function_pointer_typedef",
+            """
+typedef int (*cmpfunc)(const void *, const void *);
+typedef cmpfunc (*cmpfunc_getter)(int);
+int compare(const void *a, const void *b) { return *(const int *)a - *(const int *)b; }
+cmpfunc get_cmp(int mode) { (void)mode; return compare; }
+void f(void) { cmpfunc_getter g = get_cmp; cmpfunc c = g(0); (void)c; }
+""",
+        ),
     ]
 
 
