@@ -4024,9 +4024,10 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){union ;return 0;}")))
 
-    def test_empty_struct_definition_is_rejected(self) -> None:
-        with self.assertRaises(ParserError):
-            parse(list(lex("int main(){struct S {};return 0;}")))
+    def test_empty_struct_definition_allowed_in_c11(self) -> None:
+        unit = parse(list(lex("struct S {}; int main(){return 0;}")))
+        self.assertEqual(len(unit.declarations), 1)
+        self.assertEqual(len(unit.functions), 1)
 
     def test_empty_struct_definition_allowed_in_gnu11(self) -> None:
         unit = parse(list(lex("struct S {}; int main(){return 0;}")), std="gnu11")
@@ -4038,9 +4039,10 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(unit.declarations), 1)
         self.assertEqual(len(unit.functions), 1)
 
-    def test_empty_union_definition_is_rejected(self) -> None:
-        with self.assertRaises(ParserError):
-            parse(list(lex("int main(){union U {};return 0;}")))
+    def test_empty_union_definition_allowed_in_c11(self) -> None:
+        unit = parse(list(lex("union U {}; int main(){return 0;}")))
+        self.assertEqual(len(unit.declarations), 1)
+        self.assertEqual(len(unit.functions), 1)
 
     def test_struct_without_declarator_rejects_initializer(self) -> None:
         with self.assertRaises(ParserError):

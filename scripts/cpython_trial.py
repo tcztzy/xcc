@@ -2302,6 +2302,83 @@ static int increment(void) { return ++local_count; }
 extern int get_global(void);
 """,
         ),
+        TrialCase(
+            "designated_initializer_struct",
+            """
+struct point { int x; int y; int z; };
+struct point p = { .z = 3, .x = 1, .y = 2 };
+""",
+        ),
+        TrialCase(
+            "designated_initializer_array",
+            """
+int arr[10] = { [3] = 30, [7] = 70 };
+""",
+        ),
+        TrialCase(
+            "compound_literal",
+            """
+struct pair { int a; int b; };
+struct pair *get_pair(void) {
+    return &(struct pair){ .a = 1, .b = 2 };
+}
+""",
+        ),
+        TrialCase(
+            "generic_selection",
+            """
+#define type_name(x) _Generic((x), \
+    int: "int", \
+    double: "double", \
+    default: "other")
+const char *name = type_name(42);
+""",
+        ),
+        TrialCase(
+            "static_assert_declaration",
+            """
+_Static_assert(sizeof(int) >= 4, "int must be at least 4 bytes");
+typedef struct { int x; } checked_t;
+""",
+        ),
+        TrialCase(
+            "nested_designated_init",
+            """
+struct inner { int val; };
+struct outer { struct inner a; struct inner b; };
+struct outer o = { .a = { .val = 10 }, .b.val = 20 };
+""",
+        ),
+        TrialCase(
+            "function_pointer_typedef_complex",
+            """
+typedef int (*cmp_fn)(const void *, const void *);
+typedef cmp_fn (*cmp_factory)(int);
+cmp_factory get_factory(void);
+""",
+        ),
+        TrialCase(
+            "pragma_once_and_line",
+            """
+#pragma once
+#line 100 "fake.c"
+int x = 1;
+""",
+        ),
+        TrialCase(
+            "multi_declarator_with_init",
+            """
+int a = 1, b = 2, *c = &a, d[3] = {1, 2, 3};
+""",
+        ),
+        TrialCase(
+            "empty_struct_and_zero_length_array",
+            """
+struct empty {};
+struct flex { int n; char data[]; };
+struct flex *make_flex(int n);
+""",
+        ),
     ]
 
 
