@@ -916,8 +916,8 @@ class Analyzer:
         if type_spec.name == "void" and is_unqualified_scalar:
             return VOID
         if type_spec.name == "typeof" and type_spec.typeof_expr is not None:
-            assert self._current_scope is not None
-            expr_type = self._analyze_expr(type_spec.typeof_expr, self._current_scope)
+            scope = self._current_scope if self._current_scope is not None else self._file_scope
+            expr_type = self._analyze_expr(type_spec.typeof_expr, scope)
             # Apply declarator ops on top of the resolved expression type
             if type_spec.declarator_ops:
                 base = expr_type

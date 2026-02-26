@@ -2379,6 +2379,100 @@ struct flex { int n; char data[]; };
 struct flex *make_flex(int n);
 """,
         ),
+        TrialCase(
+            "computed_goto_labels_as_values",
+            """
+void dispatch(int op) {
+    static void *table[] = { &&L_ADD, &&L_SUB, &&L_RET };
+    goto *table[op];
+L_ADD: return;
+L_SUB: return;
+L_RET: return;
+}
+""",
+            std="gnu11",
+        ),
+        TrialCase(
+            "typeof_extension",
+            """
+int x = 42;
+__typeof__(x) y = x + 1;
+__typeof__(x + 0.5) z = 3.14;
+""",
+            std="gnu11",
+        ),
+        TrialCase(
+            "statement_expression_gnu",
+            """
+#define MAX(a, b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a : _b; })
+int test(void) { return MAX(3, 5); }
+""",
+            std="gnu11",
+        ),
+        TrialCase(
+            "attribute_packed_struct",
+            """
+struct __attribute__((packed)) wire_header {
+    unsigned char type;
+    unsigned int length;
+    unsigned short flags;
+};
+""",
+        ),
+        TrialCase(
+            "attribute_aligned_variable",
+            """
+int data __attribute__((aligned(16)));
+struct __attribute__((aligned(64))) cacheline { char buf[64]; };
+""",
+        ),
+        TrialCase(
+            "nested_function_pointer_param",
+            """
+typedef int (*cmpfunc)(const void *, const void *);
+void sort(void *base, int n, int size, cmpfunc cmp);
+int my_cmp(const void *a, const void *b) { return *(const int*)a - *(const int*)b; }
+""",
+        ),
+        TrialCase(
+            "multiple_storage_class_extern_inline",
+            """
+extern inline int fast_add(int a, int b) { return a + b; }
+static inline int fast_sub(int a, int b) { return a - b; }
+""",
+        ),
+        TrialCase(
+            "complex_cast_chain",
+            """
+void test(void) {
+    void *p = (void*)0;
+    int *ip = (int*)(void*)(char*)p;
+    const volatile int *cvip = (const volatile int *)ip;
+    (void)cvip;
+}
+""",
+        ),
+        TrialCase(
+            "multiline_string_concat",
+            """
+const char *msg = "Hello, "
+                  "world! "
+                  "This is "
+                  "a long string.";
+""",
+        ),
+        TrialCase(
+            "struct_self_referencing_list",
+            """
+struct node {
+    int value;
+    struct node *next;
+    struct node *prev;
+};
+struct node *list_append(struct node *head, int val);
+struct node sentinel = { .value = -1, .next = &sentinel, .prev = &sentinel };
+""",
+        ),
     ]
 
 
