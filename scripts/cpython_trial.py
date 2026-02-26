@@ -2011,6 +2011,89 @@ cmpfunc get_cmp(int mode) { (void)mode; return compare; }
 void f(void) { cmpfunc_getter g = get_cmp; cmpfunc c = g(0); (void)c; }
 """,
         ),
+        TrialCase(
+            "designated_initializer_nested_struct",
+            """
+struct point { int x; int y; };
+struct rect { struct point tl; struct point br; };
+struct rect r = { .tl = { .x = 0, .y = 1 }, .br = { .x = 10, .y = 11 } };
+""",
+        ),
+        TrialCase(
+            "compound_literal_as_argument",
+            """
+struct pair { int a; int b; };
+int sum(struct pair p) { return p.a + p.b; }
+int f(void) { return sum((struct pair){ .a = 3, .b = 4 }); }
+""",
+        ),
+        TrialCase(
+            "static_assert_declaration",
+            """
+_Static_assert(sizeof(int) >= 4, "int too small");
+_Static_assert(1, "always true");
+""",
+        ),
+        TrialCase(
+            "generic_selection_expr",
+            """
+#define type_name(x) _Generic((x), \
+    int: "int", \
+    double: "double", \
+    default: "other")
+const char *f(void) { int i = 0; return type_name(i); }
+""",
+        ),
+        TrialCase(
+            "atomic_type_qualifier",
+            """
+_Atomic int counter;
+void inc(void) { counter = counter + 1; }
+""",
+        ),
+        TrialCase(
+            "noreturn_function",
+            """
+_Noreturn void die(const char *msg);
+void f(int x) { if (x < 0) die("negative"); }
+""",
+        ),
+        TrialCase(
+            "alignas_and_alignof",
+            """
+_Alignas(16) char buf[256];
+unsigned long a = _Alignof(double);
+""",
+        ),
+        TrialCase(
+            "complex_macro_expansion_with_stringize",
+            """
+#define STR(x) #x
+#define XSTR(x) STR(x)
+#define VER 3
+const char *version = XSTR(VER);
+""",
+        ),
+        TrialCase(
+            "function_returning_struct",
+            """
+struct vec2 { float x; float y; };
+struct vec2 make_vec(float x, float y) { struct vec2 v; v.x = x; v.y = y; return v; }
+void f(void) { struct vec2 v = make_vec(1.0f, 2.0f); (void)v; }
+""",
+        ),
+        TrialCase(
+            "long_long_and_unsigned_literals",
+            """
+void f(void) {
+    long long a = 123456789012345LL;
+    unsigned long long b = 0xFFFFFFFFFFFFFFFFULL;
+    unsigned u = 42U;
+    long l = 100L;
+    (void)a; (void)b; (void)u; (void)l;
+}
+""",
+        ),
     ]
 
 
