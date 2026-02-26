@@ -25,23 +25,18 @@ This repository aims to become a C11 compiler written in modern Python (CPython 
 
 ## Continuous Development Loop
 
-- Development loop: CPython trial -> failure bucket -> pick the highest-frequency blocker -> implement fix with tests -> verify `tox` is green -> commit -> repeat.
 - Every agent task must name one concrete failure to fix, provide its verification command, and leave `tox` green before handoff.
-- No speculative feature work: each change must trace to a concrete CPython compilation failure.
-- Cron-job guidelines: run every 30 minutes, focus on one failure category per run, require green `tox` before commit, and auto-rollback when verification fails.
+- No speculative feature work: each change must trace to a concrete compilation failure.
 
-## Commit Discipline
+## Git Rules
 
-- Prefer **slice commits**: a single commit should bundle the behavior change with its tests/fixtures and any required doc updates, and keep the tree green (lint/type/tests + 100% coverage).
-- Avoid **progress-only micro-commits** (e.g., TODO/log updates, one fixture at a time). Batch related fixture/manifest cases so each commit is reviewable and meaningful.
-- Use `git commit --fixup <sha>` for follow-ups, then squash before pushing/merging with `git rebase -i --autosquash <base>`.
-- Do not force-push `master` unless doing an explicitly coordinated history cleanup (keep a backup ref before rewriting).
+- **Agents do NOT commit.** Make code changes and verify `tox` passes, then stop. The TL reviews and commits.
+- **Do NOT run `git commit`, `git add`, or any git write operations.**
+- If `tox` fails after your changes, roll back with `git checkout .` and report what went wrong.
 
 ## Feature Implementation Order
 
 - For every new feature, add or update tests before implementing production code.
-- If an equivalent LLVM/Clang test exists, add it to the curated fixture suite first.
-- If no LLVM/Clang test exists, explicitly note the gap and add local positive and negative tests before coding.
 
 ## Linux/ELF Testing (via tox-docker)
 
@@ -73,13 +68,6 @@ External specs (PDF/TXT/HTML) are cached under `docs/_sources/` for convenience,
 - Review `LESSONS.md` before major compiler or testing changes.
 - Keep `LESSONS.md` concise, actionable, and in professional English.
 - When adding a lesson, include at least one concrete action for `xcc`.
-
-## LLVM/Clang Fixture Tests
-
-- Curated upstream fixtures live under `tests/external/clang/fixtures/`.
-- Keep fixture metadata and checksums in `tests/external/clang/manifest.json`.
-- Keep vendored fixture files byte-identical to upstream and pinned to a commit.
-- Use `python scripts/sync_clang_fixtures.py` to sync fixture bytes and checksums.
 
 ## Code Hygiene Checklist (before submitting changes)
 
