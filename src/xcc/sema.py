@@ -40,6 +40,7 @@ from xcc.ast import (
     MemberExpr,
     NullStmt,
     Param,
+    RecordMemberDecl,
     ReturnStmt,
     SizeofExpr,
     StatementExpr,
@@ -324,6 +325,8 @@ class Analyzer:
         self._pending_goto_labels: list[str] = []
         self._current_return_type: Type | None = None
         self._current_scope: Scope | None = None
+        self._anon_record_counter = 0
+        self._anon_record_names: dict[tuple[str, tuple[RecordMemberDecl, ...]], str] = {}
         if std == "gnu11":
             self._register_gcc_builtins()
 
@@ -714,7 +717,13 @@ class Analyzer:
     def _record_type_name(self, type_spec: TypeSpec) -> str:
         if type_spec.record_tag is not None:
             return self._record_key(type_spec.name, type_spec.record_tag)
-        return f"{type_spec.name} <anon:{id(type_spec)}>"
+        key = (type_spec.name, type_spec.record_members)
+        name = self._anon_record_names.get(key)
+        if name is None:
+            self._anon_record_counter += 1
+            name = f"{type_spec.name} <anon:{self._anon_record_counter}>"
+            self._anon_record_names[key] = name
+        return name
 
     def _normalize_record_members(
         self,

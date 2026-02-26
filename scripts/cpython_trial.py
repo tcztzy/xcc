@@ -1802,6 +1802,114 @@ void process(const volatile int *reg) {
 }
 """,
         ),
+        TrialCase(
+            "comma_operator_in_expr",
+            """
+int f(void) {
+    int a = 1, b = 2;
+    int c = (a++, b++, a + b);
+    return c;
+}
+""",
+        ),
+        TrialCase(
+            "sizeof_expression_variants",
+            """
+typedef struct { int x; double y; } Pair;
+int sizes(void) {
+    int a = sizeof(int);
+    int b = sizeof(Pair);
+    Pair p;
+    int c = sizeof p;
+    int d = sizeof(int *);
+    return a + b + c + d;
+}
+""",
+        ),
+        TrialCase(
+            "conditional_expr_lvalue",
+            """
+int f(void) {
+    int a = 1, b = 2;
+    return a > b ? a : b;
+}
+""",
+        ),
+        TrialCase(
+            "array_of_function_pointers",
+            """
+typedef int (*binop_fn)(int, int);
+int add(int a, int b) { return a + b; }
+int sub(int a, int b) { return a - b; }
+binop_fn ops[2] = { add, sub };
+""",
+        ),
+        TrialCase(
+            "nested_ternary",
+            """
+int classify(int x) {
+    return x > 0 ? 1 : x < 0 ? -1 : 0;
+}
+""",
+        ),
+        TrialCase(
+            "struct_self_referential_list",
+            """
+typedef struct node {
+    int value;
+    struct node *next;
+} Node;
+Node *prepend(Node *head, int val) {
+    static Node n;
+    n.value = val;
+    n.next = head;
+    return &n;
+}
+""",
+        ),
+        TrialCase(
+            "enum_in_switch",
+            """
+typedef enum { RED, GREEN, BLUE } Color;
+const char *color_name(Color c) {
+    switch (c) {
+    case RED: return "red";
+    case GREEN: return "green";
+    case BLUE: return "blue";
+    default: return "unknown";
+    }
+}
+""",
+        ),
+        TrialCase(
+            "string_literal_concatenation",
+            """
+const char *msg = "hello" " " "world";
+const char *multiline = "line1\\n"
+                        "line2\\n"
+                        "line3\\n";
+""",
+        ),
+        TrialCase(
+            "cast_expression_complex",
+            """
+typedef struct { int x; } S;
+void f(void) {
+    long addr = 0x1000;
+    S *p = (S *)(void *)addr;
+    int val = (int)(unsigned char)(*((char *)p));
+}
+""",
+        ),
+        TrialCase(
+            "multiple_declarators_mixed",
+            """
+int a, *b, **c, arr[10], (*fp)(int);
+void f(void) {
+    int x = 1, *y = &x, z[3] = {1, 2, 3};
+}
+""",
+        ),
     ]
 
 
