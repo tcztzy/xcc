@@ -1,0 +1,23 @@
+site_name: XCC
+site_description: A C compiler in Python targeting CPython.
+docs_dir: docs
+theme:
+  name: mkdocs
+nav:
+  - Home: index.md
+  - Requirements: requirements.md
+  - Apple Silicon Target: apple_silicon.md
+  - Linux/ELF Target: linux_elf.md
+  - Build Environments: build.md
+  - CPython Compatibility: cpython.md
+  - Architecture: architecture.md
+  - Front End: frontend.md
+  - Front End C11 Coverage: frontend_c11_coverage.md
+  - Back End: backend.md
+  - Testing: testing.md
+  - Quality: quality.md
+  - Performance: performance.md
+  - Documentation: documentation.md
+  - Licensing: licensing.md
+  - Roadmap: roadmap.md
+  - References: references.md

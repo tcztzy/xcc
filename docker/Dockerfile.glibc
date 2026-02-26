@@ -1,0 +1,17 @@
+FROM python:3.11-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        clang \
+        build-essential \
+        mold \
+        pkg-config \
+        python3-coverage \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+
+CMD ["tail", "-f", "/dev/null"]
