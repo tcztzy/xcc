@@ -1673,7 +1673,8 @@ class Analyzer:
     def _is_char_array_string_initializer(self, target_type: Type, init_expr: Expr) -> bool:
         if not target_type.is_array() or not isinstance(init_expr, StringLiteral):
             return False
-        if target_type.element_type() != CHAR:
+        elem = target_type.element_type()
+        if elem is None or elem.name != "char" or elem.declarator_ops:
             return False
         required_length = self._string_literal_required_length(init_expr.value)
         if required_length is None:
@@ -1681,6 +1682,9 @@ class Analyzer:
         assert target_type.declarator_ops
         _, value = target_type.declarator_ops[0]
         assert isinstance(value, int)
+        # Incomplete array (e.g. char msg[] = "hello") — size inferred from literal
+        if value < 0:
+            return True
         return required_length <= value
 
     def _string_literal_required_length(self, lexeme: str) -> int | None:

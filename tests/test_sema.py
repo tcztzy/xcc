@@ -3204,6 +3204,21 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_incomplete_char_array_string_initializer_ok(self) -> None:
+        unit = parse(list(lex('int main(){char s[]="abc";return 0;}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_incomplete_const_char_array_string_initializer_ok(self) -> None:
+        unit = parse(list(lex('const char s[]="hello"; int main(){return s[0];}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_incomplete_char_array_concatenated_string_initializer_ok(self) -> None:
+        unit = parse(list(lex('int main(){char s[]="a""b";return 0;}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_duplicate_file_scope_object_declaration(self) -> None:
         unit = parse(list(lex("int g; int g; int main(){return 0;}")))
         with self.assertRaises(SemaError) as ctx:
