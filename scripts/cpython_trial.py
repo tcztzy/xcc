@@ -2670,6 +2670,99 @@ _Atomic(unsigned long) flags;
 void inc(void) { counter = counter + 1; }
 """,
         ),
+        TrialCase(
+            "typedef_function_pointer_array",
+            """
+typedef int (*handler_t)(void *, int);
+handler_t handlers[16];
+int dispatch(int idx, void *ctx, int arg) { return handlers[idx](ctx, arg); }
+""",
+        ),
+        TrialCase(
+            "nested_struct_with_bitfields",
+            """
+struct outer {
+    struct inner {
+        unsigned int a : 3;
+        unsigned int b : 5;
+        unsigned int c : 8;
+    } fields;
+    int tag;
+};
+""",
+        ),
+        TrialCase(
+            "enum_used_as_array_size",
+            """
+enum { BUF_SIZE = 256 };
+char buffer[BUF_SIZE];
+void clear(void) { buffer[0] = 0; }
+""",
+        ),
+        TrialCase(
+            "recursive_macro_guard",
+            """
+#define FOO(x) ((x) + BAR(x))
+#define BAR(x) ((x) * 2)
+int val = FOO(3);
+""",
+        ),
+        TrialCase(
+            "void_pointer_arithmetic_cast",
+            """
+void *advance(void *p, int n) {
+    return (char *)p + n;
+}
+""",
+        ),
+        TrialCase(
+            "static_inline_with_local_static",
+            """
+static inline int counter(void) {
+    static int n = 0;
+    return n++;
+}
+""",
+        ),
+        TrialCase(
+            "comma_operator_in_for",
+            """
+void fill(int *a, int n) {
+    int i, j;
+    for (i = 0, j = n - 1; i < j; i++, j--) {
+        int tmp = a[i];
+        a[i] = a[j];
+        a[j] = tmp;
+    }
+}
+""",
+        ),
+        TrialCase(
+            "sizeof_expression_in_malloc",
+            """
+typedef struct node { int val; struct node *next; } Node;
+void *alloc(void *(*malloc_fn)(unsigned long)) {
+    return malloc_fn(sizeof(Node));
+}
+""",
+        ),
+        TrialCase(
+            "string_literal_concatenation_wide",
+            """
+const char msg[] = "hello " "world" "!";
+const char multi[] = "line1\\n"
+                     "line2\\n"
+                     "line3\\n";
+""",
+        ),
+        TrialCase(
+            "ternary_in_initializer",
+            """
+int debug = 0;
+int level = debug ? 3 : 1;
+const char *mode = level > 2 ? "verbose" : "quiet";
+""",
+        ),
     ]
 
 
