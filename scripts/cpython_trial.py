@@ -2866,6 +2866,115 @@ const char *name = STR(hello);
 int CONCAT(var, 1) = 42;
 """,
         ),
+        TrialCase(
+            "bitfield_in_struct",
+            """
+struct Flags {
+    unsigned int readable : 1;
+    unsigned int writable : 1;
+    unsigned int executable : 1;
+    unsigned int : 5;
+    unsigned int reserved : 8;
+};
+struct Flags f = {1, 0, 1};
+""",
+        ),
+        TrialCase(
+            "anonymous_struct_in_union",
+            """
+union Value {
+    long as_long;
+    double as_double;
+    struct {
+        void *ptr;
+        int tag;
+    };
+};
+union Value v;
+void test(void) { v.ptr = (void *)0; v.tag = 1; }
+""",
+        ),
+        TrialCase(
+            "compound_literal_assignment",
+            """
+struct Point { int x; int y; };
+void move(struct Point *p) {
+    *p = (struct Point){.x = 10, .y = 20};
+}
+""",
+        ),
+        TrialCase(
+            "variadic_macro",
+            """
+#define DEBUG_LOG(fmt, ...) ((void)0)
+void test(void) {
+    DEBUG_LOG("hello %d", 42);
+    DEBUG_LOG("no args");
+}
+""",
+        ),
+        TrialCase(
+            "enum_with_explicit_values",
+            """
+enum TokenKind {
+    TOK_EOF = 0,
+    TOK_NAME = 256,
+    TOK_NUMBER,
+    TOK_STRING = 300,
+    TOK_NEWLINE
+};
+enum TokenKind kind = TOK_NUMBER;
+""",
+        ),
+        TrialCase(
+            "array_of_function_pointers",
+            """
+typedef int (*BinOp)(int, int);
+int add(int a, int b) { return a + b; }
+int sub(int a, int b) { return a - b; }
+BinOp ops[] = {add, sub};
+""",
+        ),
+        TrialCase(
+            "static_inline_function",
+            """
+static inline int max(int a, int b) {
+    return a > b ? a : b;
+}
+int test(void) { return max(3, 5); }
+""",
+        ),
+        TrialCase(
+            "nested_struct_initializer",
+            """
+struct Inner { int a; int b; };
+struct Outer { struct Inner i; int c; };
+struct Outer o = { {1, 2}, 3 };
+struct Outer o2 = { .i = {.a = 10, .b = 20}, .c = 30 };
+""",
+        ),
+        TrialCase(
+            "sizeof_on_expression_and_type",
+            """
+struct Header { int refcnt; int flags; };
+void test(void) {
+    int x;
+    long s1 = sizeof(x);
+    long s2 = sizeof(struct Header);
+    long s3 = sizeof(int *);
+    long s4 = sizeof x + 1;
+}
+""",
+        ),
+        TrialCase(
+            "conditional_with_void_cast",
+            """
+void do_something(int x);
+void test(int debug) {
+    debug ? do_something(1) : (void)0;
+}
+""",
+        ),
     ]
 
 
