@@ -1420,6 +1420,37 @@ class Parser:
                 is_thread_local=decl_specs.is_thread_local,
             )
         declarations: list[DeclStmt | TypedefDecl] = []
+        # For non-typedef declarations, _parse_type_spec may have absorbed
+        # pointer '*' tokens into base_type.declarator_ops.  These belong to
+        # the first declarator only.  Compute a raw base without those ops so
+        # that subsequent declarators in a comma-separated list start clean.
+        if not is_typedef and base_type.declarator_ops:
+            # All ops absorbed by parse_pointer_depth are trailing ptr ops.
+            trailing_ptrs = 0
+            for kind, _ in reversed(base_type.declarator_ops):
+                if kind == "ptr":
+                    trailing_ptrs += 1
+                else:
+                    break
+            if trailing_ptrs:
+                raw_declarator_ops = base_type.declarator_ops[:-trailing_ptrs]
+                raw_base_type = TypeSpec(
+                    base_type.name,
+                    declarator_ops=raw_declarator_ops,
+                    qualifiers=base_type.qualifiers,
+                    is_atomic=base_type.is_atomic,
+                    atomic_target=base_type.atomic_target,
+                    enum_tag=base_type.enum_tag,
+                    enum_members=base_type.enum_members,
+                    record_tag=base_type.record_tag,
+                    record_members=base_type.record_members,
+                    typeof_expr=base_type.typeof_expr,
+                )
+            else:
+                raw_base_type = base_type
+        else:
+            raw_base_type = base_type
+        is_first_declarator = True
         while True:
             declarator_has_prefix_qualifier = False
             top_pointer_is_qualified = False
@@ -1441,7 +1472,11 @@ class Parser:
                 )
             if name is None:
                 raise self._expected_identifier_error()
-            decl_type = self._build_declarator_type(base_type, declarator_ops)
+            if is_first_declarator:
+                decl_type = self._build_declarator_type(base_type, declarator_ops)
+                is_first_declarator = False
+            else:
+                decl_type = self._build_declarator_type(raw_base_type, declarator_ops)
             if is_typedef:
                 if self._check_punct("="):
                     raise ParserError("Typedef cannot have initializer", self._current())
