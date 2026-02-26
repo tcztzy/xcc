@@ -1,5 +1,6 @@
 import ast
 import os
+import platform
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -241,6 +242,19 @@ _PREDEFINED_MACROS = (
     "__INCLUDE_LEVEL__=0",
     "__COUNTER__=0",
 )
+_HOST_ARCH_PREDEFINED_MACROS: dict[str, tuple[str, ...]] = {
+    "aarch64": ("__arm64__=1",),
+    "arm64": ("__arm64__=1",),
+    "amd64": ("__x86_64__=1",),
+    "x86_64": ("__x86_64__=1",),
+    "i386": ("__i386__=1",),
+    "i686": ("__i386__=1",),
+    "arm": ("__arm__=1",),
+    "armv7l": ("__arm__=1",),
+}
+_HOST_ARCH_DEFINE_STRINGS = tuple(
+    define for defines in _HOST_ARCH_PREDEFINED_MACROS.values() for define in defines
+)
 _PREDEFINED_DYNAMIC_MACROS = frozenset(
     {"__FILE__", "__FILE_NAME__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"}
 )
@@ -297,7 +311,12 @@ def _macro_name_from_cli_define(define: str) -> str:
 
 _PREDEFINED_MACRO_NAMES = frozenset(
     _macro_name_from_cli_define(item)
-    for item in (*_PREDEFINED_MACROS, *_STRICT_MODE_PREDEFINED_MACROS, *_GNU_MODE_PREDEFINED_MACROS)
+    for item in (
+        *_PREDEFINED_MACROS,
+        *_STRICT_MODE_PREDEFINED_MACROS,
+        *_GNU_MODE_PREDEFINED_MACROS,
+        *_HOST_ARCH_DEFINE_STRINGS,
+    )
 ) | frozenset(_PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS | {"__STDC_HOSTED__"})
 
 
@@ -530,6 +549,9 @@ class _Preprocessor:
         for define in mode_defines:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
+        for define in _HOST_ARCH_PREDEFINED_MACROS.get(platform.machine(), ()):
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
         self._macros["__DATE__"] = _Macro(
             "__DATE__",
             (_MacroToken(TokenKind.STRING_LITERAL, self._date_literal),),
@@ -633,7 +655,7 @@ class _Preprocessor:
                 line_index += 1
                 directive_lines.append(lines[line_index])
             directive_cursor = _DirectiveCursor(logical_cursor, len(directive_lines))
-            directive_text = "".join(directive_lines)
+            directive_text = "".join(directive_lines).replace("\\\n", "")
             parsed = _parse_directive(directive_text)
             if parsed is None:
                 for directive_index, chunk in enumerate(directive_lines):
@@ -706,6 +728,12 @@ class _Preprocessor:
                     filename=directive_cursor.first_location().filename,
                     code=_PP_INVALID_DIRECTIVE,
                 )
+            if name == "warning":
+                for directive_index, chunk in enumerate(directive_lines):
+                    out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
+                logical_cursor.advance(len(directive_lines))
+                line_index += 1
+                continue
             if name == "line":
                 line_value, filename_value = self._parse_line_directive(
                     body, directive_cursor.first_location()
@@ -1270,8 +1298,10 @@ class _Preprocessor:
         )
 
     def _require_macro_name(self, body: str, location: _SourceLocation) -> str:
-        macro_name = body.strip()
-        if _IDENT_RE.fullmatch(macro_name) is None:
+        stripped = _strip_condition_comments(body).strip()
+        parts = stripped.split()
+        macro_name = parts[0] if parts else ""
+        if len(parts) != 1 or _IDENT_RE.fullmatch(macro_name) is None:
             raise PreprocessorError(
                 "Expected macro name",
                 location.line,
@@ -1354,6 +1384,12 @@ class _Preprocessor:
         rewritten = self._replace_single_feature_probe_operator(
             rewritten,
             marker="__has_builtin",
+            location=location,
+            supported=(),
+        )
+        rewritten = self._replace_single_feature_probe_operator(
+            rewritten,
+            marker="__has_attribute",
             location=location,
             supported=(),
         )
