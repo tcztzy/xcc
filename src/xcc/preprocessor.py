@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import cast
 
+from xcc.host_includes import host_system_include_dirs
 from xcc.lexer import LexerError, TokenKind, lex_pp
 from xcc.options import FrontendOptions, normalize_options
 
@@ -554,9 +555,11 @@ class _Preprocessor:
         if options.no_standard_includes:
             self._cpath_include_dirs = ()
             self._c_include_path_dirs = ()
+            self._host_system_include_dirs = ()
         else:
             self._cpath_include_dirs = _env_path_list("CPATH")
             self._c_include_path_dirs = _env_path_list("C_INCLUDE_PATH")
+            self._host_system_include_dirs = host_system_include_dirs()
 
     def process(self, source: str, *, filename: str) -> _ProcessedText:
         self._base_filename = filename
@@ -1210,6 +1213,7 @@ class _Preprocessor:
         search_roots.extend(Path(path) for path in self._options.include_dirs)
         search_roots.extend(Path(path) for path in self._cpath_include_dirs)
         search_roots.extend(Path(path) for path in self._options.system_include_dirs)
+        search_roots.extend(Path(path) for path in self._host_system_include_dirs)
         search_roots.extend(Path(path) for path in self._c_include_path_dirs)
         search_roots.extend(Path(path) for path in self._options.after_include_dirs)
 
