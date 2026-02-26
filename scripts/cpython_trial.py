@@ -2763,6 +2763,109 @@ int level = debug ? 3 : 1;
 const char *mode = level > 2 ? "verbose" : "quiet";
 """,
         ),
+        TrialCase(
+            "flexible_array_member",
+            """
+typedef struct {
+    int length;
+    char data[];
+} Buffer;
+void init(Buffer *b) { b->length = 0; }
+""",
+        ),
+        TrialCase(
+            "function_pointer_typedef_call",
+            """
+typedef int (*comparator)(const void *, const void *);
+int cmp(const void *a, const void *b) { return *(const int *)a - *(const int *)b; }
+comparator get_cmp(void) { return cmp; }
+""",
+        ),
+        TrialCase(
+            "nested_ternary_expression",
+            """
+int classify(int x) {
+    return x > 0 ? 1 : x < 0 ? -1 : 0;
+}
+""",
+        ),
+        TrialCase(
+            "do_while_loop",
+            """
+int count_digits(int n) {
+    int count = 0;
+    do { count++; n /= 10; } while (n != 0);
+    return count;
+}
+""",
+        ),
+        TrialCase(
+            "switch_with_fallthrough",
+            """
+int categorize(int c) {
+    int result = 0;
+    switch (c) {
+        case 'a': case 'e': case 'i': case 'o': case 'u':
+            result = 1; break;
+        default:
+            result = 0; break;
+    }
+    return result;
+}
+""",
+        ),
+        TrialCase(
+            "pointer_to_pointer_parameter",
+            """
+void swap_ptrs(int **a, int **b) {
+    int *tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+""",
+        ),
+        TrialCase(
+            "const_array_parameter",
+            """
+int sum(const int arr[], int n) {
+    int s = 0;
+    for (int i = 0; i < n; i++) s += arr[i];
+    return s;
+}
+""",
+        ),
+        TrialCase(
+            "multi_declarator_statement",
+            """
+void f(void) {
+    int a = 1, b = 2, c = 3;
+    int *p = &a, **pp = &p;
+    (void)b; (void)c; (void)pp;
+}
+""",
+        ),
+        TrialCase(
+            "struct_self_referential",
+            """
+typedef struct Node {
+    int value;
+    struct Node *next;
+} Node;
+Node *prepend(Node *list, int val) {
+    (void)val;
+    return list;
+}
+""",
+        ),
+        TrialCase(
+            "macro_stringize_and_concat",
+            """
+#define STR(x) #x
+#define CONCAT(a, b) a##b
+const char *name = STR(hello);
+int CONCAT(var, 1) = 42;
+""",
+        ),
     ]
 
 
