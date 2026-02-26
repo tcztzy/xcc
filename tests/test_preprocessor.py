@@ -35,6 +35,7 @@ from xcc.preprocessor import (
     _safe_eval_int_expr,
     _strip_gnu_asm_extensions,
     _tokenize_macro_replacement,
+    _tokenize_macro_text,
     _tokenize_expr,
     _translate_expr_to_python,
     preprocess_source,
@@ -2871,6 +2872,9 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(_eval_node(ast.BoolOp(op=ast.And(), values=[ast.Constant(1), ast.Constant(2)])), 1)
         self.assertEqual(_eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(2)])), 1)
         self.assertEqual(_eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(0)])), 0)
+
+    def test_tokenize_macro_text_empty(self) -> None:
+        self.assertEqual(_tokenize_macro_text(""), [])
 
 
 if __name__ == "__main__":

@@ -4506,6 +4506,21 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int (*)(void);")))
 
+    def test_looks_like_function_returns_false_for_multi_declarator(self) -> None:
+        """A declaration like 'int f(int x), g;' is not a function definition."""
+        unit = parse(list(lex("int f(int x), g;")))
+        self.assertEqual(len(unit.functions), 0)
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_generic_default_in_array_size(self) -> None:
+        """_Generic with default fallback and qualified association in array size."""
+        # 'float' does not match int literal → default selected (covers 2294-2295).
+        # 'const float' has qualifiers → _unqualified_type_spec strips them (covers 2357).
+        unit = parse(list(lex(
+            "int main(void){ int arr[_Generic(1, const float: 2, default: 8)]; }"
+        )))
+        self.assertEqual(len(unit.functions), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
