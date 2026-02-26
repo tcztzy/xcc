@@ -89,6 +89,27 @@ This is a target list for the initial milestones. It will evolve as CPython comp
 - Run a command in glibc image: `./scripts/docker-run.sh glibc <command> [args...]`
 - Run a command in musl image: `./scripts/docker-run.sh musl <command> [args...]`
 
+## OpenClaw cron jobs
+
+### Blocker crusher (deterministic)
+
+- Runner: `uv run --group dev python scripts/xcc_blocker_crusher.py --dirty-policy fail`
+- Behavior: enforce a clean git tree (`--dirty-policy stash` is available), run `scripts/cpython_trial.py`, classify failures into stable blocker codes, pick the top-frequency blocker, apply the registered deterministic fix, run `tox -q`, and commit on success.
+- If the top blocker has no deterministic fixer yet, the run fails fast with a clear message.
+
+Local cron example (every 30 minutes):
+
+```bash
+*/30 * * * * cd /path/to/xcc && UV_CACHE_DIR=/tmp/uv-cache uv run --group dev python scripts/xcc_blocker_crusher.py --dirty-policy fail >> /tmp/xcc_blocker_crusher.log 2>&1
+```
+
+### Smoke check
+
+- Smoke runner: `./scripts/openclaw_cron_smoke.sh`
+- Behavior: if a CPython checkout with `./configure` exists (`./cpython` or `../cpython`), run `CC=xcc ./configure`; otherwise run `python -m unittest discover -v` in this repo.
+- Report: prints a concise `ok`/`fail` summary with exit code, command, and tail logs from stdout/stderr.
+- Exit codes: `0` success, `1` command failed, `2` timeout.
+
 ## Documentation
 
 Project documentation is built with MkDocs and lives in `docs/`.
