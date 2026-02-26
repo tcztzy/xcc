@@ -1,5 +1,6 @@
 import io
 import os
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -100,10 +101,13 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.c"
             path.write_text("int main(){return 0;}", encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path), "--unknown"])
-        self.assertEqual(code, 2)
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                run.return_value = subprocess.CompletedProcess((), 1)
+                code, stdout, stderr = self._run_main([str(path), "--unknown"])
+        self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
-        self.assertIn("unrecognized arguments", stderr)
+        self.assertEqual(stderr, "")
+        run.assert_called_once_with(("clang", str(path), "--unknown"), check=False)
 
     def test_main_io_error(self) -> None:
         code, stdout, stderr = self._run_main(["/definitely/not/here.c"])

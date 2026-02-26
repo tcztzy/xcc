@@ -48,10 +48,12 @@ def select_smoke_check(repo_root: Path, cpython_dir: Path | None = None) -> Smok
     for candidate in candidates:
         resolved = candidate.expanduser().resolve()
         if (resolved / "configure").is_file():
+            build_dir = (repo_root / ".openclaw" / "cpython-build").resolve()
+            build_dir.mkdir(parents=True, exist_ok=True)
             return SmokeCheck(
                 name="cpython-configure",
-                cwd=resolved,
-                command=("./configure",),
+                cwd=build_dir,
+                command=(str(resolved / "configure"),),
                 extra_env=(("CC", "xcc"),),
             )
     return SmokeCheck(

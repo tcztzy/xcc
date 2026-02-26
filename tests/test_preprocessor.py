@@ -46,6 +46,16 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source("", filename="empty.c")
         self.assertEqual(result.source, "")
 
+    def test_host_arch_predefined_macros_can_define_arm64(self) -> None:
+        with patch("xcc.preprocessor.platform.machine", return_value="arm64"):
+            result = preprocess_source(
+                "#if defined(__arm64__)\nint ok;\n#endif\n"
+                "#if defined(__x86_64__)\nint bad;\n#endif\n",
+                filename="if.c",
+            )
+        self.assertIn("int ok", result.source)
+        self.assertNotIn("int bad", result.source)
+
     def test_expand_line_without_macros_short_circuits(self) -> None:
         processor = _Preprocessor(FrontendOptions())
         processor._macros.clear()
@@ -215,6 +225,11 @@ class PreprocessorTests(unittest.TestCase):
         source = "#define ZERO 0\n#undef ZERO\nint main(void){return ZERO;}\n"
         result = preprocess_source(source, filename="main.c")
         self.assertEqual(result.source, "\n\nint main(void){return ZERO;}\n")
+
+    def test_ifdef_allows_trailing_comment(self) -> None:
+        source = "#define X 1\n#ifdef X /* comment */\nint ok;\n#endif\n"
+        result = preprocess_source(source, filename="main.c")
+        self.assertIn("int ok", result.source)
 
     def test_cli_defines_and_undefs(self) -> None:
         source = "int main(void){return ZERO;}\n"
@@ -1085,6 +1100,8 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source(
             "#if __has_builtin(__builtin_expect)\nint bad_builtin;\n#endif\n"
             "#if !__has_builtin(__builtin_expect)\nint ok_builtin;\n#endif\n"
+            "#if __has_attribute(enum_extensibility)\nint bad_attribute;\n#endif\n"
+            "#if !__has_attribute(enum_extensibility)\nint ok_attribute;\n#endif\n"
             "#if __has_feature(c_static_assert)\nint bad_feature;\n#endif\n"
             "#if !__has_feature(c_static_assert)\nint ok_feature;\n#endif\n"
             "#if __has_extension(attribute_deprecated_with_message)\nint bad_extension;\n#endif\n"
@@ -1095,6 +1112,8 @@ class PreprocessorTests(unittest.TestCase):
         )
         self.assertNotIn("bad_builtin", result.source)
         self.assertIn("ok_builtin", result.source)
+        self.assertNotIn("bad_attribute", result.source)
+        self.assertIn("ok_attribute", result.source)
         self.assertNotIn("bad_feature", result.source)
         self.assertIn("ok_feature", result.source)
         self.assertNotIn("bad_extension", result.source)
@@ -2597,6 +2616,29 @@ class PreprocessorTests(unittest.TestCase):
                 result = preprocess_source(source, filename=str(root / "main.c"))
         self.assertEqual(result.source, "int x;\n\n")
 
+    def test_multiline_if_directive_is_spliced_before_parsing(self) -> None:
+        source = "#if 1 || \\\n0\nint ok;\n#elif 1\nint bad;\n#endif\n"
+        result = preprocess_source(source, filename="main.c")
+        self.assertIn("int ok", result.source)
+        self.assertNotIn("int bad", result.source)
+
+    def test_multiline_directive_parse_failure_blanks_all_lines(self) -> None:
+        source = "#define A \\\n1\nint A;\n"
+        real_parse_directive = _parse_directive
+
+        def fake_parse_directive(text: str) -> tuple[str, str] | None:
+            if text == "#define A \\\n":
+                return ("define", " A \\")
+            if text == "#define A 1\n":
+                return None
+            return real_parse_directive(text)
+
+        with patch("xcc.preprocessor._parse_directive", side_effect=fake_parse_directive):
+            result = preprocess_source(source, filename="main.c")
+        self.assertTrue(result.source.startswith("\n\n"))
+        self.assertIn("int A", result.source)
+        self.assertNotIn("int 1", result.source)
+
     def test_if_expression_macro_error_is_preserved(self) -> None:
         source = "#define F(x) x\n#if F(\nint x;\n#endif\n"
         with self.assertRaises(PreprocessorError) as ctx:
@@ -2624,6 +2666,10 @@ class PreprocessorTests(unittest.TestCase):
             filename="main.c",
             options=FrontendOptions(std="gnu11"),
         )
+        self.assertEqual(result.source, "\nint x;\n")
+
+    def test_warning_directive_is_ignored(self) -> None:
+        result = preprocess_source("#warning hello\nint x;\n", filename="main.c")
         self.assertEqual(result.source, "\nint x;\n")
 
     def test_macro_include_cycle_reports_error(self) -> None:

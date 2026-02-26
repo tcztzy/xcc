@@ -19,9 +19,10 @@ class OpenClawCronSmokeTests(unittest.TestCase):
             cpython_dir.mkdir()
             (cpython_dir / "configure").write_text("#!/bin/sh\n", encoding="utf-8")
             check = openclaw_cron.select_smoke_check(root)
+            self.assertTrue(check.cwd.is_dir())
         self.assertEqual(check.name, "cpython-configure")
-        self.assertEqual(check.cwd, cpython_dir.resolve())
-        self.assertEqual(check.command, ("./configure",))
+        self.assertEqual(check.cwd, (root / ".openclaw" / "cpython-build").resolve())
+        self.assertEqual(check.command, (str(cpython_dir.resolve() / "configure"),))
         self.assertEqual(check.extra_env, (("CC", "xcc"),))
 
     def test_select_smoke_check_uses_explicit_cpython_dir(self) -> None:
@@ -32,7 +33,8 @@ class OpenClawCronSmokeTests(unittest.TestCase):
             (explicit / "configure").write_text("#!/bin/sh\n", encoding="utf-8")
             check = openclaw_cron.select_smoke_check(root, explicit)
         self.assertEqual(check.name, "cpython-configure")
-        self.assertEqual(check.cwd, explicit.resolve())
+        self.assertEqual(check.cwd, (root / ".openclaw" / "cpython-build").resolve())
+        self.assertEqual(check.command, (str(explicit.resolve() / "configure"),))
 
     def test_select_smoke_check_falls_back_to_unittest_suite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

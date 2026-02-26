@@ -4,6 +4,7 @@ import sys
 from collections.abc import Sequence
 from typing import TextIO, cast
 
+from xcc import cc_driver
 from xcc.frontend import FrontendError, compile_source, format_tokens, read_source
 from xcc.options import FrontendOptions
 
@@ -100,10 +101,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None) -> int:
     parser = _build_arg_parser()
+    effective_argv = list(argv) if argv is not None else sys.argv[1:]
+    if cc_driver.looks_like_cc_driver(effective_argv):
+        return cc_driver.main(effective_argv, stdin=stdin)
     try:
-        args = parser.parse_args(list(argv) if argv is not None else None)
+        args, unknown = parser.parse_known_args(effective_argv)
     except SystemExit as error:
         return cast(int, error.code)
+    if unknown:
+        return cc_driver.main(effective_argv, stdin=stdin)
     options = FrontendOptions(
         std=args.std,
         hosted=args.hosted,
