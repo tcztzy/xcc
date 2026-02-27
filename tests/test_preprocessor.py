@@ -924,6 +924,29 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source("#if 1 /* keep */\nint x;\n#endif\n", filename="if.c")
         self.assertIn("int x;", result.source)
 
+    def test_multiline_block_comment_does_not_get_corrupted_by_macro_expansion(self) -> None:
+        result = preprocess_source(
+            "#define A 1\n/*\n * A\n */\nint main(void){return A;}\n",
+            filename="comment.c",
+        )
+        self.assertIn("*/\n", result.source)
+        self.assertNotIn("* /", result.source)
+        self.assertIn(" * A\n", result.source)
+
+    def test_block_comment_sigil_inside_string_does_not_disable_directives(self) -> None:
+        result = preprocess_source(
+            'const char *s="\\\"/*";\n#define A 2\nint x=A;\n',
+            filename="string.c",
+        )
+        self.assertIn("int x = 2 ;", result.source)
+
+    def test_slash_slash_comment_does_not_start_block_comment(self) -> None:
+        result = preprocess_source(
+            "// /*\n#define A 3\nint x=A;\n",
+            filename="linecomment.c",
+        )
+        self.assertIn("int x = 3 ;", result.source)
+
     def test_if_expression_accepts_character_literals(self) -> None:
         result = preprocess_source("#if 'A' == 65\nint x;\n#endif\n", filename="if.c")
         self.assertIn("int x;", result.source)

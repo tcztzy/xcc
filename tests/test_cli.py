@@ -23,7 +23,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.c"
             path.write_text("int main(){return 0;}", encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path)])
+            code, stdout, stderr = self._run_main(["--frontend", str(path)])
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
@@ -109,8 +109,28 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         run.assert_called_once_with(("clang", str(path), "--unknown"), check=False)
 
+    def test_main_unknown_option_without_c_input_delegates_to_driver(self) -> None:
+        with patch("xcc.cc_driver.subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess((), 1)
+            code, stdout, stderr = self._run_main(["-", "--unknown"])
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        run.assert_called_once_with(("clang", "-", "--unknown"), check=False)
+
+    def test_main_frontend_unknown_option_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.c"
+            path.write_text("int main(){return 0;}", encoding="utf-8")
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(["--frontend", str(path), "--unknown"])
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn("frontend mode error: unknown options", stderr)
+        run.assert_not_called()
+
     def test_main_io_error(self) -> None:
-        code, stdout, stderr = self._run_main(["/definitely/not/here.c"])
+        code, stdout, stderr = self._run_main(["--frontend", "/definitely/not/here.c"])
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
         self.assertIn("I/O error", stderr)
@@ -119,7 +139,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "bad.c"
             path.write_text("int main(){return;}", encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path)])
+            code, stdout, stderr = self._run_main(["--frontend", str(path)])
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
         self.assertIn("sema: Non-void function must return a value", stderr)
@@ -138,7 +158,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.c"
             path.write_text("int main(void){return ZERO;}", encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path), "-D", "ZERO=0"])
+            code, stdout, stderr = self._run_main(["--frontend", str(path), "-D", "ZERO=0"])
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
@@ -151,7 +171,7 @@ class CliTests(unittest.TestCase):
             (quote_dir / "inc.h").write_text("#define VALUE 7\n", encoding="utf-8")
             path = root / "ok.c"
             path.write_text('#include "inc.h"\nint main(void){return VALUE;}\n', encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path), "-iquote", str(quote_dir)])
+            code, stdout, stderr = self._run_main(["--frontend", str(path), "-iquote", str(quote_dir)])
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
@@ -165,7 +185,7 @@ class CliTests(unittest.TestCase):
             path = root / "ok.c"
             path.write_text('#include <inc.h>\nint main(void){return VALUE;}\n', encoding="utf-8")
             with patch.dict("os.environ", {"CPATH": str(cpath_dir)}, clear=False):
-                code, stdout, stderr = self._run_main([str(path)])
+                code, stdout, stderr = self._run_main(["--frontend", str(path)])
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
@@ -180,7 +200,7 @@ class CliTests(unittest.TestCase):
             try:
                 os.chdir(root)
                 with patch.dict("os.environ", {"CPATH": f"{os.pathsep}"}, clear=False):
-                    code, stdout, stderr = self._run_main([str(path)])
+                    code, stdout, stderr = self._run_main(["--frontend", str(path)])
             finally:
                 os.chdir(previous_cwd)
         self.assertEqual(code, 0)
@@ -195,7 +215,7 @@ class CliTests(unittest.TestCase):
             (after_dir / "inc.h").write_text("#define VALUE 9\n", encoding="utf-8")
             path = root / "ok.c"
             path.write_text('#include <inc.h>\nint main(void){return VALUE;}\n', encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path), "-idirafter", str(after_dir)])
+            code, stdout, stderr = self._run_main(["--frontend", str(path), "-idirafter", str(after_dir)])
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
@@ -209,7 +229,7 @@ class CliTests(unittest.TestCase):
             path = root / "ok.c"
             path.write_text('#include <inc.h>\nint main(void){return VALUE;}\n', encoding="utf-8")
             with patch.dict("os.environ", {"CPATH": str(cpath_dir)}, clear=False):
-                code, stdout, stderr = self._run_main([str(path), "-nostdinc"])
+                code, stdout, stderr = self._run_main(["--frontend", str(path), "-nostdinc"])
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
         self.assertIn("Include not found", stderr)
@@ -222,7 +242,9 @@ class CliTests(unittest.TestCase):
             (include_dir / "forced.h").write_text("#define VALUE 13\n", encoding="utf-8")
             path = root / "ok.c"
             path.write_text("int main(void){return VALUE;}\n", encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path), "-I", str(include_dir), "-include", "forced.h"])
+            code, stdout, stderr = self._run_main(
+                ["--frontend", str(path), "-I", str(include_dir), "-include", "forced.h"]
+            )
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
@@ -235,7 +257,9 @@ class CliTests(unittest.TestCase):
             (include_dir / "defs.h").write_text("#define VALUE 17\n", encoding="utf-8")
             path = root / "ok.c"
             path.write_text("int main(void){return VALUE;}\n", encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path), "-I", str(include_dir), "-imacros", "defs.h"])
+            code, stdout, stderr = self._run_main(
+                ["--frontend", str(path), "-I", str(include_dir), "-imacros", "defs.h"]
+            )
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
@@ -244,7 +268,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.c"
             path.write_text("#if __STDC_HOSTED__ != 0\n#error hosted\n#endif\nint main(void){return 0;}\n", encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path), "-ffreestanding"])
+            code, stdout, stderr = self._run_main(["--frontend", str(path), "-ffreestanding"])
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(stdout, f"xcc: ok: {path}\n")
@@ -253,7 +277,7 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "bad.c"
             path.write_text("int main(void){return ZERO;}", encoding="utf-8")
-            code, stdout, stderr = self._run_main([str(path), "-D", "ZERO=0", "-U", "ZERO"])
+            code, stdout, stderr = self._run_main(["--frontend", str(path), "-D", "ZERO=0", "-U", "ZERO"])
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
         self.assertIn("Undeclared identifier: ZERO", stderr)

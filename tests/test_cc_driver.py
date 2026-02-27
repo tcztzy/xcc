@@ -1,13 +1,16 @@
 import io
+import os
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 from xcc import main
+from xcc.cc_driver import looks_like_cc_driver
 
 
 class CcDriverTests(unittest.TestCase):
@@ -18,6 +21,28 @@ class CcDriverTests(unittest.TestCase):
             code = main(argv, stdin=io.StringIO(stdin_text))
         return code, stdout.getvalue(), stderr.getvalue()
 
+    def test_cc_driver_one_positional_defaults_to_driver(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "ok.c"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+
+            def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                self.assertEqual(cmd, ("clang", str(source)))
+                self.assertEqual(kwargs, {"check": False})
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+                code, stdout, stderr = self._run_main([str(source)])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        run.assert_called_once()
+
+    def test_cc_driver_mode_detection_skips_option_values(self) -> None:
+        self.assertTrue(looks_like_cc_driver(["-I", "inc", "ok.c"]))
+
     def test_cc_driver_delegates_to_clang_on_frontend_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -25,13 +50,14 @@ class CcDriverTests(unittest.TestCase):
             source.write_text("int main(void){return 0;}\n", encoding="utf-8")
             obj = root / "ok.o"
 
-            def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
-                self.assertEqual(cmd, ("clang", "-c", str(source), "-o", str(obj)))
-                self.assertEqual(kwargs, {"check": False})
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            def fake_run(argv: Sequence[str]) -> int:
+                self.assertEqual(tuple(argv), ("-c", str(source), "-o", str(obj)))
+                return 0
 
-            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
-                code, stdout, stderr = self._run_main(["-c", str(source), "-o", str(obj)])
+            with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+                with patch("xcc.preprocessor.host_system_include_dirs", return_value=()):
+                    with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                        code, stdout, stderr = self._run_main(["-c", str(source), "-o", str(obj)])
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
@@ -44,8 +70,10 @@ class CcDriverTests(unittest.TestCase):
             source = root / "bad.c"
             source.write_text("int main(void){return;}\n", encoding="utf-8")
             obj = root / "bad.o"
-            with patch("xcc.cc_driver.subprocess.run") as run:
-                code, stdout, stderr = self._run_main(["-c", str(source), "-o", str(obj)])
+            with patch("xcc.cc_driver._run_clang") as run:
+                with patch("xcc.preprocessor.host_system_include_dirs", return_value=()):
+                    with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                        code, stdout, stderr = self._run_main(["-c", str(source), "-o", str(obj)])
 
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
@@ -53,16 +81,35 @@ class CcDriverTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_cc_driver_supports_stdin_with_x_c_dash(self) -> None:
-        def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
-            self.assertEqual(cmd, ("clang", "-E", "-xc", "-", "-o", "out.i"))
-            self.assertEqual(kwargs, {"check": False})
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        def fake_run(argv: Sequence[str]) -> int:
+            self.assertEqual(tuple(argv), ("-E", "-xc", "-", "-o", "out.i"))
+            return 0
 
-        with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
-            code, stdout, stderr = self._run_main(
-                ["-E", "-xc", "-", "-o", "out.i"],
-                stdin_text="int x;\n",
-            )
+        with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+            with patch("xcc.preprocessor.host_system_include_dirs", return_value=()):
+                with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                    code, stdout, stderr = self._run_main(
+                        ["-E", "-xc", "-", "-o", "out.i"],
+                        stdin_text="int x;\n",
+                    )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        run.assert_called_once()
+
+    def test_cc_driver_validation_mode_supports_dash_x_c_separate(self) -> None:
+        def fake_run(argv: Sequence[str]) -> int:
+            self.assertEqual(tuple(argv), ("-E", "-x", "c", "-", "-o", "out.i"))
+            return 0
+
+        with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+            with patch("xcc.preprocessor.host_system_include_dirs", return_value=()):
+                with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                    code, stdout, stderr = self._run_main(
+                        ["-E", "-x", "c", "-", "-o", "out.i"],
+                        stdin_text="int x;\n",
+                    )
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
@@ -76,18 +123,19 @@ class CcDriverTests(unittest.TestCase):
             source.write_text("int main(void){return VALUE;}\n", encoding="utf-8")
             obj = root / "ok.o"
 
-            def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            def fake_run(argv: Sequence[str]) -> int:
                 self.assertEqual(
-                    cmd,
-                    ("clang", "-c", str(source), "-o", str(obj), "-Iinc", "-DVALUE=0", "-std=gnu11"),
+                    tuple(argv),
+                    ("-c", str(source), "-o", str(obj), "-Iinc", "-DVALUE=0", "-std=gnu11"),
                 )
-                self.assertEqual(kwargs, {"check": False})
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+                return 0
 
-            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
-                code, stdout, stderr = self._run_main(
-                    ["-c", str(source), "-o", str(obj), "-Iinc", "-DVALUE=0", "-std=gnu11"]
-                )
+            with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+                with patch("xcc.preprocessor.host_system_include_dirs", return_value=()):
+                    with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                        code, stdout, stderr = self._run_main(
+                            ["-c", str(source), "-o", str(obj), "-Iinc", "-DVALUE=0", "-std=gnu11"]
+                        )
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
@@ -95,16 +143,17 @@ class CcDriverTests(unittest.TestCase):
         run.assert_called_once()
 
     def test_cc_driver_x_none_does_not_validate_stdin(self) -> None:
-        def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
-            self.assertEqual(cmd, ("clang", "-E", "-x", "none", "-"))
-            self.assertEqual(kwargs, {"check": False})
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        def fake_run(argv: Sequence[str]) -> int:
+            self.assertEqual(tuple(argv), ("-E", "-x", "none", "-"))
+            return 0
 
-        with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
-            code, stdout, stderr = self._run_main(
-                ["-E", "-x", "none", "-"],
-                stdin_text="int main(void){return;}\n",
-            )
+        with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+            with patch("xcc.preprocessor.host_system_include_dirs", return_value=()):
+                with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                    code, stdout, stderr = self._run_main(
+                        ["-E", "-x", "none", "-"],
+                        stdin_text="int main(void){return;}\n",
+                    )
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
@@ -121,11 +170,10 @@ class CcDriverTests(unittest.TestCase):
             )
             obj = root / "ok.o"
 
-            def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            def fake_run(argv: Sequence[str]) -> int:
                 self.assertEqual(
-                    cmd,
+                    tuple(argv),
                     (
-                        "clang",
                         "-c",
                         str(source),
                         f"-o{obj}",
@@ -136,22 +184,23 @@ class CcDriverTests(unittest.TestCase):
                         "-nostdinc",
                     ),
                 )
-                self.assertEqual(kwargs, {"check": False})
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+                return 0
 
-            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
-                code, stdout, stderr = self._run_main(
-                    [
-                        "-c",
-                        str(source),
-                        f"-o{obj}",
-                        "-std",
-                        "c11",
-                        "-ffreestanding",
-                        "-fhosted",
-                        "-nostdinc",
-                    ]
-                )
+            with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+                with patch("xcc.preprocessor.host_system_include_dirs", return_value=()):
+                    with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                        code, stdout, stderr = self._run_main(
+                            [
+                                "-c",
+                                str(source),
+                                f"-o{obj}",
+                                "-std",
+                                "c11",
+                                "-ffreestanding",
+                                "-fhosted",
+                                "-nostdinc",
+                            ]
+                        )
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
@@ -164,13 +213,14 @@ class CcDriverTests(unittest.TestCase):
             source = root / "ok.c"
             source.write_text("int main(void){return 0;}\n", encoding="utf-8")
 
-            def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
-                self.assertEqual(cmd, ("clang", "-c", "--", "note", str(source)))
-                self.assertEqual(kwargs, {"check": False})
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            def fake_run(argv: Sequence[str]) -> int:
+                self.assertEqual(tuple(argv), ("-c", "--", "note", str(source)))
+                return 0
 
-            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
-                code, stdout, stderr = self._run_main(["-c", "--", "note", str(source)])
+            with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+                with patch("xcc.preprocessor.host_system_include_dirs", return_value=()):
+                    with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                        code, stdout, stderr = self._run_main(["-c", "--", "note", str(source)])
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
@@ -182,8 +232,9 @@ class CcDriverTests(unittest.TestCase):
             root = Path(tmp)
             source = root / "ok.c"
             source.write_text("int main(void){return 0;}\n", encoding="utf-8")
-            with patch("xcc.cc_driver.subprocess.run") as run:
-                code, stdout, stderr = self._run_main(["-c", str(source), "-std=c99"])
+            with patch("xcc.cc_driver._run_clang") as run:
+                with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                    code, stdout, stderr = self._run_main(["-c", str(source), "-std=c99"])
 
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
@@ -195,8 +246,9 @@ class CcDriverTests(unittest.TestCase):
             root = Path(tmp)
             source = root / "ok.c"
             source.write_text("int main(void){return 0;}\n", encoding="utf-8")
-            with patch("xcc.cc_driver.subprocess.run") as run:
-                code, stdout, stderr = self._run_main(["-c", str(source), "-std"])
+            with patch("xcc.cc_driver._run_clang") as run:
+                with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                    code, stdout, stderr = self._run_main(["-c", str(source), "-std"])
 
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
@@ -204,13 +256,28 @@ class CcDriverTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_cc_driver_missing_input_reports_io_error(self) -> None:
-        with patch("xcc.cc_driver.subprocess.run") as run:
-            code, stdout, stderr = self._run_main(["-c", "missing.c"])
+        with patch("xcc.cc_driver._run_clang") as run:
+            with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                code, stdout, stderr = self._run_main(["-c", "missing.c"])
 
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
         self.assertIn("I/O error", stderr)
         run.assert_not_called()
+
+    def test_cc_driver_default_mode_passthrough_calls_clang_on_missing_input(self) -> None:
+        def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            self.assertEqual(cmd, ("clang", "-c", "missing.c"))
+            self.assertEqual(kwargs, {"check": False})
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+        with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+            code, stdout, stderr = self._run_main(["-c", "missing.c"])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        run.assert_called_once()
 
     def test_cc_driver_two_positionals_uses_driver(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -220,13 +287,14 @@ class CcDriverTests(unittest.TestCase):
             src1.write_text("int a(void){return 0;}\n", encoding="utf-8")
             src2.write_text("int b(void){return 0;}\n", encoding="utf-8")
 
-            def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
-                self.assertEqual(cmd, ("clang", str(src1), str(src2)))
-                self.assertEqual(kwargs, {"check": False})
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            def fake_run(argv: Sequence[str]) -> int:
+                self.assertEqual(tuple(argv), (str(src1), str(src2)))
+                return 0
 
-            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
-                code, stdout, stderr = self._run_main([str(src1), str(src2)])
+            with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+                with patch("xcc.preprocessor.host_system_include_dirs", return_value=()):
+                    with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                        code, stdout, stderr = self._run_main([str(src1), str(src2)])
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
@@ -298,6 +366,23 @@ class CcDriverTests(unittest.TestCase):
                 ["-xnone", "-", "-oout.i"],
                 stdin_text="int main(void){return;}\n",
             )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        run.assert_called_once()
+
+    def test_cc_driver_validation_mode_handles_joined_xnone(self) -> None:
+        def fake_run(argv: Sequence[str]) -> int:
+            self.assertEqual(tuple(argv), ("-xnone", "-", "-oout.i"))
+            return 0
+
+        with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+            with patch.dict(os.environ, {"XCC_VALIDATE_FRONTEND": "1"}, clear=False):
+                code, stdout, stderr = self._run_main(
+                    ["-xnone", "-", "-oout.i"],
+                    stdin_text="int main(void){return;}\n",
+                )
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")

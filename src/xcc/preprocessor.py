@@ -637,17 +637,22 @@ class _Preprocessor:
         out = _OutputBuilder()
         logical_cursor = _LogicalCursor(filename, include_level=max(len(include_stack) - 1, 0))
         stack: list[_ConditionalFrame] = []
+        in_block_comment = False
         line_index = 0
         while line_index < len(lines):
             line = lines[line_index]
-            parsed = _parse_directive(line)
+            parsed = None if in_block_comment else _parse_directive(line)
             if parsed is None:
                 location = logical_cursor.current()
                 if _is_active(stack):
-                    out.append(self._expand_line(line, location), location)
+                    if in_block_comment:
+                        out.append(line, location)
+                    else:
+                        out.append(self._expand_line(line, location), location)
                 else:
                     out.append(_blank_line(line), location)
                 logical_cursor.advance()
+                in_block_comment = _scan_block_comment_state(line, in_block_comment)
                 line_index += 1
                 continue
             directive_lines = [line]
@@ -675,12 +680,16 @@ class _Preprocessor:
                 for directive_index, chunk in enumerate(directive_lines):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.advance(len(directive_lines))
+                for chunk in directive_lines:
+                    in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
                 line_index += 1
                 continue
             if not _is_active(stack):
                 for directive_index, chunk in enumerate(directive_lines):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.advance(len(directive_lines))
+                for chunk in directive_lines:
+                    in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
                 line_index += 1
                 continue
             if name == "define":
@@ -688,6 +697,8 @@ class _Preprocessor:
                 for directive_index, chunk in enumerate(directive_lines):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.advance(len(directive_lines))
+                for chunk in directive_lines:
+                    in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
                 line_index += 1
                 continue
             if name == "undef":
@@ -695,6 +706,8 @@ class _Preprocessor:
                 for directive_index, chunk in enumerate(directive_lines):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.advance(len(directive_lines))
+                for chunk in directive_lines:
+                    in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
                 line_index += 1
                 continue
             if name in {"include", "include_next"}:
@@ -717,6 +730,8 @@ class _Preprocessor:
                 for directive_index, chunk in enumerate(directive_lines[1:], start=1):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.advance(len(directive_lines))
+                for chunk in directive_lines:
+                    in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
                 line_index += 1
                 continue
             if name == "error":
@@ -732,6 +747,8 @@ class _Preprocessor:
                 for directive_index, chunk in enumerate(directive_lines):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.advance(len(directive_lines))
+                for chunk in directive_lines:
+                    in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
                 line_index += 1
                 continue
             if name == "line":
@@ -741,6 +758,8 @@ class _Preprocessor:
                 for directive_index, chunk in enumerate(directive_lines):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.rebase(line_value, filename_value)
+                for chunk in directive_lines:
+                    in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
                 line_index += 1
                 continue
             if name == "pragma":
@@ -749,6 +768,8 @@ class _Preprocessor:
                 for directive_index, chunk in enumerate(directive_lines):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.advance(len(directive_lines))
+                for chunk in directive_lines:
+                    in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
                 line_index += 1
                 continue
             if self._options.std == "c11":
@@ -2517,6 +2538,42 @@ def _parse_directive(line: str) -> tuple[str, str] | None:
 
 def _blank_line(line: str) -> str:
     return "\n" if line.endswith("\n") else ""
+
+
+def _scan_block_comment_state(line: str, in_block_comment: bool) -> bool:
+    in_string: str | None = None
+    index = 0
+    while index < len(line):
+        ch = line[index]
+        if in_string is not None:
+            if ch == "\\" and index + 1 < len(line):
+                index += 2
+                continue
+            if ch == in_string:
+                in_string = None
+            index += 1
+            continue
+        if in_block_comment:
+            if ch == "*" and index + 1 < len(line) and line[index + 1] == "/":
+                in_block_comment = False
+                index += 2
+                continue
+            index += 1
+            continue
+        if ch in {'"', "'"}:
+            in_string = ch
+            index += 1
+            continue
+        if ch == "/" and index + 1 < len(line):
+            nxt = line[index + 1]
+            if nxt == "/":
+                return in_block_comment
+            if nxt == "*":
+                in_block_comment = True
+                index += 2
+                continue
+        index += 1
+    return in_block_comment
 
 
 def _is_active(stack: list[_ConditionalFrame]) -> bool:

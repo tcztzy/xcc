@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -10,6 +11,13 @@ from xcc.options import FrontendOptions, StdMode
 def looks_like_cc_driver(argv: Sequence[str]) -> bool:
     if not argv:
         return False
+    for arg in argv:
+        if arg == "--frontend":
+            return False
+        if arg.startswith("--dump-"):
+            return False
+        if arg == "--diag-format" or arg.startswith("--diag-format="):
+            return False
     index = 0
     c_inputs = 0
     while index < len(argv):
@@ -40,7 +48,7 @@ def looks_like_cc_driver(argv: Sequence[str]) -> bool:
             continue
         if arg.endswith(".c") and not arg.startswith("-"):
             c_inputs += 1
-    return c_inputs > 1
+    return c_inputs > 0
 
 
 def _take_value(argv: Sequence[str], index: int, opt: str) -> tuple[str, int]:
@@ -172,7 +180,14 @@ def _run_clang(argv: Sequence[str]) -> int:
     return completed.returncode
 
 
+def _frontend_validation_enabled() -> bool:
+    raw = os.environ.get("XCC_VALIDATE_FRONTEND", "").strip().lower()
+    return raw not in {"", "0", "false", "no", "off"}
+
+
 def main(argv: Sequence[str], *, stdin: TextIO | None = None) -> int:
+    if not _frontend_validation_enabled():
+        return _run_clang(argv)
     try:
         options, c_inputs, needs_stdin = _frontend_options_from_cc_argv(argv)
     except ValueError as error:

@@ -11,6 +11,11 @@ from xcc.options import FrontendOptions
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the XCC frontend pipeline on C source input.")
+    parser.add_argument(
+        "--frontend",
+        action="store_true",
+        help="run the frontend pipeline without invoking the system toolchain",
+    )
     parser.add_argument("input", help="path to a C source file, or - to read from stdin")
     parser.add_argument("-std", choices=("c11", "gnu11"), default="c11", help="language mode")
     parser.add_argument(
@@ -108,6 +113,12 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None) -> i
         args, unknown = parser.parse_known_args(effective_argv)
     except SystemExit as error:
         return cast(int, error.code)
+    if args.frontend and unknown:
+        print(
+            f"xcc: frontend mode error: unknown options: {' '.join(unknown)}",
+            file=sys.stderr,
+        )
+        return 2
     if unknown:
         return cc_driver.main(effective_argv, stdin=stdin)
     options = FrontendOptions(
