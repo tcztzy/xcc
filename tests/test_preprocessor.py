@@ -1111,13 +1111,43 @@ class PreprocessorTests(unittest.TestCase):
             )
         self.assertNotIn("int bad;", result.source)
 
-    def test_if_expression_with_has_include_next_errors_in_c11(self) -> None:
-        with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source(
-                '#if __has_include_next("missing.h")\nint x;\n#endif\n',
-                filename="if.c",
+    def test_if_expression_with_has_include_next_skips_current_directory_in_c11(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            source_dir.mkdir()
+            (source_dir / "next.h").write_text("\n", encoding="utf-8")
+            source = '#if __has_include_next("next.h")\nint bad;\n#endif\n'
+            result = preprocess_source(
+                source,
+                filename=str(source_dir / "main.c"),
+                options=FrontendOptions(std="c11"),
             )
-        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertNotIn("int bad;", result.source)
+
+    def test_if_expression_with_has_include_next_missing_header_is_zero_in_c11(self) -> None:
+        result = preprocess_source(
+            '#if __has_include_next("missing.h")\nint x;\n#endif\n',
+            filename="if.c",
+            options=FrontendOptions(std="c11"),
+        )
+        self.assertNotIn("int x;", result.source)
+
+    def test_if_expression_with_has_include_next_in_c11(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_dir = root / "src"
+            include_dir = root / "include"
+            source_dir.mkdir()
+            include_dir.mkdir()
+            (include_dir / "next.h").write_text("\n", encoding="utf-8")
+            source = '#if __has_include_next("next.h")\nint ok;\n#endif\n'
+            result = preprocess_source(
+                source,
+                filename=str(source_dir / "main.c"),
+                options=FrontendOptions(std="c11", include_dirs=(str(include_dir),)),
+            )
+        self.assertIn("int ok;", result.source)
 
     def test_if_expression_with_has_builtin_feature_extension_and_warning_operators(self) -> None:
         result = preprocess_source(
@@ -1636,11 +1666,22 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("main.c:1: #include <inc.h>", result.include_trace[0])
         self.assertIn(f'{(first_dir / "inc.h").resolve()}:1: #include_next <inc.h>', result.include_trace[1])
 
-    def test_include_next_is_rejected_in_c11_mode(self) -> None:
-        with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source("#include_next <inc.h>\n", filename="main.c")
-        self.assertEqual(ctx.exception.code, "XCC-PP-0101")
-        self.assertEqual(ctx.exception.args[0], "Unknown preprocessor directive: #include_next at main.c:1:1")
+    def test_include_next_is_allowed_in_c11_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first_dir = root / "first"
+            second_dir = root / "second"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            (first_dir / "inc.h").write_text("#include_next <inc.h>\nint from_first;\n", encoding="utf-8")
+            (second_dir / "inc.h").write_text("int from_second;\n", encoding="utf-8")
+            options = FrontendOptions(
+                std="c11",
+                include_dirs=(str(first_dir), str(second_dir)),
+                no_standard_includes=True,
+            )
+            result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "int from_second;\nint from_first;\n")
 
     def test_include_expansion_preserves_line_map_for_header_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

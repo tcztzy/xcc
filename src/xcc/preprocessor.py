@@ -711,14 +711,8 @@ class _Preprocessor:
                 line_index += 1
                 continue
             if name in {"include", "include_next"}:
-                if name == "include_next" and self._options.std == "c11":
-                    raise PreprocessorError(
-                        "Unknown preprocessor directive: #include_next",
-                        directive_cursor.first_location().line,
-                        1,
-                        filename=directive_cursor.first_location().filename,
-                        code=_PP_UNKNOWN_DIRECTIVE,
-                    )
+                # `#include_next` is a common extension used by real-world headers.
+                # We support it in both c11 and gnu11 modes for compatibility.
                 include_processed = self._handle_include(
                     body,
                     directive_cursor.first_location(),
@@ -1656,15 +1650,6 @@ class _Preprocessor:
         base_dir: Path | None,
         include_next: bool,
     ) -> str:
-        if include_next and self._options.std == "c11" and marker in expr:
-            raise PreprocessorError(
-                "Invalid #if expression",
-                location.line,
-                1,
-                filename=location.filename,
-                code=_PP_INVALID_IF_EXPR,
-            )
-
         chunks: list[str] = []
         index = 0
         while True:
