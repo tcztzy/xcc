@@ -15,6 +15,9 @@ wheels/
 .uv-cache/
 .coverage
 
+# OpenClaw cron/workspace artifacts
+.openclaw/
+
 # MkDocs build output
 site/
 
