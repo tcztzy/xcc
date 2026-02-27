@@ -17,6 +17,7 @@ wheels/
 
 # OpenClaw cron/workspace artifacts
 .openclaw/
+.worktrees/
 
 # MkDocs build output
 site/
