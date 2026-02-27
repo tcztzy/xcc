@@ -2,6 +2,12 @@
 
 This file records implementation progress and validation history.
 
+## 2026-02-27
+
+- Hardened repo hygiene by ignoring local agent/worktree artifacts (`.claude/`) and local planning drafts (`docs/plans/`) in `.gitignore`, preventing accidental commits of machine-local files.
+- Synced `TODO.md` with the current verified baseline: quality-gate and coverage M0 checklist items are now marked done, and current blocker status now reflects the latest CPython snippet trial snapshot (`288 / 288` pass, no open buckets).
+- Checks: `UV_CACHE_DIR=/tmp/uv-cache uv run tox -e py311,lint,type`, `UV_CACHE_DIR=/tmp/uv-cache uv run tox -e clang_suite`, and `UV_CACHE_DIR=/tmp/uv-cache uv run python scripts/cpython_trial.py` (pass).
+
 ## 2026-02-26
 
 - Added OpenClaw cron smoke runner plumbing: `scripts/openclaw_cron_smoke.sh` now launches `xcc.openclaw_cron` with `set -euo pipefail`; the smoke logic auto-selects milestone checks (`CC=xcc ./configure` when CPython checkout is present, otherwise `python -m unittest discover -v`) with timeout handling, concise status reporting, and explicit exit codes (`0`/`1`/`2`).

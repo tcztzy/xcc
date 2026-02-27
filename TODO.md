@@ -4,31 +4,17 @@ This file tracks failure-driven work toward the M0 frontend baseline.
 
 ## M0 Definition of Done
 
-- [ ] `tox -e py311,lint,type` is green with 0 failures.
-- [ ] Coverage is 100% line + branch (`fail-under=100`).
+- [x] `tox -e py311,lint,type` is green with 0 failures.
+- [x] Coverage is 100% line + branch (`fail-under=100`).
 - [ ] Frontend (`preprocess + lex + parse + sema`) succeeds on 10 selected CPython `.c` files without errors.
 
 ## Current Blockers
 
-| ID | Category (pp/lex/parse/sema) | Description | Frequency | Status |
-| --- | --- | --- | --- | --- |
-| B001 | parse | Expected `;` (examples: `typeof_expression`, `double_underscore_typeof_expression`, `nested_function_pointer_declarator`) | 4 / 108 | [ ] |
-| B002 | parse | Expected identifier before `;` (examples: `anonymous_struct_union`, `anonymous_struct_in_union`) | 3 / 108 | [ ] |
-| B003 | parse | Unknown declaration type name: `__attribute__` (examples: `attribute_visibility_variable`, `attribute_cold_hot`) | 3 / 108 | [ ] |
-| B004 | parse | Array size is required in this context (examples: `flexible_array_member`, `flexible_array_embedded`) | 2 / 108 | [ ] |
-| B005 | parse | Expected `]` (examples: `array_designator_range_gnu`, `designator_range_with_trailing_comma`) | 2 / 108 | [ ] |
-| B006 | parse | Expression cannot start with keyword `struct`: expected an operand (examples: `builtin_offsetof_pattern`, `builtin_offsetof_nested_member`) | 2 / 108 | [ ] |
-| B007 | parse | Unknown declaration type name: `a` (examples: `knr_style_function_definition`, `old_style_declaration_plus_definition`) | 2 / 108 | [ ] |
-| B008 | parse | Array size must be positive (examples: `zero_length_array_gnu`) | 1 / 108 | [ ] |
-| B009 | parse | Expected member declaration (examples: `empty_struct_gnu`) | 1 / 108 | [ ] |
-| B010 | sema | Initializer index out of range (examples: `labels_as_values_array`, `computed_goto_loop`) | 2 / 108 | [ ] |
-| B011 | sema | Duplicate declaration: `py_counter` (examples: `extern_declaration_then_definition`) | 1 / 108 | [ ] |
-| B012 | sema | Duplicate declaration: `tls_counter` (examples: `thread_local_extern_pattern`) | 1 / 108 | [ ] |
-| B013 | sema | Duplicate definition: `struct _object` (examples: `typedef_pyobject`) | 1 / 108 | [ ] |
-| B014 | sema | Undeclared function: `WRAP` (examples: `complex_macro_multiline_nested`) | 1 / 108 | [ ] |
-| B015 | sema | Undeclared function: `__builtin_expect` (examples: `builtin_expect_pattern`) | 1 / 108 | [ ] |
-| B016 | sema | Undeclared function: `__builtin_unreachable` (examples: `builtin_unreachable_pattern`) | 1 / 108 | [ ] |
-| B017 | sema | Variable length array not allowed at file scope (examples: `initializer_trailing_commas`) | 1 / 108 | [ ] |
+Latest CPython snippet trial (`scripts/cpython_trial.py`) status:
+
+- Date: 2026-02-27
+- Result: 288 / 288 passed
+- Open blocker buckets: none
 
 ## Backlog (reference)
 
