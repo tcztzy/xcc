@@ -1,11 +1,14 @@
 # Curated LLVM/Clang Test Fixtures
 
-This directory vendors a small, pinned subset of upstream LLVM/Clang tests for `xcc` regression checks.
+This directory keeps a manifest-driven subset of LLVM/Clang tests for `xcc` regression checks.
+Upstream fixtures are fetched from a pinned LLVM release tarball and are not committed to Git.
 
 ## Provenance
 
 - Upstream repository: `https://github.com/llvm/llvm-project`
-- Upstream snapshot commit: `9898082bd358e1706f7703291bdec6caae12993a`
+- Upstream release tag: `llvmorg-22.1.0`
+- Upstream archive URL: `https://api.github.com/repos/llvm/llvm-project/tarball/llvmorg-22.1.0`
+- Upstream archive SHA-256: recorded in `tests/external/clang/manifest.json`
 - Upstream license: Apache-2.0 WITH LLVM-exception
 - Fixture inventory and checksums: `tests/external/clang/manifest.json`
 
@@ -19,19 +22,24 @@ The curated subset is intentionally small and currently checks only whether `xcc
 
 The harness does not run Clang `lit`/`FileCheck` directives yet.
 
+Fixture classes:
+
+- **External fixtures**: upstream `clang/test/...` files materialized under `tests/external/clang/generated/`.
+- **Local fixtures**: `xcc/local/...` regression files tracked under `tests/external/clang/fixtures/`.
+
 ## Update Rule
 
 When adding or replacing fixtures:
 
-1. Keep files byte-identical to upstream.
+1. Keep external files byte-identical to upstream release archives.
 2. Update `manifest.json` with upstream path, expected stage, and SHA-256 checksum.
 3. Prefer manifest-driven assertions (`message_contains`, `line`, `column`) over test-code special cases.
 
 ## Syncing fixtures
 
-- Refresh fixtures and checksums from the pinned commit:
+- Materialize external fixtures from the pinned release archive:
   - `python scripts/sync_clang_fixtures.py`
-- Verify local fixtures against upstream without writing:
+- Verify local fixtures and checksums against the pinned archive:
   - `python scripts/sync_clang_fixtures.py --check`
-- Sync from a different commit:
-  - `python scripts/sync_clang_fixtures.py --commit <llvm-commit>`
+- Recompute external-case checksums in the manifest (only for intentional upstream upgrades):
+  - `python scripts/sync_clang_fixtures.py --update-sha`
