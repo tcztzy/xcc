@@ -76,10 +76,10 @@ External specs (PDF/TXT/HTML) are cached under `docs/_sources/` for convenience,
 
 ## LLVM/Clang Fixture Tests
 
-- Curated upstream fixtures live under `tests/external/clang/fixtures/`.
-- Keep fixture metadata and checksums in `tests/external/clang/manifest.json`.
-- Keep vendored fixture files byte-identical to upstream and pinned to a commit.
-- Use `python scripts/sync_clang_fixtures.py` to sync fixture bytes and checksums.
+- Keep fixture metadata, pinned upstream archive metadata, and checksums in `tests/external/clang/manifest.json`.
+- External upstream fixtures are generated under `tests/external/clang/generated/` and must not be committed.
+- Local `xcc` regression fixtures live under `tests/external/clang/fixtures/`.
+- Use `python scripts/sync_clang_fixtures.py` to materialize external fixtures from the pinned release tarball.
 
 ## Code Hygiene Checklist (before submitting changes)
 

@@ -1,77 +1,81 @@
 {
   "upstream": {
     "repository": "https://github.com/llvm/llvm-project",
-    "commit": "9898082bd358e1706f7703291bdec6caae12993a",
-    "license": "Apache-2.0 WITH LLVM-exception"
+    "release_tag": "llvmorg-22.1.0",
+    "archive_url": "https://api.github.com/repos/llvm/llvm-project/tarball/llvmorg-22.1.0",
+    "archive_name": "llvm-project-llvmorg-22.1.0.tar.gz",
+    "archive_sha256": "f69aadbe9327953b5bd6fa53f42a4a0949f9f8852000c3752e15a6ffc91e27e6",
+    "license": "Apache-2.0 WITH LLVM-exception",
+    "strip_components": 1
   },
   "cases": [
     {
       "id": "parser-argument-scope",
       "upstream": "clang/test/Parser/argument_scope.c",
-      "fixture": "tests/external/clang/fixtures/Parser/argument_scope.c",
+      "fixture": "tests/external/clang/generated/Parser/argument_scope.c",
       "expect": "ok",
       "sha256": "fa92fcf986c085999f0049b715c8d3473f58ee583138a1783b2de31428d4fc59"
     },
     {
       "id": "parser-c-namespace",
       "upstream": "clang/test/Parser/c-namespace.c",
-      "fixture": "tests/external/clang/fixtures/Parser/c-namespace.c",
+      "fixture": "tests/external/clang/generated/Parser/c-namespace.c",
       "expect": "ok",
       "sha256": "b3457551c5d6165b85d3d2190c37cad2198c15a1b663ddf751ce6f6721043b92"
     },
     {
       "id": "parser-namelookup-bug-1",
       "upstream": "clang/test/Parser/namelookup-bug-1.c",
-      "fixture": "tests/external/clang/fixtures/Parser/namelookup-bug-1.c",
+      "fixture": "tests/external/clang/generated/Parser/namelookup-bug-1.c",
       "expect": "ok",
       "sha256": "f266256d639f5b62c39425885bc98c9c012552d1b5037688c102f8b16a19a5c9"
     },
     {
       "id": "parser-struct-recursion",
       "upstream": "clang/test/Parser/struct-recursion.c",
-      "fixture": "tests/external/clang/fixtures/Parser/struct-recursion.c",
+      "fixture": "tests/external/clang/generated/Parser/struct-recursion.c",
       "expect": "ok",
       "sha256": "1771aa0c0399d7b3d3f9baac5fc82624bfe5f032ebc02161c0643b8ec09a99ae"
     },
     {
       "id": "parser-control-scope",
       "upstream": "clang/test/Parser/control-scope.c",
-      "fixture": "tests/external/clang/fixtures/Parser/control-scope.c",
+      "fixture": "tests/external/clang/generated/Parser/control-scope.c",
       "expect": "ok",
       "sha256": "88fba21d3fdb787bb29a5ab4720af1e90299d95cc4cc4e5b0354e56a4253798e"
     },
     {
       "id": "debuginfo-slash",
       "upstream": "clang/test/DebugInfo/Generic/slash.c",
-      "fixture": "tests/external/clang/fixtures/DebugInfo/Generic/slash.c",
+      "fixture": "tests/external/clang/generated/DebugInfo/Generic/slash.c",
       "expect": "ok",
       "sha256": "4e55dd1da845df5279719090dd860609331931ad719314da9d90f1a66b5932c1"
     },
     {
       "id": "lexer-comment-utf8",
       "upstream": "clang/test/Lexer/comment-utf8.c",
-      "fixture": "tests/external/clang/fixtures/Lexer/comment-utf8.c",
+      "fixture": "tests/external/clang/generated/Lexer/comment-utf8.c",
       "expect": "ok",
       "sha256": "b0e9aea199961eb0c7114b21108ef0e5194b2d06aab9bd7cd26c36f1060696fd"
     },
     {
       "id": "lexer-newline-eof",
       "upstream": "clang/test/Lexer/newline-eof.c",
-      "fixture": "tests/external/clang/fixtures/Lexer/newline-eof.c",
+      "fixture": "tests/external/clang/generated/Lexer/newline-eof.c",
       "expect": "ok",
       "sha256": "fc1c8a40714202a8ad7ddbf54149ca8fdf6d8b3f1fc7224d5733d6eefbc249b0"
     },
     {
       "id": "lexer-multi-char-constants",
       "upstream": "clang/test/Lexer/multi-char-constants.c",
-      "fixture": "tests/external/clang/fixtures/Lexer/multi-char-constants.c",
+      "fixture": "tests/external/clang/generated/Lexer/multi-char-constants.c",
       "expect": "ok",
       "sha256": "d2853d1ff824a0aa8fc0bb68bfe7c1fb9da679cce86d2855615b2627b651acd4"
     },
     {
       "id": "parser-argument-redef",
       "upstream": "clang/test/Parser/argument_redef.c",
-      "fixture": "tests/external/clang/fixtures/Parser/argument_redef.c",
+      "fixture": "tests/external/clang/generated/Parser/argument_redef.c",
       "expect": "sema",
       "message_contains": "Duplicate declaration: A",
       "sha256": "a8810ab1dc6e918024955b3c0f6465feb636d9e6c8078db5f2bcbead77e912b0"
@@ -79,7 +83,7 @@
     {
       "id": "parser-check-cast",
       "upstream": "clang/test/Parser/check_cast.c",
-      "fixture": "tests/external/clang/fixtures/Parser/check_cast.c",
+      "fixture": "tests/external/clang/generated/Parser/check_cast.c",
       "expect": "sema",
       "message_contains": "Cast target type is not castable",
       "sha256": "31e4f5ba2a1e9f2948a7e1189072494d15cdce41eb99f6f2107866c2e33640b6"
@@ -87,7 +91,7 @@
     {
       "id": "parser-if-scope-c99",
       "upstream": "clang/test/Parser/if-scope-c99.c",
-      "fixture": "tests/external/clang/fixtures/Parser/if-scope-c99.c",
+      "fixture": "tests/external/clang/generated/Parser/if-scope-c99.c",
       "expect": "sema",
       "message_contains": "Undeclared identifier: a",
       "sha256": "671ed848d20a64f52ebfa6ac00888afb4c64730cb448aee63fbdb461a1bbc8b4"
@@ -95,7 +99,7 @@
     {
       "id": "parser-if-scope-c90",
       "upstream": "clang/test/Parser/if-scope-c90.c",
-      "fixture": "tests/external/clang/fixtures/Parser/if-scope-c90.c",
+      "fixture": "tests/external/clang/generated/Parser/if-scope-c90.c",
       "expect": "sema",
       "message_contains": "Undeclared identifier: a",
       "sha256": "4bb9ce3ad3d8e0cc86762ef9b7b7a2e4ca2bfcb893a1a04b309599b0cdf17a8e"
@@ -103,7 +107,7 @@
     {
       "id": "parser-while-loop-outside-function",
       "upstream": "clang/test/Parser/while-loop-outside-function.c",
-      "fixture": "tests/external/clang/fixtures/Parser/while-loop-outside-function.c",
+      "fixture": "tests/external/clang/generated/Parser/while-loop-outside-function.c",
       "expect": "parse",
       "message_contains": "while statement outside of a function",
       "line": 3,
@@ -113,7 +117,7 @@
     {
       "id": "parser-bad-control",
       "upstream": "clang/test/Parser/bad-control.c",
-      "fixture": "tests/external/clang/fixtures/Parser/bad-control.c",
+      "fixture": "tests/external/clang/generated/Parser/bad-control.c",
       "expect": "parse",
       "message_contains": "Statement expression is a GNU extension",
       "sha256": "2bada42bcaded3ad1b56ac88ba4d96ffca79a35133e0cd4673ccce520f8649da"
@@ -121,7 +125,7 @@
     {
       "id": "lexer-eof-char",
       "upstream": "clang/test/Lexer/eof-char.c",
-      "fixture": "tests/external/clang/fixtures/Lexer/eof-char.c",
+      "fixture": "tests/external/clang/generated/Lexer/eof-char.c",
       "expect": "lex",
       "message_contains": "Invalid escape sequence",
       "line": 8,
@@ -131,7 +135,7 @@
     {
       "id": "lexer-eof-string",
       "upstream": "clang/test/Lexer/eof-string.c",
-      "fixture": "tests/external/clang/fixtures/Lexer/eof-string.c",
+      "fixture": "tests/external/clang/generated/Lexer/eof-string.c",
       "expect": "lex",
       "message_contains": "Invalid escape sequence",
       "line": 8,
@@ -141,7 +145,7 @@
     {
       "id": "lexer-unknown-char",
       "upstream": "clang/test/Lexer/unknown-char.c",
-      "fixture": "tests/external/clang/fixtures/Lexer/unknown-char.c",
+      "fixture": "tests/external/clang/generated/Lexer/unknown-char.c",
       "expect": "lex",
       "message_contains": "Unexpected character",
       "line": 4,
@@ -151,7 +155,7 @@
     {
       "id": "lexer-block-cmt-end",
       "upstream": "clang/test/Lexer/block_cmt_end.c",
-      "fixture": "tests/external/clang/fixtures/Lexer/block_cmt_end.c",
+      "fixture": "tests/external/clang/generated/Lexer/block_cmt_end.c",
       "expect": "lex",
       "message_contains": "Unterminated block comment",
       "line": 44,
@@ -161,28 +165,28 @@
     {
       "id": "c99-n629-integer-constants",
       "upstream": "clang/test/C/C99/n629.c",
-      "fixture": "tests/external/clang/fixtures/C/C99/n629.c",
+      "fixture": "tests/external/clang/generated/C/C99/n629.c",
       "expect": "ok",
       "sha256": "9f1dff443205f100b0075a7dd0462e1964d24536cdc8f4a5dcd0960efa2b53ac"
     },
     {
       "id": "c99-n736-intmax-arithmetic",
       "upstream": "clang/test/C/C99/n736.c",
-      "fixture": "tests/external/clang/fixtures/C/C99/n736.c",
+      "fixture": "tests/external/clang/generated/C/C99/n736.c",
       "expect": "ok",
       "sha256": "743fec8b9e9510ce251b933ee7e0326f6b14e3a0b024413a2998c6f9389565b0"
     },
     {
       "id": "lexer-long-long-cpp",
       "upstream": "clang/test/Lexer/long-long.cpp",
-      "fixture": "tests/external/clang/fixtures/Lexer/long-long.cpp",
+      "fixture": "tests/external/clang/generated/Lexer/long-long.cpp",
       "expect": "ok",
       "sha256": "4c03868ee307dca195f44de3011988f0730063e5e3ca040ce63289b720092a26"
     },
     {
       "id": "lexer-ms-extensions-i64",
       "upstream": "clang/test/Lexer/ms-extensions.c",
-      "fixture": "tests/external/clang/fixtures/Lexer/ms-extensions.c",
+      "fixture": "tests/external/clang/generated/Lexer/ms-extensions.c",
       "expect": "lex",
       "message_contains": "Invalid numeric constant",
       "line": 5,
@@ -192,14 +196,14 @@
     {
       "id": "parser-extension-long-long",
       "upstream": "clang/test/Parser/extension.c",
-      "fixture": "tests/external/clang/fixtures/Parser/extension.c",
+      "fixture": "tests/external/clang/generated/Parser/extension.c",
       "expect": "ok",
       "sha256": "abdb07f0e44b5e34e37ff63f7ba548f532956da89bc73f44a47c29884bcfb0fa"
     },
     {
       "id": "parser-no-gnu-inline-asm",
       "upstream": "clang/test/Parser/no-gnu-inline-asm.c",
-      "fixture": "tests/external/clang/fixtures/Parser/no-gnu-inline-asm.c",
+      "fixture": "tests/external/clang/generated/Parser/no-gnu-inline-asm.c",
       "expect": "pp",
       "message_contains": "GNU asm extension is not allowed in c11",
       "sha256": "a2ca3b7094f9ba3029c337a98da920624adb1df3c01c46e6ef5d2a9c86b811b4"
@@ -207,7 +211,7 @@
     {
       "id": "parser-atomic-c11",
       "upstream": "clang/test/Parser/atomic.c",
-      "fixture": "tests/external/clang/fixtures/Parser/atomic.c",
+      "fixture": "tests/external/clang/generated/Parser/atomic.c",
       "expect": "parse",
       "message_contains": "Invalid atomic type",
       "line": 14,
@@ -217,7 +221,7 @@
     {
       "id": "sema-alignas-c11",
       "upstream": "clang/test/Sema/alignas.c",
-      "fixture": "tests/external/clang/fixtures/Sema/alignas.c",
+      "fixture": "tests/external/clang/generated/Sema/alignas.c",
       "expect": "parse",
       "message_contains": "Invalid alignment specifier",
       "line": 5,
@@ -227,7 +231,7 @@
     {
       "id": "sema-static-assert-c11",
       "upstream": "clang/test/Sema/static-assert.c",
-      "fixture": "tests/external/clang/fixtures/Sema/static-assert.c",
+      "fixture": "tests/external/clang/generated/Sema/static-assert.c",
       "expect": "parse",
       "message_contains": "Expected static assertion message",
       "line": 27,
@@ -237,7 +241,7 @@
     {
       "id": "sema-generic-selection-c11",
       "upstream": "clang/test/Sema/generic-selection.c",
-      "fixture": "tests/external/clang/fixtures/Sema/generic-selection.c",
+      "fixture": "tests/external/clang/generated/Sema/generic-selection.c",
       "expect": "sema",
       "message_contains": "Invalid generic association type",
       "sha256": "1995a38d944d4a9360b79137fc750692b6ede0b23bed885c8e2fa5d78fac8f1f"
@@ -245,7 +249,7 @@
     {
       "id": "sema-array-size-64",
       "upstream": "clang/test/Sema/array-size-64.c",
-      "fixture": "tests/external/clang/fixtures/Sema/array-size-64.c",
+      "fixture": "tests/external/clang/generated/Sema/array-size-64.c",
       "expect": "sema",
       "sha256": "b007badfbc091875408475f8ead39a88dbd3f1a2215b65f77877c407e8992988",
       "message_contains": "array is too large"
@@ -253,7 +257,7 @@
     {
       "id": "sema-c89-long-long-extension",
       "upstream": "clang/test/Sema/c89.c",
-      "fixture": "tests/external/clang/fixtures/Sema/c89.c",
+      "fixture": "tests/external/clang/generated/Sema/c89.c",
       "expect": "parse",
       "message_contains": "Declaration type is missing before ')'",
       "line": 31,
@@ -263,7 +267,7 @@
     {
       "id": "sema-indirect-goto-long-long",
       "upstream": "clang/test/Sema/indirect-goto.c",
-      "fixture": "tests/external/clang/fixtures/Sema/indirect-goto.c",
+      "fixture": "tests/external/clang/generated/Sema/indirect-goto.c",
       "expect": "parse",
       "message_contains": "Label address is a GNU extension",
       "sha256": "2794dd34b1276692605f1fa6ee7125af7a0e2d1140f70bc6f21717efedf77f40"
@@ -271,14 +275,14 @@
     {
       "id": "sema-warn-absolute-value-header",
       "upstream": "clang/test/Sema/warn-absolute-value-header.c",
-      "fixture": "tests/external/clang/fixtures/Sema/warn-absolute-value-header.c",
+      "fixture": "tests/external/clang/generated/Sema/warn-absolute-value-header.c",
       "expect": "ok",
       "sha256": "54ebcc0d1ac88e89add0415130e4c810205332741a3830fb0059dbba8fe4eb53"
     },
     {
       "id": "sema-builtins-arm-exclusive-4",
       "upstream": "clang/test/Sema/builtins-arm-exclusive-4.c",
-      "fixture": "tests/external/clang/fixtures/Sema/builtins-arm-exclusive-4.c",
+      "fixture": "tests/external/clang/generated/Sema/builtins-arm-exclusive-4.c",
       "expect": "sema",
       "message_contains": "Undeclared function: __builtin_arm_ldrex",
       "sha256": "5a2e61e0346c808a1781579850e8a06f5f1d43b9319045ba953df17d5ef1e940"
@@ -286,7 +290,7 @@
     {
       "id": "sema-builtins-arm-exclusive-none",
       "upstream": "clang/test/Sema/builtins-arm-exclusive-none.c",
-      "fixture": "tests/external/clang/fixtures/Sema/builtins-arm-exclusive-none.c",
+      "fixture": "tests/external/clang/generated/Sema/builtins-arm-exclusive-none.c",
       "expect": "sema",
       "message_contains": "Undeclared function: __builtin_arm_ldrex",
       "sha256": "dde828ae137fbabc542221c7d40635f3f63f9de959bedc93d4ec15144e7fbd53"
@@ -294,14 +298,14 @@
     {
       "id": "sema-warn-null-long-long-macro",
       "upstream": "clang/test/Sema/warn-null.c",
-      "fixture": "tests/external/clang/fixtures/Sema/warn-null.c",
+      "fixture": "tests/external/clang/generated/Sema/warn-null.c",
       "expect": "ok",
       "sha256": "6e0e9d9f9bfb7fd2712c15f415411da0269b36f92c6e1f065ba72263464cd74b"
     },
     {
       "id": "sema-vector-cast-long-long",
       "upstream": "clang/test/Sema/vector-cast.c",
-      "fixture": "tests/external/clang/fixtures/Sema/vector-cast.c",
+      "fixture": "tests/external/clang/generated/Sema/vector-cast.c",
       "expect": "parse",
       "message_contains": "Expected ';'",
       "line": 3,
@@ -311,7 +315,7 @@
     {
       "id": "sema-vector-gcc-compat-long-long",
       "upstream": "clang/test/Sema/vector-gcc-compat.c",
-      "fixture": "tests/external/clang/fixtures/Sema/vector-gcc-compat.c",
+      "fixture": "tests/external/clang/generated/Sema/vector-gcc-compat.c",
       "expect": "parse",
       "message_contains": "Expected ';'",
       "line": 5,
@@ -321,7 +325,7 @@
     {
       "id": "sema-builtins-x86-long-long-vectors",
       "upstream": "clang/test/Sema/builtins-x86.c",
-      "fixture": "tests/external/clang/fixtures/Sema/builtins-x86.c",
+      "fixture": "tests/external/clang/generated/Sema/builtins-x86.c",
       "expect": "parse",
       "message_contains": "Expected ';'",
       "line": 3,
@@ -331,14 +335,14 @@
     {
       "id": "sema-align-x86-64-ulonglong",
       "upstream": "clang/test/Sema/align-x86-64.c",
-      "fixture": "tests/external/clang/fixtures/Sema/align-x86-64.c",
+      "fixture": "tests/external/clang/generated/Sema/align-x86-64.c",
       "expect": "sema",
       "sha256": "413255386b93b447bb95e8dff0e9cb047cf5e0f78c3c98897151584450cadfb5"
     },
     {
       "id": "sema-warn-absolute-value-long-long",
       "upstream": "clang/test/Sema/warn-absolute-value.c",
-      "fixture": "tests/external/clang/fixtures/Sema/warn-absolute-value.c",
+      "fixture": "tests/external/clang/generated/Sema/warn-absolute-value.c",
       "expect": "sema",
       "message_contains": "Undeclared function: __builtin_abs",
       "xfail_reason": "Expected failure until _Complex type parsing and related sema paths are implemented.",
@@ -347,7 +351,7 @@
     {
       "id": "sema-builtins-x86-64-long-long-vectors",
       "upstream": "clang/test/Sema/builtins-x86_64.c",
-      "fixture": "tests/external/clang/fixtures/Sema/builtins-x86_64.c",
+      "fixture": "tests/external/clang/generated/Sema/builtins-x86_64.c",
       "expect": "parse",
       "message_contains": "Expected ';'",
       "line": 3,
@@ -357,7 +361,7 @@
     {
       "id": "sema-conversion-64-32-long-long-vector",
       "upstream": "clang/test/Sema/conversion-64-32.c",
-      "fixture": "tests/external/clang/fixtures/Sema/conversion-64-32.c",
+      "fixture": "tests/external/clang/generated/Sema/conversion-64-32.c",
       "expect": "parse",
       "message_contains": "Expected ';'",
       "line": 7,
@@ -367,7 +371,7 @@
     {
       "id": "sema-conversion-implicit-int-64-32-long-long",
       "upstream": "clang/test/Sema/conversion-implicit-int-includes-64-to-32.c",
-      "fixture": "tests/external/clang/fixtures/Sema/conversion-implicit-int-includes-64-to-32.c",
+      "fixture": "tests/external/clang/generated/Sema/conversion-implicit-int-includes-64-to-32.c",
       "expect": "parse",
       "message_contains": "Expected ';'",
       "line": 7,
@@ -377,7 +381,7 @@
     {
       "id": "sema-alloc-align-attr-ulonglong",
       "upstream": "clang/test/Sema/alloc-align-attr.c",
-      "fixture": "tests/external/clang/fixtures/Sema/alloc-align-attr.c",
+      "fixture": "tests/external/clang/generated/Sema/alloc-align-attr.c",
       "expect": "parse",
       "message_contains": "Expected ';'",
       "line": 13,
@@ -387,7 +391,7 @@
     {
       "id": "parser-altivec-long-long",
       "upstream": "clang/test/Parser/altivec.c",
-      "fixture": "tests/external/clang/fixtures/Parser/altivec.c",
+      "fixture": "tests/external/clang/generated/Parser/altivec.c",
       "expect": "parse",
       "message_contains": "Unknown declaration type name: '__vector'",
       "line": 6,
@@ -397,7 +401,7 @@
     {
       "id": "c23-n2927-2-long-long",
       "upstream": "clang/test/C/C23/n2927_2.c",
-      "fixture": "tests/external/clang/fixtures/C/C23/n2927_2.c",
+      "fixture": "tests/external/clang/generated/C/C23/n2927_2.c",
       "expect": "parse",
       "message_contains": "Expression cannot start with keyword",
       "line": 8,

@@ -18,9 +18,9 @@
 
 ## LLVM/Clang test fixtures
 
-- Curated test fixtures copied from `llvm/llvm-project` are allowed under Apache-2.0 with LLVM exceptions.
-- Keep fixture provenance pinned by commit in `tests/external/clang/manifest.json`.
-- Keep vendored fixture files byte-identical to upstream and track checksums.
+- Curated upstream fixtures from `llvm/llvm-project` are allowed under Apache-2.0 with LLVM exceptions.
+- Keep fixture provenance pinned by release archive URL and SHA-256 in `tests/external/clang/manifest.json`.
+- Materialize upstream fixtures from the pinned archive and keep them byte-identical to upstream.
 
 ## References
 

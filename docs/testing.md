@@ -20,12 +20,13 @@
 
 ## Curated LLVM/Clang fixtures
 
-- Fixtures are vendored under `tests/external/clang/fixtures/`.
-- Metadata, upstream commit pin, and checksums are stored in `tests/external/clang/manifest.json`.
+- Upstream fixtures are materialized under `tests/external/clang/generated/` from a pinned LLVM release archive.
+- Local `xcc` regression fixtures are tracked under `tests/external/clang/fixtures/`.
+- Metadata, upstream archive pin, and checksums are stored in `tests/external/clang/manifest.json`.
 - The harness in `tests/test_clang_suite.py` validates fixture integrity, expected frontend stage (`ok`, `lex`, `parse`, `sema`), and selected diagnostic details.
 - Run only this subset with `python -m unittest -v tests.test_clang_suite`.
 - Or use tox: `tox -e clang_suite`.
-- Sync fixtures from upstream with `python scripts/sync_clang_fixtures.py`.
+- Materialize external fixtures from upstream with `python scripts/sync_clang_fixtures.py`.
 
 ## Tooling
 

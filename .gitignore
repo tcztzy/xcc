@@ -14,12 +14,16 @@ wheels/
 .ruff_cache/
 .uv-cache/
 .coverage
+.cache/
 
-# OpenClaw cron/workspace artifacts
+# Local workspace artifacts
 .openclaw/
 .worktrees/
 .claude/
 docs/plans/
+
+# Generated external fixtures and download cache
+tests/external/clang/generated/
 
 # MkDocs build output
 site/

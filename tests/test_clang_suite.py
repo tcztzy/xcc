@@ -1,5 +1,7 @@
 import hashlib
 import json
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 from typing import Any
@@ -9,10 +11,20 @@ from xcc.frontend import FrontendError, compile_source
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "tests/external/clang/manifest.json"
+SYNC_SCRIPT = ROOT / "scripts/sync_clang_fixtures.py"
 ALLOWED_EXPECTATIONS = {"ok", "pp", "lex", "parse", "sema"}
 REQUIRED_CASE_KEYS = {"id", "upstream", "fixture", "expect", "sha256"}
 OPTIONAL_CASE_KEYS = {"message_contains", "line", "column"}
 XFAIL_REASON_KEY = "xfail_reason"
+REQUIRED_UPSTREAM_KEYS = {
+    "repository",
+    "release_tag",
+    "archive_url",
+    "archive_name",
+    "archive_sha256",
+    "license",
+    "strip_components",
+}
 
 
 def _load_cases() -> list[dict[str, Any]]:
@@ -29,14 +41,56 @@ def _load_cases() -> list[dict[str, Any]]:
     return cases
 
 
+def _load_manifest() -> dict[str, Any]:
+    return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _is_external_case(case: dict[str, Any]) -> bool:
+    return case["upstream"].startswith("clang/test/")
+
+
+def _external_fixtures_ready(cases: list[dict[str, Any]]) -> bool:
+    for case in cases:
+        if not _is_external_case(case):
+            continue
+        fixture = ROOT / case["fixture"]
+        if not fixture.is_file():
+            return False
+        if _sha256(fixture.read_bytes()) != case["sha256"]:
+            return False
+    return True
+
+
+def _materialize_external_fixtures(cases: list[dict[str, Any]]) -> None:
+    if _external_fixtures_ready(cases):
+        return
+    completed = subprocess.run(
+        (sys.executable, str(SYNC_SCRIPT)),
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(
+            "failed to materialize external clang fixtures:\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+    if not _external_fixtures_ready(cases):
+        raise AssertionError("external clang fixtures are still missing after sync")
 
 
 class ClangSuiteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        cls._manifest = _load_manifest()
         cls._cases = _load_cases()
+        _materialize_external_fixtures(cls._cases)
 
     def test_clang_fixtures_match_manifest_checksums(self) -> None:
         for case in self._cases:
@@ -46,6 +100,14 @@ class ClangSuiteTests(unittest.TestCase):
                 self.assertEqual(_sha256(fixture.read_bytes()), case["sha256"])
 
     def test_clang_manifest_case_schema(self) -> None:
+        upstream = self._manifest.get("upstream")
+        self.assertIsInstance(upstream, dict)
+        upstream_keys = set(upstream or {})
+        self.assertTrue(REQUIRED_UPSTREAM_KEYS.issubset(upstream_keys))
+        self.assertEqual(
+            sorted(upstream_keys),
+            sorted(REQUIRED_UPSTREAM_KEYS),
+        )
         case_ids: set[str] = set()
         for case in self._cases:
             case_id = case.get("id", "<missing-id>")
@@ -63,6 +125,11 @@ class ClangSuiteTests(unittest.TestCase):
                 self.assertIsInstance(case["fixture"], str)
                 self.assertIsInstance(case["expect"], str)
                 self.assertIsInstance(case["sha256"], str)
+                if _is_external_case(case):
+                    self.assertTrue(case["fixture"].startswith("tests/external/clang/generated/"))
+                else:
+                    self.assertTrue(case["upstream"].startswith("xcc/local/"))
+                    self.assertTrue(case["fixture"].startswith("tests/external/clang/fixtures/"))
                 if "message_contains" in case:
                     self.assertIsInstance(case["message_contains"], str)
                 if "line" in case:
