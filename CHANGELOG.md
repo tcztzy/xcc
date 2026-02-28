@@ -4,6 +4,11 @@ This file records implementation progress and validation history.
 
 ## 2026-02-28
 
+- Removed OpenClaw smoke-check code path from the active project surface (`src/xcc/openclaw_cron.py`, `tests/test_openclaw_cron.py`, `scripts/openclaw_cron_smoke.sh`).
+- Checks: `UV_CACHE_DIR=/tmp/uv-cache uv run tox -e py311,lint,type` (pass).
+
+## 2026-02-28
+
 - Reworked LLVM/Clang fixture sourcing to de-vendor external upstream files: `tests/external/clang/manifest.json` now pins a stable release tag (`llvmorg-22.1.0`), archive URL, archive filename, SHA-256, and strip policy instead of an upstream commit checkout flow.
 - Replaced git-clone-based fixture sync with archive-based materialization in `scripts/sync_clang_fixtures.py`; the script now downloads/verifies the pinned tarball, materializes only `clang/test/...` cases, supports `--check`, and keeps local `xcc/local/...` fixtures untouched.
 - Moved external fixture targets to generated paths (`tests/external/clang/generated/...` in manifest), removed 47 previously vendored upstream fixture files from Git, and updated `tests/test_clang_suite.py` to auto-materialize external fixtures when missing.
