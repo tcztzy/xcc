@@ -17,7 +17,7 @@ wheels/
 .cache/
 
 # Local workspace artifacts
-.openclaw/
+.open*/
 .worktrees/
 .claude/
 docs/plans/
