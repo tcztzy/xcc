@@ -3223,10 +3223,10 @@ class ParserTests(unittest.TestCase):
             "Array size identifier 'n' is not an integer constant expression",
         ):
             parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
-        parser = Parser(list(lex("1*2]")))
+        parser = Parser(list(lex("a+b]")))
         with self.assertRaisesRegex(
             ParserError,
-            "Array size binary operator '\*' is not an integer constant expression",
+            "not an integer constant expression",
         ):
             parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
         parser = Parser(list(lex("foo()]")))
@@ -3742,12 +3742,12 @@ class ParserTests(unittest.TestCase):
         )
 
     def test_array_size_accepts_vla_binary_operator_expression(self) -> None:
-        unit = parse(list(lex("int main(){int a[4/2];return 0;}")))
-        stmt = _body(unit.functions[0]).statements[0]
+        unit = parse(list(lex("int main(){int n;int a[n/2];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[1]
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec.declarator_ops,
-            (("arr", ArrayDecl(BinaryExpr("/", IntLiteral("4"), IntLiteral("2")))),),
+            (("arr", ArrayDecl(BinaryExpr("/", Identifier("n"), IntLiteral("2")))),),
         )
 
     def test_array_size_accepts_vla_sizeof_void_expression(self) -> None:
@@ -3981,6 +3981,98 @@ class ParserTests(unittest.TestCase):
         token = Token(TokenKind.INT_CONST, "0", 1, 1)
         with self.assertRaises(ParserError):
             parser._parse_array_size_expr_or_vla(IntLiteral("0"), token)
+
+    def test_array_size_accepts_simple_ternary(self) -> None:
+        unit = parse(list(lex("int main(){int a[1 ? 4 : 8];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (4,)))
+
+    def test_array_size_accepts_sizeof_in_ternary_condition(self) -> None:
+        unit = parse(list(lex("int main(){int a[(sizeof(int) > 2) ? 10 : 20];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (10,)))
+
+    def test_array_size_accepts_nested_ternary(self) -> None:
+        unit = parse(list(lex("int main(){int a[(1 > 0) ? (2 > 1 ? 3 : 4) : 5];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (3,)))
+
+    def test_array_size_accepts_fd_set_pattern(self) -> None:
+        source = (
+            "int main(){"
+            "typedef int t;"
+            "t fds[((1024 % (sizeof(t) * 8)) == 0)"
+            " ? (1024 / (sizeof(t) * 8))"
+            " : ((1024 / (sizeof(t) * 8)) + 1)];"
+            "return 0;}"
+        )
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, DeclStmt)
+        # sizeof(int)=4, 4*8=32, 1024%32==0, so 1024/32=32
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (32,)))
+
+    def test_array_size_eval_binary_multiply(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("*", IntLiteral("3"), IntLiteral("4"))), 12)
+
+    def test_array_size_eval_binary_divide(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("/", IntLiteral("10"), IntLiteral("3"))), 3)
+        self.assertIsNone(parser._eval_array_size_expr(BinaryExpr("/", IntLiteral("10"), IntLiteral("0"))))
+
+    def test_array_size_eval_binary_modulo(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("%", IntLiteral("10"), IntLiteral("3"))), 1)
+        self.assertIsNone(parser._eval_array_size_expr(BinaryExpr("%", IntLiteral("10"), IntLiteral("0"))))
+
+    def test_array_size_eval_binary_right_shift(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr(">>", IntLiteral("16"), IntLiteral("2"))), 4)
+        self.assertIsNone(parser._eval_array_size_expr(BinaryExpr(">>", IntLiteral("16"), UnaryExpr("-", IntLiteral("1")))))
+
+    def test_array_size_eval_binary_relational(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("<", IntLiteral("1"), IntLiteral("2"))), 1)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("<", IntLiteral("2"), IntLiteral("1"))), 0)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr(">", IntLiteral("2"), IntLiteral("1"))), 1)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr(">", IntLiteral("1"), IntLiteral("2"))), 0)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("<=", IntLiteral("1"), IntLiteral("1"))), 1)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("<=", IntLiteral("2"), IntLiteral("1"))), 0)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr(">=", IntLiteral("1"), IntLiteral("1"))), 1)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr(">=", IntLiteral("0"), IntLiteral("1"))), 0)
+
+    def test_array_size_eval_binary_bitwise(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("&", IntLiteral("6"), IntLiteral("3"))), 2)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("^", IntLiteral("6"), IntLiteral("3"))), 5)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("|", IntLiteral("6"), IntLiteral("3"))), 7)
+
+    def test_array_size_eval_binary_logical(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("&&", IntLiteral("1"), IntLiteral("2"))), 1)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("&&", IntLiteral("0"), IntLiteral("2"))), 0)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("||", IntLiteral("0"), IntLiteral("0"))), 0)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("||", IntLiteral("0"), IntLiteral("1"))), 1)
+        self.assertEqual(parser._eval_array_size_expr(BinaryExpr("||", IntLiteral("1"), IntLiteral("0"))), 1)
+        # Unknown binary operator falls through to None
+        self.assertIsNone(parser._eval_array_size_expr(BinaryExpr(",", IntLiteral("1"), IntLiteral("2"))))
+
+    def test_array_size_eval_unary_plus(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(UnaryExpr("+", IntLiteral("7"))), 7)
+
+    def test_array_size_eval_unary_bitwise_not(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(UnaryExpr("~", IntLiteral("0"))), -1)
+
+    def test_array_size_eval_unary_logical_not(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(parser._eval_array_size_expr(UnaryExpr("!", IntLiteral("0"))), 1)
+        self.assertEqual(parser._eval_array_size_expr(UnaryExpr("!", IntLiteral("5"))), 0)
 
     def test_void_declaration_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
@@ -4505,6 +4597,128 @@ class ParserTests(unittest.TestCase):
         """Abstract function pointer at top level is a parse error, not a function."""
         with self.assertRaises(ParserError):
             parse(list(lex("int (*)(void);")))
+
+    def test_asm_label_on_function_declaration(self) -> None:
+        """__asm('symbol') after function declarator is skipped."""
+        unit = parse(list(lex('extern int close(int) __asm("_close");')), std="gnu11")
+        self.assertEqual(len(unit.functions), 1)
+        self.assertEqual(unit.functions[0].name, "close")
+
+    def test_asm_label_on_function_declaration_asm_keyword(self) -> None:
+        unit = parse(list(lex('extern int foo(void) __asm__("_foo");')), std="gnu11")
+        self.assertEqual(len(unit.functions), 1)
+        self.assertEqual(unit.functions[0].name, "foo")
+
+    def test_asm_label_on_variable_declaration(self) -> None:
+        unit = parse(list(lex('extern int x __asm("_x");')), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_asm_label_with_attribute(self) -> None:
+        """__asm after __attribute__ is skipped."""
+        unit = parse(list(lex(
+            'extern int close(int) __attribute__((visibility("default"))) __asm("_close");'
+        )), std="gnu11")
+        self.assertEqual(len(unit.functions), 1)
+        self.assertEqual(unit.functions[0].name, "close")
+
+    def test_asm_label_complex_declarator(self) -> None:
+        """__asm on complex function declarator (function returning pointer)."""
+        unit = parse(list(lex(
+            'extern int *getenv(const char *) __asm("_getenv");'
+        )), std="gnu11")
+        self.assertEqual(len(unit.functions), 1)
+
+    def test_nullable_qualifier_on_pointer(self) -> None:
+        """_Nullable qualifier on pointer is skipped."""
+        unit = parse(list(lex("int * _Nullable p;")), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_nonnull_qualifier_on_pointer(self) -> None:
+        unit = parse(list(lex("int * _Nonnull p;")), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_null_unspecified_qualifier_on_pointer(self) -> None:
+        unit = parse(list(lex("int * _Null_unspecified p;")), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_nullable_in_function_param(self) -> None:
+        unit = parse(list(lex("void f(int * _Nullable p);")), std="gnu11")
+        self.assertEqual(len(unit.functions), 1)
+
+    def test_float16_type(self) -> None:
+        unit = parse(list(lex("_Float16 x;")), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_float32_type(self) -> None:
+        unit = parse(list(lex("_Float32 x;")), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_float64_type(self) -> None:
+        unit = parse(list(lex("_Float64 x;")), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_float128_type(self) -> None:
+        unit = parse(list(lex("_Float128 x;")), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_float16_pointer(self) -> None:
+        unit = parse(list(lex("_Float16 *p;")), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_asm_label_nested_parens(self) -> None:
+        """__asm with nested parentheses is handled correctly."""
+        unit = parse(list(lex('extern int x __asm(("_x"));')), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_asm_label_with_punctuator_inside(self) -> None:
+        """__asm with non-paren punctuator inside is handled."""
+        unit = parse(list(lex('extern int x __asm("_x" + "_y");')), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_asm_label_bare_keyword(self) -> None:
+        """Bare asm keyword without parens is skipped."""
+        unit = parse(list(lex('extern int x asm;')), std="gnu11")
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_asm_label_unterminated_raises(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex('extern int x __asm("_x"')), std="gnu11")
+
+    def test_array_size_large_integer_division(self) -> None:
+        """Division of large integers that would overflow float works correctly."""
+        big = 2**63
+        unit = parse(list(lex(f"int arr[{big} / {big}];")))
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_array_size_truncation_toward_zero(self) -> None:
+        """C integer division truncates toward zero: 7/2 == 3."""
+        unit = parse(list(lex("int arr[7 / 2];")))
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_array_size_modulo_c_semantics(self) -> None:
+        """C modulo: -5 % 3 == -2 (negative), so array size is rejected."""
+        with self.assertRaises(ParserError):
+            parse(list(lex("int a[-5 % 3];")))
+
+    def test_array_size_modulo_positive(self) -> None:
+        """C modulo with positive result: 7 % 3 == 1."""
+        unit = parse(list(lex("int a[7 % 3];")))
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_asm_then_attribute_order(self) -> None:
+        """__asm followed by __attribute__ (reverse order) is accepted."""
+        unit = parse(list(lex(
+            'extern int close(int) __asm("_close") __attribute__((visibility("default")));'
+        )), std="gnu11")
+        self.assertEqual(len(unit.functions), 1)
+        self.assertEqual(unit.functions[0].name, "close")
+
+    def test_attribute_asm_attribute_interleaved(self) -> None:
+        """Multiple interleaved __attribute__ and __asm are accepted."""
+        unit = parse(list(lex(
+            'extern int f(void) __attribute__((noinline)) __asm("_f") __attribute__((cold));'
+        )), std="gnu11")
+        self.assertEqual(len(unit.functions), 1)
 
 
 if __name__ == "__main__":

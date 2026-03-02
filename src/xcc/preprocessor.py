@@ -25,7 +25,7 @@ _EXPR_TOKEN_RE = re.compile(
     r"|[0-9]+(?:[uU](?:ll|LL|[lL])?|(?:ll|LL|[lL])[uU]?)?"
     r"|(?:u8|[uUL])?'(?:[^'\\\n]|\\.)+'"
     r"|[A-Za-z_]\w*"
-    r"|\|\||&&|==|!=|<=|>=|<<|>>|[()!~+\-*/%<>&^|]"
+    r"|\|\||&&|==|!=|<=|>=|<<|>>|[()!~+\-*/%<>&^|?:]"
 )
 
 _PP_UNKNOWN_DIRECTIVE = "XCC-PP-0101"
@@ -34,6 +34,7 @@ _PP_INVALID_IF_EXPR = "XCC-PP-0103"
 _PP_INVALID_DIRECTIVE = "XCC-PP-0104"
 _PP_GNU_EXTENSION = "XCC-PP-0105"
 _PP_INVALID_MACRO = "XCC-PP-0201"
+_PP_UNTERMINATED_MACRO = "XCC-PP-0202"
 _PP_INCLUDE_READ_ERROR = "XCC-PP-0301"
 _PP_INCLUDE_CYCLE = "XCC-PP-0302"
 _PREDEFINED_MACROS = (
@@ -644,11 +645,59 @@ class _Preprocessor:
             parsed = None if in_block_comment else _parse_directive(line)
             if parsed is None:
                 location = logical_cursor.current()
+                if _is_active(stack) and not in_block_comment:
+                    all_lines = [line]
+                    text_parts = [line]
+                    inner_stack: list[_ConditionalFrame] = []
+                    expanded = None
+                    while expanded is None:
+                        joined = "".join(text_parts)
+                        try:
+                            expanded = self._expand_line(joined, location)
+                        except PreprocessorError as exc:
+                            if exc.code != _PP_UNTERMINATED_MACRO:
+                                raise
+                            next_idx = line_index + len(all_lines)
+                            if next_idx >= len(lines):
+                                raise
+                            next_line = lines[next_idx]
+                            inner_parsed = _parse_directive(next_line)
+                            if inner_parsed is not None:
+                                inner_name, inner_body = inner_parsed
+                                inner_loc = _SourceLocation(
+                                    logical_cursor.filename,
+                                    logical_cursor.line + len(all_lines),
+                                    logical_cursor.include_level,
+                                )
+                                result = self._handle_conditional(
+                                    inner_name,
+                                    inner_body,
+                                    inner_loc,
+                                    inner_stack,
+                                    base_dir=base_dir,
+                                )
+                                if result is None:
+                                    raise
+                                all_lines.append(next_line)
+                            elif _is_active(inner_stack):
+                                text_parts.append(next_line)
+                                all_lines.append(next_line)
+                            else:
+                                all_lines.append(next_line)
+                    out.append(expanded, location)
+                    for i in range(1, len(all_lines)):
+                        in_block_comment = _scan_block_comment_state(
+                            all_lines[i - 1], in_block_comment
+                        )
+                        logical_cursor.advance()
+                        line_index += 1
+                        out.append(_blank_line(all_lines[i]), logical_cursor.current())
+                    logical_cursor.advance()
+                    in_block_comment = _scan_block_comment_state(all_lines[-1], in_block_comment)
+                    line_index += 1
+                    continue
                 if _is_active(stack):
-                    if in_block_comment:
-                        out.append(line, location)
-                    else:
-                        out.append(self._expand_line(line, location), location)
+                    out.append(line, location)
                 else:
                     out.append(_blank_line(line), location)
                 logical_cursor.advance()
@@ -1946,7 +1995,7 @@ def _parse_macro_invocation(
         location.line,
         1,
         filename=location.filename,
-        code=_PP_INVALID_MACRO,
+        code=_PP_UNTERMINATED_MACRO,
     )
 
 
@@ -2151,6 +2200,68 @@ def _paste_token_pair(
     return pasted
 
 
+def _rewrite_ternary(tokens: list[str]) -> list[str]:
+    """Rewrite C ternary ``A ? B : C`` sequences to Python ``( B if A else C )``."""
+    # First, recursively process parenthesized sub-expressions.
+    processed: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] == "(":
+            depth = 1
+            j = i + 1
+            while j < len(tokens) and depth > 0:
+                if tokens[j] == "(":
+                    depth += 1
+                elif tokens[j] == ")":
+                    depth -= 1
+                j += 1
+            inner = _rewrite_ternary(tokens[i + 1 : j - 1])
+            processed.append("(")
+            processed.extend(inner)
+            processed.append(")")
+            i = j
+        else:
+            processed.append(tokens[i])
+            i += 1
+    tokens = processed
+    # Find the leftmost ``?`` at depth 0 (outside parentheses).
+    question = -1
+    depth = 0
+    for i in range(len(tokens)):
+        if tokens[i] == "(":
+            depth += 1
+        elif tokens[i] == ")":
+            depth -= 1
+        elif tokens[i] == "?" and depth == 0:
+            question = i
+            break
+    if question == -1:
+        return tokens
+    # Find the matching ``:`` by counting nested ``?``/``:`` pairs.
+    colon = -1
+    ternary_depth = 1
+    paren_depth = 0
+    for i in range(question + 1, len(tokens)):
+        if tokens[i] == "(":
+            paren_depth += 1
+        elif tokens[i] == ")":
+            paren_depth -= 1
+        elif paren_depth == 0:
+            if tokens[i] == "?":
+                ternary_depth += 1
+            elif tokens[i] == ":":
+                ternary_depth -= 1
+                if ternary_depth == 0:
+                    colon = i
+                    break
+    if colon == -1:
+        raise ValueError("Invalid token")
+    condition = _rewrite_ternary(tokens[:question])
+    true_branch = _rewrite_ternary(tokens[question + 1 : colon])
+    false_branch = _rewrite_ternary(tokens[colon + 1 :])
+    return ["("] + true_branch + ["if"] + condition + ["else"] + false_branch + [")"]
+
+
 def _translate_expr_to_python(expr: str) -> str:
     tokens = _tokenize_expr(expr)
     tokens = _collapse_function_invocations(tokens)
@@ -2183,6 +2294,7 @@ def _translate_expr_to_python(expr: str) -> str:
             mapped.append("//")
             continue
         mapped.append(token)
+    mapped = _rewrite_ternary(mapped)
     return " ".join(mapped)
 
 
@@ -2417,6 +2529,25 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
         if isinstance(op, ast.GtE):
             return _PPValue(int(left_value >= right_value))
         raise ValueError(f"Unsupported preprocessor comparison operator: {type(op).__name__}")
+    if isinstance(node, ast.IfExp):
+        condition = _eval_pp_node(node.test)
+        if condition.value:
+            result = _eval_pp_node(node.body)
+            try:
+                other = _eval_pp_node(node.orelse)
+                is_unsigned = result.is_unsigned or other.is_unsigned
+            except (ValueError, ZeroDivisionError):
+                is_unsigned = result.is_unsigned
+        else:
+            result = _eval_pp_node(node.orelse)
+            try:
+                other = _eval_pp_node(node.body)
+                is_unsigned = result.is_unsigned or other.is_unsigned
+            except (ValueError, ZeroDivisionError):
+                is_unsigned = result.is_unsigned
+        if is_unsigned:
+            return _PPValue(result.as_unsigned(), True)
+        return result
     raise ValueError(f"Unsupported preprocessor expression node: {type(node).__name__}")
 
 

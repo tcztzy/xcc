@@ -520,7 +520,7 @@ class Lexer:
             return TokenKind.FLOAT_CONST
         if INTEGER_RE.fullmatch(lexeme):
             return TokenKind.INT_CONST
-        raise LexerError("Invalid numeric constant", line, column)
+        return TokenKind.PP_NUMBER
 
     def _read_punctuator(self, line: int, column: int) -> str:
         for punct in PUNCTUATORS_SORTED:

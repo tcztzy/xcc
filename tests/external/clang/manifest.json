@@ -188,9 +188,9 @@
       "upstream": "clang/test/Lexer/ms-extensions.c",
       "fixture": "tests/external/clang/generated/Lexer/ms-extensions.c",
       "expect": "lex",
-      "message_contains": "Invalid numeric constant",
-      "line": 5,
-      "column": 14,
+      "message_contains": "Unexpected character",
+      "line": 56,
+      "column": 74,
       "sha256": "66b5ce9e46bcd33ccc506ed6dadd361e214b0a61ce87ca9b3166e5f492090206"
     },
     {

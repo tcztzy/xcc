@@ -199,10 +199,13 @@ class NumberTests(unittest.TestCase):
             ],
         )
 
-    def test_invalid_numbers(self) -> None:
+    def test_unclassifiable_numbers_produce_pp_number(self) -> None:
+        """Numbers that aren't valid int/float constants produce PP_NUMBER."""
         for text in ["0x", "08", "1e", "1f", "0x1p"]:
-            with self.subTest(text=text), self.assertRaises(LexerError):
-                list(lex(text))
+            with self.subTest(text=text):
+                tokens = list(lex(text))
+                self.assertEqual(tokens[0].kind, TokenKind.PP_NUMBER)
+                self.assertEqual(tokens[0].lexeme, text)
 
     def test_pp_numbers(self) -> None:
         tokens = list(lex_pp("1e+2 1E-2 .1e+2 1abc 0x1p+2", header_names=False))
@@ -268,6 +271,26 @@ class ErrorTests(unittest.TestCase):
         lexer = Lexer("x1234")
         with self.assertRaises(LexerError):
             lexer._read_ucn_escape()
+
+
+    def test_pp_number_version_string(self) -> None:
+        """Version-like pp-numbers (10.12.1) produce PP_NUMBER tokens."""
+        tokens = lex("10.12.1")
+        self.assertEqual(tokens[0].kind, TokenKind.PP_NUMBER)
+        self.assertEqual(tokens[0].lexeme, "10.12.1")
+
+    def test_pp_number_multiple_dots(self) -> None:
+        tokens = lex("1.2.3.4")
+        self.assertEqual(tokens[0].kind, TokenKind.PP_NUMBER)
+        self.assertEqual(tokens[0].lexeme, "1.2.3.4")
+
+    def test_valid_float_still_classified_correctly(self) -> None:
+        tokens = lex("10.12")
+        self.assertEqual(tokens[0].kind, TokenKind.FLOAT_CONST)
+
+    def test_valid_int_still_classified_correctly(self) -> None:
+        tokens = lex("42")
+        self.assertEqual(tokens[0].kind, TokenKind.INT_CONST)
 
 
 if __name__ == "__main__":
