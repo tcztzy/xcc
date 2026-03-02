@@ -2,6 +2,19 @@
 
 This file records implementation progress and validation history.
 
+## 2026-03-02
+
+- **PP**: Added multi-line macro invocation support — `_process_text()` now joins subsequent lines when a function-like macro call spans multiple source lines (catches "Unterminated macro invocation" and retries with joined text); stops before directive lines to avoid swallowing `#if`/`#endif` blocks.
+- **PP**: Fixed `#if` ternary `?:` unsigned promotion — `ast.IfExp` handler now applies C usual arithmetic conversions so `(1 ? -1 : 0U)` is unsigned, matching Clang semantics.
+- **LEX**: Changed `_classify_number()` to return `TokenKind.PP_NUMBER` for unclassifiable pp-numbers (e.g., `10.12.1` in `__attribute__((availability(...)))`) instead of raising `LexerError`.
+- **PA**: Added `_skip_asm_label()` and `_skip_gnu_extensions()` to skip interleaved `__asm("symbol")` / `__attribute__((...))` in any order after function and variable declarators.
+- **PA**: Extended `_skip_type_qualifiers()` to skip `_Nullable`, `_Nonnull`, `_Null_unspecified` clang nullability qualifiers.
+- **PA**: Added `_Float16`, `_Float32`, `_Float64`, `_Float128`, `_Float32x`, `_Float64x` as recognized extension type specifiers with sizes in `_BASE_TYPE_SIZES`.
+- **PA**: Fixed array-size constant evaluator: division uses integer-only arithmetic (`divmod` + sign correction) instead of `int(left / right)`, avoiding `OverflowError`; modulo uses C truncation-toward-zero semantics instead of Python floor remainder.
+- Updated clang fixture `lexer-ms-extensions-i64` manifest entry (first lex error moved from line 5 to line 56 after PP_NUMBER change).
+- Tests: 37 new tests (9 preprocessor, 4 lexer, 24 parser), 1 updated lexer test.
+- Checks: `uv run tox -e py311,lint,type` (1547 tests, 100% coverage, lint clean, type clean), `uv run python scripts/cpython_trial.py` (288/288 pass).
+
 ## 2026-02-28
 
 - Reworked LLVM/Clang fixture sourcing to de-vendor external upstream files: `tests/external/clang/manifest.json` now pins a stable release tag (`llvmorg-22.1.0`), archive URL, archive filename, SHA-256, and strip policy instead of an upstream commit checkout flow.

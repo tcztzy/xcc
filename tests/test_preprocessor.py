@@ -2578,14 +2578,10 @@ class PreprocessorTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_literal)
         self.assertEqual(str(ctx.exception), "Unsupported preprocessor literal type: str")
-        unsupported_expr = ast.IfExp(
-            test=ast.Constant(True),
-            body=ast.Constant(1),
-            orelse=ast.Constant(0),
-        )
+        unsupported_node = ast.Attribute(value=ast.Constant(1), attr="x")
         with self.assertRaises(ValueError) as ctx:
-            _eval_pp_node(unsupported_expr)
-        self.assertEqual(str(ctx.exception), "Unsupported preprocessor expression node: IfExp")
+            _eval_pp_node(unsupported_node)
+        self.assertEqual(str(ctx.exception), "Unsupported preprocessor expression node: Attribute")
 
     def test_eval_node_unsupported_branches(self) -> None:
         self.assertEqual(_eval_node(ast.Constant(True)), 1)
@@ -2707,7 +2703,7 @@ class PreprocessorTests(unittest.TestCase):
         source = "#define F(x) x\n#if F(\nint x;\n#endif\n"
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source(source, filename="if.c")
-        self.assertEqual(ctx.exception.code, "XCC-PP-0201")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0202")
 
     def test_strip_gnu_asm_extensions(self) -> None:
         self.assertEqual(_strip_gnu_asm_extensions(""), "")
@@ -3010,6 +3006,170 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(_eval_node(ast.BoolOp(op=ast.And(), values=[ast.Constant(1), ast.Constant(2)])), 1)
         self.assertEqual(_eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(2)])), 1)
         self.assertEqual(_eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(0)])), 0)
+
+    def test_ternary_if_true(self) -> None:
+        source = "#if 1 ? 1 : 0\nint yes;\n#endif\n"
+        result = preprocess_source(source, filename="ternary.c")
+        self.assertIn("int yes", result.source)
+
+    def test_ternary_if_false(self) -> None:
+        source = "#if 0 ? 1 : 0\nint yes;\n#endif\n"
+        result = preprocess_source(source, filename="ternary.c")
+        self.assertNotIn("int yes", result.source)
+
+    def test_ternary_defined_true(self) -> None:
+        source = "#define X\n#if defined(X) ? 1 : 0\nint yes;\n#endif\n"
+        result = preprocess_source(source, filename="ternary.c")
+        self.assertIn("int yes", result.source)
+
+    def test_ternary_defined_false(self) -> None:
+        source = "#if defined(X) ? 1 : 0\nint yes;\n#endif\n"
+        result = preprocess_source(source, filename="ternary.c")
+        self.assertNotIn("int yes", result.source)
+
+    def test_ternary_nested(self) -> None:
+        source = "#if 1 ? (0 ? 3 : 4) : 5\nint yes;\n#endif\n"
+        result = preprocess_source(source, filename="ternary.c")
+        self.assertIn("int yes", result.source)
+
+    def test_ternary_limits_h_pattern(self) -> None:
+        # Pattern: defined(A) ? defined(B) : !defined(C)
+        # Case 1: A defined, B defined -> true
+        source = "#define A\n#define B\n#if defined(A) ? defined(B) : !defined(C)\nint yes;\n#endif\n"
+        result = preprocess_source(source, filename="ternary.c")
+        self.assertIn("int yes", result.source)
+        # Case 2: A defined, B not defined -> false
+        source = "#define A\n#if defined(A) ? defined(B) : !defined(C)\nint yes;\n#endif\n"
+        result = preprocess_source(source, filename="ternary.c")
+        self.assertNotIn("int yes", result.source)
+        # Case 3: A not defined, C not defined -> true (!defined(C) is true)
+        source = "#if defined(A) ? defined(B) : !defined(C)\nint yes;\n#endif\n"
+        result = preprocess_source(source, filename="ternary.c")
+        self.assertIn("int yes", result.source)
+        # Case 4: A not defined, C defined -> false (!defined(C) is false)
+        source = "#define C\n#if defined(A) ? defined(B) : !defined(C)\nint yes;\n#endif\n"
+        result = preprocess_source(source, filename="ternary.c")
+        self.assertNotIn("int yes", result.source)
+
+    def test_translate_ternary_expr(self) -> None:
+        self.assertEqual(
+            _translate_expr_to_python("1 ? 2 : 3"),
+            "( 2 if 1 else 3 )",
+        )
+
+    def test_translate_nested_ternary_expr(self) -> None:
+        self.assertEqual(
+            _translate_expr_to_python("1 ? 0 ? 3 : 4 : 5"),
+            "( ( 3 if 0 else 4 ) if 1 else 5 )",
+        )
+
+    def test_ternary_missing_colon_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            _translate_expr_to_python("1 ? 2")
+
+    def test_safe_eval_pp_expr_ternary(self) -> None:
+        self.assertEqual(_safe_eval_pp_expr("( 1 if 1 else 0 )"), 1)
+        self.assertEqual(_safe_eval_pp_expr("( 0 if 0 else 1 )"), 1)
+        self.assertEqual(_safe_eval_pp_expr("( 4 if 1 else 5 )"), 4)
+
+    def test_multiline_macro_invocation(self) -> None:
+        source = "#define M(a,b) a+b\nM(1,\n2)\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("1 + 2", result.source)
+
+    def test_multiline_macro_invocation_three_lines(self) -> None:
+        source = "#define F(a,b,c) a+b+c\nF(1,\n2,\n3)\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("1 + 2 + 3", result.source)
+
+    def test_multiline_macro_invocation_preserves_line_count(self) -> None:
+        source = "#define M(a,b) a+b\nM(1,\n2)\nint x;\n"
+        result = preprocess_source(source, filename="t.c")
+        lines = result.source.splitlines(keepends=True)
+        self.assertEqual(len(lines), 4)
+        self.assertIn("int x", lines[3])
+
+    def test_multiline_macro_unterminated_at_eof_raises(self) -> None:
+        source = "#define M(a,b) a+b\nM(1,\n"
+        with self.assertRaises(PreprocessorError):
+            preprocess_source(source, filename="t.c")
+
+    def test_multiline_macro_non_macro_error_propagates(self) -> None:
+        """Errors other than unterminated invocation propagate normally."""
+        source = "#define M(a) a\nM(1,2)\n"
+        with self.assertRaises(PreprocessorError):
+            preprocess_source(source, filename="t.c")
+
+    def test_ternary_unsigned_promotion(self) -> None:
+        """C usual arithmetic conversions: (1 ? -1 : 0U) is unsigned."""
+        # -1 as uint64 is 0xFFFFFFFFFFFFFFFF, so < 0 is false
+        source = "#if (1 ? -1 : 0U) < 0\nyes\n#else\nno\n#endif\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertNotIn("yes", result.source)
+        self.assertIn("no", result.source)
+
+    def test_ternary_both_signed_stays_signed(self) -> None:
+        """When both branches are signed, result stays signed."""
+        source = "#if (1 ? -1 : 0) < 0\nyes\n#else\nno\n#endif\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("yes", result.source)
+
+    def test_ternary_false_branch_unsigned(self) -> None:
+        """Unsigned promotion applies even when false branch is chosen."""
+        source = "#if (0 ? 0U : -1) < 0\nyes\n#else\nno\n#endif\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertNotIn("yes", result.source)
+        self.assertIn("no", result.source)
+
+    def test_multiline_macro_conditional_directive_in_args(self) -> None:
+        """Conditional directives inside macro arguments are processed."""
+        source = "#define M(a) a\nM(\n#if 1\n2\n#endif\n)\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("2", result.source)
+
+    def test_multiline_macro_conditional_if0_in_args(self) -> None:
+        """#if 0 inside macro arguments excludes the body, #else provides it."""
+        source = "#define M(a) a\nM(\n#if 0\nX\n#else\nY\n#endif\n)\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("Y", result.source)
+        self.assertNotIn("X", result.source)
+
+    def test_multiline_macro_ifdef_in_args(self) -> None:
+        """#ifdef inside macro arguments works."""
+        source = "#define FOO\n#define M(a) a\nM(\n#ifdef FOO\n99\n#endif\n)\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("99", result.source)
+
+    def test_multiline_macro_non_conditional_directive_raises(self) -> None:
+        """Non-conditional directives inside macro arguments raise."""
+        source = "#define M(a) a\nM(\n#define X 1\n)\n"
+        with self.assertRaises(PreprocessorError):
+            preprocess_source(source, filename="t.c")
+
+    def test_multiline_macro_if_else_in_args(self) -> None:
+        """#if/#else inside macro arguments selects correct branch."""
+        source = "#define M(a) a\nM(\n#if 0\nBAD\n#else\nGOOD\n#endif\n)\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("GOOD", result.source)
+        self.assertNotIn("BAD", result.source)
+
+    def test_ternary_short_circuit_div_zero(self) -> None:
+        """Division by zero in unselected ternary branch must not raise."""
+        source = "#if 0 ? 1/0 : 1\nyes\n#else\nno\n#endif\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("yes", result.source)
+
+    def test_ternary_short_circuit_false_div_zero(self) -> None:
+        """Division by zero in unselected false branch must not raise."""
+        source = "#if 1 ? 42 : 1/0\nyes\n#else\nno\n#endif\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("yes", result.source)
+
+    def test_multiline_macro_line_comment(self) -> None:
+        """// comment in multi-line macro does not eat subsequent lines."""
+        source = "#define M(a, b) b\nM(1, //c\n2)\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("2", result.source)
 
 
 if __name__ == "__main__":

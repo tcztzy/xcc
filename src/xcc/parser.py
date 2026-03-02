@@ -82,6 +82,15 @@ PAREN_TYPE_NAME_KEYWORDS = (
     | TYPEOF_KEYWORDS
 )
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
+_NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
+_GNU_EXTENSION_TYPES = {
+    "_Float16",
+    "_Float32",
+    "_Float64",
+    "_Float128",
+    "_Float32x",
+    "_Float64x",
+}
 STORAGE_CLASS_KEYWORDS = {"auto", "register", "static", "extern", "typedef"}
 EXTERNAL_STATEMENT_KEYWORDS = {
     "break",
@@ -116,6 +125,12 @@ _BASE_TYPE_SIZES = {
     "double": 8,
     "long double": 16,
     "enum": 4,
+    "_Float16": 2,
+    "_Float32": 4,
+    "_Float64": 8,
+    "_Float128": 16,
+    "_Float32x": 8,
+    "_Float64x": 16,
 }
 _EXTENSION_MARKER = "__extension__"
 StdMode = Literal["c11", "gnu11"]
@@ -389,7 +404,7 @@ class Parser:
                     return False
                 if not ops or ops[0][0] != "fn":
                     return False
-                self._skip_gnu_attributes()
+                self._skip_gnu_extensions()
                 return self._check_punct("{") or self._check_punct(";")
             self._advance()
             self._skip_gnu_attributes()
@@ -398,7 +413,7 @@ class Parser:
             self._advance()
             params, has_prototype, _ = self._parse_params()
             self._expect_punct(")")
-            self._skip_gnu_attributes()
+            self._skip_gnu_extensions()
             if self._check_punct("{") or self._check_punct(";"):
                 return True
             # K&R: declarations follow ')' before '{'.
@@ -436,7 +451,7 @@ class Parser:
             self._expect_punct("(")
             params, has_prototype, is_variadic = self._parse_params()
             self._expect_punct(")")
-            self._skip_gnu_attributes()
+            self._skip_gnu_extensions()
             # Parse K&R-style parameter declarations between ')' and '{'.
             is_knr = not has_prototype and params
             if is_knr and not self._check_punct("{") and not self._check_punct(";"):
@@ -461,7 +476,7 @@ class Parser:
             function_name = str(decl_name)
             assert self._function_def_info is not None
             params, has_prototype, is_variadic = self._function_def_info
-            self._skip_gnu_attributes()
+            self._skip_gnu_extensions()
             function_type = self._build_declarator_type(base_type, declarator_ops)
             # Build the return type from base + all ops except the first (fn) op.
             return_type = self._build_declarator_type(base_type, declarator_ops[1:])
@@ -665,6 +680,16 @@ class Parser:
         token = self._current()
         if token.kind == TokenKind.IDENT:
             assert isinstance(token.lexeme, str)
+            if token.lexeme in _GNU_EXTENSION_TYPES:
+                self._advance()
+                type_spec = TypeSpec(token.lexeme)
+                pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
+                if pointer_depth:
+                    type_spec = self._build_declarator_type(
+                        type_spec,
+                        (POINTER_OP,) * pointer_depth,
+                    )
+                return self._apply_type_qualifiers(type_spec, qualifiers)
             type_spec = self._lookup_typedef(token.lexeme)
             if type_spec is None:
                 raise ParserError(self._unsupported_type_message(context, token), token)
@@ -1496,7 +1521,7 @@ class Parser:
                         self._current(),
                     )
                 self._define_ordinary_type(name, decl_type)
-                self._skip_gnu_attributes()
+                self._skip_gnu_extensions()
                 init: Expr | InitList | None = None
                 if self._check_punct("="):
                     self._advance()
@@ -2257,11 +2282,17 @@ class Parser:
             if expr.type_spec is not None:
                 return self._alignof_type_spec(expr.type_spec)
             return None
-        if isinstance(expr, UnaryExpr) and expr.op in {"+", "-"}:
+        if isinstance(expr, UnaryExpr) and expr.op in {"+", "-", "~", "!"}:
             operand = self._eval_array_size_expr(expr.operand)
             if operand is None:
                 return None
-            return operand if expr.op == "+" else -operand
+            if expr.op == "+":
+                return operand
+            if expr.op == "-":
+                return -operand
+            if expr.op == "~":
+                return ~operand
+            return int(not operand)
         if isinstance(expr, BinaryExpr):
             left = self._eval_array_size_expr(expr.left)
             right = self._eval_array_size_expr(expr.right)
@@ -2271,12 +2302,49 @@ class Parser:
                 return left + right
             if expr.op == "-":
                 return left - right
+            if expr.op == "*":
+                return left * right
+            if expr.op == "/":
+                if right == 0:
+                    return None
+                # C11 truncation toward zero: use integer-only arithmetic
+                # to avoid OverflowError from float conversion on large ints.
+                q, r = divmod(abs(left), abs(right))
+                return q if (left >= 0) == (right >= 0) else -q
+            if expr.op == "%":
+                if right == 0:
+                    return None
+                # C11 remainder: left - trunc(left/right) * right
+                q, _ = divmod(abs(left), abs(right))
+                if (left >= 0) != (right >= 0):
+                    q = -q
+                return left - q * right
             if expr.op == "<<":
                 return None if right < 0 else left << right
+            if expr.op == ">>":
+                return None if right < 0 else left >> right
+            if expr.op == "<":
+                return int(left < right)
+            if expr.op == ">":
+                return int(left > right)
+            if expr.op == "<=":
+                return int(left <= right)
+            if expr.op == ">=":
+                return int(left >= right)
             if expr.op == "==":
                 return int(left == right)
             if expr.op == "!=":
                 return int(left != right)
+            if expr.op == "&":
+                return left & right
+            if expr.op == "^":
+                return left ^ right
+            if expr.op == "|":
+                return left | right
+            if expr.op == "&&":
+                return int(bool(left) and bool(right))
+            if expr.op == "||":
+                return int(bool(left) or bool(right))
         if isinstance(expr, ConditionalExpr):
             condition = self._eval_array_size_expr(expr.condition)
             if condition is None:
@@ -2820,6 +2888,11 @@ class Parser:
         found, _ = self._consume_gnu_attributes()
         return found
 
+    def _skip_gnu_extensions(self) -> None:
+        """Skip interleaved __attribute__ and __asm in any order."""
+        while self._skip_gnu_attributes() or self._skip_asm_label():
+            pass
+
     def _consume_gnu_attributes(self) -> tuple[bool, bool]:
         found = False
         has_overloadable = False
@@ -2859,10 +2932,41 @@ class Parser:
     def _skip_type_qualifiers(self, *, allow_atomic: bool = False) -> bool:
         qualifiers = TYPE_QUALIFIER_KEYWORDS | ({"_Atomic"} if allow_atomic else set())
         found = False
-        while self._current().kind == TokenKind.KEYWORD and self._current().lexeme in qualifiers:
-            found = True
-            self._advance()
+        while True:
+            if self._current().kind == TokenKind.KEYWORD and self._current().lexeme in qualifiers:
+                found = True
+                self._advance()
+                continue
+            if (
+                self._current().kind == TokenKind.IDENT
+                and self._current().lexeme in _NULLABLE_QUALIFIERS
+            ):
+                found = True
+                self._advance()
+                continue
+            break
         return found
+
+    def _skip_asm_label(self) -> bool:
+        token = self._current()
+        if token.kind != TokenKind.IDENT or token.lexeme not in ("__asm__", "__asm", "asm"):
+            return False
+        start = self._advance()
+        if not self._check_punct("("):
+            return True
+        self._advance()
+        depth = 1
+        while depth > 0:
+            tok = self._current()
+            if tok.kind == TokenKind.EOF:
+                raise ParserError("Expected ')'", start)
+            if tok.kind == TokenKind.PUNCTUATOR:
+                if tok.lexeme == "(":
+                    depth += 1
+                elif tok.lexeme == ")":
+                    depth -= 1
+            self._advance()
+        return True
 
     def _consume_decl_specifiers(self) -> DeclSpecInfo:
         storage_class: str | None = None
