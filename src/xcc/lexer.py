@@ -61,6 +61,7 @@ KEYWORDS = {
     "_Static_assert",
     "_Thread_local",
     "typeof",
+    "typeof_unqual",
     "__typeof__",
     "__extension__",
 }

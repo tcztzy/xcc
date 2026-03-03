@@ -50,9 +50,10 @@ class LexerTokenTests(unittest.TestCase):
         self.assertEqual(tokens[1].kind, TokenKind.IDENT)
 
     def test_typeof_keywords(self) -> None:
-        tokens = list(lex("typeof __typeof__"))
+        tokens = list(lex("typeof typeof_unqual __typeof__"))
         self.assertEqual(tokens[0].kind, TokenKind.KEYWORD)
         self.assertEqual(tokens[1].kind, TokenKind.KEYWORD)
+        self.assertEqual(tokens[2].kind, TokenKind.KEYWORD)
 
     def test_comments_and_whitespace(self) -> None:
         source = "int /*c*/\n// line\nmain() {return 0;}"

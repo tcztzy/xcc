@@ -403,10 +403,9 @@
       "upstream": "clang/test/C/C23/n2927_2.c",
       "fixture": "tests/external/clang/generated/C/C23/n2927_2.c",
       "expect": "parse",
-      "message_contains": "Expression cannot start with keyword",
+      "message_contains": "typeof is a GNU extension",
       "line": 8,
-      "column": 17,
-      "xfail_reason": "Expected failure until C23 typeof_unqual support is implemented.",
+      "column": 5,
       "sha256": "2e53ab58eb56c295f0c62505f38b171cf9d05b69d324e15b5e5cd20270be551c"
     },
     {

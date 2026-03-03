@@ -68,7 +68,7 @@ ASSIGNMENT_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "
 INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
 SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | FLOATING_TYPE_KEYWORDS | {"void"}
-TYPEOF_KEYWORDS = {"typeof", "__typeof__"}
+TYPEOF_KEYWORDS = {"typeof", "typeof_unqual", "__typeof__"}
 PAREN_TYPE_NAME_KEYWORDS = (
     SIMPLE_TYPE_SPEC_KEYWORDS
     | {
@@ -1266,6 +1266,7 @@ class Parser:
             or self._check_keyword("_Atomic")
             or self._check_keyword("_Complex")
             or self._check_keyword("typeof")
+            or self._check_keyword("typeof_unqual")
             or self._check_keyword("__typeof__")
             or self._check_keyword("enum")
             or self._check_keyword("struct")

@@ -5431,6 +5431,11 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
+    def test_typeof_unqual_expression_resolves_variable_type(self) -> None:
+        unit = parse(list(lex("int f(int x) { typeof_unqual(x) y = x + 5; return y; }")), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
     def test_typeof_type_name_resolves(self) -> None:
         unit = parse(list(lex("int f(void) { typeof(int) y = 42; return y; }")), std="gnu11")
         sema = analyze(unit, std="gnu11")
