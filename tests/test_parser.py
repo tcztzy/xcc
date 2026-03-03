@@ -2932,6 +2932,18 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int"))
 
+    def test_typeof_unqual_type_name_declaration(self) -> None:
+        unit = parse(list(lex("int main(void){typeof_unqual(int*) p; return 0;}")), std="gnu11")
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+
+    def test_typeof_unqual_expression_declaration(self) -> None:
+        unit = parse(list(lex("int main(void){int x; typeof_unqual(x) y; return 0;}")), std="gnu11")
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec.name, "typeof")
+
     def test_typeof_type_name_with_trailing_pointer(self) -> None:
         unit = parse(list(lex("int main(void){typeof(int) *p; return 0;}")), std="gnu11")
         stmt = _body(unit.functions[0]).statements[0]
@@ -2941,6 +2953,11 @@ class ParserTests(unittest.TestCase):
     def test_typeof_rejected_in_c11(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){typeof(int) x; return 0;}")), std="c11")
+        self.assertEqual(ctx.exception.message, "typeof is a GNU extension")
+
+    def test_typeof_unqual_rejected_in_c11(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){typeof_unqual(int) x; return 0;}")), std="c11")
         self.assertEqual(ctx.exception.message, "typeof is a GNU extension")
 
     def test_generic_selection_expression(self) -> None:

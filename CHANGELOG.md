@@ -2,6 +2,14 @@
 
 This file records implementation progress and validation history.
 
+## 2026-03-04
+
+- **PA/LEX**: Added `typeof_unqual` keyword recognition and parser support in GNU mode by reusing the existing `typeof` type-spec parsing path.
+- **PA**: Added parser regressions for `typeof_unqual` type-name/expression declarations and c11-mode rejection diagnostics.
+- **SEMA**: Added semantic regression coverage for `typeof_unqual(expr)` declaration typing in GNU mode.
+- **Clang fixtures**: Unblocked `c23-n2927-2-long-long` by updating expected parse diagnostics to the stabilized `typeof`-extension rejection path and removing its stale `xfail_reason`.
+- Checks: `uv run tox -e py311,lint,type` and `uv run tox -e clang_suite` (pass).
+
 ## 2026-03-02
 
 - **PP**: Added multi-line macro invocation support — `_process_text()` now joins subsequent lines when a function-like macro call spans multiple source lines (catches "Unterminated macro invocation" and retries with joined text); stops before directive lines to avoid swallowing `#if`/`#endif` blocks.
