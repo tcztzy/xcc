@@ -8,6 +8,9 @@ This file records implementation progress and validation history.
 - **PA**: Added parser regressions for `typeof_unqual` type-name/expression declarations and c11-mode rejection diagnostics.
 - **SEMA**: Added semantic regression coverage for `typeof_unqual(expr)` declaration typing in GNU mode.
 - **Clang fixtures**: Unblocked `c23-n2927-2-long-long` by updating expected parse diagnostics to the stabilized `typeof`-extension rejection path and removing its stale `xfail_reason`.
+- **PA**: Allowed trailing `_Complex` after floating base types (`float`, `double`, `long double`) while keeping integer `_Complex` combinations rejected.
+- **PA tests**: Replaced trailing floating `_Complex` rejection expectations with parse-success regressions for declarations and `sizeof(type-name)` use.
+- **Clang fixtures**: Unblocked `sema-warn-absolute-value-long-long` by advancing it from parse failure (`_Complex`) to the expected sema diagnostic and removing its stale `xfail_reason`.
 - Checks: `uv run tox -e py311,lint,type` and `uv run tox -e clang_suite` (pass).
 
 ## 2026-03-02

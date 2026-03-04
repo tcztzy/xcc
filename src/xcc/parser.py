@@ -735,7 +735,7 @@ class Parser:
         if token.lexeme in FLOATING_TYPE_KEYWORDS:
             assert isinstance(token.lexeme, str)
             type_name = str(token.lexeme)
-            self._reject_optional_complex_specifier(context)
+            self._reject_optional_complex_specifier(context, allow=True)
             pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
             return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
         if token.lexeme == "_Bool":
@@ -750,7 +750,10 @@ class Parser:
             if type_name == "long" and self._check_keyword("double"):
                 self._advance()
                 type_name = "long double"
-            self._reject_optional_complex_specifier(context)
+            self._reject_optional_complex_specifier(
+                context,
+                allow=type_name == "long double",
+            )
             pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
             return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
         if token.lexeme == "enum":
@@ -976,9 +979,11 @@ class Parser:
             typeof_expr=type_spec.typeof_expr,
         )
 
-    def _reject_optional_complex_specifier(self, context: str) -> None:
+    def _reject_optional_complex_specifier(self, context: str, *, allow: bool = False) -> None:
         if self._check_keyword("_Complex"):
             token = self._advance()
+            if allow:
+                return
             raise ParserError(self._unsupported_type_message(context, token), token)
 
     def _parse_integer_type_spec(

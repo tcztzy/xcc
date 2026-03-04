@@ -154,10 +154,11 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(func.return_type, TypeSpec("double"))
         self.assertEqual(func.params, [Param(TypeSpec("float"), "x"), Param(TypeSpec("long double"), "y")])
 
-    def test_complex_specifier_is_rejected_after_floating_base_type(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex("float _Complex cabsf(float _Complex x);")))
-        self.assertEqual(ctx.exception.message, "Unsupported declaration type: '_Complex'")
+    def test_complex_specifier_is_accepted_after_floating_base_type(self) -> None:
+        unit = parse(list(lex("float _Complex cabsf(float _Complex x, long double _Complex y);")))
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("float"))
+        self.assertEqual(func.params, [Param(TypeSpec("float"), "x"), Param(TypeSpec("long double"), "y")])
 
     def test_complex_specifier_requires_floating_base_type(self) -> None:
         with self.assertRaises(ParserError):
@@ -1336,10 +1337,11 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("int main(void){ return sizeof(_Complex int); }")))
         self.assertEqual(ctx.exception.message, "Unsupported type name: '_Complex'")
 
-    def test_unsupported_trailing_complex_type_uses_type_name_context_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex("int main(void){ return sizeof(float _Complex); }")))
-        self.assertEqual(ctx.exception.message, "Unsupported type name: '_Complex'")
+    def test_trailing_complex_type_name_parses_for_sizeof(self) -> None:
+        unit = parse(list(lex("int main(void){ return sizeof(float _Complex) + sizeof(long double _Complex); }")))
+        return_stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(return_stmt, ReturnStmt)
+        self.assertIsInstance(return_stmt.value, BinaryExpr)
 
     def test_unknown_identifier_type_uses_declaration_context_diagnostic(self) -> None:
         with self.assertRaises(ParserError) as ctx:
