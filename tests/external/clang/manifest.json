@@ -345,7 +345,6 @@
       "fixture": "tests/external/clang/generated/Sema/warn-absolute-value.c",
       "expect": "sema",
       "message_contains": "Undeclared function: __builtin_abs",
-      "xfail_reason": "Expected failure until _Complex type parsing and related sema paths are implemented.",
       "sha256": "4c1a85bf35e67df77a794374c136291fba89657a6b5729ec2f8e9b299f7e415b"
     },
     {
