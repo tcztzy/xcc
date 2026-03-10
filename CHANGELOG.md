@@ -2,6 +2,14 @@
 
 This file records implementation progress and validation history.
 
+## 2026-03-10
+
+- **Driver**: Made XCC frontend validation part of the default driver path, removed the public `XCC_VALIDATE_FRONTEND` gate, added `--backend={auto,xcc,clang}`, `--no-backend-fallback`, and first-class `-S`, `-c`, and `-o` handling.
+- **CG**: Added an experimental native macOS `arm64` backend that lowers directly from the typed AST to AArch64 assembly for a small scalar subset and reports stable `codegen` diagnostics (`XCC-CG-*`) for unsupported native constructs and toolchain failures.
+- **Tests**: Added driver regressions for strict-native rejection and auto fallback on unsupported constructs, plus a `native_smoke` suite that compiles, links, and runs ten macOS `arm64` smoke programs.
+- **Release contract**: Promoted the package to preview version `0.2.0a1`, added Apache-2.0 packaging metadata, documented the supported/experimental backend matrix, and added a minimal CI workflow plus a pinned CPython real-file compile-only trial script.
+- Checks: `uv run python -m unittest tests.test_cc_driver tests.test_cli tests.test_native_backend -v` (pass).
+
 ## 2026-03-04
 
 - **PA/LEX**: Added `typeof_unqual` keyword recognition and parser support in GNU mode by reusing the existing `typeof` type-spec parsing path.

@@ -10,7 +10,13 @@ from xcc.options import FrontendOptions
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the XCC frontend pipeline on C source input.")
+    parser = argparse.ArgumentParser(
+        description="Run the XCC frontend pipeline on C source input.",
+        epilog=(
+            "Driver mode also supports --backend={auto,xcc,clang}, "
+            "--no-backend-fallback, -S, -c, and -o when compiling C inputs."
+        ),
+    )
     parser.add_argument(
         "--frontend",
         action="store_true",

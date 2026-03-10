@@ -1,13 +1,40 @@
 [project]
 name = "xcc"
-version = "0.1.0"
-description = "A C11 compiler in Python targeting CPython."
+version = "0.2.0a1"
+description = "Preview C11 compiler frontend with an experimental macOS arm64 native backend."
 readme = "README.md"
 authors = [
     { name = "Tang Ziya", email = "tcztzy@gmail.com" }
 ]
 requires-python = ">=3.11"
 dependencies = []
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["c", "c11", "compiler", "macos", "arm64"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: C",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Software Development :: Compilers",
+]
+
+[project.urls]
+Homepage = "https://github.com/tcztzy/xcc"
+Repository = "https://github.com/tcztzy/xcc"
+Issues = "https://github.com/tcztzy/xcc/issues"
+Changelog = "https://github.com/tcztzy/xcc/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/tcztzy/xcc/tree/main/docs"
 
 [project.scripts]
 xcc = "xcc:main"
@@ -72,7 +99,7 @@ omit = [
 
 [tool.tox]
 requires = ["tox>=4.34.1", "tox-docker>=5.0.0", "tox-uv>=1.29.0"]
-env_list = ["py311", "py312", "py313", "py313t", "py314", "py314t", "pypy311", "clang_suite", "lint", "type"]
+env_list = ["py311", "py312", "py313", "py313t", "py314", "py314t", "pypy311", "clang_suite", "native_smoke", "lint", "type"]
 skip_missing_interpreters = true
 
 [tool.tox.env_run_base]
@@ -97,6 +124,11 @@ commands = [["ty", "check", "src"]]
 description = "Run the curated LLVM/Clang fixture subset"
 package = "skip"
 commands = [["python", "-m", "unittest", "-v", "tests.test_clang_suite"]]
+
+[tool.tox.env.native_smoke]
+description = "Run experimental macOS arm64 native backend smoke tests"
+package = "skip"
+commands = [["python", "-m", "unittest", "-v", "tests.test_native_backend"]]
 
 [tool.tox.env.docker_glibc]
 description = "Run unit tests inside a glibc container via tox-docker"

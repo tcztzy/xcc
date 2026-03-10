@@ -1,25 +1,24 @@
 # Back End
 
-## IR design
+## Preview design
 
-- Use an explicit control flow graph with typed values.
-- Keep lowering passes small and fully testable.
-- Track provenance from AST to IR for better diagnostics.
+- The preview backend does not introduce a general IR.
+- Native code generation lowers directly from the typed/sema AST to AArch64 assembly for macOS `arm64`.
+- Unsupported constructs fail with stable `codegen` diagnostics in the `XCC-CG-*` family.
 
-## Code generation
+## Native code generation
 
-- Emit objects compatible with the target platform ABI.
-- Prefer deterministic register allocation and instruction selection.
-- Implement a stable calling convention layer per target.
+- Supported preview subset is intentionally narrow: scalar locals and parameters, file-scope scalar globals, literals, identifier references, scalar unary and binary operators, assignments, blocks, `return`, `if`/`else`, loops, and direct calls with scalar arguments and returns.
+- The backend emits assembly only. `clang` performs assembly, object creation, and final linking.
+- `--backend=xcc` is strict. `--backend=auto` falls back to `clang` when native code generation is unsupported.
 
-## Object emission and linking
+## Not shipped yet
 
-- Emit standard object files for the platform (ELF, Mach-O, or COFF).
-- For macOS targets, emit Mach-O objects and link with the system linker.
-- For ELF targets, link with mold as the initial supported linker.
-- Linux/ELF builds are executed in Docker to isolate the toolchain.
+- Standalone Mach-O object emission.
+- Native Linux/ELF code generation.
+- A general optimization pipeline or backend IR.
 
 ## Debuggability
 
-- Emit optional debug information behind a flag.
-- Provide line mapping for diagnostics and profiling.
+- Backend failures report a `codegen` diagnostic with a stable `XCC-CG-*` code.
+- Frontend validation always runs before backend selection.

@@ -12,9 +12,10 @@
 
 ## Test layers
 
-- Unit tests for lexer, parser, semantic analysis, and IR passes.
+- Unit tests for lexer, parser, semantic analysis, driver behavior, and native backend rejection paths.
 - Golden tests for diagnostics and error messages.
-- End to end tests that compile CPython components and compare outputs.
+- Native backend smoke tests for macOS `arm64`.
+- CPython snippet trials and pinned real-file frontend trials.
 - Regression tests for reported bugs.
 - Curated upstream LLVM/Clang fixture tests for cross-checking accepted and rejected C inputs.
 
@@ -33,6 +34,16 @@
 - Use `tox` to run tests across supported interpreters and configurations.
 - Use `coverage` to gate line and branch coverage thresholds.
   - Coverage is enforced at 100% for line and branch coverage.
+
+Common commands:
+
+- `tox -e py311`
+- `tox -e lint`
+- `tox -e type`
+- `tox -e clang_suite`
+- `tox -e native_smoke`
+- `python scripts/cpython_trial.py`
+- `python scripts/cpython_file_trial.py`
 
 ## Docker (Linux/ELF)
 

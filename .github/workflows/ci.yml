@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install dev dependencies
+        run: uv sync --dev
+      - name: Unit tests
+        run: uv run tox -e py311
+      - name: Lint
+        run: uv run tox -e lint
+      - name: Type check
+        run: uv run tox -e type
+      - name: Clang fixture suite
+        run: uv run tox -e clang_suite
+      - name: Build package
+        run: uv build

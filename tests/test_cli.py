@@ -90,6 +90,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertIn("usage:", stdout)
+        self.assertIn("--backend={auto,xcc,clang}", stdout)
 
     def test_main_missing_input(self) -> None:
         code, stdout, stderr = self._run_main([])
@@ -106,7 +107,7 @@ class CliTests(unittest.TestCase):
                 code, stdout, stderr = self._run_main([str(path), "--unknown"])
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
-        self.assertEqual(stderr, "")
+        self.assertIn("falling back to clang backend", stderr)
         run.assert_called_once_with(("clang", str(path), "--unknown"), check=False)
 
     def test_main_unknown_option_without_c_input_delegates_to_driver(self) -> None:

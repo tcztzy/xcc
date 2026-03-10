@@ -17,11 +17,11 @@ Apple silicon and Intel Macs use little-endian data format, so no byte-order con
 
 ## Object format and linking
 
-macOS uses Mach-O for object files and executables. The initial macOS backend emits Mach-O and links with the system linker.
+macOS uses Mach-O for object files and executables. In this preview, XCC emits AArch64 assembly and relies on the platform `clang` toolchain to assemble and link Mach-O outputs. A standalone Mach-O object writer is planned but not shipped yet.
 
 ## Linux/ELF targets
 
-Linux/ELF targets use mold and glibc or musl, and are built inside Docker on macOS hosts.
+Linux/ELF targets remain a planned backend target. Current Docker workflows are used for validation, not native ELF code generation.
 
 ## References
 

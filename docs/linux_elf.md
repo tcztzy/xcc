@@ -6,7 +6,7 @@ Linux/ELF is a secondary target used to validate glibc and musl compatibility an
 
 ## Linker
 
-The initial ELF linker is mold.
+The planned ELF linker is mold.
 
 ## C library targets
 
@@ -15,7 +15,7 @@ The initial ELF linker is mold.
 
 ## Build environment
 
-Linux/ELF builds are executed in Docker containers on macOS hosts to keep the toolchain isolated and reproducible.
+Linux/ELF builds are executed in Docker containers on macOS hosts to keep the toolchain isolated and reproducible. The current preview does not ship a native ELF backend.
 
 ## Docker workflow
 

@@ -16,7 +16,15 @@ class Diagnostic:
         return f"{self.filename}:{self.line}:{self.column}: {self.stage}: {self.message}"
 
 
-class FrontendError(ValueError):
+class XccError(ValueError):
     def __init__(self, diagnostic: Diagnostic) -> None:
         super().__init__(str(diagnostic))
         self.diagnostic = diagnostic
+
+
+class FrontendError(XccError):
+    pass
+
+
+class CodegenError(XccError):
+    pass
