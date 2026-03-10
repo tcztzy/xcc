@@ -4,7 +4,14 @@ XCC is a C compiler written in modern Python (CPython and PyPy, 3.11+). The firs
 
 ## Status
 
-Research and scaffolding. The codebase is being prepared with strict quality and testing requirements.
+Preview release candidate.
+
+- The frontend is the default entry point for every C compile.
+- `--backend=auto` prefers the experimental native macOS `arm64` backend and falls back to `clang` when native code generation is unsupported.
+- `--backend=xcc` keeps the native backend strict and experimental.
+- `--backend=clang` always delegates code generation and linking to `clang` after XCC frontend validation.
+
+This preview does not ship a standalone Mach-O writer, a native Linux/ELF backend, or a full CPython tree build.
 
 ## Motivation
 
@@ -16,8 +23,8 @@ CPython depends on a C compiler with predictable semantics and diagnostics. XCC 
 - Compile the CPython source tree without modifying CPython sources.
 - Zero third party runtime dependencies.
 - Full test coverage with strict linting and type checking.
-- Link with the mold linker for ELF targets.
-- Support glibc and musl as the initial C library targets.
+- Support a documented preview path for macOS `arm64`.
+- Keep Linux/ELF validation available as a future backend target.
 
 ## Non-goals (initial)
 
@@ -31,9 +38,10 @@ CPython depends on a C compiler with predictable semantics and diagnostics. XCC 
 2. Preprocessing and macro expansion.
 3. Lexing and parsing into an AST.
 4. Semantic analysis and type checking.
-5. IR construction and optimization.
-6. Code generation and object emission.
-7. Linker integration and final artifacts.
+5. Experimental direct lowering from sema AST to AArch64 assembly on macOS `arm64`.
+6. Assembly, object creation, and linking via the platform `clang` toolchain.
+
+Planned follow-on work includes broader native code generation and standalone object emission.
 
 ## Design principles
 
@@ -59,8 +67,16 @@ This is a target list for the initial milestones. It will evolve as CPython comp
 
 ## Targets
 
-- Native host: macOS `arm64` with Mach-O output and the system linker.
-- Linux/ELF: built in Docker, linked with mold, validated against glibc and musl.
+- Supported preview path: XCC frontend validation plus `clang`-backed compile/link.
+- Experimental preview path: native AArch64 assembly generation for single-file macOS `arm64` programs in a narrow scalar subset.
+- Planned later: native Mach-O object emission and Linux/ELF backend support.
+
+## CLI preview
+
+- `xcc source.c` runs the frontend, tries the experimental native backend on macOS `arm64`, and falls back to `clang` when needed.
+- `xcc --backend=xcc -S source.c -o -` prints native AArch64 assembly and fails on unsupported constructs.
+- `xcc --backend=clang -c source.c -o source.o` validates with XCC and always compiles with `clang`.
+- `xcc --no-backend-fallback source.c` keeps `auto` mode strict for backend diagnostics.
 
 ## Quality gates
 
@@ -83,6 +99,10 @@ This is a target list for the initial milestones. It will evolve as CPython comp
 - Run type checks: `tox -e type`
 - Run tests: `tox -e py311`
 - Run curated Clang fixtures: `tox -e clang_suite`
+- Run native smoke tests: `tox -e native_smoke`
+- Run CPython snippet trial: `python scripts/cpython_trial.py`
+- Run pinned CPython real-file trial: `python scripts/cpython_file_trial.py`
+- Build preview artifacts: `uv build`
 - Run tests in Linux containers: `tox -e docker_glibc` or `tox -e docker_musl`
 - Build Linux/ELF image (glibc): `./scripts/docker-build.sh glibc`
 - Build Linux/ELF image (musl): `./scripts/docker-build.sh musl`
