@@ -2,6 +2,8 @@
 import argparse
 import hashlib
 import json
+import signal
+import sys
 import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -10,9 +12,26 @@ from urllib import parse
 from urllib import request
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from xcc.clang_suite import (  # noqa: E402
+    SKIP_REASON_KEY,
+    baseline_skip_reason,
+    case_id_from_upstream_path,
+    fixture_path_from_upstream_path,
+    infer_expectation_from_source,
+    is_clang_test_case_path,
+    matches_expectation,
+)
+from xcc.frontend import FrontendError, compile_source  # noqa: E402
+from xcc.options import FrontendOptions  # noqa: E402
+
 DEFAULT_MANIFEST = ROOT / "tests/external/clang/manifest.json"
 DEFAULT_CACHE_DIR = ROOT / ".cache/external-artifacts"
 CASE_REQUIRED_KEYS = ("id", "upstream", "fixture", "expect", "sha256")
+CASE_TIMEOUT_SECONDS = 2.0
 UPSTREAM_REQUIRED_KEYS = (
     "repository",
     "release_tag",
@@ -22,6 +41,10 @@ UPSTREAM_REQUIRED_KEYS = (
     "license",
     "strip_components",
 )
+
+
+class _CaseTimeoutError(TimeoutError):
+    pass
 
 
 def _sha256(data: bytes) -> str:
@@ -108,6 +131,7 @@ def _ensure_archive(
     upstream: dict[str, Any],
     cache_dir: Path,
     archive_path_override: Path | None,
+    force_download: bool,
 ) -> Path:
     expected_sha = upstream["archive_sha256"]
     if archive_path_override is not None:
@@ -116,7 +140,7 @@ def _ensure_archive(
             raise ValueError(f"archive file does not exist: {archive_path}")
     else:
         archive_path = (cache_dir / upstream["archive_name"]).resolve()
-        if archive_path.is_file() and _sha256_file(archive_path) == expected_sha:
+        if not force_download and archive_path.is_file() and _sha256_file(archive_path) == expected_sha:
             return archive_path
         if archive_path.is_file():
             archive_path.unlink()
@@ -246,6 +270,122 @@ def _run_check(*, payload: dict[str, Any], archive_path: Path) -> int:
     return 0
 
 
+def _evaluate_case(data: bytes, *, fixture_path: str, std: str) -> tuple[str, str | None]:
+    def _raise_case_timeout(signum: int, frame: object) -> None:
+        raise _CaseTimeoutError(f"fixture exceeded {CASE_TIMEOUT_SECONDS:.1f}s")
+
+    try:
+        source = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return "decode-error", f"utf-8 decode failed: {exc.reason}"
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    try:
+        signal.signal(signal.SIGALRM, _raise_case_timeout)
+        signal.setitimer(signal.ITIMER_REAL, CASE_TIMEOUT_SECONDS)
+        compile_source(
+            source,
+            filename=str(ROOT / fixture_path),
+            options=FrontendOptions(std=std),
+        )
+    except _CaseTimeoutError as exc:
+        return "timeout", str(exc)
+    except FrontendError as exc:
+        diagnostic = exc.diagnostic
+        return diagnostic.stage, diagnostic.message
+    except Exception as exc:  # pragma: no cover - baseline generation fallback
+        return exc.__class__.__name__.lower(), str(exc)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        signal.signal(signal.SIGALRM, previous_handler)
+    return "ok", None
+
+
+def _build_full_suite_cases(
+    *,
+    archive_path: Path,
+    payload: dict[str, Any],
+    std: str,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    cases: list[dict[str, Any]] = []
+    counters = {
+        "total": 0,
+        "matched": 0,
+        "skipped": 0,
+        "ok": 0,
+        "error": 0,
+    }
+    strip_components = payload["upstream"]["strip_components"]
+    with tarfile.open(archive_path, mode="r:*") as archive:
+        member_index = _build_member_index(archive, strip_components=strip_components)
+        for upstream_path in sorted(member_index):
+            if not is_clang_test_case_path(upstream_path):
+                continue
+            counters["total"] += 1
+            if counters["total"] % 250 == 0:
+                print(
+                    "baselining clang fixtures: "
+                    f"{counters['total']} cases scanned, "
+                    f"{counters['matched']} active, "
+                    f"{counters['skipped']} skipped",
+                    flush=True,
+                )
+            data = _read_member_bytes(
+                archive,
+                member_index=member_index,
+                upstream_path=upstream_path,
+                case_id=upstream_path,
+            )
+            fixture_path = fixture_path_from_upstream_path(upstream_path)
+            actual, detail = _evaluate_case(data, fixture_path=fixture_path, std=std)
+            try:
+                source = data.decode("utf-8")
+            except UnicodeDecodeError:
+                expectation = "ok"
+            else:
+                expectation = infer_expectation_from_source(source)
+            case = {
+                "id": case_id_from_upstream_path(upstream_path),
+                "upstream": upstream_path,
+                "fixture": fixture_path,
+                "expect": expectation,
+                "sha256": _sha256(data),
+            }
+            if matches_expectation(expectation, actual):
+                counters["matched"] += 1
+                counters[expectation] += 1
+            else:
+                counters["skipped"] += 1
+                case[SKIP_REASON_KEY] = baseline_skip_reason(expectation, actual, detail)
+            cases.append(case)
+    return cases, counters
+
+
+def _rewrite_full_suite_baseline(
+    *,
+    payload: dict[str, Any],
+    archive_path: Path,
+    manifest_path: Path,
+    std: str,
+) -> int:
+    cases, counters = _build_full_suite_cases(archive_path=archive_path, payload=payload, std=std)
+    payload = {"upstream": payload["upstream"], "cases": cases}
+    manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    _materialize_external_cases(
+        payload=payload,
+        archive_path=archive_path,
+        update_sha=False,
+        clean_external=True,
+        manifest_path=manifest_path,
+    )
+    print(
+        "rewrote clang manifest from scratch: "
+        f"{counters['total']} cases, "
+        f"{counters['matched']} active, "
+        f"{counters['skipped']} skipped"
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Materialize curated LLVM/Clang fixtures from a pinned release archive."
@@ -268,6 +408,11 @@ def main() -> int:
         help="use this local archive instead of downloading from manifest upstream.archive_url",
     )
     parser.add_argument(
+        "--force-download",
+        action="store_true",
+        help="discard any cached archive and download the pinned release tarball again",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="verify local fixtures and checksums against the pinned release archive",
@@ -282,7 +427,22 @@ def main() -> int:
         action="store_true",
         help="remove untracked files under tests/external/clang/generated not in the manifest",
     )
+    parser.add_argument(
+        "--rebuild-full-suite-baseline",
+        action="store_true",
+        help="rewrite manifest.json from all pinned clang/test/*.c fixtures and baseline current xcc mismatches as skips",
+    )
+    parser.add_argument(
+        "--std",
+        default="c11",
+        choices=("c11", "gnu11"),
+        help="frontend language mode used while baselining the full suite",
+    )
     args = parser.parse_args()
+    if args.check and args.rebuild_full_suite_baseline:
+        raise ValueError("--check cannot be combined with --rebuild-full-suite-baseline")
+    if args.update_sha and args.rebuild_full_suite_baseline:
+        raise ValueError("--update-sha cannot be combined with --rebuild-full-suite-baseline")
 
     manifest_path = args.manifest.resolve()
     payload = _read_manifest(manifest_path)
@@ -290,7 +450,15 @@ def main() -> int:
         upstream=payload["upstream"],
         cache_dir=args.cache_dir.resolve(),
         archive_path_override=args.archive_path,
+        force_download=args.force_download,
     )
+    if args.rebuild_full_suite_baseline:
+        return _rewrite_full_suite_baseline(
+            payload=payload,
+            archive_path=archive_path,
+            manifest_path=manifest_path,
+            std=args.std,
+        )
     if args.check:
         return _run_check(payload=payload, archive_path=archive_path)
     _materialize_external_cases(

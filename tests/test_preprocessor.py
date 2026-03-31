@@ -2632,6 +2632,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(_blank_line("abc\n"), "\n")
         self.assertEqual(_blank_line("abc"), "")
         self.assertEqual(_parse_directive("int x;\n"), None)
+        self.assertEqual(_parse_directive("# 1\n"), None)
         self.assertEqual(_parse_directive("#define X 1\n"), ("define", " X 1"))
         self.assertEqual(_tokenize_macro_replacement(""), [])
         self.assertEqual(_expand_object_like_macros("A B", {"A": "1", "B": "2"}), "1 2")

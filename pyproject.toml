@@ -121,8 +121,9 @@ package = "skip"
 commands = [["ty", "check", "src"]]
 
 [tool.tox.env.clang_suite]
-description = "Run the curated LLVM/Clang fixture subset"
+description = "Run the pinned LLVM/Clang full-suite baseline"
 package = "skip"
+set_env = { XCC_RUN_CLANG_SUITE = "1" }
 commands = [["python", "-m", "unittest", "-v", "tests.test_clang_suite"]]
 
 [tool.tox.env.native_smoke]

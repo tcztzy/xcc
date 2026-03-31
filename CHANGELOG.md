@@ -4,6 +4,11 @@ This file records implementation progress and validation history.
 
 ## 2026-03-31
 
+- **Clang fixtures**: Rebuilt the pinned LLVM/Clang fixture baseline from a fresh archive download instead of relying on the prior curated subset; `scripts/sync_clang_fixtures.py` now supports `--force-download` and `--rebuild-full-suite-baseline`, rewrites `tests/external/clang/manifest.json` from scratch, materializes all pinned `clang/test/**/*.c` fixtures, and records `skip_reason` for cases that do not yet match current `xcc` behavior.
+- **Clang suite**: Added shared full-suite helpers in `src/xcc/clang_suite.py`, updated `tests/test_clang_suite.py` to require explicit `XCC_RUN_CLANG_SUITE=1`, and documented the new baseline workflow in `tests/external/clang/README.md`; the rebuilt manifest currently contains `10313` cases (`4030` active, `6283` skipped).
+- **Tests**: Added focused helper coverage for the new baseline ID/classification logic plus parser and preprocessor regressions that keep default `py311` coverage at `100%` even though the full Clang baseline now runs only in `tox -e clang_suite`.
+- Checks: `.venv/bin/python scripts/sync_clang_fixtures.py --rebuild-full-suite-baseline --force-download` (pass); `.venv/bin/tox -e py311` (pass, 100% line/branch coverage); `.venv/bin/tox -e clang_suite` (pass, `OK (skipped=6283)`); `.venv/bin/ruff check src` (pass); `.venv/bin/ty check src` (pass).
+
 - **PA/SEMA**: Added GNU builtin integer type support for `__int128_t` and `__uint128_t` so Apple SDK declarations no longer fail with `Unknown declaration type name` during CPython real-file frontend trials.
 - **Types**: Added 128-bit builtin scalar entries to the shared type model, parser size/alignment tables, and semantic integer rank/limit/canonicalization helpers.
 - **Tests**: Added focused parser and sema regressions for `__int128_t` / `__uint128_t` function signatures plus `sizeof`/`alignof` helper coverage for `__uint128_t`.
