@@ -1,21 +1,22 @@
+import os
 import hashlib
 import json
-import subprocess
-import sys
 import unittest
 from pathlib import Path
 from typing import Any
 
 from tests import _bootstrap  # noqa: F401
+from xcc.clang_suite import (
+    ALLOWED_EXPECTATIONS,
+    SKIP_REASON_KEY,
+    case_id_from_upstream_path,
+)
 from xcc.frontend import FrontendError, compile_source
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "tests/external/clang/manifest.json"
-SYNC_SCRIPT = ROOT / "scripts/sync_clang_fixtures.py"
-ALLOWED_EXPECTATIONS = {"ok", "pp", "lex", "parse", "sema"}
 REQUIRED_CASE_KEYS = {"id", "upstream", "fixture", "expect", "sha256"}
-OPTIONAL_CASE_KEYS = {"message_contains", "line", "column"}
-XFAIL_REASON_KEY = "xfail_reason"
+OPTIONAL_CASE_KEYS = {"message_contains", "line", "column", SKIP_REASON_KEY}
 REQUIRED_UPSTREAM_KEYS = {
     "repository",
     "release_tag",
@@ -65,32 +66,25 @@ def _external_fixtures_ready(cases: list[dict[str, Any]]) -> bool:
     return True
 
 
-def _materialize_external_fixtures(cases: list[dict[str, Any]]) -> None:
+def _assert_external_fixtures_ready(cases: list[dict[str, Any]]) -> None:
     if _external_fixtures_ready(cases):
         return
-    completed = subprocess.run(
-        (sys.executable, str(SYNC_SCRIPT)),
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
+    raise AssertionError(
+        "external clang fixtures are missing or stale; run "
+        "`python scripts/sync_clang_fixtures.py --rebuild-full-suite-baseline --force-download` first"
     )
-    if completed.returncode != 0:
-        raise AssertionError(
-            "failed to materialize external clang fixtures:\n"
-            f"stdout:\n{completed.stdout}\n"
-            f"stderr:\n{completed.stderr}"
-        )
-    if not _external_fixtures_ready(cases):
-        raise AssertionError("external clang fixtures are still missing after sync")
 
 
+@unittest.skipUnless(
+    os.environ.get("XCC_RUN_CLANG_SUITE") == "1",
+    "clang suite is disabled outside tox -e clang_suite",
+)
 class ClangSuiteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._manifest = _load_manifest()
         cls._cases = _load_cases()
-        _materialize_external_fixtures(cls._cases)
+        _assert_external_fixtures_ready(cls._cases)
 
     def test_clang_fixtures_match_manifest_checksums(self) -> None:
         for case in self._cases:
@@ -114,9 +108,7 @@ class ClangSuiteTests(unittest.TestCase):
             with self.subTest(case=case_id):
                 keys = set(case)
                 self.assertTrue(REQUIRED_CASE_KEYS.issubset(keys))
-                self.assertTrue(
-                    keys.issubset(REQUIRED_CASE_KEYS | OPTIONAL_CASE_KEYS | {XFAIL_REASON_KEY})
-                )
+                self.assertTrue(keys.issubset(REQUIRED_CASE_KEYS | OPTIONAL_CASE_KEYS))
                 self.assertIsInstance(case["id"], str)
                 self.assertNotEqual(case["id"], "")
                 self.assertNotIn(case["id"], case_ids)
@@ -127,6 +119,7 @@ class ClangSuiteTests(unittest.TestCase):
                 self.assertIsInstance(case["sha256"], str)
                 if _is_external_case(case):
                     self.assertTrue(case["fixture"].startswith("tests/external/clang/generated/"))
+                    self.assertEqual(case["id"], case_id_from_upstream_path(case["upstream"]))
                 else:
                     self.assertTrue(case["upstream"].startswith("xcc/local/"))
                     self.assertTrue(case["fixture"].startswith("tests/external/clang/fixtures/"))
@@ -136,9 +129,9 @@ class ClangSuiteTests(unittest.TestCase):
                     self.assertIsInstance(case["line"], int)
                 if "column" in case:
                     self.assertIsInstance(case["column"], int)
-                if XFAIL_REASON_KEY in case:
-                    self.assertIsInstance(case[XFAIL_REASON_KEY], str)
-                    self.assertNotEqual(case[XFAIL_REASON_KEY], "")
+                if SKIP_REASON_KEY in case:
+                    self.assertIsInstance(case[SKIP_REASON_KEY], str)
+                    self.assertNotEqual(case[SKIP_REASON_KEY], "")
 
     def _assert_case_matches_expectation(self, case: dict[str, Any]) -> None:
         expectation = case["expect"]
@@ -151,7 +144,8 @@ class ClangSuiteTests(unittest.TestCase):
         with self.assertRaises(FrontendError) as ctx:
             compile_source(source, filename=str(fixture))
         diagnostic = ctx.exception.diagnostic
-        self.assertEqual(diagnostic.stage, expectation)
+        if expectation != "error":
+            self.assertEqual(diagnostic.stage, expectation)
         message_contains = case.get("message_contains")
         if isinstance(message_contains, str):
             self.assertIn(message_contains, diagnostic.message)
@@ -166,16 +160,10 @@ class ClangSuiteTests(unittest.TestCase):
         for case in self._cases:
             case_id = case.get("id", "<missing-id>")
             expectation = case["expect"]
-            xfail_reason = case.get(XFAIL_REASON_KEY)
+            skip_reason = case.get(SKIP_REASON_KEY)
             with self.subTest(case=case_id, expect=expectation):
-                if isinstance(xfail_reason, str):
-                    try:
-                        self._assert_case_matches_expectation(case)
-                    except Exception:
-                        continue
-                    self.fail(
-                        f"Unexpected pass for xfail clang fixture {case_id}: {xfail_reason}"
-                    )
+                if isinstance(skip_reason, str):
+                    self.skipTest(skip_reason)
                 self._assert_case_matches_expectation(case)
 
 

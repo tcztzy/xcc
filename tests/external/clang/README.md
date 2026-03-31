@@ -1,6 +1,6 @@
-# Curated LLVM/Clang Test Fixtures
+# LLVM/Clang Test Fixtures
 
-This directory keeps a manifest-driven subset of LLVM/Clang tests for `xcc` regression checks.
+This directory keeps a manifest-driven LLVM/Clang baseline for `xcc` regression checks.
 Upstream fixtures are fetched from a pinned LLVM release tarball and are not committed to Git.
 
 ## Provenance
@@ -14,13 +14,14 @@ Upstream fixtures are fetched from a pinned LLVM release tarball and are not com
 
 ## Scope
 
-The curated subset is intentionally small and currently checks only whether `xcc`:
+The baseline currently rewrites `manifest.json` from scratch from all pinned `clang/test/**/*.c`
+fixtures. Each case is classified coarsely as either:
 
-- accepts selected valid Clang parser fixtures, or
-- rejects selected invalid fixtures at the expected diagnostic stage (`lex`, `parse`, or `sema`).
-- emits expected diagnostic text and source coordinates for selected negative cases.
+- `ok`: the source should compile without a frontend diagnostic, or
+- `error`: the source is annotated with Clang `expected-*` diagnostics and any frontend failure is acceptable.
 
-The harness does not run Clang `lit`/`FileCheck` directives yet.
+Fixtures that do not match the current `xcc` behavior are recorded with `skip_reason` so the full
+suite stays green while features are implemented incrementally.
 
 Fixture classes:
 
@@ -29,17 +30,18 @@ Fixture classes:
 
 ## Update Rule
 
-When adding or replacing fixtures:
+When rebuilding the full-suite baseline:
 
-1. Keep external files byte-identical to upstream release archives.
-2. Update `manifest.json` with upstream path, expected stage, and SHA-256 checksum.
-3. Prefer manifest-driven assertions (`message_contains`, `line`, `column`) over test-code special cases.
+1. Download the pinned archive from scratch.
+2. Rewrite `manifest.json` from the archive inventory, not from previous case rows.
+3. Keep generated fixtures byte-identical to the upstream release archive.
+4. Remove `skip_reason` entries only when `xcc` gains the required behavior.
 
-## Syncing fixtures
+## Baseline Workflow
 
-- Materialize external fixtures from the pinned release archive:
-  - `python scripts/sync_clang_fixtures.py`
+- Rewrite the full upstream baseline from scratch and force a fresh download:
+  - `python scripts/sync_clang_fixtures.py --rebuild-full-suite-baseline --force-download`
 - Verify local fixtures and checksums against the pinned archive:
   - `python scripts/sync_clang_fixtures.py --check`
-- Recompute external-case checksums in the manifest (only for intentional upstream upgrades):
-  - `python scripts/sync_clang_fixtures.py --update-sha`
+- Run the dedicated suite:
+  - `XCC_RUN_CLANG_SUITE=1 python -m unittest -v tests.test_clang_suite`

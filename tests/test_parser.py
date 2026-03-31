@@ -3855,6 +3855,12 @@ class ParserTests(unittest.TestCase):
             parser._eval_array_size_expr(BinaryExpr("!=", IntLiteral("1"), IntLiteral("2"))),
             1,
         )
+        self.assertEqual(
+            parser._eval_array_size_expr(
+                GenericExpr(IntLiteral("0L"), ((None, IntLiteral("2")),))
+            ),
+            2,
+        )
         self.assertIsNone(
             parser._eval_array_size_expr(
                 ConditionalExpr(Identifier("x"), IntLiteral("1"), IntLiteral("2"))
@@ -3870,6 +3876,10 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(
             parser._decay_type_spec(TypeSpec("int", declarator_ops=(("arr", 2),))),
             TypeSpec("int", declarator_ops=(("ptr", 0),)),
+        )
+        self.assertEqual(
+            parser._unqualified_type_spec(TypeSpec("int", qualifiers=("const",))),
+            TypeSpec("int"),
         )
         self.assertEqual(parser._alignof_type_spec(TypeSpec("int", pointer_depth=1)), 8)
         self.assertEqual(parser._alignof_type_spec(TypeSpec("int", array_lengths=(2,))), 4)
@@ -4559,6 +4569,10 @@ class ParserTests(unittest.TestCase):
             std="gnu11",
         )
         self.assertEqual(len(unit.functions), 1)
+
+    def test_looks_like_function_rejects_initialized_prototype_declaration(self) -> None:
+        parser = Parser(list(lex("int f(void) = 1;")))
+        self.assertFalse(parser._looks_like_function())
 
     def test_knr_missing_declarator_in_declaration(self) -> None:
         with self.assertRaises(ParserError):
