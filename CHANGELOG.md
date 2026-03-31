@@ -2,6 +2,14 @@
 
 This file records implementation progress and validation history.
 
+## 2026-03-31
+
+- **PA/SEMA**: Added GNU builtin integer type support for `__int128_t` and `__uint128_t` so Apple SDK declarations no longer fail with `Unknown declaration type name` during CPython real-file frontend trials.
+- **Types**: Added 128-bit builtin scalar entries to the shared type model, parser size/alignment tables, and semantic integer rank/limit/canonicalization helpers.
+- **Tests**: Added focused parser and sema regressions for `__int128_t` / `__uint128_t` function signatures plus `sizeof`/`alignof` helper coverage for `__uint128_t`.
+- Checks: `PYTHONPATH=src .venv/bin/python -m unittest tests.test_parser.ParserTests.test_int128_t_function_signature tests.test_parser.ParserTests.test_uint128_t_function_signature tests.test_sema.SemaTests.test_int128_t_function_signature tests.test_sema.SemaTests.test_uint128_t_function_signature tests.test_sema.SemaTests.test_uint128_t_type_helpers -q` (pass); `.venv/bin/python scripts/cpython_file_trial.py --case Programs/python.c --case Parser/token.c --allow-failures` (advanced past `__uint128_t`, now fails on a later GNU attribute declaration shape in Apple SDK headers); `.venv/bin/tox -e py311,lint,type` (pass).
+- Next target: teach the parser to skip/accept the remaining anonymous GNU `__attribute__` declaration forms emitted by Clang/Darwin headers so `Programs/python.c` and `Parser/token.c` can progress beyond the current `Expected identifier before ';'` failure in `mach/arm/_structs.h`.
+
 ## 2026-03-10
 
 - **Driver**: Made XCC frontend validation part of the default driver path, removed the public `XCC_VALIDATE_FRONTEND` gate, added `--backend={auto,xcc,clang}`, `--no-backend-fallback`, and first-class `-S`, `-c`, and `-o` handling.
