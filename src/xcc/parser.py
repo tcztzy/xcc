@@ -90,6 +90,8 @@ _GNU_EXTENSION_TYPES = {
     "_Float128",
     "_Float32x",
     "_Float64x",
+    "__int128_t",
+    "__uint128_t",
 }
 STORAGE_CLASS_KEYWORDS = {"auto", "register", "static", "extern", "typedef"}
 EXTERNAL_STATEMENT_KEYWORDS = {
@@ -121,6 +123,8 @@ _BASE_TYPE_SIZES = {
     "unsigned long": 8,
     "long long": 8,
     "unsigned long long": 8,
+    "__int128_t": 16,
+    "__uint128_t": 16,
     "float": 4,
     "double": 8,
     "long double": 16,

@@ -55,12 +55,14 @@ from xcc.types import (
     DOUBLE,
     FLOAT,
     INT,
+    INT128,
     LLONG,
     LONG,
     LONGDOUBLE,
     SHORT,
     UCHAR,
     UINT,
+    UINT128,
     ULLONG,
     ULONG,
     USHORT,
@@ -84,6 +86,8 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ULONG), "unsigned long")
         self.assertEqual(str(LLONG), "long long")
         self.assertEqual(str(ULLONG), "unsigned long long")
+        self.assertEqual(str(INT128), "__int128_t")
+        self.assertEqual(str(UINT128), "__uint128_t")
         self.assertEqual(str(CHAR), "char")
         self.assertEqual(str(UCHAR), "unsigned char")
         self.assertEqual(str(BOOL), "_Bool")
@@ -1125,6 +1129,27 @@ class SemaTests(unittest.TestCase):
         func = sema.functions["id"]
         self.assertIs(func.return_type, ULLONG)
         self.assertIs(func.locals["x"].type_, ULLONG)
+
+    def test_int128_t_function_signature(self) -> None:
+        source = "__int128_t id(__int128_t x){return x;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit)
+        func = sema.functions["id"]
+        self.assertIs(func.return_type, INT128)
+        self.assertIs(func.locals["x"].type_, INT128)
+
+    def test_uint128_t_function_signature(self) -> None:
+        source = "__uint128_t id(__uint128_t x){return x;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit)
+        func = sema.functions["id"]
+        self.assertIs(func.return_type, UINT128)
+        self.assertIs(func.locals["x"].type_, UINT128)
+
+    def test_uint128_t_type_helpers(self) -> None:
+        analyzer = Analyzer()
+        self.assertEqual(analyzer._sizeof_type(UINT128), 16)
+        self.assertEqual(analyzer._alignof_type(UINT128), 16)
 
     def test_char_literal_typemap(self) -> None:
         unit = parse(list(lex("int main(){return 'a';}")))

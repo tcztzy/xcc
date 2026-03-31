@@ -148,6 +148,18 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(func.return_type, TypeSpec("unsigned long long"))
         self.assertEqual(func.params, [Param(TypeSpec("unsigned long long"), "x")])
 
+    def test_int128_t_function_signature(self) -> None:
+        unit = parse(list(lex("__int128_t id(__int128_t x){return x;}")), std="gnu11")
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("__int128_t"))
+        self.assertEqual(func.params, [Param(TypeSpec("__int128_t"), "x")])
+
+    def test_uint128_t_function_signature(self) -> None:
+        unit = parse(list(lex("__uint128_t id(__uint128_t x){return x;}")), std="gnu11")
+        func = unit.functions[0]
+        self.assertEqual(func.return_type, TypeSpec("__uint128_t"))
+        self.assertEqual(func.params, [Param(TypeSpec("__uint128_t"), "x")])
+
     def test_floating_function_signature(self) -> None:
         unit = parse(list(lex("double f(float x, long double y){return x;}")))
         func = unit.functions[0]

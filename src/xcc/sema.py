@@ -62,12 +62,14 @@ from xcc.types import (
     DOUBLE,
     FLOAT,
     INT,
+    INT128,
     LLONG,
     LONG,
     LONGDOUBLE,
     SHORT,
     UCHAR,
     UINT,
+    UINT128,
     ULLONG,
     ULONG,
     USHORT,
@@ -91,6 +93,8 @@ _BASE_TYPE_SIZES = {
     "unsigned long": 8,
     "long long": 8,
     "unsigned long long": 8,
+    "__int128_t": 16,
+    "__uint128_t": 16,
     "float": 4,
     "double": 8,
     "long double": 16,
@@ -115,11 +119,13 @@ _SIGNED_INTEGER_TYPE_LIMITS = {
     INT: (-(1 << 31), (1 << 31) - 1),
     LONG: (-(1 << 63), (1 << 63) - 1),
     LLONG: (-(1 << 63), (1 << 63) - 1),
+    INT128: (-(1 << 127), (1 << 127) - 1),
 }
 _UNSIGNED_INTEGER_TYPE_LIMITS = {
     UINT: (1 << 32) - 1,
     ULONG: (1 << 64) - 1,
     ULLONG: (1 << 64) - 1,
+    UINT128: (1 << 128) - 1,
 }
 _INTEGER_PROMOTION_TYPES = {
     BOOL.name: INT,
@@ -140,12 +146,15 @@ _INTEGER_TYPE_RANKS = {
     ULONG.name: 5,
     LLONG.name: 6,
     ULLONG.name: 6,
+    INT128.name: 7,
+    UINT128.name: 7,
 }
-_SIGNED_INTEGER_NAMES = {CHAR.name, SHORT.name, INT.name, LONG.name, LLONG.name}
+_SIGNED_INTEGER_NAMES = {CHAR.name, SHORT.name, INT.name, LONG.name, LLONG.name, INT128.name}
 _UNSIGNED_COUNTERPARTS = {
     INT.name: UINT,
     LONG.name: ULONG,
     LLONG.name: ULLONG,
+    INT128.name: UINT128,
 }
 _CANONICAL_INTEGER_TYPES = {
     BOOL.name: BOOL,
@@ -159,6 +168,8 @@ _CANONICAL_INTEGER_TYPES = {
     ULONG.name: ULONG,
     LLONG.name: LLONG,
     ULLONG.name: ULLONG,
+    INT128.name: INT128,
+    UINT128.name: UINT128,
 }
 _DECIMAL_LITERAL_CANDIDATES: dict[str, tuple[Type, ...]] = {
     "": (INT, LONG, LLONG),
@@ -905,6 +916,10 @@ class Analyzer:
             return LLONG
         if type_spec.name == "unsigned long long" and is_unqualified_scalar:
             return ULLONG
+        if type_spec.name == "__int128_t" and is_unqualified_scalar:
+            return INT128
+        if type_spec.name == "__uint128_t" and is_unqualified_scalar:
+            return UINT128
         if type_spec.name == "float" and is_unqualified_scalar:
             return FLOAT
         if type_spec.name == "double" and is_unqualified_scalar:
@@ -1178,6 +1193,8 @@ class Analyzer:
             ULONG.name,
             LLONG.name,
             ULLONG.name,
+            INT128.name,
+            UINT128.name,
             CHAR.name,
             UCHAR.name,
             BOOL.name,
