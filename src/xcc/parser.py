@@ -1469,6 +1469,7 @@ class Parser:
             and self._current().lexeme in _IGNORED_IDENT_TYPE_QUALIFIERS
         )
         base_type = self._parse_type_spec(parse_pointer_depth=not is_typedef)
+        self._skip_decl_attributes()
         if self._check_punct(";"):
             self._reject_invalid_alignment_context(
                 decl_specs.alignment,

@@ -109,6 +109,18 @@ class FrontendTests(unittest.TestCase):
         self.assertEqual(result.unit.functions[0].name, "foo")
         self.assertEqual(result.unit.functions[1].name, "f")
 
+    def test_compile_source_accepts_tag_only_record_definition_with_trailing_attributes(
+        self,
+    ) -> None:
+        result = compile_source(
+            'struct Tagged { int value; } __attribute__((btf_decl_tag("tag1")));\n',
+            filename="attrs.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        declaration = result.unit.declarations[0]
+        self.assertEqual(declaration.type_spec.record_tag, "Tagged")
+        self.assertIsNone(declaration.name)
+
     def test_compile_source_rejects_gnu_asm_in_c11(self) -> None:
         with self.assertRaises(FrontendError) as ctx:
             compile_source('asm("INST r1, 0");\n', filename="asm.c", options=FrontendOptions(std="c11"))

@@ -2,6 +2,13 @@
 
 This file records implementation progress and validation history.
 
+## 2026-04-01
+
+- **PA**: Fixed the concrete Clang-suite blocker `Expected identifier before ';'` for tag-only `struct` / `union` declarations that end with trailing GNU/MS declaration attributes but no declarator, for example `union U {} __attribute__((aligned(16)));`. The parser now skips those trailing declaration attributes before applying the existing tag-only declaration path, without relaxing ordinary missing-declarator diagnostics like `int __attribute__((unused));`.
+- **Tests**: Added focused parser regressions for file-scope and block-scope tagged record definitions with trailing GNU attributes plus a frontend regression that compiles a tag-only record definition carrying a trailing `btf_decl_tag` attribute.
+- **Clang suite**: Removed stale `skip_reason` entries from 28 upstream cases now matched by the frontend, including `clang/test/CIR/CodeGen/empty-union.c`, `clang/test/CIR/CodeGen/union.c`, multiple `clang/test/CodeGen/bpf-attr-preserve-access-index-*.c` fixtures, and `clang/test/Index/availability.c`. One newly exposed warning-only fixture (`clang/test/Sema/bpf-attr-preserve-static-offset-warns-nonbpf.c`) is now explicitly baseline-skipped because `xcc` still treats unknown attributes as `ok` instead of emitting warning diagnostics, for a net reduction from `6257` skipped / `4056` active to `6230` skipped / `4083` active.
+- Checks: `./.venv/bin/python -m unittest tests.test_parser.ParserTests.test_file_scope_record_definition_accepts_trailing_gnu_attributes_without_declarator tests.test_parser.ParserTests.test_block_scope_record_definition_accepts_trailing_gnu_attributes_without_declarator tests.test_frontend.FrontendTests.test_compile_source_accepts_tag_only_record_definition_with_trailing_attributes -q` (pass); `./.venv/bin/tox -e py311,lint,type` (pass, 100% line/branch coverage); `./.venv/bin/tox -e clang_suite` (pass, `OK (skipped=6230)`).
+
 ## 2026-03-31
 
 - **Clang fixtures**: Rebuilt the pinned LLVM/Clang fixture baseline from a fresh archive download instead of relying on the prior curated subset; `scripts/sync_clang_fixtures.py` now supports `--force-download` and `--rebuild-full-suite-baseline`, rewrites `tests/external/clang/manifest.json` from scratch, materializes all pinned `clang/test/**/*.c` fixtures, and records `skip_reason` for cases that do not yet match current `xcc` behavior.
