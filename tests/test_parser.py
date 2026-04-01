@@ -1412,6 +1412,42 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("int;")))
         self.assertEqual(ctx.exception.message, "Expected identifier before ';'")
 
+    def test_file_scope_record_definition_accepts_trailing_gnu_attributes_without_declarator(
+        self,
+    ) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "union EmptyAligned {} __attribute__((aligned(16)))"
+                    ' __attribute__((btf_decl_tag("tag1")));'
+                )
+            )
+        )
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertIsNone(declaration.name)
+        self.assertEqual(declaration.type_spec.name, "union")
+        self.assertEqual(declaration.type_spec.record_tag, "EmptyAligned")
+        self.assertTrue(declaration.type_spec.has_record_body)
+
+    def test_block_scope_record_definition_accepts_trailing_gnu_attributes_without_declarator(
+        self,
+    ) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "void f(void){ struct Local { int value; }"
+                    " __attribute__((aligned(16))); }"
+                )
+            )
+        )
+        declaration = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertIsNone(declaration.name)
+        self.assertEqual(declaration.type_spec.name, "struct")
+        self.assertEqual(declaration.type_spec.record_tag, "Local")
+        self.assertTrue(declaration.type_spec.has_record_body)
+
     def test_declarator_rejects_missing_identifier_before_comma(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(void){ int ,x; }")))
