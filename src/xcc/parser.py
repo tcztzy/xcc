@@ -1298,6 +1298,8 @@ class Parser:
         token = self._current()
         if token.kind != TokenKind.IDENT or not isinstance(token.lexeme, str):
             return False
+        if token.lexeme == "__thread":
+            return True
         return self._is_typedef_name(token.lexeme)
 
     def _parse_if_stmt(self) -> IfStmt:
@@ -2989,41 +2991,41 @@ class Parser:
         while True:
             # Skip leading/interleaved GNU __attribute__ specifiers
             self._skip_gnu_attributes()
-            if self._current().kind != TokenKind.KEYWORD:
+            current = self._current()
+            if current.kind == TokenKind.KEYWORD:
+                lexeme = str(current.lexeme)
+            elif current.kind == TokenKind.IDENT and current.lexeme == "__thread":
+                lexeme = "_Thread_local"
+            else:
                 break
-            lexeme = str(self._current().lexeme)
             if lexeme in STORAGE_CLASS_KEYWORDS:
                 if storage_class is not None:
-                    raise ParserError(
-                        f"Duplicate storage class specifier: '{lexeme}'", self._current()
-                    )
+                    raise ParserError(f"Duplicate storage class specifier: '{lexeme}'", current)
                 storage_class = cast(StorageClass, lexeme)
-                storage_class_token = self._current()
+                storage_class_token = current
                 self._advance()
                 continue
             if lexeme == "_Thread_local":
                 if is_thread_local:
-                    raise ParserError(
-                        "Duplicate thread-local specifier: '_Thread_local'", self._current()
-                    )
+                    raise ParserError("Duplicate thread-local specifier: '_Thread_local'", current)
                 is_thread_local = True
                 self._advance()
                 continue
             if lexeme == "inline":
                 if is_inline:
-                    raise ParserError("Duplicate function specifier: 'inline'", self._current())
+                    raise ParserError("Duplicate function specifier: 'inline'", current)
                 is_inline = True
                 self._advance()
                 continue
             if lexeme == "_Noreturn":
                 if is_noreturn:
-                    raise ParserError("Duplicate function specifier: '_Noreturn'", self._current())
+                    raise ParserError("Duplicate function specifier: '_Noreturn'", current)
                 is_noreturn = True
                 self._advance()
                 continue
             if lexeme == "_Alignas":
                 if alignment_token is None:
-                    alignment_token = self._current()
+                    alignment_token = current
                 current_alignment = self._consume_alignas_specifier()
                 if alignment is None or current_alignment > alignment:
                     alignment = current_alignment

@@ -1152,6 +1152,20 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(declaration.type_spec, TypeSpec("int"))
         self.assertEqual(declaration.name, "g")
 
+    def test_gnu_thread_local_file_scope_declaration(self) -> None:
+        unit = parse(list(lex("__thread int g;")))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.type_spec, TypeSpec("int"))
+        self.assertEqual(declaration.name, "g")
+
+    def test_gnu_thread_local_block_scope_declaration(self) -> None:
+        unit = parse(list(lex("int f(void){__thread static int g; return g;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int"))
+        self.assertEqual(stmt.name, "g")
+
     def test_alignas_constant_expression_declaration(self) -> None:
         unit = parse(list(lex("int main(void){_Alignas(16) int x; return x;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -3226,6 +3240,10 @@ class ParserTests(unittest.TestCase):
             ParserError, "Duplicate thread-local specifier: '_Thread_local'"
         ):
             parse(list(lex("_Thread_local _Thread_local int x;")))
+        with self.assertRaisesRegex(
+            ParserError, "Duplicate thread-local specifier: '_Thread_local'"
+        ):
+            parse(list(lex("__thread _Thread_local int x;")))
         with self.assertRaisesRegex(ParserError, "Duplicate function specifier: 'inline'"):
             parse(list(lex("inline inline int f(void);")))
         with self.assertRaisesRegex(ParserError, "Duplicate function specifier: '_Noreturn'"):
