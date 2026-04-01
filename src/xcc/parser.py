@@ -86,6 +86,13 @@ TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 _NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
 _MS_DECLSPEC_KEYWORD = "__declspec"
+_MS_CALLING_CONVENTION_IDENTIFIERS = {
+    "__cdecl",
+    "__stdcall",
+    "__fastcall",
+    "__thiscall",
+    "__vectorcall",
+}
 _GNU_EXTENSION_TYPES = {
     "_Float16",
     "_Float32",
@@ -404,6 +411,7 @@ class Parser:
                 return False
             self._parse_type_spec()
             self._skip_decl_attributes()
+            self._skip_calling_convention_identifiers()
             if self._current().kind != TokenKind.IDENT:
                 # Complex declarator case (e.g. function returning function pointer)
                 name, ops = self._parse_declarator(allow_abstract=False)
@@ -450,6 +458,7 @@ class Parser:
         # Simple: bare IDENT (possibly followed by GNU attributes) then '('.
         # Complex: starts with '*' or '(' (e.g. function returning function pointer).
         self._skip_decl_attributes()
+        self._skip_calling_convention_identifiers()
         if self._current().kind == TokenKind.IDENT:
             # Simple case: NAME ( params )
             name_token = self._expect(TokenKind.IDENT)
@@ -3005,6 +3014,16 @@ class Parser:
             and token.lexeme == _MS_DECLSPEC_KEYWORD
             and self._peek_punct("(")
         )
+
+    def _skip_calling_convention_identifiers(self) -> bool:
+        found = False
+        while (
+            self._current().kind == TokenKind.IDENT
+            and self._current().lexeme in _MS_CALLING_CONVENTION_IDENTIFIERS
+        ):
+            self._advance()
+            found = True
+        return found
 
     def _skip_type_name_attributes(self, *, allow_gnu_attributes: bool) -> bool:
         found = False
