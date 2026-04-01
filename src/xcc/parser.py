@@ -1298,7 +1298,7 @@ class Parser:
         token = self._current()
         if token.kind != TokenKind.IDENT or not isinstance(token.lexeme, str):
             return False
-        if token.lexeme == "__thread":
+        if token.lexeme in {"__thread", "__inline", "__inline__"}:
             return True
         return self._is_typedef_name(token.lexeme)
 
@@ -2994,8 +2994,12 @@ class Parser:
             current = self._current()
             if current.kind == TokenKind.KEYWORD:
                 lexeme = str(current.lexeme)
-            elif current.kind == TokenKind.IDENT and current.lexeme == "__thread":
-                lexeme = "_Thread_local"
+            elif current.kind == TokenKind.IDENT and current.lexeme in {
+                "__thread",
+                "__inline",
+                "__inline__",
+            }:
+                lexeme = "_Thread_local" if current.lexeme == "__thread" else "inline"
             else:
                 break
             if lexeme in STORAGE_CLASS_KEYWORDS:

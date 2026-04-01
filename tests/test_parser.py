@@ -3043,6 +3043,20 @@ class ParserTests(unittest.TestCase):
         self.assertTrue(func.is_inline)
         self.assertTrue(func.is_noreturn)
 
+    def test_gnu_inline_function_specifier_is_recorded(self) -> None:
+        unit = parse(list(lex("static __inline__ _Noreturn int f(void);")))
+        func = unit.functions[0]
+        self.assertEqual(func.storage_class, "static")
+        self.assertTrue(func.is_inline)
+        self.assertTrue(func.is_noreturn)
+
+    def test_gnu_inline_block_scope_function_declaration(self) -> None:
+        unit = parse(list(lex("int main(void){ __inline int f(void); return 0; }")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("fn", ((), False)),)))
+        self.assertEqual(stmt.name, "f")
+
     def test_decl_stmt_storage_class_is_recorded(self) -> None:
         unit = parse(list(lex("extern int g;")))
         decl = unit.declarations[0]
@@ -3111,6 +3125,14 @@ class ParserTests(unittest.TestCase):
     def test_typedef_rejects_function_specifier(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("typedef inline int T;")))
+        self.assertEqual(
+            ctx.exception.message,
+            "Invalid declaration specifier for typedef: 'inline'",
+        )
+
+    def test_gnu_inline_typedef_rejects_function_specifier(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("typedef __inline__ int T;")))
         self.assertEqual(
             ctx.exception.message,
             "Invalid declaration specifier for typedef: 'inline'",
@@ -3246,6 +3268,8 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("__thread _Thread_local int x;")))
         with self.assertRaisesRegex(ParserError, "Duplicate function specifier: 'inline'"):
             parse(list(lex("inline inline int f(void);")))
+        with self.assertRaisesRegex(ParserError, "Duplicate function specifier: 'inline'"):
+            parse(list(lex("__inline inline int f(void);")))
         with self.assertRaisesRegex(ParserError, "Duplicate function specifier: '_Noreturn'"):
             parse(list(lex("_Noreturn _Noreturn int f(void);")))
         with self.assertRaisesRegex(ParserError, "Duplicate type qualifier: 'volatile'"):
