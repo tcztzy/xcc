@@ -69,6 +69,7 @@ INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
 SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | FLOATING_TYPE_KEYWORDS | {"void"}
 TYPEOF_KEYWORDS = {"typeof", "typeof_unqual", "__typeof__"}
+ALIGNOF_KEYWORDS = {"_Alignof", "__alignof__"}
 PAREN_TYPE_NAME_KEYWORDS = (
     SIMPLE_TYPE_SPEC_KEYWORDS
     | {
@@ -83,6 +84,7 @@ PAREN_TYPE_NAME_KEYWORDS = (
 )
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 _NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
+_IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
 _GNU_EXTENSION_TYPES = {
     "_Float16",
     "_Float32",
@@ -954,13 +956,24 @@ class Parser:
     def _consume_type_qualifiers(self, *, allow_atomic: bool = False) -> tuple[str, ...]:
         qualifiers = TYPE_QUALIFIER_KEYWORDS | ({"_Atomic"} if allow_atomic else set())
         seen: list[str] = []
-        while self._current().kind == TokenKind.KEYWORD and self._current().lexeme in qualifiers:
-            token = self._advance()
-            lexeme = str(token.lexeme)
-            if lexeme in seen:
-                raise ParserError(f"Duplicate type qualifier: '{lexeme}'", token)
-            seen.append(lexeme)
-        return tuple(seen)
+        while True:
+            token = self._current()
+            if token.kind == TokenKind.KEYWORD and token.lexeme in qualifiers:
+                token = self._advance()
+                lexeme = str(token.lexeme)
+                if lexeme in seen:
+                    raise ParserError(f"Duplicate type qualifier: '{lexeme}'", token)
+                seen.append(lexeme)
+                continue
+            if token.kind == TokenKind.IDENT and token.lexeme in _IGNORED_IDENT_TYPE_QUALIFIERS:
+                token = self._advance()
+                lexeme = str(token.lexeme)
+                if lexeme in seen:
+                    raise ParserError(f"Duplicate type qualifier: '{lexeme}'", token)
+                seen.append(lexeme)
+                continue
+            break
+        return tuple(qualifier for qualifier in seen if qualifier in qualifiers)
 
     def _apply_type_qualifiers(
         self,
@@ -1298,7 +1311,7 @@ class Parser:
         token = self._current()
         if token.kind != TokenKind.IDENT or not isinstance(token.lexeme, str):
             return False
-        if token.lexeme in {"__thread", "__inline", "__inline__"}:
+        if token.lexeme in {"__thread", "__inline", "__inline__", "__unaligned"}:
             return True
         return self._is_typedef_name(token.lexeme)
 
@@ -1435,6 +1448,9 @@ class Parser:
         base_has_leading_qualifier = (
             self._current().kind == TokenKind.KEYWORD
             and self._current().lexeme in TYPE_QUALIFIER_KEYWORDS
+        ) or (
+            self._current().kind == TokenKind.IDENT
+            and self._current().lexeme in _IGNORED_IDENT_TYPE_QUALIFIERS
         )
         base_type = self._parse_type_spec(parse_pointer_depth=not is_typedef)
         if self._check_punct(";"):
@@ -1759,7 +1775,7 @@ class Parser:
             return self._parse_unary()
         if self._check_keyword("sizeof"):
             return self._parse_sizeof_expr()
-        if self._check_keyword("_Alignof"):
+        if self._current().kind == TokenKind.KEYWORD and self._current().lexeme in ALIGNOF_KEYWORDS:
             return self._parse_alignof_expr()
         if self._is_parenthesized_type_name_start() and not self._looks_like_compound_literal():
             return self._parse_cast_expr()
@@ -1975,7 +1991,9 @@ class Parser:
             return False
         index = self._index + 1
         token = self._tokens[min(index, len(self._tokens) - 1)]
-        while token.kind == TokenKind.KEYWORD and token.lexeme in TYPE_QUALIFIER_KEYWORDS:
+        while (token.kind == TokenKind.KEYWORD and token.lexeme in TYPE_QUALIFIER_KEYWORDS) or (
+            token.kind == TokenKind.IDENT and token.lexeme in _IGNORED_IDENT_TYPE_QUALIFIERS
+        ):
             index += 1
             token = self._tokens[min(index, len(self._tokens) - 1)]
         if token.kind == TokenKind.KEYWORD:
@@ -2949,9 +2967,8 @@ class Parser:
                 found = True
                 self._advance()
                 continue
-            if (
-                self._current().kind == TokenKind.IDENT
-                and self._current().lexeme in _NULLABLE_QUALIFIERS
+            if self._current().kind == TokenKind.IDENT and self._current().lexeme in (
+                _NULLABLE_QUALIFIERS | _IGNORED_IDENT_TYPE_QUALIFIERS
             ):
                 found = True
                 self._advance()
