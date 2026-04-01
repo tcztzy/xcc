@@ -2689,6 +2689,24 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(function.name, "precedence1B")
         self.assertEqual(function.return_type, TypeSpec("void"))
 
+    def test_microsoft_calling_convention_function_declaration_is_ignored(self) -> None:
+        unit = parse(list(lex("int __cdecl foo(void);")))
+        function = unit.functions[0]
+        self.assertEqual(function.name, "foo")
+        self.assertEqual(function.return_type, TypeSpec("int"))
+        self.assertIsNone(function.body)
+
+    def test_microsoft_calling_convention_function_definition_is_ignored(self) -> None:
+        unit = parse(list(lex("float __stdcall stdcall(float a, float b){return a + b;}")))
+        function = unit.functions[0]
+        self.assertEqual(function.name, "stdcall")
+        self.assertEqual(function.return_type, TypeSpec("float"))
+        self.assertIsNotNone(function.body)
+
+    def test_microsoft_calling_convention_non_function_declaration_still_errors(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("struct {} __cdecl s;")))
+
     def test_declspec_between_struct_keyword_and_tag_is_ignored(self) -> None:
         unit = parse(
             list(
