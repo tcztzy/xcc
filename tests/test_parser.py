@@ -1139,6 +1139,20 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("_Bool"))
 
+    def test_unaligned_block_scope_declaration_is_ignored(self) -> None:
+        unit = parse(list(lex("int main(){__unaligned int value; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int"))
+        self.assertEqual(stmt.name, "value")
+
+    def test_unaligned_pointer_qualifiers_are_ignored(self) -> None:
+        unit = parse(list(lex("int main(){int __unaligned *__unaligned p; return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+        self.assertEqual(stmt.name, "p")
+
     def test_noreturn_function_definition(self) -> None:
         unit = parse(list(lex("_Noreturn int f(void){return 1;}")))
         function = unit.functions[0]
@@ -2921,6 +2935,24 @@ class ParserTests(unittest.TestCase):
         self.assertIsNone(expr.expr)
         self.assertEqual(expr.type_spec, TypeSpec("int", 1))
 
+    def test_alignof_unaligned_type_name(self) -> None:
+        unit = parse(list(lex("int main(){return _Alignof(__unaligned int);}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, AlignofExpr)
+        self.assertIsNone(expr.expr)
+        self.assertEqual(expr.type_spec, TypeSpec("int"))
+
+    def test_dunder_alignof_type_name(self) -> None:
+        unit = parse(list(lex("int main(){return __alignof__(int*);}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, AlignofExpr)
+        self.assertIsNone(expr.expr)
+        self.assertEqual(expr.type_spec, TypeSpec("int", 1))
+
     def test_alignof_expression(self) -> None:
         unit = parse(list(lex("int main(){int x; return _Alignof(x);}")), std="gnu11")
         stmt = _body(unit.functions[0]).statements[1]
@@ -3274,6 +3306,8 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("_Noreturn _Noreturn int f(void);")))
         with self.assertRaisesRegex(ParserError, "Duplicate type qualifier: 'volatile'"):
             parse(list(lex("volatile volatile int x;")))
+        with self.assertRaisesRegex(ParserError, "Duplicate type qualifier: '__unaligned'"):
+            parse(list(lex("__unaligned __unaligned int x;")))
         with self.assertRaisesRegex(ParserError, "Duplicate type qualifier: 'const'"):
             parse(list(lex("int f(int a[const const 4]){return 0;}")))
         with self.assertRaisesRegex(ParserError, "Duplicate array bound specifier: 'static'"):

@@ -52,6 +52,7 @@ KEYWORDS = {
     "while",
     "_Alignas",
     "_Alignof",
+    "__alignof__",
     "_Atomic",
     "_Bool",
     "_Complex",
