@@ -592,6 +592,15 @@ class SemaTests(unittest.TestCase):
         assert stmt.value is not None
         self.assertIs(sema.type_map.get(stmt.value), INT)
 
+    def test_gnu_thread_local_file_scope_declaration_typemap(self) -> None:
+        unit = parse(list(lex("__thread int g; int main(void){return g;}")))
+        sema = analyze(unit)
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        self.assertIsNotNone(stmt.value)
+        assert stmt.value is not None
+        self.assertIs(sema.type_map.get(stmt.value), INT)
+
     def test_alignas_constant_expression_declaration_typemap(self) -> None:
         unit = parse(list(lex("int main(void){_Alignas(16) int x=1; return x;}")))
         sema = analyze(unit)
