@@ -85,6 +85,7 @@ PAREN_TYPE_NAME_KEYWORDS = (
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 _NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
+_MS_DECLSPEC_KEYWORD = "__declspec"
 _GNU_EXTENSION_TYPES = {
     "_Float16",
     "_Float32",
@@ -402,7 +403,7 @@ class Parser:
             if decl_specs.is_typedef:
                 return False
             self._parse_type_spec()
-            self._skip_gnu_attributes()
+            self._skip_decl_attributes()
             if self._current().kind != TokenKind.IDENT:
                 # Complex declarator case (e.g. function returning function pointer)
                 name, ops = self._parse_declarator(allow_abstract=False)
@@ -410,16 +411,16 @@ class Parser:
                     return False
                 if not ops or ops[0][0] != "fn":
                     return False
-                self._skip_gnu_extensions()
+                self._skip_decl_extensions()
                 return self._check_punct("{") or self._check_punct(";")
             self._advance()
-            self._skip_gnu_attributes()
+            self._skip_decl_attributes()
             if not self._check_punct("("):
                 return False
             self._advance()
             params, has_prototype, _ = self._parse_params()
             self._expect_punct(")")
-            self._skip_gnu_extensions()
+            self._skip_decl_extensions()
             if self._check_punct("{") or self._check_punct(";"):
                 return True
             # K&R: declarations follow ')' before '{'.
@@ -443,21 +444,22 @@ class Parser:
             allow=False,
         )
         base_type = self._parse_type_spec()
-        is_overloadable = self._consume_overloadable_gnu_attributes()
+        is_overloadable = self._consume_overloadable_decl_attributes()
 
         # Detect simple vs complex declarator.
         # Simple: bare IDENT (possibly followed by GNU attributes) then '('.
         # Complex: starts with '*' or '(' (e.g. function returning function pointer).
+        self._skip_decl_attributes()
         if self._current().kind == TokenKind.IDENT:
             # Simple case: NAME ( params )
             name_token = self._expect(TokenKind.IDENT)
             function_name = str(name_token.lexeme)
-            if self._consume_overloadable_gnu_attributes():
+            if self._consume_overloadable_decl_attributes():
                 is_overloadable = True
             self._expect_punct("(")
             params, has_prototype, is_variadic = self._parse_params()
             self._expect_punct(")")
-            self._skip_gnu_extensions()
+            self._skip_decl_extensions()
             # Parse K&R-style parameter declarations between ')' and '{'.
             is_knr = not has_prototype and params
             if is_knr and not self._check_punct("{") and not self._check_punct(";"):
@@ -482,7 +484,7 @@ class Parser:
             function_name = str(decl_name)
             assert self._function_def_info is not None
             params, has_prototype, is_variadic = self._function_def_info
-            self._skip_gnu_extensions()
+            self._skip_decl_extensions()
             function_type = self._build_declarator_type(base_type, declarator_ops)
             # Build the return type from base + all ops except the first (fn) op.
             return_type = self._build_declarator_type(base_type, declarator_ops[1:])
@@ -972,6 +974,9 @@ class Parser:
                     raise ParserError(f"Duplicate type qualifier: '{lexeme}'", token)
                 seen.append(lexeme)
                 continue
+            if self._is_ms_declspec_start():
+                self._skip_ms_declspecs()
+                continue
             break
         return tuple(qualifier for qualifier in seen if qualifier in qualifiers)
 
@@ -1127,7 +1132,7 @@ class Parser:
         token: Token,
         kind: str,
     ) -> tuple[str | None, tuple[RecordMemberDecl, ...], bool]:
-        self._skip_gnu_attributes()
+        self._skip_decl_attributes()
         record_tag: str | None = None
         if self._current().kind == TokenKind.IDENT:
             ident = self._advance()
@@ -1312,6 +1317,8 @@ class Parser:
         if token.kind != TokenKind.IDENT or not isinstance(token.lexeme, str):
             return False
         if token.lexeme in {"__thread", "__inline", "__inline__", "__unaligned"}:
+            return True
+        if token.lexeme == _MS_DECLSPEC_KEYWORD and self._peek_punct("("):
             return True
         return self._is_typedef_name(token.lexeme)
 
@@ -1505,6 +1512,7 @@ class Parser:
             raw_base_type = base_type
         is_first_declarator = True
         while True:
+            self._skip_decl_attributes()
             declarator_has_prefix_qualifier = False
             top_pointer_is_qualified = False
             if is_typedef:
@@ -1518,7 +1526,6 @@ class Parser:
                     allow_gnu_attributes=base_type.is_atomic,
                 )
             else:
-                self._skip_gnu_attributes()
                 name, declarator_ops = self._parse_declarator(
                     allow_abstract=False,
                     allow_vla=True,
@@ -1549,7 +1556,7 @@ class Parser:
                         self._current(),
                     )
                 self._define_ordinary_type(name, decl_type)
-                self._skip_gnu_extensions()
+                self._skip_decl_extensions()
                 init: Expr | InitList | None = None
                 if self._check_punct("="):
                     self._advance()
@@ -1885,14 +1892,12 @@ class Parser:
         allow_gnu_attributes: bool = False,
     ) -> tuple[str | None, tuple[DeclaratorOp, ...], bool, bool]:
         declarator_has_prefix_qualifier = self._skip_type_qualifiers(allow_atomic=True)
-        if allow_gnu_attributes:
-            self._skip_gnu_attributes()
+        self._skip_type_name_attributes(allow_gnu_attributes=allow_gnu_attributes)
         pointer_qualifiers: list[bool] = []
         while self._check_punct("*"):
             self._advance()
             pointer_qualifiers.append(self._skip_type_qualifiers(allow_atomic=True))
-            if allow_gnu_attributes:
-                self._skip_gnu_attributes()
+            self._skip_type_name_attributes(allow_gnu_attributes=allow_gnu_attributes)
         (
             name,
             direct_ops,
@@ -1921,8 +1926,7 @@ class Parser:
         name: str | None
         declarator_ops: tuple[DeclaratorOp, ...]
         top_pointer_is_qualified = False
-        if allow_gnu_attributes:
-            self._skip_gnu_attributes()
+        self._skip_type_name_attributes(allow_gnu_attributes=allow_gnu_attributes)
         if self._current().kind == TokenKind.IDENT:
             token = self._advance()
             assert isinstance(token.lexeme, str)
@@ -1946,7 +1950,7 @@ class Parser:
         else:
             raise self._expected_identifier_error()
         while True:
-            if allow_gnu_attributes and self._skip_gnu_attributes():
+            if self._skip_type_name_attributes(allow_gnu_attributes=allow_gnu_attributes):
                 continue
             if self._check_punct("["):
                 self._advance()
@@ -2910,18 +2914,34 @@ class Parser:
     def _invalid_object_type_message(self, context: str, type_label: str) -> str:
         return f"Invalid object type for {context}: {type_label}"
 
-    def _consume_overloadable_gnu_attributes(self) -> bool:
-        _, has_overloadable = self._consume_gnu_attributes()
+    def _consume_overloadable_decl_attributes(self) -> bool:
+        _, has_overloadable = self._consume_decl_attributes()
         return has_overloadable
+
+    def _skip_decl_attributes(self) -> bool:
+        found, _ = self._consume_decl_attributes()
+        return found
 
     def _skip_gnu_attributes(self) -> bool:
         found, _ = self._consume_gnu_attributes()
         return found
 
-    def _skip_gnu_extensions(self) -> None:
-        """Skip interleaved __attribute__ and __asm in any order."""
-        while self._skip_gnu_attributes() or self._skip_asm_label():
+    def _skip_decl_extensions(self) -> None:
+        """Skip interleaved declaration attributes and __asm in any order."""
+        while self._skip_decl_attributes() or self._skip_asm_label():
             pass
+
+    def _consume_decl_attributes(self) -> tuple[bool, bool]:
+        found = False
+        has_overloadable = False
+        while True:
+            gnu_found, gnu_has_overloadable = self._consume_gnu_attributes()
+            ms_found = self._skip_ms_declspecs()
+            found = found or gnu_found or ms_found
+            has_overloadable = has_overloadable or gnu_has_overloadable
+            if not gnu_found and not ms_found:
+                break
+        return found, has_overloadable
 
     def _consume_gnu_attributes(self) -> tuple[bool, bool]:
         found = False
@@ -2959,6 +2979,43 @@ class Parser:
             and second.lexeme == "("
         )
 
+    def _skip_ms_declspecs(self) -> bool:
+        found = False
+        while self._is_ms_declspec_start():
+            start = self._advance()
+            self._expect_punct("(")
+            depth = 1
+            while depth > 0:
+                token = self._current()
+                if token.kind == TokenKind.EOF:
+                    raise ParserError("Expected ')'", start)
+                if token.kind == TokenKind.PUNCTUATOR:
+                    if token.lexeme == "(":
+                        depth += 1
+                    elif token.lexeme == ")":
+                        depth -= 1
+                self._advance()
+            found = True
+        return found
+
+    def _is_ms_declspec_start(self) -> bool:
+        token = self._current()
+        return (
+            token.kind == TokenKind.IDENT
+            and token.lexeme == _MS_DECLSPEC_KEYWORD
+            and self._peek_punct("(")
+        )
+
+    def _skip_type_name_attributes(self, *, allow_gnu_attributes: bool) -> bool:
+        found = False
+        while True:
+            skipped = self._skip_ms_declspecs()
+            if allow_gnu_attributes:
+                skipped = self._skip_gnu_attributes() or skipped
+            if not skipped:
+                return found
+            found = True
+
     def _skip_type_qualifiers(self, *, allow_atomic: bool = False) -> bool:
         qualifiers = TYPE_QUALIFIER_KEYWORDS | ({"_Atomic"} if allow_atomic else set())
         found = False
@@ -2972,6 +3029,10 @@ class Parser:
             ):
                 found = True
                 self._advance()
+                continue
+            if self._is_ms_declspec_start():
+                found = True
+                self._skip_ms_declspecs()
                 continue
             break
         return found
@@ -3006,8 +3067,8 @@ class Parser:
         is_inline = False
         is_noreturn = False
         while True:
-            # Skip leading/interleaved GNU __attribute__ specifiers
-            self._skip_gnu_attributes()
+            # Skip leading/interleaved declaration attributes.
+            self._skip_decl_attributes()
             current = self._current()
             if current.kind == TokenKind.KEYWORD:
                 lexeme = str(current.lexeme)
