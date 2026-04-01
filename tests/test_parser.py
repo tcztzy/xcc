@@ -2703,6 +2703,37 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(function.return_type, TypeSpec("float"))
         self.assertIsNotNone(function.body)
 
+    def test_microsoft_calling_convention_before_pointer_is_ignored(self) -> None:
+        unit = parse(list(lex("void (__fastcall *pf1)(void);")))
+        declaration = unit.declarations[0]
+        self.assertEqual(declaration.name, "pf1")
+        self.assertEqual(
+            declaration.type_spec,
+            TypeSpec("void", declarator_ops=(("ptr", 0), ("fn", ((), False)))),
+        )
+
+    def test_microsoft_calling_convention_after_pointer_is_ignored(self) -> None:
+        unit = parse(list(lex("void (*__fastcall fastpfunc)(void);")))
+        declaration = unit.declarations[0]
+        self.assertEqual(declaration.name, "fastpfunc")
+        self.assertEqual(
+            declaration.type_spec,
+            TypeSpec("void", declarator_ops=(("ptr", 0), ("fn", ((), False)))),
+        )
+
+    def test_repeated_microsoft_calling_convention_typedef_is_ignored(self) -> None:
+        unit = parse(list(lex("typedef int (__stdcall __stdcall *callback)(int);")))
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        self.assertEqual(declaration.name, "callback")
+        self.assertEqual(
+            declaration.type_spec,
+            TypeSpec(
+                "int",
+                declarator_ops=(("ptr", 0), ("fn", ((TypeSpec("int"),), False))),
+            ),
+        )
+
     def test_microsoft_calling_convention_non_function_declaration_still_errors(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("struct {} __cdecl s;")))

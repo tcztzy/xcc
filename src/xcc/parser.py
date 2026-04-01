@@ -1902,11 +1902,13 @@ class Parser:
     ) -> tuple[str | None, tuple[DeclaratorOp, ...], bool, bool]:
         declarator_has_prefix_qualifier = self._skip_type_qualifiers(allow_atomic=True)
         self._skip_type_name_attributes(allow_gnu_attributes=allow_gnu_attributes)
+        self._skip_calling_convention_identifiers_before_pointer()
         pointer_qualifiers: list[bool] = []
         while self._check_punct("*"):
             self._advance()
             pointer_qualifiers.append(self._skip_type_qualifiers(allow_atomic=True))
             self._skip_type_name_attributes(allow_gnu_attributes=allow_gnu_attributes)
+            self._skip_calling_convention_identifiers_after_pointer()
         (
             name,
             direct_ops,
@@ -2148,10 +2150,12 @@ class Parser:
         allow_flexible_array: bool = False,
     ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
         self._skip_type_qualifiers()
+        self._skip_calling_convention_identifiers_before_pointer()
         pointer_count = 0
         while self._check_punct("*"):
             self._advance()
             self._skip_type_qualifiers()
+            self._skip_calling_convention_identifiers_after_pointer()
             pointer_count += 1
         name, ops = self._parse_direct_declarator(
             allow_abstract,
@@ -3024,6 +3028,38 @@ class Parser:
             self._advance()
             found = True
         return found
+
+    def _skip_calling_convention_identifiers_if(self, predicate: Callable[[Token], bool]) -> bool:
+        token = self._current()
+        if token.kind != TokenKind.IDENT or token.lexeme not in _MS_CALLING_CONVENTION_IDENTIFIERS:
+            return False
+        offset = 0
+        while True:
+            token = self._peek(offset) if offset else self._current()
+            if (
+                token.kind != TokenKind.IDENT
+                or token.lexeme not in _MS_CALLING_CONVENTION_IDENTIFIERS
+            ):
+                break
+            offset += 1
+        if not predicate(token):
+            return False
+        for _ in range(offset):
+            self._advance()
+        return True
+
+    def _skip_calling_convention_identifiers_before_pointer(self) -> bool:
+        return self._skip_calling_convention_identifiers_if(
+            lambda token: token.kind == TokenKind.PUNCTUATOR and token.lexeme == "*"
+        )
+
+    def _skip_calling_convention_identifiers_after_pointer(self) -> bool:
+        return self._skip_calling_convention_identifiers_if(
+            lambda token: (
+                token.kind == TokenKind.IDENT
+                or (token.kind == TokenKind.PUNCTUATOR and token.lexeme in {"(", ")"})
+            )
+        )
 
     def _skip_type_name_attributes(self, *, allow_gnu_attributes: bool) -> bool:
         found = False
