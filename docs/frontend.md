@@ -2,7 +2,7 @@
 
 ## Overview
 
-The front end currently provides a deterministic check pipeline:
+The compiler front end provides a deterministic check pipeline:
 
 1. Source loading (`file` or `stdin`).
 2. Preprocessing, macro expansion, and include resolution.
@@ -10,7 +10,7 @@ The front end currently provides a deterministic check pipeline:
 4. Parsing into the AST.
 5. Semantic analysis and type checking.
 
-The pipeline is exposed through `xcc.frontend.compile_source` / `compile_path` and is used by both the frontend-only CLI path and the compile driver.
+The pipeline is exposed through `xcc.frontend.compile_source` / `compile_path` and is used by both the frontend-only CLI mode and the compile driver.
 
 ## Driver behavior
 
@@ -43,7 +43,7 @@ Unexpected internal AST-shape failures in semantic analysis (including expressio
 
 - `c11` is strict mode. GNU-only constructs are rejected, including statement expressions,
   computed goto (`goto *expr`, `&&label`), and GNU asm forms.
-- `gnu11` keeps GNU extensions that are currently supported by the front end, including
+- `gnu11` keeps GNU extensions currently supported by XCC, including
   GNU preprocessor conditionals like `#elifdef` / `#elifndef`.
 
 ## Lexer
@@ -68,7 +68,7 @@ Unexpected internal AST-shape failures in semantic analysis (including expressio
 ## Constant evaluation
 
 - Supports deterministic integer constant expression evaluation for required semantic checks.
-- Handles unary, binary, conditional, cast, and enum-constant forms used by the current front-end checks.
+- Handles unary, binary, conditional, cast, and enum-constant forms used by the current compiler checks.
 
 ## References
 

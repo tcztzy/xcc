@@ -19,7 +19,7 @@ SEMA_PATH = ROOT / "src/xcc/sema.py"
 FAILURE_LINE_RE = re.compile(r"^FAIL \[(?P<stage>[^\]]+)\] (?P<case>[^:]+): (?P<message>.+)$")
 UNDECLARED_FUNCTION_RE = re.compile(r"^Undeclared function: `(?P<name>[^`]+)`$")
 
-DEFAULT_TRIAL_COMMAND = (sys.executable, "scripts/cpython_trial.py")
+DEFAULT_TRIAL_COMMAND = (sys.executable, "scripts/cpython_trial.py", "--emit-failure-lines")
 DEFAULT_VERIFY_COMMAND = ("tox", "-q")
 DEFAULT_STASH_MESSAGE = "xcc-blocker-crusher:auto-stash"
 
@@ -257,7 +257,7 @@ def _print_trial_output(output: str, failures: list[TrialFailure]) -> None:
     if failures:
         print(output, end="" if output.endswith("\n") else "\n")
         return
-    marker = "CPython Frontend Trial Summary"
+    marker = "CPython Integration Gate"
     index = output.find(marker)
     if index >= 0:
         summary = output[index:].strip()

@@ -6,16 +6,16 @@ XCC is developed on macOS (Apple silicon). Linux/ELF builds are executed in Dock
 
 ## macOS (native)
 
-- The preview native backend lowers directly to AArch64 assembly.
-- Assembly and linking are delegated to the platform `clang` toolchain.
-- Standalone Mach-O object emission is not shipped in this preview.
+- The current native backend lowers directly to AArch64 assembly.
+- Assembly and linking are currently delegated to the platform `clang` toolchain.
+- Native Mach-O object emission is part of the compiler roadmap.
 
 ## Linux/ELF (Docker)
 
-- Linux/ELF remains a validation target, not a shipped native backend.
-- Docker images are used for frontend and toolchain validation.
-- Planned linker target: mold.
-- Planned C library targets: glibc and musl.
+- Linux/ELF support is developed and validated in Docker.
+- Docker images are used for compiler and toolchain validation.
+- Target linker: mold.
+- Target C library variants: glibc and musl.
 
 ## Docker workflow
 

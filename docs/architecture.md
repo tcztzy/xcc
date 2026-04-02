@@ -7,7 +7,7 @@
 3. Preprocessing and macro expansion.
 4. Lexing and parsing into an AST.
 5. Semantic analysis and type checking.
-6. Direct lowering from the typed AST to AArch64 assembly for the supported macOS `arm64` subset.
+6. Direct lowering from the typed AST to AArch64 assembly for the macOS `arm64` backend implementation that exists today.
 7. Assembly and linking via the system `clang` toolchain, or full `clang` delegation when requested.
 
 ## Core design choices
@@ -26,7 +26,7 @@
 - `lexer`: translation phases and token classification.
 - `parser`: grammar, AST nodes.
 - `sema`: types, scopes, constant evaluation.
-- `codegen`: experimental direct native lowering to assembly.
+- `codegen`: direct native lowering to assembly.
 - `host_includes`: host toolchain include-root discovery for driver mode.
 - `clang_suite`: shared helpers for the pinned LLVM/Clang baseline.
 - `diag`: diagnostics and formatting.

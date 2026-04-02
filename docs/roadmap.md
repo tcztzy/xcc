@@ -5,12 +5,12 @@
 - Collect specifications and requirements.
 - Establish documentation, linting, typing, and test policy.
 
-## Phase 1: Front end MVP
+## Phase 1: Language and semantics
 
 - Preprocessor, lexer, parser, and AST.
 - Basic semantic analysis and type checking.
 
-## Phase 2: Direct Native Code Generation Preview
+## Phase 2: Native code generation
 
 - Direct lowering from the typed AST to AArch64 assembly for macOS `arm64`.
 - Assemble and link through the system `clang` toolchain.
@@ -29,6 +29,6 @@
 
 ## Phase 4: Optimization and hardening
 
-- Revisit standalone object emission and any backend IR requirements once the preview backend scope is exhausted.
+- Revisit standalone object emission and any backend IR requirements as native backend coverage expands.
 - Performance tuning with benchmarks.
 - Extensive regression tests and diagnostics polish.
