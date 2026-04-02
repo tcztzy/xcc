@@ -22,6 +22,7 @@ from xcc.ast import (
     GenericExpr,
     FloatLiteral,
     Identifier,
+    IfStmt,
     InitItem,
     InitList,
     IntLiteral,
@@ -4385,6 +4386,55 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: A")
+
+    def test_if_condition_enum_members_visible_in_then_body(self) -> None:
+        unit = parse(list(lex("int main(){if(sizeof(enum { A })) return A; return 0;}")))
+        sema = analyze(unit)
+        if_stmt = _body(unit.functions[0]).statements[0]
+        assert isinstance(if_stmt, IfStmt)
+        assert isinstance(if_stmt.then_body, ReturnStmt)
+        assert if_stmt.then_body.value is not None
+        self.assertEqual(sema.type_map.get(if_stmt.then_body.value), INT)
+
+    def test_if_condition_enum_members_do_not_escape_if_scope(self) -> None:
+        unit = parse(list(lex("int main(){if(sizeof(enum { A })) return A; return A;}")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Undeclared identifier: A")
+
+    def test_if_condition_duplicate_enumerator_declaration(self) -> None:
+        unit = parse(
+            list(lex("int f(int z){if(z + sizeof(enum { A })) return 1 + sizeof(enum { A }); return 0;}"))
+        )
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Duplicate declaration: A")
+
+    def test_if_condition_enum_scope_shadows_outer_enum(self) -> None:
+        source = (
+            "enum { A, B };"
+            "int main(){"
+            "if(sizeof(enum { B, A }) != sizeof(int)){_Static_assert(A == 1, \"\");}"
+            "_Static_assert(B == 1, \"\");"
+            "return 0;}"
+        )
+        sema = analyze(parse(list(lex(source))))
+        self.assertIn("main", sema.functions)
+
+    def test_define_scoped_enum_members_ignores_repeated_binding(self) -> None:
+        unit = parse(list(lex("int main(){sizeof(enum { A }); return 0;}")))
+        expr_stmt = _body(unit.functions[0]).statements[0]
+        assert isinstance(expr_stmt, ExprStmt)
+        assert isinstance(expr_stmt.expr, SizeofExpr)
+        assert expr_stmt.expr.type_spec is not None
+        analyzer = Analyzer()
+        scope = Scope()
+        analyzer._define_scoped_enum_members(expr_stmt.expr.type_spec, scope)
+        analyzer._define_scoped_enum_members(expr_stmt.expr.type_spec, scope)
+        symbol = scope.lookup("A")
+        self.assertIsNotNone(symbol)
+        assert symbol is not None
+        self.assertEqual(symbol.value, 0)
 
     def test_duplicate_struct_definition_error(self) -> None:
         unit = parse(list(lex("int main(){struct S { int x; }; struct S { int y; }; return 0;}")))

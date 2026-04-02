@@ -329,6 +329,7 @@ class Analyzer:
             tuple[tuple[RecordMemberInfo, ...], dict[str, tuple[Type, int]]],
         ] = {}
         self._seen_record_definitions: set[int] = set()
+        self._seen_scoped_enum_definitions: set[tuple[int, int]] = set()
         self._file_scope = Scope()
         self._loop_depth = 0
         self._switch_stack: list[SwitchContext] = []
@@ -1021,6 +1022,15 @@ class Analyzer:
                     raise SemaError("Enumerator value is not integer constant")
             scope.define(EnumConstSymbol(name, value))
             next_value = value + 1
+
+    def _define_scoped_enum_members(self, type_spec: TypeSpec, scope: Scope) -> None:
+        if not type_spec.enum_members:
+            return
+        binding = (id(scope), id(type_spec))
+        if binding in self._seen_scoped_enum_definitions:
+            return
+        self._seen_scoped_enum_definitions.add(binding)
+        self._define_enum_members(type_spec, scope)
 
     def _is_function_object_type(self, type_spec: TypeSpec) -> bool:
         return bool(type_spec.declarator_ops) and type_spec.declarator_ops[0][0] == "fn"
@@ -2024,10 +2034,11 @@ class Analyzer:
             self._analyze_compound(stmt, inner_scope, return_type)
             return
         if isinstance(stmt, IfStmt):
-            self._check_condition_type(self._analyze_expr(stmt.condition, scope))
-            self._analyze_stmt(stmt.then_body, scope, return_type)
+            inner_scope = Scope(scope)
+            self._check_condition_type(self._analyze_expr(stmt.condition, inner_scope))
+            self._analyze_stmt(stmt.then_body, inner_scope, return_type)
             if stmt.else_body is not None:
-                self._analyze_stmt(stmt.else_body, scope, return_type)
+                self._analyze_stmt(stmt.else_body, inner_scope, return_type)
             return
         if isinstance(stmt, WhileStmt):
             self._check_condition_type(self._analyze_expr(stmt.condition, scope))
@@ -2140,6 +2151,7 @@ class Analyzer:
         if isinstance(expr, SizeofExpr):
             if expr.type_spec is not None:
                 self._register_type_spec(expr.type_spec)
+                self._define_scoped_enum_members(expr.type_spec, scope)
                 reason = self._invalid_sizeof_operand_reason_for_type_spec(expr.type_spec)
                 if reason is not None:
                     raise SemaError(f"Invalid sizeof operand: {reason}")
