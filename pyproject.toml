@@ -1,7 +1,7 @@
 [project]
 name = "xcc"
 version = "0.2.0a1"
-description = "Preview Python C11 compiler with a validated frontend and an experimental macOS arm64 native backend."
+description = "Python C11 compiler with deterministic diagnostics and zero runtime dependencies."
 readme = "README.md"
 authors = [
     { name = "Tang Ziya", email = "tcztzy@gmail.com" }
@@ -127,7 +127,7 @@ set_env = { XCC_RUN_CLANG_SUITE = "1" }
 commands = [["python", "-m", "unittest", "-v", "tests.test_clang_suite"]]
 
 [tool.tox.env.native_smoke]
-description = "Run experimental macOS arm64 native backend smoke tests"
+description = "Run macOS arm64 native backend smoke tests"
 package = "skip"
 commands = [["python", "-m", "unittest", "-v", "tests.test_native_backend"]]
 

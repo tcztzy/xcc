@@ -21,6 +21,13 @@ if str(SRC) not in sys.path:
 from xcc.diag import FrontendError
 from xcc.frontend import compile_path
 from xcc.options import FrontendOptions
+from xcc.cpython_harness import (
+    CPythonTrialResult,
+    bucket_location,
+    normalize_trial_detail,
+    summarize_trial_results,
+    top_failure_bucket,
+)
 
 ARCHIVE_URL = "https://www.python.org/ftp/python/3.11.12/Python-3.11.12.tgz"
 ARCHIVE_NAME = "Python-3.11.12.tgz"
@@ -33,14 +40,6 @@ DEFAULT_CACHE_DIR = ROOT / ".cache/external-artifacts"
 class TrialCase:
     path: str
     include_dirs: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class TrialResult:
-    path: str
-    ok: bool
-    detail: str
-    stage: str
 
 
 DEFAULT_CASES = (
@@ -142,7 +141,24 @@ def _base_include_dirs(source_root: Path, overlay: Path) -> tuple[str, ...]:
     )
 
 
-def _select_cases(selected: tuple[str, ...]) -> tuple[TrialCase, ...]:
+def _normalize_diagnostic_file(filename: str | None, source_root: Path, overlay: Path) -> str | None:
+    if filename is None:
+        return None
+    resolved = Path(filename).resolve()
+    source_root = source_root.resolve()
+    overlay = overlay.resolve()
+    try:
+        return resolved.relative_to(source_root).as_posix()
+    except ValueError:
+        pass
+    try:
+        relative = resolved.relative_to(overlay).as_posix()
+    except ValueError:
+        return str(resolved)
+    return f"overlay/{relative}"
+
+
+def select_cases(selected: tuple[str, ...]) -> tuple[TrialCase, ...]:
     if not selected:
         return DEFAULT_CASES
     known = {case.path: case for case in DEFAULT_CASES}
@@ -152,7 +168,7 @@ def _select_cases(selected: tuple[str, ...]) -> tuple[TrialCase, ...]:
     return tuple(known[path] for path in selected)
 
 
-def _run_case(source_root: Path, overlay: Path, case: TrialCase) -> TrialResult:
+def _run_case(source_root: Path, overlay: Path, case: TrialCase) -> CPythonTrialResult:
     include_dirs = _base_include_dirs(source_root, overlay) + tuple(
         str(source_root / extra) for extra in case.include_dirs
     )
@@ -161,21 +177,49 @@ def _run_case(source_root: Path, overlay: Path, case: TrialCase) -> TrialResult:
     try:
         compile_path(path, options=options)
     except FrontendError as error:
-        return TrialResult(
-            case.path,
-            False,
-            error.diagnostic.message,
-            error.diagnostic.stage,
+        return CPythonTrialResult(
+            path=case.path,
+            ok=False,
+            detail=normalize_trial_detail(error.diagnostic.message),
+            stage=error.diagnostic.stage,
+            diagnostic_file=_normalize_diagnostic_file(
+                error.diagnostic.filename,
+                source_root,
+                overlay,
+            ),
+            line=error.diagnostic.line,
+            column=error.diagnostic.column,
         )
-    return TrialResult(case.path, True, "ok", "ok")
+    return CPythonTrialResult(path=case.path, ok=True, detail="ok", stage="ok")
 
 
-def _print_summary(results: tuple[TrialResult, ...]) -> None:
+def run_curated_trial(
+    *,
+    cache_dir: Path,
+    archive_path_override: Path | None,
+    cases: tuple[TrialCase, ...],
+) -> tuple[CPythonTrialResult, ...]:
+    archive_path = _ensure_archive(cache_dir, archive_path_override)
+    with tempfile.TemporaryDirectory() as tmp:
+        work_root = Path(tmp)
+        source_root = _extract_archive(archive_path, work_root)
+        overlay = work_root / "overlay"
+        _prepare_overlay(overlay)
+        return tuple(_run_case(source_root, overlay, case) for case in cases)
+
+
+def _print_summary(
+    results: tuple[CPythonTrialResult, ...],
+    *,
+    emit_failure_lines: bool,
+) -> None:
     for result in results:
         if result.ok:
             print(f"PASS {result.path}")
             continue
         print(f"FAIL {result.path} [{result.stage}] {result.detail}")
+        if emit_failure_lines:
+            print(f"FAIL [{result.stage}] {result.path}: {result.detail}")
     passed = sum(result.ok for result in results)
     print(f"\nCPython real-file trial: {passed}/{len(results)} passed")
     failures = Counter(result.stage for result in results if not result.ok)
@@ -183,6 +227,21 @@ def _print_summary(results: tuple[TrialResult, ...]) -> None:
         print("Failure stages:")
         for stage, count in sorted(failures.items()):
             print(f"- {stage}: {count}")
+        summary = summarize_trial_results(results)
+        print("Failure buckets:")
+        for bucket in summary.buckets:
+            print(
+                f"- {bucket.code} [{bucket.stage}] x{bucket.count}: "
+                f"{bucket.detail} @ {bucket_location(bucket)}"
+            )
+        top_bucket = top_failure_bucket(summary)
+        if top_bucket is not None:
+            examples = ", ".join(top_bucket.case_paths[:3])
+            print(
+                "Top blocker: "
+                f"{top_bucket.code} [{top_bucket.stage}] x{top_bucket.count} "
+                f"({examples})"
+            )
 
 
 def main() -> int:
@@ -217,22 +276,25 @@ def main() -> int:
         action="store_true",
         help="return success even when some curated files still fail",
     )
+    parser.add_argument(
+        "--emit-failure-lines",
+        action="store_true",
+        help="emit legacy machine-readable failure lines for blocker tools",
+    )
     args = parser.parse_args()
 
-    cases = _select_cases(tuple(args.case))
+    cases = select_cases(tuple(args.case))
     if args.list_cases:
         for case in cases:
             print(case.path)
         return 0
 
-    archive_path = _ensure_archive(args.cache_dir, args.archive_path)
-    with tempfile.TemporaryDirectory() as tmp:
-        work_root = Path(tmp)
-        source_root = _extract_archive(archive_path, work_root)
-        overlay = work_root / "overlay"
-        _prepare_overlay(overlay)
-        results = tuple(_run_case(source_root, overlay, case) for case in cases)
-    _print_summary(results)
+    results = run_curated_trial(
+        cache_dir=args.cache_dir,
+        archive_path_override=args.archive_path,
+        cases=cases,
+    )
+    _print_summary(results, emit_failure_lines=args.emit_failure_lines)
     if args.allow_failures:
         return 0
     return 0 if all(result.ok for result in results) else 1

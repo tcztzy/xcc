@@ -2,7 +2,7 @@
 
 ## Scope
 
-Linux/ELF is a secondary target used to validate glibc and musl compatibility and to keep the toolchain aligned with CPython's Linux build expectations.
+Linux/ELF is part of the compiler target set and is used to validate glibc and musl compatibility while keeping the toolchain aligned with CPython's Linux build expectations.
 
 ## Linker
 
@@ -15,7 +15,7 @@ The planned ELF linker is mold.
 
 ## Build environment
 
-Linux/ELF builds are executed in Docker containers on macOS hosts to keep the toolchain isolated and reproducible. The current preview does not ship a native ELF backend.
+Linux/ELF builds are executed in Docker containers on macOS hosts to keep the toolchain isolated and reproducible. Native ELF support is developed and validated through these environments.
 
 ## Docker workflow
 

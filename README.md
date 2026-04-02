@@ -1,20 +1,20 @@
 # XCC
 
-XCC is a C compiler written in modern Python (CPython and PyPy, 3.11+). The first target platform is macOS on Apple silicon (`arm64`). The long term goal is to compile the CPython source tree without third party runtime dependencies.
+XCC is a C compiler written in modern Python (CPython and PyPy, 3.11+). It targets a complete, deterministic, zero-runtime-dependency C11 compiler, with macOS on Apple silicon (`arm64`) as the primary native development platform today and CPython as a standing integration target.
 
 ## Status
 
-Preview alpha (`0.2.0a1`).
+Alpha (`0.2.0a1`).
 
 - Frontend validation runs for every C compile before backend selection.
 - `xcc source.c` is driver mode: it validates with XCC, then uses the native backend or delegates to `clang`.
 - `xcc --frontend source.c` forces a frontend-only check run.
-- `--backend=auto` prefers the experimental native macOS `arm64` backend and falls back to `clang` when native code generation is unsupported.
-- `--backend=xcc` keeps the native backend strict and experimental.
+- `--backend=auto` prefers the native macOS `arm64` backend and falls back to `clang` when native code generation is unsupported.
+- `--backend=xcc` keeps native code generation strict.
 - `--backend=clang` always delegates code generation and linking to `clang` after XCC frontend validation.
-- The curated CPython-style snippet trial is green; the pinned real-file CPython frontend trial is still partial.
+- The pinned CPython integration gate and Clang fixture suite track compiler progress continuously.
 
-This preview does not ship a standalone Mach-O writer, a native Linux/ELF backend, or a full CPython tree build.
+Current implementation still relies on the platform toolchain for assembly and linking, and full native object generation plus full-tree CPython compilation remain open work.
 
 ## Motivation
 
@@ -22,18 +22,12 @@ CPython depends on a C compiler with predictable semantics and diagnostics. XCC 
 
 ## Goals
 
-- Implement a C11 compiler with clear, deterministic behavior.
+- Implement a complete C11 compiler with clear, deterministic behavior.
 - Compile the CPython source tree without modifying CPython sources.
 - Zero third party runtime dependencies.
 - Full test coverage with strict linting and type checking.
-- Support a documented preview path for macOS `arm64`.
-- Keep Linux/ELF validation available as a future backend target.
-
-## Non-goals (initial)
-
-- C++ support.
-- Multiple platform backends at launch.
-- A custom linker.
+- Support native code generation on macOS `arm64` and Linux/ELF.
+- Keep diagnostics, testing, and behavior reproducible across host environments.
 
 ## Pipeline
 
@@ -41,10 +35,10 @@ CPython depends on a C compiler with predictable semantics and diagnostics. XCC 
 2. Preprocessing and macro expansion.
 3. Lexing and parsing into an AST.
 4. Semantic analysis and type checking.
-5. Experimental direct lowering from sema AST to AArch64 assembly on macOS `arm64`.
+5. Direct lowering from sema AST to AArch64 assembly on macOS `arm64`.
 6. Assembly, object creation, and linking via the platform `clang` toolchain.
 
-Planned follow-on work includes broader native code generation and standalone object emission.
+Ongoing work includes broader native code generation, native object emission, and Linux/ELF support.
 
 ## Design principles
 
@@ -55,7 +49,7 @@ Planned follow-on work includes broader native code generation and standalone ob
 
 ## Planned feature coverage
 
-This is a target list for the initial milestones. It will evolve as CPython compilation uncovers gaps.
+This is a target list for the compiler roadmap. It will evolve as CPython compilation and Clang conformance work uncover gaps.
 
 - C11 core language features required by CPython.
 - Preprocessor with full macro expansion and include handling.
@@ -64,19 +58,20 @@ This is a target list for the initial milestones. It will evolve as CPython comp
 ## Requirements
 
 - Python 3.11+ on CPython or PyPy.
-- macOS on Apple silicon (`arm64`) for the initial target.
+- macOS on Apple silicon (`arm64`) for native development today.
 - Docker is required to build Linux/ELF targets on macOS.
 - Linux targets use the mold linker and a glibc or musl userland.
 
-## Targets
+## Current implementation
 
-- Supported preview path: XCC frontend validation plus `clang`-backed compile/link.
-- Experimental preview path: native AArch64 assembly generation for single-file macOS `arm64` programs in a narrow scalar subset.
-- Planned later: native Mach-O object emission and Linux/ELF backend support.
+- XCC runs preprocessing, lexing, parsing, and semantic analysis for every C compile input.
+- XCC can generate native AArch64 assembly on macOS `arm64` for the subset currently implemented in the backend.
+- `clang` remains the assembler, linker, and code-generation fallback while native coverage expands.
+- Linux/ELF validation runs in Docker and remains part of the compiler roadmap.
 
-## CLI preview
+## CLI
 
-- `xcc source.c` validates with XCC, then tries the experimental native backend on macOS `arm64` and falls back to `clang` when needed.
+- `xcc source.c` validates with XCC, then tries the native backend on macOS `arm64` and falls back to `clang` when needed.
 - `xcc --frontend source.c` runs only preprocessing, lexing, parsing, and semantic analysis.
 - `xcc --backend=xcc -S source.c -o -` prints native AArch64 assembly and fails on unsupported constructs.
 - `xcc --backend=clang -c source.c -o source.o` validates with XCC and always compiles with `clang`.
@@ -105,8 +100,9 @@ This is a target list for the initial milestones. It will evolve as CPython comp
 - Run curated Clang fixtures: `tox -e clang_suite`
 - Run curated Clang fixtures directly: `XCC_RUN_CLANG_SUITE=1 python3 -m unittest -v tests.test_clang_suite`
 - Run native smoke tests: `tox -e native_smoke`
-- Run CPython snippet trial: `python3 scripts/cpython_trial.py`
-- Run pinned CPython real-file trial: `python3 scripts/cpython_file_trial.py`
+- Run the CPython integration gate summary: `python3 scripts/cpython_trial.py`
+- Require the CPython integration gate to pass: `python3 scripts/cpython_trial.py --strict`
+- Inspect the detailed pinned CPython real-file harness: `python3 scripts/cpython_file_trial.py --allow-failures`
 - Build Python package artifacts: `uv build`
 - Run tests in Linux containers: `tox -e docker_glibc` or `tox -e docker_musl`
 - Build Linux/ELF image (glibc): `./scripts/docker-build.sh glibc`

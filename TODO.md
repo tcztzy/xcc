@@ -1,20 +1,26 @@
 # TODO
 
-This file tracks failure-driven work toward the M0 frontend baseline.
+This file tracks failure-driven work toward a complete C compiler.
 
-## M0 Definition of Done
+## Current Milestone Exit Criteria
 
 - [x] `tox -e py311,lint,type` is green with 0 failures.
 - [x] Coverage is 100% line + branch (`fail-under=100`).
-- [ ] Frontend (`preprocess + lex + parse + sema`) succeeds on 10 selected CPython `.c` files without errors.
+- [ ] XCC compiles 10 selected CPython `.c` files through the current integration gate without diagnostics.
 
 ## Current Blockers
 
-Latest CPython snippet trial (`scripts/cpython_trial.py`) status:
+Latest CPython integration gate (`scripts/cpython_trial.py`) status:
 
 - Date: 2026-04-02
-- Result: 288 / 288 passed
-- Open blocker buckets: none
+- Pinned archive: `Python-3.11.12.tgz`
+- Curated file set: 8 translation units
+- Verdict: fail
+- Result: 3 / 8 passed
+- Top blocker buckets:
+  - `/usr/include/sys/_select.h:42:1` (`parse`: `Expected ';'`) affecting `Programs/python.c` and `Parser/token.c`
+  - `clang resource __stddef_max_align_t.h:21:1` (`parse`: `Expected ';'`) affecting `Modules/_sha3/sha3.c` and `Modules/expat/xmlrole.c`
+  - `pycore_fileutils.h:8:1` (`pp`: `"Py_BUILD_CORE must be defined to include this header"`) affecting `Python/fileutils.c`
 
 Latest CPython real-file trial (`scripts/cpython_file_trial.py --allow-failures`) status:
 
@@ -28,7 +34,7 @@ Latest CPython real-file trial (`scripts/cpython_file_trial.py --allow-failures`
   - `Python/fileutils.c` (`pp`: `"Py_BUILD_CORE must be defined to include this header"`)
   - `Modules/_sha3/sha3.c` (`parse`: `Expected ';'`)
   - `Modules/expat/xmlrole.c` (`parse`: `Expected ';'`)
-- Next focus: clear the remaining real-file parse blockers, then expand the curated real-file set from 8 to the M0 target of 10 files.
+- Next focus: clear the remaining real-file blocker buckets, then expand the curated real-file set from 8 to the current milestone target of 10 files.
 
 ## Backlog (reference)
 
@@ -94,14 +100,14 @@ Latest CPython real-file trial (`scripts/cpython_file_trial.py --allow-failures`
 
 ### 1.8 Conformance and Regression Testing
 
-- [ ] Expand curated Clang fixture manifest with additional C11 frontend coverage.
+- [ ] Expand curated Clang fixture manifest with additional C11 compiler coverage.
 - [ ] Add local tests for every gap where no suitable upstream fixture exists.
 - [ ] Maintain 100% line + branch coverage while adding new behavior.
 - [ ] Keep `tox -e py311`, `tox -e lint`, `tox -e type`, and `tox -e clang_suite` green.
 
 ### 1.9 CPython-Driven Gap Closure
 
-- [x] Start regular frontend-only compilation trials against selected CPython translation units.
+- [x] Start regular compilation trials against selected CPython translation units.
 - [ ] Record failures into categorized buckets (preprocessor, parser, sema, diagnostics).
 - [ ] Convert each bucket item into reproducible unit/fixture tests before implementation.
 
