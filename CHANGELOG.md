@@ -2,6 +2,13 @@
 
 This file records implementation progress and validation history.
 
+## 2026-04-02
+
+- **PP**: Fixed the concrete Clang-suite blocker where malformed pragma directives were silently ignored and therefore misclassified as `ok`. The preprocessor now validates `#pragma STDC FENV_ACCESS`, `#pragma STDC CX_LIMITED_RANGE`, `#pragma STDC FP_CONTRACT`, checks `#pragma STDC FENV_ROUND` operands, and diagnoses malformed `#pragma GCC visibility` / `#pragma fenv_access` spellings while still preserving `#pragma once` and unrelated pragmas.
+- **Tests**: Added focused preprocessor regressions for valid and invalid `#pragma STDC`, `#pragma GCC visibility`, and `#pragma fenv_access` forms, including the helper no-op branches that keep pragma coverage at 100%.
+- **Clang suite**: Removed stale `skip_reason` entries from 4 upstream cases now matched by current frontend behavior: `clang/test/C/C99/n696.c`, `clang/test/Parser/pragma-fenv_access-ms.c`, `clang/test/Parser/pragma-fenv_round.c`, and `clang/test/Parser/pragma-visibility.c`. The dedicated suite baseline moves from `6230` skipped / `4083` active to `6226` skipped / `4087` active.
+- Checks: `./.venv/bin/python -m unittest tests.test_preprocessor.PreprocessorTests.test_stdc_pragma_valid_toggles_are_ignored tests.test_preprocessor.PreprocessorTests.test_stdc_pragma_invalid_value_errors tests.test_preprocessor.PreprocessorTests.test_stdc_fenv_round_invalid_value_errors tests.test_preprocessor.PreprocessorTests.test_pragma_helpers_ignore_non_matching_inputs tests.test_preprocessor.PreprocessorTests.test_gcc_visibility_pragma_valid_forms_are_ignored tests.test_preprocessor.PreprocessorTests.test_gcc_visibility_pragma_invalid_forms_error tests.test_preprocessor.PreprocessorTests.test_fenv_access_pragma_valid_forms_are_ignored tests.test_preprocessor.PreprocessorTests.test_fenv_access_pragma_invalid_forms_error -q` (pass); `PYTHONPATH=src ./.venv/bin/python - <<'PY' ... verified the 4 unskipped pragma fixtures plus the recovered AST FENV_ROUND fixtures ... PY` (pass); `./.venv/bin/tox -e py311,lint,type` (pass, 100% line/branch coverage); `./.venv/bin/tox -e clang_suite` (pass, `OK (skipped=6226)`).
+
 ## 2026-04-01
 
 - **PA**: Fixed the concrete Clang-suite blocker `Expected identifier before ';'` for tag-only `struct` / `union` declarations that end with trailing GNU/MS declaration attributes but no declarator, for example `union U {} __attribute__((aligned(16)));`. The parser now skips those trailing declaration attributes before applying the existing tag-only declaration path, without relaxing ordinary missing-declarator diagnostics like `int __attribute__((unused));`.

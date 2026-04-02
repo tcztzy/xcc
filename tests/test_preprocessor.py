@@ -37,6 +37,9 @@ from xcc.preprocessor import (
     _tokenize_macro_replacement,
     _tokenize_expr,
     _translate_expr_to_python,
+    _validate_fenv_access_pragma,
+    _validate_gcc_visibility_pragma,
+    _validate_stdc_pragma,
     preprocess_source,
 )
 
@@ -1272,6 +1275,99 @@ class PreprocessorTests(unittest.TestCase):
     def test_pragma_and_line_directives(self) -> None:
         result = preprocess_source("#pragma once\n#line 42\nint x;\n", filename="if.c")
         self.assertEqual(result.source, "\n\nint x;\n")
+
+    def test_stdc_pragma_valid_toggles_are_ignored(self) -> None:
+        result = preprocess_source(
+            "#pragma STDC FENV_ACCESS ON\n"
+            "#pragma STDC CX_LIMITED_RANGE OFF\n"
+            "#pragma STDC FP_CONTRACT DEFAULT\n"
+            "#pragma STDC FENV_ROUND FE_UPWARD\n"
+            "int x;\n",
+            filename="main.c",
+        )
+        self.assertEqual(result.source, "\n\n\n\nint x;\n")
+
+    def test_stdc_pragma_invalid_value_errors(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#pragma STDC FENV_ACCESS BLERP\n", filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid #pragma STDC FENV_ACCESS value: BLERP at main.c:1:1",
+        )
+
+    def test_stdc_fenv_round_invalid_value_errors(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#pragma STDC FENV_ROUND ON\n", filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid #pragma STDC FENV_ROUND value: ON at main.c:1:1",
+        )
+
+    def test_pragma_helpers_ignore_non_matching_inputs(self) -> None:
+        location = _SourceLocation("main.c", 1)
+        _validate_stdc_pragma("STDC", location)
+        _validate_stdc_pragma("STDC UNKNOWN ON", location)
+        _validate_gcc_visibility_pragma("region", location)
+        _validate_fenv_access_pragma("region", location)
+
+    def test_gcc_visibility_pragma_valid_forms_are_ignored(self) -> None:
+        result = preprocess_source(
+            "#pragma GCC visibility push(hidden)\n"
+            "#pragma GCC visibility pop\n"
+            "int x;\n",
+            filename="main.c",
+        )
+        self.assertEqual(result.source, "\n\nint x;\n")
+
+    def test_gcc_visibility_pragma_invalid_forms_error(self) -> None:
+        cases = (
+            "#pragma GCC visibility foo\n",
+            "#pragma GCC visibility pop foo\n",
+            "#pragma GCC visibility push\n",
+            "#pragma GCC visibility push(\n",
+            "#pragma GCC visibility push(hidden\n",
+            "#pragma GCC visibility push()\n",
+        )
+        for source in cases:
+            with self.subTest(source=source.strip()):
+                with self.assertRaises(PreprocessorError) as ctx:
+                    preprocess_source(source, filename="main.c")
+                self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+                self.assertEqual(
+                    str(ctx.exception),
+                    "Invalid #pragma GCC visibility directive at main.c:1:1",
+                )
+
+    def test_fenv_access_pragma_valid_forms_are_ignored(self) -> None:
+        result = preprocess_source(
+            "#pragma fenv_access (on)\n"
+            "#pragma fenv_access (off)\n"
+            "int x;\n",
+            filename="main.c",
+        )
+        self.assertEqual(result.source, "\n\nint x;\n")
+
+    def test_fenv_access_pragma_invalid_forms_error(self) -> None:
+        cases = (
+            "#pragma fenv_access\n",
+            "#pragma fenv_access foo\n",
+            "#pragma fenv_access on\n",
+            "#pragma fenv_access (\n",
+            "#pragma fenv_access (on\n",
+            "#pragma fenv_access (on) foo\n",
+            "#pragma fenv_access (maybe)\n",
+        )
+        for source in cases:
+            with self.subTest(source=source.strip()):
+                with self.assertRaises(PreprocessorError) as ctx:
+                    preprocess_source(source, filename="main.c")
+                self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+                self.assertEqual(
+                    str(ctx.exception),
+                    "Invalid #pragma fenv_access directive at main.c:1:1",
+                )
 
     def test_pragma_once_skips_second_include(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
