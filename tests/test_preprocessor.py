@@ -37,6 +37,7 @@ from xcc.preprocessor import (
     _tokenize_macro_replacement,
     _tokenize_expr,
     _translate_expr_to_python,
+    _validate_defined_syntax,
     _validate_fenv_access_pragma,
     _validate_gcc_visibility_pragma,
     _validate_stdc_pragma,
@@ -910,6 +911,15 @@ class PreprocessorTests(unittest.TestCase):
             preprocess_source("#if 1 +\nint x;\n#endif\n", filename="if.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
         self.assertEqual((ctx.exception.filename, ctx.exception.line), ("if.c", 1))
+
+    def test_invalid_if_expression_rejects_missing_defined_close_paren(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source(
+                "#define r_paren )\n#if defined( x r_paren\nint x;\n#endif\n",
+                filename="if.c",
+            )
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertEqual((ctx.exception.filename, ctx.exception.line), ("if.c", 2))
 
     def test_if_expression_short_circuits_boolean_operators(self) -> None:
         result = preprocess_source(
@@ -3189,6 +3199,14 @@ class PreprocessorTests(unittest.TestCase):
     def test_parse_pp_char_literal_covers_prefix_and_empty_literal(self) -> None:
         self.assertEqual(_parse_pp_char_literal("u8'A'"), ord("A"))
         self.assertIsNone(_parse_pp_char_literal("''"))
+
+    def test_validate_defined_syntax_covers_bare_paren_and_missing_close(self) -> None:
+        location = _SourceLocation("if.c", 1)
+        _validate_defined_syntax("defined FLAG", location)
+        _validate_defined_syntax("defined(FLAG)", location)
+        with self.assertRaises(PreprocessorError) as ctx:
+            _validate_defined_syntax("defined( FLAG", location)
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
 
     def test_eval_node_boolean_paths_cover_and_or_outcomes(self) -> None:
         self.assertEqual(_eval_node(ast.BoolOp(op=ast.And(), values=[ast.Constant(1), ast.Constant(2)])), 1)
