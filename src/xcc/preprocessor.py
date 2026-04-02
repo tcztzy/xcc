@@ -1420,6 +1420,14 @@ class _Preprocessor:
             expanded = self._replace_feature_probe_operators(expanded, location)
             py_expr = _translate_expr_to_python(expanded)
             return bool(_safe_eval_pp_expr(py_expr))
+        except _PPExprOverflow as error:
+            raise PreprocessorError(
+                str(error).capitalize(),
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_IF_EXPR,
+            ) from error
         except PreprocessorError:
             raise
         except ValueError as error:
@@ -2282,6 +2290,8 @@ def _translate_expr_to_python(expr: str) -> str:
     for token in tokens:
         value = _parse_pp_integer_literal(token)
         if value is not None:
+            if value > _UINT64_MASK:
+                raise ValueError("Integer literal overflow")
             if _is_unsigned_pp_integer(token):
                 mapped.append(f"u64({value})")
             else:
@@ -2355,9 +2365,10 @@ def _parse_pp_integer_literal(token: str) -> int | None:
 
 
 def _is_unsigned_pp_integer(token: str) -> bool:
-    if _PP_INT_RE.fullmatch(token) is None:
+    value = _parse_pp_integer_literal(token)
+    if value is None:
         return False
-    return any(ch in "uU" for ch in token)
+    return any(ch in "uU" for ch in token) or value > _INT64_MAX
 
 
 def _parse_pp_char_literal(token: str) -> int | None:
@@ -2408,7 +2419,13 @@ def _safe_eval_int_expr(expr: str) -> int:
     return _eval_node(node)
 
 
+_INT64_MIN = -(1 << 63)
+_INT64_MAX = (1 << 63) - 1
 _UINT64_MASK = (1 << 64) - 1
+
+
+class _PPExprOverflow(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -2420,9 +2437,11 @@ class _PPValue:
         return self.value & _UINT64_MASK
 
     def normalize(self) -> "_PPValue":
-        if not self.is_unsigned:
-            return self
-        return _PPValue(self.value & _UINT64_MASK, True)
+        if self.is_unsigned:
+            return _PPValue(self.value & _UINT64_MASK, True)
+        if self.value < _INT64_MIN or self.value > _INT64_MAX:
+            raise _PPExprOverflow("integer overflow in preprocessor expression")
+        return self
 
 
 def _safe_eval_pp_expr(expr: str) -> int:
@@ -2443,6 +2462,10 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
         if isinstance(node.value, bool):
             return _PPValue(int(node.value))
         if isinstance(node.value, int):
+            if node.value > _UINT64_MASK or node.value < _INT64_MIN:
+                raise _PPExprOverflow("integer overflow in preprocessor expression")
+            if node.value > _INT64_MAX:
+                return _PPValue(node.value, True).normalize()
             return _PPValue(node.value)
         raise ValueError(f"Unsupported preprocessor literal type: {type(node.value).__name__}")
     if isinstance(node, ast.Call):

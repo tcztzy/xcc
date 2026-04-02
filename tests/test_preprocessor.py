@@ -921,6 +921,39 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
         self.assertEqual((ctx.exception.filename, ctx.exception.line), ("if.c", 2))
 
+    def test_invalid_if_expression_rejects_signed_integer_overflow(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if 9223372036854775807LL + 1LL\nint x;\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertEqual(str(ctx.exception), "Integer overflow in preprocessor expression at if.c:1:1")
+
+    def test_invalid_if_expression_rejects_too_large_integer_literal(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#if 0 && 18446744073709551616\nint x;\n#endif\n", filename="if.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
+        self.assertEqual(str(ctx.exception), "Invalid #if expression at if.c:1:1")
+
+    def test_if_expression_uses_uintmax_for_large_unsuffixed_literals(self) -> None:
+        result = preprocess_source(
+            "#if 0xFFFFFFFFFFFFFFFF + 1 == 0\nint ok;\n#endif\n",
+            filename="if.c",
+        )
+        self.assertIn("int ok;", result.source)
+
+    def test_if_expression_accepts_intmax_min_boundary(self) -> None:
+        result = preprocess_source(
+            "#if -9223372036854775807LL - 1LL == __INTMAX_MIN__\nint ok;\n#endif\n",
+            filename="if.c",
+        )
+        self.assertIn("int ok;", result.source)
+
+    def test_skipped_if_block_ignores_too_large_integer_literal(self) -> None:
+        result = preprocess_source(
+            "#if 0\n#if 18446744073709551616\nint bad;\n#endif\n#endif\nint ok;\n",
+            filename="if.c",
+        )
+        self.assertIn("int ok;", result.source)
+
     def test_if_expression_short_circuits_boolean_operators(self) -> None:
         result = preprocess_source(
             "#if 0 && (1 / 0)\nint bad;\n#elif 1 || (1 / 0)\nint ok;\n#endif\n",
@@ -2658,14 +2691,21 @@ class PreprocessorTests(unittest.TestCase):
     def test_translate_expr_to_python_and_tokenizer(self) -> None:
         self.assertEqual(_translate_expr_to_python("A && !B || 1 / 2"), "0 and not 0 or 1 // 2")
         self.assertEqual(_translate_expr_to_python("1UL + 0x10LL"), "u64(1) + 16")
+        self.assertEqual(
+            _translate_expr_to_python("0xFFFFFFFFFFFFFFFF + 1"),
+            "u64(18446744073709551615) + 1",
+        )
         self.assertEqual(_translate_expr_to_python("__has_extension(x)"), "0")
         self.assertEqual(_tokenize_expr("0x10 + 1"), ["0x10", "+", "1"])
         with self.assertRaises(ValueError):
             _tokenize_expr("@")
         with self.assertRaises(ValueError):
             _translate_expr_to_python("f((1)")
+        with self.assertRaises(ValueError):
+            _translate_expr_to_python("18446744073709551616")
         self.assertIsNone(_parse_pp_integer_literal("09"))
         self.assertEqual(_parse_pp_integer_literal("010"), 8)
+        self.assertTrue(_is_unsigned_pp_integer("0xFFFFFFFFFFFFFFFF"))
         self.assertFalse(_is_unsigned_pp_integer("x"))
 
     def test_safe_eval_int_expr_operators(self) -> None:
@@ -2707,6 +2747,7 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_safe_eval_pp_expr(self) -> None:
         self.assertEqual(_safe_eval_pp_expr("u64(18446744073709551615) + u64(1)"), 0)
+        self.assertEqual(_safe_eval_pp_expr("18446744073709551615 + 1"), 0)
         self.assertEqual(_safe_eval_pp_expr("u64(0) - u64(1)"), 18446744073709551615)
         self.assertEqual(_safe_eval_pp_expr("u64(1) != 0"), 1)
         self.assertEqual(_safe_eval_pp_expr("u64(1) and 0"), 0)
@@ -2726,7 +2767,15 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(_safe_eval_pp_expr("u64(1) <= 2"), 1)
         self.assertEqual(_safe_eval_pp_expr("u64(2) >= 2"), 1)
         with self.assertRaises(ValueError):
+            _safe_eval_pp_expr("18446744073709551616")
+        with self.assertRaises(ValueError):
+            _safe_eval_pp_expr("9223372036854775807 + 1")
+        with self.assertRaises(ValueError):
+            _safe_eval_pp_expr("u64(18446744073709551616)")
+        with self.assertRaises(ValueError):
             _safe_eval_pp_expr("u64(1, 2)")
+        with self.assertRaises(ValueError):
+            _safe_eval_pp_expr("-9223372036854775807 - 2")
         with self.assertRaises(ValueError):
             _safe_eval_pp_expr("1 // 0")
         with self.assertRaises(ValueError):
