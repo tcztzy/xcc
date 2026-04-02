@@ -1369,6 +1369,97 @@ class PreprocessorTests(unittest.TestCase):
                     "Invalid #pragma fenv_access directive at main.c:1:1",
                 )
 
+    def test_clang_diagnostic_pragma_valid_forms_are_ignored(self) -> None:
+        result = preprocess_source(
+            "#pragma clang diagnostic push\n"
+            "#pragma clang diagnostic ignored \"-Wmultichar\"\n"
+            "#pragma clang diagnostic warning \"-Weverything\"\n"
+            "#pragma GCC diagnostic error \"-Wundef\"\n"
+            "#pragma clang diagnostic fatal \"-Wall\"\n"
+            "#pragma clang diagnostic pop\n"
+            "int x;\n",
+            filename="main.c",
+        )
+        self.assertEqual(result.source, "\n\n\n\n\n\nint x;\n")
+
+    def test_clang_diagnostic_pragma_invalid_forms_error(self) -> None:
+        cases = (
+            "#pragma clang diagnostic\n",
+            "#pragma clang diagnostic puhs\n",
+            "#pragma clang diagnostic error 42\n",
+            "#pragma clang diagnostic push ignored \"-Wdeprecated-declarations\"\n",
+            "#pragma GCC diagnostic error \"invalid-name\"\n",
+        )
+        for source in cases:
+            with self.subTest(source=source.strip()):
+                with self.assertRaises(PreprocessorError) as ctx:
+                    preprocess_source(source, filename="main.c")
+                self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+                self.assertEqual(
+                    str(ctx.exception),
+                    "Invalid #pragma diagnostic directive at main.c:1:1",
+                )
+
+    def test_clang_module_pragma_valid_forms_are_ignored(self) -> None:
+        result = preprocess_source(
+            "#pragma clang module\n"
+            "#pragma clang module build bounds_safety\n"
+            "#pragma clang module contents\n"
+            "#pragma clang module begin foo.a\n"
+            "#pragma clang module import foo.a\n"
+            "#pragma clang module end\n"
+            "#pragma clang module endbuild\n"
+            "int x;\n",
+            filename="main.c",
+        )
+        self.assertEqual(result.source, "\n\n\n\n\n\n\nint x;\n")
+
+    def test_clang_module_pragma_invalid_forms_error(self) -> None:
+        cases = (
+            "#pragma clang module import\n",
+            "#pragma clang module import !\n",
+            "#pragma clang module import foo ? bar\n",
+            "#pragma clang module begin !\n",
+            "#pragma clang module end foo.a\n",
+        )
+        for source in cases:
+            with self.subTest(source=source.strip()):
+                with self.assertRaises(PreprocessorError) as ctx:
+                    preprocess_source(source, filename="main.c")
+                self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+                self.assertEqual(
+                    str(ctx.exception),
+                    "Invalid #pragma clang module directive at main.c:1:1",
+                )
+
+    def test_clang_fp_pragma_valid_forms_are_ignored(self) -> None:
+        result = preprocess_source(
+            "#pragma clang fp reassociate(off)\n"
+            "#pragma clang fp reciprocal(on)\n"
+            "#pragma clang fp reciprocal(on) reassociate(on)\n"
+            "#pragma clang fp contract(fast) reassociate(on)\n"
+            "#pragma clang fp eval_method(source)\n"
+            "#pragma clang fp exceptions(maytrap)\n"
+            "int x;\n",
+            filename="main.c",
+        )
+        self.assertEqual(result.source, "\n\n\n\n\n\nint x;\n")
+
+    def test_clang_fp_pragma_invalid_forms_error(self) -> None:
+        cases = (
+            "#pragma clang fp reassociate(fast)\n",
+            "#pragma clang fp reciprocal(fast)\n",
+        )
+        for source in cases:
+            with self.subTest(source=source.strip()):
+                with self.assertRaises(PreprocessorError) as ctx:
+                    preprocess_source(source, filename="main.c")
+                self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+                self.assertEqual(
+                    str(ctx.exception),
+                    "Invalid #pragma clang fp directive at main.c:1:1",
+                )
+
     def test_pragma_once_skips_second_include(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
