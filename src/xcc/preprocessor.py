@@ -288,6 +288,11 @@ _SUPPORTED_C_ATTRIBUTES = frozenset(
         "gnu::unused",
     }
 )
+_STDC_PRAGMA_TOGGLE_VALUES = frozenset({"ON", "OFF", "DEFAULT"})
+_STDC_VALIDATED_PRAGMAS = frozenset({"FENV_ACCESS", "CX_LIMITED_RANGE", "FP_CONTRACT"})
+_STDC_FENV_ROUND_VALUES = frozenset(
+    {"FE_DYNAMIC", "FE_DOWNWARD", "FE_TONEAREST", "FE_TOWARDZERO", "FE_UPWARD"}
+)
 
 
 def _env_path_list(name: str) -> tuple[str, ...]:
@@ -806,8 +811,11 @@ class _Preprocessor:
                 line_index += 1
                 continue
             if name == "pragma":
-                if body.strip() == "once":
+                stripped_body = body.strip()
+                if stripped_body == "once":
                     self._pragma_once_files.add(source_id)
+                else:
+                    _validate_pragma(stripped_body, directive_cursor.first_location())
                 for directive_index, chunk in enumerate(directive_lines):
                     out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
                 logical_cursor.advance(len(directive_lines))
@@ -2650,6 +2658,77 @@ def _parse_directive(line: str) -> tuple[str, str] | None:
     if match is None:
         return None
     return match.group("name"), match.group("body")
+
+
+def _raise_pragma_error(message: str, location: _SourceLocation) -> None:
+    raise PreprocessorError(
+        message,
+        location.line,
+        1,
+        filename=location.filename,
+        code=_PP_INVALID_DIRECTIVE,
+    )
+
+
+def _validate_stdc_pragma(body: str, location: _SourceLocation) -> None:
+    parts = body.split()
+    if len(parts) < 2:
+        return
+    subject = parts[1]
+    value = " ".join(parts[2:])
+    if subject == "FENV_ROUND":
+        if value not in _STDC_FENV_ROUND_VALUES:
+            _raise_pragma_error(
+                f"Invalid #pragma STDC FENV_ROUND value: {value or '<missing>'}",
+                location,
+            )
+        return
+    if subject not in _STDC_VALIDATED_PRAGMAS:
+        return
+    if value not in _STDC_PRAGMA_TOGGLE_VALUES:
+        _raise_pragma_error(
+            f"Invalid #pragma STDC {subject} value: {value or '<missing>'}",
+            location,
+        )
+
+
+def _validate_gcc_visibility_pragma(body: str, location: _SourceLocation) -> None:
+    if not body.startswith("GCC visibility"):
+        return
+    tail = body.removeprefix("GCC visibility").strip()
+    if tail == "pop":
+        return
+    if not tail.startswith("push"):
+        _raise_pragma_error("Invalid #pragma GCC visibility directive", location)
+    arguments = tail.removeprefix("push").strip()
+    if not arguments.startswith("(") or not arguments.endswith(")"):
+        _raise_pragma_error("Invalid #pragma GCC visibility directive", location)
+    operand = arguments[1:-1].strip()
+    if not operand or _IDENT_RE.fullmatch(operand) is None:
+        _raise_pragma_error("Invalid #pragma GCC visibility directive", location)
+
+
+def _validate_fenv_access_pragma(body: str, location: _SourceLocation) -> None:
+    if not body.startswith("fenv_access"):
+        return
+    arguments = body.removeprefix("fenv_access").strip()
+    if not arguments.startswith("(") or not arguments.endswith(")"):
+        _raise_pragma_error("Invalid #pragma fenv_access directive", location)
+    operand = arguments[1:-1].strip().lower()
+    if operand not in {"on", "off"}:
+        _raise_pragma_error("Invalid #pragma fenv_access directive", location)
+
+
+def _validate_pragma(body: str, location: _SourceLocation) -> None:
+    body = _strip_condition_comments(body).strip()
+    if body.startswith("STDC "):
+        _validate_stdc_pragma(body, location)
+        return
+    if body.startswith("GCC visibility"):
+        _validate_gcc_visibility_pragma(body, location)
+        return
+    if body.startswith("fenv_access"):
+        _validate_fenv_access_pragma(body, location)
 
 
 def _blank_line(line: str) -> str:
