@@ -5,7 +5,7 @@ XCC is a C compiler implemented in modern Python (CPython and PyPy, Python 3.11+
 ## Goals
 
 - Compile the CPython source tree with full fidelity.
-- Implement a C11 compiler that follows the standard closely and avoids compiler specific extensions.
+- Implement a C11 compiler that follows the standard closely while keeping GNU/Clang compatibility behavior explicit and mode-gated.
 - Provide strict diagnostics and deterministic output.
 - Run on CPython and PyPy with identical behavior.
 - Enforce complete test coverage and zero warnings.
@@ -29,7 +29,7 @@ XCC is a C compiler implemented in modern Python (CPython and PyPy, Python 3.11+
 - CPython Compatibility: how CPython sources are supported.
 - Architecture: compiler pipeline and module boundaries.
 - Front End: preprocessing, parsing, and semantic analysis.
-- Back End: IR, code generation, and object emission.
+- Back End: direct native code generation, `clang` delegation, and future backend work.
 - Testing and Quality: tests, coverage, linting, and typing.
 - Performance: benchmarking and optimization discipline.
 - Licensing: source policy and third party review.

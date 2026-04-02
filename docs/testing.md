@@ -24,10 +24,10 @@
 - Upstream fixtures are materialized under `tests/external/clang/generated/` from a pinned LLVM release archive.
 - Local `xcc` regression fixtures are tracked under `tests/external/clang/fixtures/`.
 - Metadata, upstream archive pin, and checksums are stored in `tests/external/clang/manifest.json`.
-- The harness in `tests/test_clang_suite.py` validates fixture integrity, expected frontend stage (`ok`, `lex`, `parse`, `sema`), and selected diagnostic details.
-- Run only this subset with `python -m unittest -v tests.test_clang_suite`.
+- The harness in `tests/test_clang_suite.py` validates fixture integrity, coarse expectations (`ok` / `error`), and selected frontend-stage or diagnostic-location details where the manifest records them.
+- Direct `unittest` runs require `XCC_RUN_CLANG_SUITE=1`: `XCC_RUN_CLANG_SUITE=1 python3 -m unittest -v tests.test_clang_suite`.
 - Or use tox: `tox -e clang_suite`.
-- Materialize external fixtures from upstream with `python scripts/sync_clang_fixtures.py`.
+- Materialize external fixtures from upstream with `python3 scripts/sync_clang_fixtures.py`.
 
 ## Tooling
 
@@ -42,16 +42,16 @@ Common commands:
 - `tox -e type`
 - `tox -e clang_suite`
 - `tox -e native_smoke`
-- `python scripts/cpython_trial.py`
-- `python scripts/cpython_file_trial.py`
+- `python3 scripts/cpython_trial.py`
+- `python3 scripts/cpython_file_trial.py`
 
 ## Docker (Linux/ELF)
 
-Linux/ELF testing runs inside Docker containers. The images are intentionally minimal and do not install tox, so use direct `python -m unittest` commands.
+Linux/ELF testing runs inside Docker containers. The images are intentionally minimal and do not install tox, so use direct `python3 -m unittest` commands.
 
 Example:
 
-- `./scripts/docker-run.sh glibc python -m unittest discover -v`
+- `./scripts/docker-run.sh glibc python3 -m unittest discover -v`
 
 ## Optional tox-docker
 

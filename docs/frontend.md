@@ -5,27 +5,36 @@
 The front end currently provides a deterministic check pipeline:
 
 1. Source loading (`file` or `stdin`).
-2. Lexing into C tokens.
-3. Parsing into the AST.
-4. Semantic analysis and type checking.
+2. Preprocessing, macro expansion, and include resolution.
+3. Lexing into C tokens.
+4. Parsing into the AST.
+5. Semantic analysis and type checking.
 
-The pipeline is exposed through `xcc.frontend.compile_source` and used by the CLI entrypoint.
+The pipeline is exposed through `xcc.frontend.compile_source` / `compile_path` and is used by both the frontend-only CLI path and the compile driver.
 
 ## Driver behavior
 
-The `xcc` CLI runs the front end and exits non-zero on diagnostics.
+The `xcc` CLI has two entry modes:
 
-- `xcc <path.c>`: run front-end checks and print a success marker.
+- `xcc <path.c>`: driver mode. Run the full frontend, then either use the native backend or delegate to `clang`.
+- `xcc --frontend <path.c>`: frontend-only mode. Run preprocess/lex/parse/sema and print a success marker or the requested dumps.
 - `xcc -`: read source from standard input.
-- `xcc --dump-tokens <path.c>`: print token stream.
-- `xcc --dump-ast <path.c>`: print parsed AST.
-- `xcc --dump-sema <path.c>`: print semantic model.
+- `xcc --frontend --dump-pp-tokens <path.c>`: print the preprocessor token stream.
+- `xcc --frontend --dump-include-trace <path.c>`: print include resolution trace.
+- `xcc --frontend --dump-macro-table <path.c>`: print the final macro table.
+- `xcc --frontend --dump-tokens <path.c>`: print token stream.
+- `xcc --frontend --dump-ast <path.c>`: print parsed AST.
+- `xcc --frontend --dump-sema <path.c>`: print semantic model.
+- `xcc --backend={auto,xcc,clang}`: select driver backend behavior for C compile inputs.
+- `xcc --no-backend-fallback`: keep `--backend=auto` strict instead of falling back to `clang`.
+- `xcc -S`, `-c`, `-o`: use standard compile-driver output controls.
 - `xcc -I <dir>`, `-iquote <dir>`, `-isystem <dir>`, `-idirafter <dir>`: configure include search roots.
 - `CPATH` and `C_INCLUDE_PATH`: environment include roots used after `-I` and `-isystem` respectively (empty entries map to the current working directory, matching GCC/Clang behavior).
 - `xcc -nostdinc`: disable `CPATH` and `C_INCLUDE_PATH` during include resolution (explicit CLI include paths still apply).
 - `xcc -include <header>`: force-include a header before the main translation unit (repeatable).
 - `xcc -imacros <header>`: load macros from a header before preprocessing the main translation unit, while discarding that header's non-directive output (repeatable).
 - `xcc -fhosted` / `xcc -ffreestanding`: set hosted-environment assumptions by defining `__STDC_HOSTED__` to `1` or `0`.
+- `xcc --frontend --diag-format=json`: emit structured frontend diagnostics.
 
 Diagnostics are stage-tagged (`lex`, `parse`, `sema`) and include source coordinates when available.
 Unexpected internal AST-shape failures in semantic analysis (including expression/statement and file-scope declaration fallbacks) are surfaced as explicit internal sema bug diagnostics, so frontend gaps are immediately distinguishable from user-code constraint violations.

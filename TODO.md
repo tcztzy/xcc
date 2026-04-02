@@ -12,9 +12,23 @@ This file tracks failure-driven work toward the M0 frontend baseline.
 
 Latest CPython snippet trial (`scripts/cpython_trial.py`) status:
 
-- Date: 2026-02-27
+- Date: 2026-04-02
 - Result: 288 / 288 passed
 - Open blocker buckets: none
+
+Latest CPython real-file trial (`scripts/cpython_file_trial.py --allow-failures`) status:
+
+- Date: 2026-04-02
+- Pinned archive: `Python-3.11.12.tgz`
+- Curated file set: 8 translation units
+- Result: 3 / 8 passed
+- Current failures:
+  - `Programs/python.c` (`parse`: `Expected ';'`)
+  - `Parser/token.c` (`parse`: `Expected ';'`)
+  - `Python/fileutils.c` (`pp`: `"Py_BUILD_CORE must be defined to include this header"`)
+  - `Modules/_sha3/sha3.c` (`parse`: `Expected ';'`)
+  - `Modules/expat/xmlrole.c` (`parse`: `Expected ';'`)
+- Next focus: clear the remaining real-file parse blockers, then expand the curated real-file set from 8 to the M0 target of 10 files.
 
 ## Backlog (reference)
 
@@ -87,7 +101,7 @@ Latest CPython snippet trial (`scripts/cpython_trial.py`) status:
 
 ### 1.9 CPython-Driven Gap Closure
 
-- [ ] Start regular frontend-only compilation trials against selected CPython translation units.
+- [x] Start regular frontend-only compilation trials against selected CPython translation units.
 - [ ] Record failures into categorized buckets (preprocessor, parser, sema, diagnostics).
 - [ ] Convert each bucket item into reproducible unit/fixture tests before implementation.
 
