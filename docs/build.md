@@ -29,6 +29,6 @@ Use the provided scripts to build and run containers:
 
 Example test run:
 
-- `./scripts/docker-run.sh glibc python -m unittest discover -v`
+- `./scripts/docker-run.sh glibc python3 -m unittest discover -v`
 
 Note: These images are intentionally minimal and do not install tox.

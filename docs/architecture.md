@@ -2,13 +2,13 @@
 
 ## Pipeline overview
 
-1. Source management and build driver.
-2. Preprocessing and macro expansion.
-3. Lexing and parsing into an AST.
-4. Semantic analysis and type checking.
-5. IR construction and optimization.
-6. Code generation and object emission.
-7. Linker integration and final artifacts.
+1. CLI parsing and driver/frontend mode selection.
+2. Source loading, option normalization, and include-root setup.
+3. Preprocessing and macro expansion.
+4. Lexing and parsing into an AST.
+5. Semantic analysis and type checking.
+6. Direct lowering from the typed AST to AArch64 assembly for the supported macOS `arm64` subset.
+7. Assembly and linking via the system `clang` toolchain, or full `clang` delegation when requested.
 
 ## Core design choices
 
@@ -19,12 +19,16 @@
 
 ## Module boundaries
 
-- `driver`: CLI, file graph, dependency tracking.
+- `xcc.__init__` and `cc_driver`: CLI parsing, driver orchestration, backend selection, and `clang` delegation.
+- `frontend`: source loading plus preprocess/lex/parse/sema orchestration.
+- `options`: frontend option model and normalization.
 - `preprocessor`: tokens, macros, include handling.
+- `lexer`: translation phases and token classification.
 - `parser`: grammar, AST nodes.
 - `sema`: types, scopes, constant evaluation.
-- `ir`: SSA or structured IR with explicit control flow.
-- `codegen`: target backend and object emission.
+- `codegen`: experimental direct native lowering to assembly.
+- `host_includes`: host toolchain include-root discovery for driver mode.
+- `clang_suite`: shared helpers for the pinned LLVM/Clang baseline.
 - `diag`: diagnostics and formatting.
 
 ## Diagnostics strategy

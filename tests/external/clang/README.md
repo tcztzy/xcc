@@ -40,8 +40,8 @@ When rebuilding the full-suite baseline:
 ## Baseline Workflow
 
 - Rewrite the full upstream baseline from scratch and force a fresh download:
-  - `python scripts/sync_clang_fixtures.py --rebuild-full-suite-baseline --force-download`
+  - `python3 scripts/sync_clang_fixtures.py --rebuild-full-suite-baseline --force-download`
 - Verify local fixtures and checksums against the pinned archive:
-  - `python scripts/sync_clang_fixtures.py --check`
+  - `python3 scripts/sync_clang_fixtures.py --check`
 - Run the dedicated suite:
-  - `XCC_RUN_CLANG_SUITE=1 python -m unittest -v tests.test_clang_suite`
+  - `XCC_RUN_CLANG_SUITE=1 python3 -m unittest -v tests.test_clang_suite`

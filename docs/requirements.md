@@ -4,7 +4,7 @@
 
 - Baseline: C11 core language and standard library semantics, without relying on optional C11 features.
 - Public C API compatibility with C99 and C++ where CPython requires it.
-- Avoid compiler specific extensions and keep warning free builds.
+- Keep compiler-specific extensions explicit, mode-gated, and warning-free where supported.
 
 ## CPython build prerequisites
 

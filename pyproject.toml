@@ -1,7 +1,7 @@
 [project]
 name = "xcc"
 version = "0.2.0a1"
-description = "Preview C11 compiler frontend with an experimental macOS arm64 native backend."
+description = "Preview Python C11 compiler with a validated frontend and an experimental macOS arm64 native backend."
 readme = "README.md"
 authors = [
     { name = "Tang Ziya", email = "tcztzy@gmail.com" }

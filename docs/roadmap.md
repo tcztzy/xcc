@@ -10,14 +10,15 @@
 - Preprocessor, lexer, parser, and AST.
 - Basic semantic analysis and type checking.
 
-## Phase 2: IR and code generation
+## Phase 2: Direct Native Code Generation Preview
 
-- Initial IR and minimal backend for a single platform.
-- Produce object files and link with the system toolchain on macOS.
+- Direct lowering from the typed AST to AArch64 assembly for macOS `arm64`.
+- Assemble and link through the system `clang` toolchain.
 - Establish Docker-based Linux/ELF build environments.
 
 ## Phase 3: CPython compilation
 
+- Expand the curated CPython real-file trial and drive selected translation units to green.
 - Compile CPython core and standard library modules.
 - Expand feature coverage based on CPython build failures.
 
@@ -28,5 +29,6 @@
 
 ## Phase 4: Optimization and hardening
 
+- Revisit standalone object emission and any backend IR requirements once the preview backend scope is exhausted.
 - Performance tuning with benchmarks.
 - Extensive regression tests and diagnostics polish.

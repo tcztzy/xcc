@@ -4,12 +4,15 @@ XCC is a C compiler written in modern Python (CPython and PyPy, 3.11+). The firs
 
 ## Status
 
-Preview release candidate.
+Preview alpha (`0.2.0a1`).
 
-- The frontend is the default entry point for every C compile.
+- Frontend validation runs for every C compile before backend selection.
+- `xcc source.c` is driver mode: it validates with XCC, then uses the native backend or delegates to `clang`.
+- `xcc --frontend source.c` forces a frontend-only check run.
 - `--backend=auto` prefers the experimental native macOS `arm64` backend and falls back to `clang` when native code generation is unsupported.
 - `--backend=xcc` keeps the native backend strict and experimental.
 - `--backend=clang` always delegates code generation and linking to `clang` after XCC frontend validation.
+- The curated CPython-style snippet trial is green; the pinned real-file CPython frontend trial is still partial.
 
 This preview does not ship a standalone Mach-O writer, a native Linux/ELF backend, or a full CPython tree build.
 
@@ -73,7 +76,8 @@ This is a target list for the initial milestones. It will evolve as CPython comp
 
 ## CLI preview
 
-- `xcc source.c` runs the frontend, tries the experimental native backend on macOS `arm64`, and falls back to `clang` when needed.
+- `xcc source.c` validates with XCC, then tries the experimental native backend on macOS `arm64` and falls back to `clang` when needed.
+- `xcc --frontend source.c` runs only preprocessing, lexing, parsing, and semantic analysis.
 - `xcc --backend=xcc -S source.c -o -` prints native AArch64 assembly and fails on unsupported constructs.
 - `xcc --backend=clang -c source.c -o source.o` validates with XCC and always compiles with `clang`.
 - `xcc --no-backend-fallback source.c` keeps `auto` mode strict for backend diagnostics.
@@ -99,10 +103,11 @@ This is a target list for the initial milestones. It will evolve as CPython comp
 - Run type checks: `tox -e type`
 - Run tests: `tox -e py311`
 - Run curated Clang fixtures: `tox -e clang_suite`
+- Run curated Clang fixtures directly: `XCC_RUN_CLANG_SUITE=1 python3 -m unittest -v tests.test_clang_suite`
 - Run native smoke tests: `tox -e native_smoke`
-- Run CPython snippet trial: `python scripts/cpython_trial.py`
-- Run pinned CPython real-file trial: `python scripts/cpython_file_trial.py`
-- Build preview artifacts: `uv build`
+- Run CPython snippet trial: `python3 scripts/cpython_trial.py`
+- Run pinned CPython real-file trial: `python3 scripts/cpython_file_trial.py`
+- Build Python package artifacts: `uv build`
 - Run tests in Linux containers: `tox -e docker_glibc` or `tox -e docker_musl`
 - Build Linux/ELF image (glibc): `./scripts/docker-build.sh glibc`
 - Build Linux/ELF image (musl): `./scripts/docker-build.sh musl`
@@ -113,7 +118,7 @@ This is a target list for the initial milestones. It will evolve as CPython comp
 
 - External archives (LLVM/Clang tarballs, CPython sources, cached specs) must not be committed.
 - Curated LLVM fixtures are pinned in `tests/external/clang/manifest.json` by release tag, archive URL, and SHA-256.
-- Materialize upstream fixtures with `python scripts/sync_clang_fixtures.py`.
+- Materialize upstream fixtures with `python3 scripts/sync_clang_fixtures.py`.
 - External fixtures are generated into `tests/external/clang/generated/` and ignored by Git.
 - Local `xcc` regression fixtures stay in `tests/external/clang/fixtures/`.
 
