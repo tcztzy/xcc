@@ -1399,6 +1399,7 @@ class _Preprocessor:
             return "1" if macro_name in self._macros else "0"
 
         condition = _strip_condition_comments(body)
+        _validate_defined_syntax(condition, location)
         expanded = _DEFINED_PAREN_RE.sub(replace_defined, condition)
         expanded = _DEFINED_BARE_RE.sub(replace_defined, expanded)
         try:
@@ -2672,6 +2673,28 @@ def _raise_pragma_error(message: str, location: _SourceLocation) -> NoReturn:
         filename=location.filename,
         code=_PP_INVALID_DIRECTIVE,
     )
+
+
+def _validate_defined_syntax(expr: str, location: _SourceLocation) -> None:
+    cursor = 0
+    while True:
+        match = re.search(r"\bdefined\b", expr[cursor:])
+        if match is None:
+            return
+        cursor += match.end()
+        while cursor < len(expr) and expr[cursor].isspace():
+            cursor += 1
+        if cursor >= len(expr) or expr[cursor] != "(":
+            continue
+        if ")" not in expr[cursor + 1 :]:
+            raise PreprocessorError(
+                "Invalid #if expression",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_IF_EXPR,
+            )
+        cursor += 1
 
 
 def _validate_stdc_pragma(body: str, location: _SourceLocation) -> None:
