@@ -4,6 +4,8 @@ This file records implementation progress and validation history.
 
 ## 2026-04-14
 
+- **Harness docs**: Added a claimable queue section to `TODO.md` aligned with the slice metadata required by `HARNESS.md`. The queue now publishes the next minimal readiness slices for the worktree helper, acceptance gate checker, and first parser conflict-reduction refactor.
+- Checks: `git diff --check` (pass).
 - **SEMA**: Fixed the concrete Clang fixture blocker where a file-scope declaration spelled through a typedef'd function type, such as `unary_int_func add_one;`, was treated like an object declaration and failed with `Conflicting declaration: add_one` before a matching definition. File-scope sema now recognizes function-typed `DeclStmt` declarations, routes them through the shared function-signature registration path, and preserves the existing invalid storage-class and `_Thread_local` diagnostics for that spelling.
 - **Tests/fixtures**: Added sema regressions for typedef-backed function declarations, direct helper error paths, and invalid storage-class / thread-local diagnostics, and removed the stale `skip_reason` from `clang/test/Sema/typedef-prototype.c`.
 - Checks: `uv run tox -e lint,type,py311` (pass, 100% line/branch coverage).

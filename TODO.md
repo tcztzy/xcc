@@ -12,9 +12,96 @@ This file tracks failure-driven work toward a complete C compiler.
 ## Current Priorities
 
 - Before increasing agent concurrency, land the multi-agent harness work in `HARNESS.md` and the supporting protocol/tooling it describes.
+- Use the claimable queue below as the source of truth for supervisor-published harness readiness slices.
 - Curated LLVM/Clang fixture parity is the main external conformance driver.
 - Native macOS `arm64` backend coverage is the main code-generation milestone.
 - CPython compilation remains a long-term target and is not a standing gate or blocker source.
+
+## Claimable Queue
+
+The queue below is the supervisor-published source of truth for early multi-agent readiness work.
+Workers should claim exactly one `todo` slice, stay inside its declared `domain`, and follow `HARNESS.md`.
+
+### `harness-worktree-helper-001`
+
+```text
+id: harness-worktree-helper-001
+category: tooling
+domain: docs-meta
+targets:
+  - add a stdlib-only helper that creates a worker branch/worktree from a slice id
+expected_files:
+  - scripts/agent_worktree.py
+  - tests/test_agent_worktree.py
+  - TODO.md
+  - HARNESS.md
+  - CHANGELOG.md
+verification:
+  - tox -e py311
+  - tox -e lint
+  - tox -e type
+priority: high
+dependencies: []
+status: todo
+notes:
+  - refuse to run from a dirty main worktree
+  - keep the interface non-interactive and supervisor-friendly
+```
+
+### `harness-gate-checker-001`
+
+```text
+id: harness-gate-checker-001
+category: tooling
+domain: docs-meta
+targets:
+  - add a minimal slice-acceptance helper for the required tox gate sequence
+expected_files:
+  - scripts/check_slice.py
+  - tests/test_check_slice.py
+  - TODO.md
+  - HARNESS.md
+  - CHANGELOG.md
+verification:
+  - tox -e py311
+  - tox -e lint
+  - tox -e type
+priority: high
+dependencies:
+  - harness-worktree-helper-001
+status: todo
+notes:
+  - run the required tox environments in a fixed order
+  - stop on the first failure and return a non-zero exit status
+```
+
+### `parser-helper-modularization-001`
+
+```text
+id: parser-helper-modularization-001
+category: refactor
+domain: parser
+targets:
+  - extract one low-risk parser diagnostics helper to reduce edit pressure in src/xcc/parser.py
+expected_files:
+  - src/xcc/parser.py
+  - src/xcc/parser_diagnostics.py
+  - tests/test_parser.py
+  - TODO.md
+  - CHANGELOG.md
+verification:
+  - tox -e py311
+  - tox -e lint
+  - tox -e type
+priority: medium
+dependencies:
+  - harness-worktree-helper-001
+  - harness-gate-checker-001
+status: todo
+notes:
+  - keep parser behavior unchanged
+  - move only stable helper logic that already has regression coverage
+```
 
 ## Backlog (reference)
 
