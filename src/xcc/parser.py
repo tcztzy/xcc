@@ -70,12 +70,13 @@ FLOATING_TYPE_KEYWORDS = {"float", "double"}
 SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | FLOATING_TYPE_KEYWORDS | {"void"}
 TYPEOF_KEYWORDS = {"typeof", "typeof_unqual", "__typeof__"}
 ALIGNOF_KEYWORDS = {"_Alignof", "__alignof__"}
+COMPLEX_TYPE_KEYWORDS = {"_Complex", "__complex__"}
 PAREN_TYPE_NAME_KEYWORDS = (
     SIMPLE_TYPE_SPEC_KEYWORDS
     | {
         "_Atomic",
         "_Bool",
-        "_Complex",
+        *COMPLEX_TYPE_KEYWORDS,
         "enum",
         "struct",
         "union",
@@ -733,7 +734,7 @@ class Parser:
                     (POINTER_OP,) * pointer_depth,
                 )
             return self._apply_type_qualifiers(type_spec, qualifiers)
-        if token.lexeme == "_Complex":
+        if token.lexeme in COMPLEX_TYPE_KEYWORDS:
             if self._check_keyword("float") or self._check_keyword("double"):
                 complex_base = self._advance()
                 assert isinstance(complex_base.lexeme, str)
@@ -748,6 +749,18 @@ class Parser:
                 self._advance()
                 pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
                 return TypeSpec("long double", pointer_depth, qualifiers=qualifiers)
+            if token.lexeme == "__complex__" and self._current().kind == TokenKind.KEYWORD:
+                complex_base = self._current()
+                if complex_base.lexeme in INTEGER_TYPE_KEYWORDS:
+                    self._advance()
+                    assert isinstance(complex_base.lexeme, str)
+                    type_name = self._parse_integer_type_spec(
+                        str(complex_base.lexeme),
+                        complex_base,
+                        context=context,
+                    )
+                    pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
+                    return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
             raise ParserError(self._unsupported_type_message(context, token), token)
         if token.lexeme in FLOATING_TYPE_KEYWORDS:
             assert isinstance(token.lexeme, str)
@@ -770,6 +783,7 @@ class Parser:
             self._reject_optional_complex_specifier(
                 context,
                 allow=type_name == "long double",
+                allow_gnu=True,
             )
             pointer_depth = self._parse_pointer_depth() if parse_pointer_depth else 0
             return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
@@ -1010,12 +1024,21 @@ class Parser:
             typeof_expr=type_spec.typeof_expr,
         )
 
-    def _reject_optional_complex_specifier(self, context: str, *, allow: bool = False) -> None:
+    def _reject_optional_complex_specifier(
+        self,
+        context: str,
+        *,
+        allow: bool = False,
+        allow_gnu: bool = False,
+    ) -> None:
         if self._check_keyword("_Complex"):
             token = self._advance()
             if allow:
                 return
             raise ParserError(self._unsupported_type_message(context, token), token)
+        if (allow or allow_gnu) and self._check_keyword("__complex__"):
+            self._advance()
+            return
 
     def _parse_integer_type_spec(
         self,
@@ -1301,6 +1324,7 @@ class Parser:
             or self._check_keyword("_Bool")
             or self._check_keyword("_Atomic")
             or self._check_keyword("_Complex")
+            or self._check_keyword("__complex__")
             or self._check_keyword("typeof")
             or self._check_keyword("typeof_unqual")
             or self._check_keyword("__typeof__")

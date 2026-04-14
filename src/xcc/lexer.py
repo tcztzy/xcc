@@ -56,6 +56,7 @@ KEYWORDS = {
     "_Atomic",
     "_Bool",
     "_Complex",
+    "__complex__",
     "_Generic",
     "_Imaginary",
     "_Noreturn",

@@ -185,6 +185,20 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("int _Complex x;")))
         self.assertEqual(ctx.exception.message, "Unsupported declaration type: '_Complex'")
 
+    def test_gnu_complex_specifier_parses_fixture_signatures(self) -> None:
+        unit = parse(
+            list(lex("void test(__complex__ double d, double x); void b(__complex__ char *y);"))
+        )
+        first = unit.functions[0]
+        second = unit.functions[1]
+        self.assertEqual(first.params, [Param(TypeSpec("double"), "d"), Param(TypeSpec("double"), "x")])
+        self.assertEqual(second.params, [Param(TypeSpec("char", 1), "y")])
+
+    def test_gnu_complex_specifier_rejects_void_base_type(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("__complex__ void value;")))
+        self.assertEqual(ctx.exception.message, "Unsupported declaration type: '__complex__'")
+
     def test_extension_marker_allows_file_scope_typedef(self) -> None:
         source = "__extension__ typedef struct { long long int quot; long long int rem; } lldiv_t;"
         unit = parse(list(lex(source)))
@@ -1469,6 +1483,16 @@ class ParserTests(unittest.TestCase):
                 lex(
                     "int main(void){ return sizeof(float _Complex) + sizeof(long double _Complex); }"
                 )
+            )
+        )
+        return_stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(return_stmt, ReturnStmt)
+        self.assertIsInstance(return_stmt.value, BinaryExpr)
+
+    def test_trailing_gnu_complex_type_name_parses_for_sizeof(self) -> None:
+        unit = parse(
+            list(
+                lex("int main(void){ return sizeof(double __complex__) + sizeof(char __complex__); }")
             )
         )
         return_stmt = _body(unit.functions[0]).statements[0]

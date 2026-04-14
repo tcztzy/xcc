@@ -60,6 +60,12 @@ class LexerTokenTests(unittest.TestCase):
         self.assertEqual(tokens[0].kind, TokenKind.KEYWORD)
         self.assertEqual(tokens[0].lexeme, "__alignof__")
 
+    def test_complex_keyword_alias(self) -> None:
+        tokens = list(lex("__complex__ value"))
+        self.assertEqual(tokens[0].kind, TokenKind.KEYWORD)
+        self.assertEqual(tokens[0].lexeme, "__complex__")
+        self.assertEqual(tokens[1].kind, TokenKind.IDENT)
+
     def test_comments_and_whitespace(self) -> None:
         source = "int /*c*/\n// line\nmain() {return 0;}"
         tokens = list(lex(source))
