@@ -2,6 +2,12 @@
 
 This file records implementation progress and validation history.
 
+## 2026-04-14
+
+- **SEMA**: Fixed the concrete Clang fixture blocker where a file-scope declaration spelled through a typedef'd function type, such as `unary_int_func add_one;`, was treated like an object declaration and failed with `Conflicting declaration: add_one` before a matching definition. File-scope sema now recognizes function-typed `DeclStmt` declarations, routes them through the shared function-signature registration path, and preserves the existing invalid storage-class and `_Thread_local` diagnostics for that spelling.
+- **Tests/fixtures**: Added sema regressions for typedef-backed function declarations, direct helper error paths, and invalid storage-class / thread-local diagnostics, and removed the stale `skip_reason` from `clang/test/Sema/typedef-prototype.c`.
+- Checks: `uv run tox -e lint,type,py311` (pass, 100% line/branch coverage).
+
 ## 2026-04-10
 
 - **Clang suite helpers**: Simplified `src/xcc/clang_suite.py` without changing behavior by replacing the manual case-id normalization loop with a compiled regex and collapsing the expectation/skip-reason helpers to their minimal equivalent forms. This slice reduced the module from 69 to 55 formatted lines while keeping helper semantics unchanged.

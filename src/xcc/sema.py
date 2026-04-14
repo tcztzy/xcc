@@ -391,27 +391,69 @@ class Analyzer:
         if self._file_scope.lookup_typedef(func.name) is not None:
             raise SemaError(f"Conflicting declaration: {func.name}")
         signature = self._signature_from(func)
-        existing = self._function_signatures.get(func.name)
-        if existing is None:
-            self._function_signatures[func.name] = signature
-            if func.is_overloadable:
-                self._overloadable_functions.add(func.name)
-                self._add_function_overload(func.name, signature)
-        else:
-            if not self._signatures_compatible(existing, signature):
-                if not self._is_compatible_overloadable_redeclaration(func):
-                    raise SemaError(f"Conflicting declaration: {func.name}")
-                self._add_function_overload(func.name, signature)
-            else:
-                merged_signature = self._merge_signature(existing, signature, func.name)
-                self._function_signatures[func.name] = merged_signature
-                if func.is_overloadable:
-                    self._overloadable_functions.add(func.name)
-                    self._add_function_overload(func.name, merged_signature)
+        self._register_function_signature(
+            func.name,
+            signature,
+            is_overloadable=func.is_overloadable,
+            allow_incompatible_overload=self._is_compatible_overloadable_redeclaration(func),
+        )
         if func.body is not None:
             if func.name in self._defined_functions:
                 raise SemaError(f"Duplicate function definition: {func.name}")
             self._defined_functions.add(func.name)
+
+    def _register_function_typed_file_scope_decl(self, declaration: DeclStmt) -> None:
+        assert declaration.name is not None
+        if declaration.storage_class not in {None, "static", "extern"}:
+            storage_class = (
+                declaration.storage_class if declaration.storage_class is not None else "<none>"
+            )
+            raise SemaError(
+                f"Invalid storage class for file-scope function declaration: '{storage_class}'"
+            )
+        if declaration.is_thread_local:
+            raise SemaError(
+                "Invalid declaration specifier for function declaration: '_Thread_local'"
+            )
+        if self._file_scope.lookup(declaration.name) is not None:
+            raise SemaError(f"Conflicting declaration: {declaration.name}")
+        if self._file_scope.lookup_typedef(declaration.name) is not None:
+            raise SemaError(f"Conflicting declaration: {declaration.name}")
+        resolved_type = self._resolve_type(declaration.type_spec)
+        callable_signature = resolved_type.callable_signature()
+        assert callable_signature is not None
+        return_type, params = callable_signature
+        parameter_types, is_variadic = params
+        self._register_function_signature(
+            declaration.name,
+            FunctionSignature(return_type, parameter_types, is_variadic),
+        )
+
+    def _register_function_signature(
+        self,
+        name: str,
+        signature: FunctionSignature,
+        *,
+        is_overloadable: bool = False,
+        allow_incompatible_overload: bool = False,
+    ) -> None:
+        existing = self._function_signatures.get(name)
+        if existing is None:
+            self._function_signatures[name] = signature
+            if is_overloadable:
+                self._overloadable_functions.add(name)
+                self._add_function_overload(name, signature)
+            return
+        if not self._signatures_compatible(existing, signature):
+            if not allow_incompatible_overload:
+                raise SemaError(f"Conflicting declaration: {name}")
+            self._add_function_overload(name, signature)
+            return
+        merged_signature = self._merge_signature(existing, signature, name)
+        self._function_signatures[name] = merged_signature
+        if is_overloadable:
+            self._overloadable_functions.add(name)
+            self._add_function_overload(name, merged_signature)
 
     def _is_compatible_overloadable_redeclaration(self, func: FunctionDef) -> bool:
         return (
@@ -633,6 +675,23 @@ class Analyzer:
             self._file_scope.define_typedef(declaration.name, typedef_type)
             return
         if isinstance(declaration, DeclStmt):
+            if self._is_function_object_type(
+                declaration.type_spec
+            ) and not self._is_invalid_atomic_type_spec(declaration.type_spec):
+                if declaration.storage_class not in {None, "static", "extern"}:
+                    storage_class = (
+                        declaration.storage_class
+                        if declaration.storage_class is not None
+                        else "<none>"
+                    )
+                    raise SemaError(
+                        "Invalid storage class for file-scope function declaration: "
+                        f"'{storage_class}'"
+                    )
+                if declaration.is_thread_local:
+                    raise SemaError(
+                        "Invalid declaration specifier for function declaration: '_Thread_local'"
+                    )
             if declaration.is_thread_local and declaration.storage_class not in {
                 None,
                 "static",
@@ -663,6 +722,11 @@ class Analyzer:
                     raise SemaError(
                         self._missing_object_identifier_message("file-scope", declaration)
                     )
+                return
+            if self._is_function_object_type(
+                declaration.type_spec
+            ) and not self._is_invalid_atomic_type_spec(declaration.type_spec):
+                self._register_function_typed_file_scope_decl(declaration)
                 return
             if declaration.name in self._function_signatures:
                 raise SemaError(f"Conflicting declaration: {declaration.name}")

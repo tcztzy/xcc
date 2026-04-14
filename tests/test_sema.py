@@ -107,6 +107,15 @@ class SemaTests(unittest.TestCase):
             str(ctx.exception), "Invalid storage class for file-scope function declaration: 'auto'"
         )
 
+    def test_typedef_function_type_invalid_storage_class_error(self) -> None:
+        source = "typedef int unary_int_func(int arg); auto unary_int_func add_one;"
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception), "Invalid storage class for file-scope function declaration: 'auto'"
+        )
+
     def test_file_scope_invalid_storage_class_error(self) -> None:
         unit = parse(list(lex("register int g;")))
         with self.assertRaises(SemaError) as ctx:
@@ -198,6 +207,16 @@ class SemaTests(unittest.TestCase):
 
     def test_function_thread_local_error(self) -> None:
         unit = parse(list(lex("_Thread_local int f(void);")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid declaration specifier for function declaration: '_Thread_local'",
+        )
+
+    def test_typedef_function_type_thread_local_error(self) -> None:
+        source = "typedef int unary_int_func(int arg); _Thread_local unary_int_func add_one;"
+        unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -2351,6 +2370,52 @@ class SemaTests(unittest.TestCase):
         self.assertFalse(analyzer._signature_matches_callable_type(signature, INT))
         self.assertIsNone(analyzer._resolve_overload_for_cast("missing", INT.pointer_to()))
 
+    def test_register_function_typed_file_scope_decl_error_paths(self) -> None:
+        function_type = TypeSpec(
+            "int",
+            declarator_ops=(("fn", ((TypeSpec("int"),), False)),),
+        )
+
+        with self.subTest(case="storage_class"):
+            analyzer = Analyzer()
+            with self.assertRaises(SemaError) as ctx:
+                analyzer._register_function_typed_file_scope_decl(
+                    DeclStmt(function_type, "add_one", None, storage_class="auto")
+                )
+            self.assertEqual(
+                str(ctx.exception),
+                "Invalid storage class for file-scope function declaration: 'auto'",
+            )
+
+        with self.subTest(case="thread_local"):
+            analyzer = Analyzer()
+            with self.assertRaises(SemaError) as ctx:
+                analyzer._register_function_typed_file_scope_decl(
+                    DeclStmt(function_type, "add_one", None, is_thread_local=True)
+                )
+            self.assertEqual(
+                str(ctx.exception),
+                "Invalid declaration specifier for function declaration: '_Thread_local'",
+            )
+
+        with self.subTest(case="object_conflict"):
+            analyzer = Analyzer()
+            analyzer._file_scope.define(VarSymbol("add_one", INT))
+            with self.assertRaises(SemaError) as ctx:
+                analyzer._register_function_typed_file_scope_decl(
+                    DeclStmt(function_type, "add_one", None)
+                )
+            self.assertEqual(str(ctx.exception), "Conflicting declaration: add_one")
+
+        with self.subTest(case="typedef_conflict"):
+            analyzer = Analyzer()
+            analyzer._file_scope.define_typedef("add_one", INT)
+            with self.assertRaises(SemaError) as ctx:
+                analyzer._register_function_typed_file_scope_decl(
+                    DeclStmt(function_type, "add_one", None)
+                )
+            self.assertEqual(str(ctx.exception), "Conflicting declaration: add_one")
+
     def test_overloadable_call_resolves_exact_match(self) -> None:
         unit = parse(
             list(
@@ -3203,6 +3268,16 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("add", sema.functions)
         self.assertIn("main", sema.functions)
+
+    def test_file_scope_typedef_function_type_declaration_then_definition(self) -> None:
+        source = (
+            "typedef int unary_int_func(int arg); "
+            "unary_int_func add_one; "
+            "int add_one(int arg){return arg + 1;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("add_one", sema.functions)
 
     def test_file_scope_typedef_incomplete_record_pointer_ok(self) -> None:
         source = "typedef struct S S; int main(){S *p; return 0;}"
