@@ -11,6 +11,7 @@ This file tracks failure-driven work toward a complete C compiler.
 
 ## Current Priorities
 
+- Before increasing agent concurrency, land the multi-agent harness work in `HARNESS.md` and the supporting protocol/tooling it describes.
 - Curated LLVM/Clang fixture parity is the main external conformance driver.
 - Native macOS `arm64` backend coverage is the main code-generation milestone.
 - CPython compilation remains a long-term target and is not a standing gate or blocker source.
