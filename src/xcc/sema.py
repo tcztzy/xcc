@@ -192,6 +192,14 @@ _NON_DECIMAL_LITERAL_CANDIDATES: dict[str, tuple[Type, ...]] = {
     "llu": (ULLONG,),
 }
 StdMode = Literal["c11", "gnu11"]
+_FLOAT_COMPARE_BUILTINS = (
+    "__builtin_isgreater",
+    "__builtin_isgreaterequal",
+    "__builtin_isless",
+    "__builtin_islessequal",
+    "__builtin_islessgreater",
+    "__builtin_isunordered",
+)
 
 
 @dataclass(frozen=True)
@@ -339,17 +347,22 @@ class Analyzer:
         self._current_scope: Scope | None = None
         self._anon_record_counter = 0
         self._anon_record_names: dict[tuple[str, tuple[RecordMemberDecl, ...]], str] = {}
-        if std == "gnu11":
-            self._register_gcc_builtins()
+        self._register_builtin_functions()
 
-    def _register_gcc_builtins(self) -> None:
-        """Pre-register GCC/Clang builtin functions for gnu11 mode."""
+    def _register_builtin_functions(self) -> None:
+        """Pre-register builtin functions accepted by the frontend."""
         self._function_signatures["__builtin_expect"] = FunctionSignature(
             return_type=LONG, params=(LONG, LONG), is_variadic=False
         )
         self._function_signatures["__builtin_unreachable"] = FunctionSignature(
             return_type=VOID, params=(), is_variadic=False
         )
+        for name in _FLOAT_COMPARE_BUILTINS:
+            self._function_signatures[name] = FunctionSignature(
+                return_type=INT,
+                params=(LONGDOUBLE, LONGDOUBLE),
+                is_variadic=False,
+            )
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]

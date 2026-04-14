@@ -2,6 +2,22 @@
 
 This file records implementation progress and validation history.
 
+## 2026-04-10
+
+- **Clang suite helpers**: Simplified `src/xcc/clang_suite.py` without changing behavior by replacing the manual case-id normalization loop with a compiled regex and collapsing the expectation/skip-reason helpers to their minimal equivalent forms. This slice reduced the module from 69 to 55 formatted lines while keeping helper semantics unchanged.
+- Checks: `python3 -m unittest -v tests.test_clang_suite_helpers tests.test_clang_suite` (pass, `OK (skipped=3)` outside `tox -e clang_suite`); `./.venv/bin/tox -e lint,type,py311` (pass, 100% line/branch coverage).
+- **Host include helpers**: Simplified `src/xcc/host_includes.py` without changing include-probing behavior by using stdlib ordered deduplication, flattening macOS SDK resolution branches, and tightening the `xcrun` stdout helper. This slice reduced the module from 74 to 65 formatted lines while preserving the existing Darwin and fallback paths.
+- Checks: `python3 -m unittest -v tests.test_host_includes` (pass); `./.venv/bin/tox -e lint,type,py311` (pass, 100% line/branch coverage).
+- **Builtin fixture release**: Fixed the concrete Clang-suite blocker where several upstream cases still failed in default `c11` mode with `Undeclared function` for `__builtin_expect`, `__builtin_unreachable`, and the ordered/unordered floating-compare builtin family. The semantic analyzer now pre-registers those builtin function signatures for the frontend's accepted surface, and 15 manifest cases across `AST`, `CodeGen`, and `Profile` no longer need `skip_reason`.
+- **Tests**: Added frontend/sema regressions for `__builtin_expect`, `__builtin_unreachable`, and all six floating comparison builtins in default `c11` mode.
+- Checks: `python3 -m unittest -v tests.test_sema.SemaTests.test_builtin_expect_accepted_in_c11 tests.test_sema.SemaTests.test_builtin_unreachable_accepted_in_c11 tests.test_sema.SemaTests.test_builtin_float_compare_family_accepted_in_c11 tests.test_frontend.FrontendTests.test_compile_source_accepts_builtin_expect_in_default_mode tests.test_frontend.FrontendTests.test_compile_source_accepts_builtin_unreachable_in_default_mode tests.test_frontend.FrontendTests.test_compile_source_accepts_builtin_float_compare_in_default_mode` (pass); `python3 - <<'PY' ... released and recompiled 15 builtin fixture cases ... PY` (pass); `XCC_RUN_CLANG_SUITE=1 python3 -m unittest -v tests.test_clang_suite.ClangSuiteTests.test_clang_manifest_case_schema` (pass); `./.venv/bin/tox -e lint,type,py311` (pass, 100% line/branch coverage).
+
+## 2026-04-03
+
+- **CPython tooling**: Removed `scripts/cpython_trial.py`, `scripts/cpython_file_trial.py`, `scripts/xcc_blocker_crusher.py`, `src/xcc/cpython_harness.py`, and the matching helper tests. CPython compilation remains a long-term compatibility target rather than a standing repository gate.
+- **Docs/Policy**: Rewrote the README, TODO, CPython/testing docs, and agent workflow guidance around the current acceptance gates: unit tests, curated Clang fixtures, backend smoke checks, and failure-driven slices.
+- Checks: `python3 -m unittest tests.test_clang_suite_helpers -q` (pass); `python3 scripts/sync_clang_fixtures.py --help` (pass); `./.venv/bin/tox -e py311,lint,type` (pass, 100% line/branch coverage).
+
 ## 2026-04-02
 
 - **Docs**: Removed self-limiting project-positioning language from the README, roadmap, target/build docs, TODO, and package metadata. XCC is now described consistently as a complete C compiler project, while current implementation status is documented as present-day fact rather than as a scoped end goal.

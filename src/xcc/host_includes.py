@@ -24,31 +24,22 @@ def _xcrun_stdout(*args: str) -> str | None:
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
-    out = proc.stdout.strip()
-    return out if out else None
+    stdout = proc.stdout.strip()
+    return stdout or None
 
 
 def _dedupe_in_order(items: list[str]) -> tuple[str, ...]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return tuple(out)
+    return tuple(dict.fromkeys(items))
 
 
 def _macos_sdk(sdkroot: str) -> tuple[str, Path | None]:
-    if sdkroot:
-        if _is_pathlike(sdkroot):
-            return "macosx", Path(sdkroot)
-        sdk = sdkroot
-        resolved = _xcrun_stdout("--sdk", sdk, "--show-sdk-path")
-        return sdk, Path(resolved) if resolved is not None else None
-
-    resolved = _xcrun_stdout("--sdk", "macosx", "--show-sdk-path")
-    return "macosx", Path(resolved) if resolved is not None else None
+    if sdkroot and _is_pathlike(sdkroot):
+        return "macosx", Path(sdkroot)
+    sdk = sdkroot or "macosx"
+    resolved = _xcrun_stdout("--sdk", sdk, "--show-sdk-path")
+    if resolved is None:
+        return sdk, None
+    return sdk, Path(resolved)
 
 
 def _macos_clang_resource_include_dir(sdk: str) -> str | None:

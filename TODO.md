@@ -6,35 +6,14 @@ This file tracks failure-driven work toward a complete C compiler.
 
 - [x] `tox -e py311,lint,type` is green with 0 failures.
 - [x] Coverage is 100% line + branch (`fail-under=100`).
-- [ ] XCC compiles 10 selected CPython `.c` files through the current integration gate without diagnostics.
+- [ ] Reduce the curated Clang-suite skip set with reviewable, fully-tested slices.
+- [ ] Expand native backend coverage without regressing driver/frontend quality gates.
 
-## Current Blockers
+## Current Priorities
 
-Latest CPython integration gate (`scripts/cpython_trial.py`) status:
-
-- Date: 2026-04-02
-- Pinned archive: `Python-3.11.12.tgz`
-- Curated file set: 8 translation units
-- Verdict: fail
-- Result: 3 / 8 passed
-- Top blocker buckets:
-  - `/usr/include/sys/_select.h:42:1` (`parse`: `Expected ';'`) affecting `Programs/python.c` and `Parser/token.c`
-  - `clang resource __stddef_max_align_t.h:21:1` (`parse`: `Expected ';'`) affecting `Modules/_sha3/sha3.c` and `Modules/expat/xmlrole.c`
-  - `pycore_fileutils.h:8:1` (`pp`: `"Py_BUILD_CORE must be defined to include this header"`) affecting `Python/fileutils.c`
-
-Latest CPython real-file trial (`scripts/cpython_file_trial.py --allow-failures`) status:
-
-- Date: 2026-04-02
-- Pinned archive: `Python-3.11.12.tgz`
-- Curated file set: 8 translation units
-- Result: 3 / 8 passed
-- Current failures:
-  - `Programs/python.c` (`parse`: `Expected ';'`)
-  - `Parser/token.c` (`parse`: `Expected ';'`)
-  - `Python/fileutils.c` (`pp`: `"Py_BUILD_CORE must be defined to include this header"`)
-  - `Modules/_sha3/sha3.c` (`parse`: `Expected ';'`)
-  - `Modules/expat/xmlrole.c` (`parse`: `Expected ';'`)
-- Next focus: clear the remaining real-file blocker buckets, then expand the curated real-file set from 8 to the current milestone target of 10 files.
+- Curated LLVM/Clang fixture parity is the main external conformance driver.
+- Native macOS `arm64` backend coverage is the main code-generation milestone.
+- CPython compilation remains a long-term target and is not a standing gate or blocker source.
 
 ## Backlog (reference)
 
@@ -105,11 +84,11 @@ Latest CPython real-file trial (`scripts/cpython_file_trial.py --allow-failures`
 - [ ] Maintain 100% line + branch coverage while adding new behavior.
 - [ ] Keep `tox -e py311`, `tox -e lint`, `tox -e type`, and `tox -e clang_suite` green.
 
-### 1.9 CPython-Driven Gap Closure
+### 1.9 Long-Term CPython Validation
 
-- [x] Start regular compilation trials against selected CPython translation units.
-- [ ] Record failures into categorized buckets (preprocessor, parser, sema, diagnostics).
-- [ ] Convert each bucket item into reproducible unit/fixture tests before implementation.
+- [ ] Reintroduce targeted CPython validation only after the core compiler milestones justify the maintenance cost.
+- [ ] Document the minimum compatibility surface needed for an initial CPython build slice.
+- [ ] Keep CPython build assumptions visible in docs without treating them as a standing gate.
 
 ## 2. Backend and Toolchain (Outline Only)
 

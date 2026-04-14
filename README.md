@@ -1,6 +1,6 @@
 # XCC
 
-XCC is a C compiler written in modern Python (CPython and PyPy, 3.11+). It targets a complete, deterministic, zero-runtime-dependency C11 compiler, with macOS on Apple silicon (`arm64`) as the primary native development platform today and CPython as a standing integration target.
+XCC is a C compiler written in modern Python (CPython and PyPy, 3.11+). It targets a complete, deterministic, zero-runtime-dependency C11 compiler, with macOS on Apple silicon (`arm64`) as the primary native development platform today and CPython compilation as a long-term compatibility target.
 
 ## Status
 
@@ -12,18 +12,17 @@ Alpha (`0.2.0a1`).
 - `--backend=auto` prefers the native macOS `arm64` backend and falls back to `clang` when native code generation is unsupported.
 - `--backend=xcc` keeps native code generation strict.
 - `--backend=clang` always delegates code generation and linking to `clang` after XCC frontend validation.
-- The pinned CPython integration gate and Clang fixture suite track compiler progress continuously.
 
 Current implementation still relies on the platform toolchain for assembly and linking, and full native object generation plus full-tree CPython compilation remain open work.
 
 ## Motivation
 
-CPython depends on a C compiler with predictable semantics and diagnostics. XCC aims to provide a clean, fully testable implementation in Python, with a focus on correctness, transparency, and reproducibility.
+XCC aims to provide a clean, fully testable implementation in Python, with a focus on correctness, transparency, and reproducibility. CPython remains a useful long-term compatibility benchmark rather than a standing day-to-day gate.
 
 ## Goals
 
 - Implement a complete C11 compiler with clear, deterministic behavior.
-- Compile the CPython source tree without modifying CPython sources.
+- Long-term: compile the CPython source tree without modifying CPython sources.
 - Zero third party runtime dependencies.
 - Full test coverage with strict linting and type checking.
 - Support native code generation on macOS `arm64` and Linux/ELF.
@@ -49,9 +48,9 @@ Ongoing work includes broader native code generation, native object emission, an
 
 ## Planned feature coverage
 
-This is a target list for the compiler roadmap. It will evolve as CPython compilation and Clang conformance work uncover gaps.
+This is a target list for the compiler roadmap. It will evolve as compiler development and Clang conformance work uncover gaps.
 
-- C11 core language features required by CPython.
+- C11 core language features needed for real-world codebases, including long-term CPython compatibility.
 - Preprocessor with full macro expansion and include handling.
 - Diagnostics with source ranges and stable error codes.
 
@@ -100,9 +99,6 @@ This is a target list for the compiler roadmap. It will evolve as CPython compil
 - Run curated Clang fixtures: `tox -e clang_suite`
 - Run curated Clang fixtures directly: `XCC_RUN_CLANG_SUITE=1 python3 -m unittest -v tests.test_clang_suite`
 - Run native smoke tests: `tox -e native_smoke`
-- Run the CPython integration gate summary: `python3 scripts/cpython_trial.py`
-- Require the CPython integration gate to pass: `python3 scripts/cpython_trial.py --strict`
-- Inspect the detailed pinned CPython real-file harness: `python3 scripts/cpython_file_trial.py --allow-failures`
 - Build Python package artifacts: `uv build`
 - Run tests in Linux containers: `tox -e docker_glibc` or `tox -e docker_musl`
 - Build Linux/ELF image (glibc): `./scripts/docker-build.sh glibc`
@@ -112,7 +108,7 @@ This is a target list for the compiler roadmap. It will evolve as CPython compil
 
 ## External fixture policy
 
-- External archives (LLVM/Clang tarballs, CPython sources, cached specs) must not be committed.
+- External archives (LLVM/Clang tarballs and cached specs) must not be committed.
 - Curated LLVM fixtures are pinned in `tests/external/clang/manifest.json` by release tag, archive URL, and SHA-256.
 - Materialize upstream fixtures with `python3 scripts/sync_clang_fixtures.py`.
 - External fixtures are generated into `tests/external/clang/generated/` and ignored by Git.

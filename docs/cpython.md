@@ -2,19 +2,19 @@
 
 ## Scope
 
-XCC targets compiling the CPython source tree for supported platforms without modifying CPython sources. The compiler must be compatible with CPython's supported C standard and build requirements.
+Compiling the CPython source tree is a long-term compatibility target for XCC. The compiler must eventually be compatible with CPython's supported C standard and build requirements, but CPython compilation is not part of the current day-to-day acceptance gate.
+
+## Current status
+
+- Current acceptance is driven by unit tests, curated LLVM/Clang fixtures, and backend smoke checks.
+- The repository does not maintain a standing CPython trial script or pinned CPython source-archive gate.
+- CPython validation should return only when the frontend and backend have enough coverage to justify the maintenance cost.
 
 ## Build system interaction
 
 - The compiler must work with CPython's existing build system and flags.
 - The released CPython source tree contains generated files; building should not require regenerating them.
-- The current acceptance path combines the CPython integration gate with detailed compile-only checks against a pinned CPython source archive.
-
-## Current acceptance step
-
-- `scripts/cpython_trial.py` reports the CPython integration gate verdict and top blocker bucket.
-- `scripts/cpython_file_trial.py` runs detailed compile-only validation against a pinned CPython 3.11.12 tarball and a curated set of real source files.
-- The real-file trial uses the host Python `pyconfig.h` as a local overlay so the trial can run without a full `./configure` step.
+- Compatibility work should start with selected translation units and grow into full-tree builds only after the core compiler is ready.
 
 ## Language features observed in CPython
 
@@ -28,8 +28,8 @@ The compiler must support the C11 features that CPython relies on, including:
 
 ## Compatibility targets
 
-- Core runtime (required).
-- Standard library modules written in C (required for parity testing).
+- Core runtime (first long-term target).
+- Standard library modules written in C (next validation tier).
 - Optional third party extension modules (not required for the core compatibility target).
 
 ## References

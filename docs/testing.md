@@ -15,7 +15,6 @@
 - Unit tests for lexer, parser, semantic analysis, driver behavior, and native backend rejection paths.
 - Golden tests for diagnostics and error messages.
 - Native backend smoke tests for macOS `arm64`.
-- CPython snippet trials and pinned real-file frontend trials.
 - Regression tests for reported bugs.
 - Curated upstream LLVM/Clang fixture tests for cross-checking accepted and rejected C inputs.
 
@@ -42,8 +41,6 @@ Common commands:
 - `tox -e type`
 - `tox -e clang_suite`
 - `tox -e native_smoke`
-- `python3 scripts/cpython_trial.py`
-- `python3 scripts/cpython_file_trial.py`
 
 ## Docker (Linux/ELF)
 

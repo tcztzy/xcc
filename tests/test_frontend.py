@@ -40,19 +40,13 @@ class FrontendTests(unittest.TestCase):
         self.assertEqual(result.unit.functions[0].name, "main")
 
     def test_compile_source_ignores_multiline_preprocessor_directive(self) -> None:
-        source = (
-            "#define SUM(a, b) \\\n"
-            "  ((a) + (b))\n"
-            "int main(void){return 0;}\n"
-        )
+        source = "#define SUM(a, b) \\\n  ((a) + (b))\nint main(void){return 0;}\n"
         result = compile_source(source, filename="pp.c")
         self.assertEqual(result.unit.functions[0].name, "main")
 
     def test_compile_source_expands_object_like_preprocessor_define(self) -> None:
         source = (
-            "#define SOME_ADDR (unsigned long long)0\n"
-            "int *p = 0;\n"
-            "void f(void){p = SOME_ADDR;}\n"
+            "#define SOME_ADDR (unsigned long long)0\nint *p = 0;\nvoid f(void){p = SOME_ADDR;}\n"
         )
         result = compile_source(source, filename="pp.c")
         self.assertEqual(result.unit.functions[0].name, "f")
@@ -123,7 +117,9 @@ class FrontendTests(unittest.TestCase):
 
     def test_compile_source_rejects_gnu_asm_in_c11(self) -> None:
         with self.assertRaises(FrontendError) as ctx:
-            compile_source('asm("INST r1, 0");\n', filename="asm.c", options=FrontendOptions(std="c11"))
+            compile_source(
+                'asm("INST r1, 0");\n', filename="asm.c", options=FrontendOptions(std="c11")
+            )
         diagnostic = ctx.exception.diagnostic
         self.assertEqual(diagnostic.stage, "pp")
         self.assertEqual(diagnostic.code, "XCC-PP-0105")
@@ -199,6 +195,27 @@ class FrontendTests(unittest.TestCase):
         )
         self.assertEqual(result.unit.functions[0].name, "main")
 
+    def test_compile_source_accepts_builtin_expect_in_default_mode(self) -> None:
+        result = compile_source(
+            "int f(int x) { if (__builtin_expect(x == 0, 0)) return -1; return x; }",
+            filename="ok.c",
+        )
+        self.assertEqual(result.unit.functions[0].name, "f")
+
+    def test_compile_source_accepts_builtin_unreachable_in_default_mode(self) -> None:
+        result = compile_source(
+            "int f(int x) { switch(x) { case 0: return 0; default: __builtin_unreachable(); } }",
+            filename="ok.c",
+        )
+        self.assertEqual(result.unit.functions[0].name, "f")
+
+    def test_compile_source_accepts_builtin_float_compare_in_default_mode(self) -> None:
+        result = compile_source(
+            "int f(double x, long double y) { return __builtin_isgreater(x, y); }",
+            filename="ok.c",
+        )
+        self.assertEqual(result.unit.functions[0].name, "f")
+
     def test_compile_source_preprocessor_error(self) -> None:
         with self.assertRaises(FrontendError) as ctx:
             compile_source("#if 1 +\nint main(void){return 0;}\n", filename="bad.c")
@@ -224,7 +241,9 @@ class FrontendTests(unittest.TestCase):
             compile_source('#line 42 "mapped.c"\n@\n', filename="bad.c")
         diagnostic = ctx.exception.diagnostic
         self.assertEqual(diagnostic.stage, "lex")
-        self.assertEqual((diagnostic.filename, diagnostic.line, diagnostic.column), ("mapped.c", 42, 1))
+        self.assertEqual(
+            (diagnostic.filename, diagnostic.line, diagnostic.column), ("mapped.c", 42, 1)
+        )
 
     def test_compile_source_parse_error_uses_line_mapping(self) -> None:
         with self.assertRaises(FrontendError) as ctx:

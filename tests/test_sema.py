@@ -103,7 +103,9 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("auto int f(void);")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid storage class for file-scope function declaration: 'auto'")
+        self.assertEqual(
+            str(ctx.exception), "Invalid storage class for file-scope function declaration: 'auto'"
+        )
 
     def test_file_scope_invalid_storage_class_error(self) -> None:
         unit = parse(list(lex("register int g;")))
@@ -216,13 +218,19 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){ static int f(void); return 0; }")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid storage class for block-scope function declaration: 'static'")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid storage class for block-scope function declaration: 'static'",
+        )
 
     def test_block_scope_function_rejects_register_storage_class(self) -> None:
         unit = parse(list(lex("int main(void){ register int f(void); return 0; }")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid storage class for block-scope function declaration: 'register'")
+        self.assertEqual(
+            str(ctx.exception),
+            "Invalid storage class for block-scope function declaration: 'register'",
+        )
 
     def test_block_scope_function_rejects_thread_local_specifier(self) -> None:
         unit = parse(list(lex("int main(void){ extern _Thread_local int f(void); return 0; }")))
@@ -287,7 +295,9 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(sema.type_map.require(stmt.value), INT)
 
     def test_extern_then_definition_thread_local(self) -> None:
-        unit = parse(list(lex("extern _Thread_local int x; _Thread_local int x = 2; int f(void){return x;}")))
+        unit = parse(
+            list(lex("extern _Thread_local int x; _Thread_local int x = 2; int f(void){return x;}"))
+        )
         sema = analyze(unit)
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, ReturnStmt)
@@ -353,9 +363,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){return (struct S){0};}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(
-            str(ctx.exception), "Invalid object type for compound literal: incomplete"
-        )
+        self.assertEqual(str(ctx.exception), "Invalid object type for compound literal: incomplete")
 
     def test_compound_literal_invalid_atomic_object_type_error(self) -> None:
         unit = parse(list(lex("int main(void){return (_Atomic(void)){0};}")))
@@ -717,8 +725,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(
             list(
                 lex(
-                    "struct S {_Alignas(16) char c;};"
-                    "int main(void){return _Alignof(struct S)==16;}"
+                    "struct S {_Alignas(16) char c;};int main(void){return _Alignof(struct S)==16;}"
                 )
             )
         )
@@ -758,7 +765,9 @@ class SemaTests(unittest.TestCase):
                     TypeSpec("int"),
                     "main",
                     [],
-                    CompoundStmt([DeclStmt(TypeSpec("int"), "x", None, 3), ReturnStmt(IntLiteral(0))]),
+                    CompoundStmt(
+                        [DeclStmt(TypeSpec("int"), "x", None, 3), ReturnStmt(IntLiteral(0))]
+                    ),
                 )
             ]
         )
@@ -826,7 +835,9 @@ class SemaTests(unittest.TestCase):
                     TypeSpec("int"),
                     "main",
                     [],
-                    CompoundStmt([DeclStmt(atomic_function_type, "g", None), ReturnStmt(IntLiteral("0"))]),
+                    CompoundStmt(
+                        [DeclStmt(atomic_function_type, "g", None), ReturnStmt(IntLiteral("0"))]
+                    ),
                 )
             ]
         )
@@ -895,7 +906,9 @@ class SemaTests(unittest.TestCase):
                     TypeSpec("int"),
                     "main",
                     [],
-                    CompoundStmt([TypedefDecl(atomic_function_type, "Fn"), ReturnStmt(IntLiteral("0"))]),
+                    CompoundStmt(
+                        [TypedefDecl(atomic_function_type, "Fn"), ReturnStmt(IntLiteral("0"))]
+                    ),
                 )
             ]
         )
@@ -1322,7 +1335,9 @@ class SemaTests(unittest.TestCase):
         self.assertIn("main", sema.functions)
 
     def test_case_utf32_char_literal_constant_ok(self) -> None:
-        unit = parse(list(lex(r"int main(){switch(1){case U'\U000000A9': break; default: return 0;}}")))
+        unit = parse(
+            list(lex(r"int main(){switch(1){case U'\U000000A9': break; default: return 0;}}"))
+        )
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
@@ -1485,7 +1500,9 @@ class SemaTests(unittest.TestCase):
         self.assertIs(sema.type_map.get(expr), INT)
 
     def test_generic_selection_default_typemap(self) -> None:
-        unit = parse(list(lex("int main(void){char c=0; return _Generic(c, long: 1, default: 2);}")))
+        unit = parse(
+            list(lex("int main(void){char c=0; return _Generic(c, long: 1, default: 2);}"))
+        )
         sema = analyze(unit)
         expr = _body(unit.functions[0]).statements[1].value
         assert expr is not None
@@ -1493,11 +1510,7 @@ class SemaTests(unittest.TestCase):
 
     def test_generic_selection_control_array_decays_to_pointer_typemap(self) -> None:
         unit = parse(
-            list(
-                lex(
-                    "int main(void){int a[2]={0,1}; return _Generic(a, int*: 1L, default: 2);}"
-                )
-            )
+            list(lex("int main(void){int a[2]={0,1}; return _Generic(a, int*: 1L, default: 2);}"))
         )
         sema = analyze(unit)
         expr = _body(unit.functions[0]).statements[1].value
@@ -1630,11 +1643,7 @@ class SemaTests(unittest.TestCase):
 
     def test_generic_selection_typedef_alias_duplicate_compatible_type_error(self) -> None:
         unit = parse(
-            list(
-                lex(
-                    "typedef int I; int main(void){int x=0; return _Generic(x, int: 1, I: 2);}"
-                )
-            )
+            list(lex("typedef int I; int main(void){int x=0; return _Generic(x, int: 1, I: 2);}"))
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
@@ -1643,7 +1652,9 @@ class SemaTests(unittest.TestCase):
             "Duplicate generic association type at position 2 at line 1, column 67 ('int'): previous compatible type was at position 1 at line 1, column 59 ('int')",
         )
 
-    def test_generic_selection_qualified_typedef_alias_duplicate_compatible_type_error(self) -> None:
+    def test_generic_selection_qualified_typedef_alias_duplicate_compatible_type_error(
+        self,
+    ) -> None:
         unit = parse(
             list(
                 lex(
@@ -1666,7 +1677,14 @@ class SemaTests(unittest.TestCase):
                     "main",
                     [],
                     CompoundStmt(
-                        [ReturnStmt(GenericExpr(IntLiteral("0"), ((None, IntLiteral("1")), (None, IntLiteral("2")))))]
+                        [
+                            ReturnStmt(
+                                GenericExpr(
+                                    IntLiteral("0"),
+                                    ((None, IntLiteral("1")), (None, IntLiteral("2"))),
+                                )
+                            )
+                        ]
                     ),
                 )
             ]
@@ -1706,7 +1724,9 @@ class SemaTests(unittest.TestCase):
             "Duplicate default generic association at position 2 at line 4, column 24: previous default was at position 1 at line 4, column 12; only one default association is allowed",
         )
 
-    def test_generic_selection_duplicate_default_association_error_with_partial_location(self) -> None:
+    def test_generic_selection_duplicate_default_association_error_with_partial_location(
+        self,
+    ) -> None:
         unit = TranslationUnit(
             [
                 FunctionDef(
@@ -1753,7 +1773,9 @@ class SemaTests(unittest.TestCase):
         )
 
     def test_generic_selection_incomplete_record_association_type_error(self) -> None:
-        unit = parse(list(lex("struct S; int main(void){return _Generic(0, struct S: 1, default: 2);}")))
+        unit = parse(
+            list(lex("struct S; int main(void){return _Generic(0, struct S: 1, default: 2);}"))
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -1828,7 +1850,9 @@ class SemaTests(unittest.TestCase):
             "Duplicate generic association type at position 2 at line 3, column 19 ('int'): previous compatible type was at position 1 at line 3, column 11 ('int')",
         )
 
-    def test_generic_selection_duplicate_type_uses_partial_association_location_fallback(self) -> None:
+    def test_generic_selection_duplicate_type_uses_partial_association_location_fallback(
+        self,
+    ) -> None:
         unit = TranslationUnit(
             [
                 FunctionDef(
@@ -1887,7 +1911,9 @@ class SemaTests(unittest.TestCase):
             "Invalid generic association type at position 1 ('void') at line 9, column 4: void type",
         )
 
-    def test_generic_selection_invalid_type_uses_partial_association_location_fallback(self) -> None:
+    def test_generic_selection_invalid_type_uses_partial_association_location_fallback(
+        self,
+    ) -> None:
         unit = TranslationUnit(
             [
                 FunctionDef(
@@ -2106,7 +2132,10 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         func_symbol = sema.functions["apply"]
-        self.assertEqual(func_symbol.locals["fn"].type_, Type("int", declarator_ops=(("ptr", 0), ("fn", ((INT,), False)))))
+        self.assertEqual(
+            func_symbol.locals["fn"].type_,
+            Type("int", declarator_ops=(("ptr", 0), ("fn", ((INT,), False)))),
+        )
 
     def test_function_pointer_call_typemap(self) -> None:
         source = "int inc(int x){return x;} int main(){int (*fp)(int)=inc; return fp(1);}"
@@ -2117,7 +2146,9 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(sema.type_map.get(return_expr), INT)
 
     def test_function_pointer_call_with_two_arguments(self) -> None:
-        source = "int add(int a,int b){return a+b;} int main(){int (*fp)(int, int)=add; return fp(1,2);}"
+        source = (
+            "int add(int a,int b){return a+b;} int main(){int (*fp)(int, int)=add; return fp(1,2);}"
+        )
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         return_expr = _body(unit.functions[1]).statements[1].value
@@ -2164,9 +2195,7 @@ class SemaTests(unittest.TestCase):
 
     def test_function_declaration_then_definition(self) -> None:
         source = (
-            "int add(int a, int b);"
-            "int main(){return add(1,2);}"
-            "int add(int a, int b){return a+b;}"
+            "int add(int a, int b);int main(){return add(1,2);}int add(int a, int b){return a+b;}"
         )
         unit = parse(list(lex(source)))
         sema = analyze(unit)
@@ -2237,14 +2266,7 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(sema.functions, {})
 
     def test_non_overloadable_conflicting_redeclaration_still_errors(self) -> None:
-        unit = parse(
-            list(
-                lex(
-                    "int __attribute__((overloadable)) test(int); "
-                    "double test(double);"
-                )
-            )
-        )
+        unit = parse(list(lex("int __attribute__((overloadable)) test(int); double test(double);")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Conflicting declaration: test")
@@ -2467,7 +2489,9 @@ class SemaTests(unittest.TestCase):
         assert stmt.init is not None
         self.assertEqual(sema.type_map.require(stmt.init), DOUBLE)
 
-    def test_overloadable_call_constant_conditional_without_selected_overload_uses_fallback(self) -> None:
+    def test_overloadable_call_constant_conditional_without_selected_overload_uses_fallback(
+        self,
+    ) -> None:
         unit = parse(
             list(
                 lex(
@@ -2593,14 +2617,7 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Missing parameter name")
 
     def test_if_and_while_ok(self) -> None:
-        source = (
-            "int main(){"
-            "if(1) return 1;"
-            "if(1) return 2; else return 3;"
-            "while(1) ;"
-            "return 0;"
-            "}"
-        )
+        source = "int main(){if(1) return 1;if(1) return 2; else return 3;while(1) ;return 0;}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
@@ -2724,13 +2741,7 @@ class SemaTests(unittest.TestCase):
         self.assertIn("main", sema.functions)
 
     def test_switch_statement_ok(self) -> None:
-        source = (
-            "int main(){"
-            "int x=1;"
-            "switch(x){case 1: break; default: return 0;}"
-            "return 1;"
-            "}"
-        )
+        source = "int main(){int x=1;switch(x){case 1: break; default: return 0;}return 1;}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
@@ -2782,27 +2793,13 @@ class SemaTests(unittest.TestCase):
         self.assertIn("main", sema.functions)
 
     def test_struct_object_type_is_assignable(self) -> None:
-        source = (
-            "int main(){"
-            "struct Node { int value; } a;"
-            "struct Node b;"
-            "b=a;"
-            "return 0;"
-            "}"
-        )
+        source = "int main(){struct Node { int value; } a;struct Node b;b=a;return 0;}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
     def test_union_object_type_is_assignable(self) -> None:
-        source = (
-            "int main(){"
-            "union Data { int x; int y; } a;"
-            "union Data b;"
-            "b=a;"
-            "return 0;"
-            "}"
-        )
+        source = "int main(){union Data { int x; int y; } a;union Data b;b=a;return 0;}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
@@ -3114,7 +3111,9 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int x; return _Alignof(x);}")), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="c11")
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand: expression form requires GNU mode")
+        self.assertEqual(
+            str(ctx.exception), "Invalid alignof operand: expression form requires GNU mode"
+        )
 
     def test_alignof_expression_rejected_in_c11_ast_path(self) -> None:
         unit = TranslationUnit(
@@ -3129,7 +3128,9 @@ class SemaTests(unittest.TestCase):
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="c11")
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand: expression form requires GNU mode")
+        self.assertEqual(
+            str(ctx.exception), "Invalid alignof operand: expression form requires GNU mode"
+        )
 
     def test_cast_expression_typemap(self) -> None:
         unit = parse(list(lex("int main(){int *p; return (int)p;}")))
@@ -3365,7 +3366,9 @@ class SemaTests(unittest.TestCase):
         )
 
     def test_pointer_to_array_assignment_is_allowed(self) -> None:
-        source = "int main(){int a[4]; int b[4]; int (*p)[4]=&a; int (*q)[4]=&b; p=q; return (*p)[0];}"
+        source = (
+            "int main(){int a[4]; int b[4]; int (*p)[4]=&a; int (*q)[4]=&b; p=q; return (*p)[0];}"
+        )
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
@@ -3456,7 +3459,9 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){int x = {1, 2}; return x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(str(ctx.exception), "Scalar initializer list must contain exactly one item")
+        self.assertEqual(
+            str(ctx.exception), "Scalar initializer list must contain exactly one item"
+        )
 
     def test_scalar_braced_initializer_with_designator_error(self) -> None:
         unit = parse(list(lex("int main(void){int x = {[0] = 1}; return x;}")))
@@ -3488,18 +3493,24 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
 
     def test_union_designated_initializer_ok(self) -> None:
-        unit = parse(list(lex("int main(void){union U { int x; int y; } u = {.y = 2}; return u.y;}")))
+        unit = parse(
+            list(lex("int main(void){union U { int x; int y; } u = {.y = 2}; return u.y;}"))
+        )
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
     def test_union_initializer_rejects_multiple_designated_items_error(self) -> None:
-        unit = parse(list(lex("int main(void){union U { int x; int y; } u = {.x = 1, .y = 2}; return 0;}")))
+        unit = parse(
+            list(lex("int main(void){union U { int x; int y; } u = {.x = 1, .y = 2}; return 0;}"))
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
 
     def test_union_initializer_rejects_designated_after_positional_item_error(self) -> None:
-        unit = parse(list(lex("int main(void){union U { int x; int y; } u = {1, .y = 2}; return 0;}")))
+        unit = parse(
+            list(lex("int main(void){union U { int x; int y; } u = {1, .y = 2}; return 0;}"))
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
@@ -3570,9 +3581,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int x=1; int *p=&x; x=p; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(
-            str(ctx.exception), "Assignment value is not compatible with target type"
-        )
+        self.assertEqual(str(ctx.exception), "Assignment value is not compatible with target type")
 
     def test_compound_assignment_int_ok(self) -> None:
         source = "int main(){int x=8; x+=2; x<<=1; x%=3; return x;}"
@@ -3631,7 +3640,9 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(sema.type_map.get(expr), Type("int", 1))
 
     def test_compound_assignment_pointer_plus_equals_pointer_error(self) -> None:
-        unit = parse(list(lex("int main(){int x=1; int y=2; int *p=&x; int *q=&y; p+=q; return 0;}")))
+        unit = parse(
+            list(lex("int main(){int x=1; int y=2; int *p=&x; int *q=&y; p+=q; return 0;}"))
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -3770,9 +3781,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int z=0; int *p; p=z; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(
-            str(ctx.exception), "Assignment value is not compatible with target type"
-        )
+        self.assertEqual(str(ctx.exception), "Assignment value is not compatible with target type")
 
     def test_assignment_void_pointer_conversion_ok(self) -> None:
         source = "int main(){int x=1; int *p=&x; void *vp=0; vp=p; p=vp; return p!=0;}"
@@ -3791,9 +3800,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(
-            str(ctx.exception), "Assignment value is not compatible with target type"
-        )
+        self.assertEqual(str(ctx.exception), "Assignment value is not compatible with target type")
 
     def test_assignment_nested_pointer_adds_const_qualifier_error(self) -> None:
         source = "int main(){int x=1; int *p=&x; int **pp=&p; const int **cpp=pp; return 0;}"
@@ -3803,31 +3810,29 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
 
     def test_assignment_function_pointer_to_void_pointer_error(self) -> None:
-        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; vp=fp; return 0;}"
+        source = (
+            "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; vp=fp; return 0;}"
+        )
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(
-            str(ctx.exception), "Assignment value is not compatible with target type"
-        )
+        self.assertEqual(str(ctx.exception), "Assignment value is not compatible with target type")
 
     def test_assignment_void_pointer_to_function_pointer_error(self) -> None:
-        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; fp=vp; return 0;}"
+        source = (
+            "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; fp=vp; return 0;}"
+        )
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(
-            str(ctx.exception), "Assignment value is not compatible with target type"
-        )
+        self.assertEqual(str(ctx.exception), "Assignment value is not compatible with target type")
 
     def test_assignment_incompatible_object_pointers_error(self) -> None:
         source = "int main(){int x=1; char y=97; int *p=&x; char *q=&y; p=q; return 0;}"
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
-        self.assertEqual(
-            str(ctx.exception), "Assignment value is not compatible with target type"
-        )
+        self.assertEqual(str(ctx.exception), "Assignment value is not compatible with target type")
 
     def test_return_type_mismatch(self) -> None:
         unit = parse(list(lex("int *f(int *p){return 1;}")))
@@ -3993,7 +3998,9 @@ class SemaTests(unittest.TestCase):
         )
 
     def test_additive_pointer_mismatch_error(self) -> None:
-        unit = parse(list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return p-q;}")))
+        unit = parse(
+            list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return p-q;}"))
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -4030,7 +4037,9 @@ class SemaTests(unittest.TestCase):
         )
 
     def test_relational_pointer_mismatch_error(self) -> None:
-        unit = parse(list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return p<q;}")))
+        unit = parse(
+            list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return p<q;}"))
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -4057,7 +4066,9 @@ class SemaTests(unittest.TestCase):
         )
 
     def test_relational_function_pointer_left_error(self) -> None:
-        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; int x=1; int *p=&x; return fp<p;}"
+        source = (
+            "int f(void){return 0;} int main(){int (*fp)(void)=f; int x=1; int *p=&x; return fp<p;}"
+        )
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
@@ -4067,7 +4078,9 @@ class SemaTests(unittest.TestCase):
         )
 
     def test_relational_function_pointer_right_error(self) -> None:
-        source = "int f(void){return 0;} int main(){int (*fp)(void)=f; int x=1; int *p=&x; return p<fp;}"
+        source = (
+            "int f(void){return 0;} int main(){int (*fp)(void)=f; int x=1; int *p=&x; return p<fp;}"
+        )
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
@@ -4077,7 +4090,9 @@ class SemaTests(unittest.TestCase):
         )
 
     def test_equality_pointer_mismatch_error(self) -> None:
-        unit = parse(list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return p==q;}")))
+        unit = parse(
+            list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return p==q;}"))
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -4096,9 +4111,7 @@ class SemaTests(unittest.TestCase):
         )
 
     def test_conditional_nested_pointer_qualifier_mismatch_error(self) -> None:
-        source = (
-            "int main(){int x=1; int *p=&x; int **pp=&p; const int **cpp=0; return (1 ? pp : cpp)==0;}"
-        )
+        source = "int main(){int x=1; int *p=&x; int **pp=&p; const int **cpp=0; return (1 ? pp : cpp)==0;}"
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
@@ -4321,12 +4334,24 @@ class SemaTests(unittest.TestCase):
     def test_eval_int_constant_expr_helpers_for_sizeof_alignof_and_generic(self) -> None:
         analyzer = Analyzer()
         scope = Scope()
-        self.assertIsNone(analyzer._eval_int_constant_expr(SizeofExpr(Identifier("x"), None), scope))
-        self.assertEqual(analyzer._eval_int_constant_expr(SizeofExpr(None, TypeSpec("int")), scope), 4)
-        self.assertIsNone(analyzer._eval_int_constant_expr(SizeofExpr(None, TypeSpec("void")), scope))
-        self.assertIsNone(analyzer._eval_int_constant_expr(AlignofExpr(Identifier("x"), None), scope))
-        self.assertEqual(analyzer._eval_int_constant_expr(AlignofExpr(None, TypeSpec("int", 1)), scope), 8)
-        self.assertIsNone(analyzer._eval_int_constant_expr(AlignofExpr(None, TypeSpec("void")), scope))
+        self.assertIsNone(
+            analyzer._eval_int_constant_expr(SizeofExpr(Identifier("x"), None), scope)
+        )
+        self.assertEqual(
+            analyzer._eval_int_constant_expr(SizeofExpr(None, TypeSpec("int")), scope), 4
+        )
+        self.assertIsNone(
+            analyzer._eval_int_constant_expr(SizeofExpr(None, TypeSpec("void")), scope)
+        )
+        self.assertIsNone(
+            analyzer._eval_int_constant_expr(AlignofExpr(Identifier("x"), None), scope)
+        )
+        self.assertEqual(
+            analyzer._eval_int_constant_expr(AlignofExpr(None, TypeSpec("int", 1)), scope), 8
+        )
+        self.assertIsNone(
+            analyzer._eval_int_constant_expr(AlignofExpr(None, TypeSpec("void")), scope)
+        )
         generic = GenericExpr(IntLiteral("1"), ((TypeSpec("int"), IntLiteral("3")),))
         self.assertEqual(analyzer._eval_int_constant_expr(generic, scope), 3)
         generic_default = GenericExpr(
@@ -4345,10 +4370,14 @@ class SemaTests(unittest.TestCase):
         analyzer = Analyzer()
         scope = Scope()
         self.assertTrue(
-            analyzer._is_null_pointer_constant(CastExpr(TypeSpec("void", 1), IntLiteral("0")), scope)
+            analyzer._is_null_pointer_constant(
+                CastExpr(TypeSpec("void", 1), IntLiteral("0")), scope
+            )
         )
         self.assertFalse(
-            analyzer._is_null_pointer_constant(CastExpr(TypeSpec("void", 1), IntLiteral("1")), scope)
+            analyzer._is_null_pointer_constant(
+                CastExpr(TypeSpec("void", 1), IntLiteral("1")), scope
+            )
         )
 
     def test_duplicate_declaration(self) -> None:
@@ -4404,7 +4433,11 @@ class SemaTests(unittest.TestCase):
 
     def test_if_condition_duplicate_enumerator_declaration(self) -> None:
         unit = parse(
-            list(lex("int f(int z){if(z + sizeof(enum { A })) return 1 + sizeof(enum { A }); return 0;}"))
+            list(
+                lex(
+                    "int f(int z){if(z + sizeof(enum { A })) return 1 + sizeof(enum { A }); return 0;}"
+                )
+            )
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
@@ -4414,8 +4447,8 @@ class SemaTests(unittest.TestCase):
         source = (
             "enum { A, B };"
             "int main(){"
-            "if(sizeof(enum { B, A }) != sizeof(int)){_Static_assert(A == 1, \"\");}"
-            "_Static_assert(B == 1, \"\");"
+            'if(sizeof(enum { B, A }) != sizeof(int)){_Static_assert(A == 1, "");}'
+            '_Static_assert(B == 1, "");'
             "return 0;}"
         )
         sema = analyze(parse(list(lex(source))))
@@ -4539,7 +4572,10 @@ class SemaTests(unittest.TestCase):
                                 TypeSpec(
                                     "struct",
                                     record_members=(
-                                        (TypeSpec("int", declarator_ops=(("fn", ((), False)),)), "call"),
+                                        (
+                                            TypeSpec("int", declarator_ops=(("fn", ((), False)),)),
+                                            "call",
+                                        ),
                                     ),
                                 ),
                                 None,
@@ -4569,7 +4605,9 @@ class SemaTests(unittest.TestCase):
                             DeclStmt(
                                 TypeSpec(
                                     "struct",
-                                    record_members=((TypeSpec("struct", record_tag="Node"), "next"),),
+                                    record_members=(
+                                        (TypeSpec("struct", record_tag="Node"), "next"),
+                                    ),
                                 ),
                                 None,
                                 None,
@@ -4760,7 +4798,10 @@ class SemaTests(unittest.TestCase):
                             DeclStmt(
                                 TypeSpec(
                                     "int",
-                                    declarator_ops=(("ptr", 0), ("fn", ((TypeSpec("void"),), False))),
+                                    declarator_ops=(
+                                        ("ptr", 0),
+                                        ("fn", ((TypeSpec("void"),), False)),
+                                    ),
                                 ),
                                 "fp",
                                 None,
@@ -4854,15 +4895,17 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Duplicate case value")
 
     def test_duplicate_case_value_from_enumerator_error(self) -> None:
-        unit = parse(list(lex("int main(){enum E { A=1, B=1 }; switch(1){case A:return 0;case B:return 1;}}")))
+        unit = parse(
+            list(
+                lex("int main(){enum E { A=1, B=1 }; switch(1){case A:return 0;case B:return 1;}}")
+            )
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate case value")
 
     def test_duplicate_default_label_error(self) -> None:
-        unit = parse(
-            list(lex("int main(){switch(1){default:return 0;default:return 1;}}"))
-        )
+        unit = parse(list(lex("int main(){switch(1){default:return 0;default:return 1;}}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate default label")
@@ -4880,12 +4923,22 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "case value is not integer constant")
 
     def test_non_decimal_case_constant_ok(self) -> None:
-        unit = parse(list(lex("int main(){switch(0){case 0x10:return 0;case 010:return 1;default:return 2;}}")))
+        unit = parse(
+            list(
+                lex("int main(){switch(0){case 0x10:return 0;case 010:return 1;default:return 2;}}")
+            )
+        )
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
     def test_suffixed_case_constant_ok(self) -> None:
-        unit = parse(list(lex("int main(){switch(0){case 0x10u:return 0;case 077ULL:return 1;default:return 2;}}")))
+        unit = parse(
+            list(
+                lex(
+                    "int main(){switch(0){case 0x10u:return 0;case 077ULL:return 1;default:return 2;}}"
+                )
+            )
+        )
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
@@ -5087,9 +5140,7 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Condition must be non-void")
 
     def test_conditional_non_scalar_condition_error(self) -> None:
-        unit = parse(
-            list(lex("struct S{int x;}; int main(){struct S s={0}; return s ? 1 : 2;}"))
-        )
+        unit = parse(list(lex("struct S{int x;}; int main(){struct S s={0}; return s ? 1 : 2;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be scalar")
@@ -5113,42 +5164,38 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Conditional type mismatch")
 
     def test_conditional_pointer_mismatch_error(self) -> None:
-        unit = parse(list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return 1 ? p : q;}")))
+        unit = parse(
+            list(lex("int main(){int x=1; char y='a'; int *p=&x; char *q=&y; return 1 ? p : q;}"))
+        )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Conditional type mismatch")
 
     def test_conditional_void_pointer_and_function_pointer_error(self) -> None:
-        source = "int f(void){return 0;} int main(){void *vp=0; int (*fp)(void)=f; return 1 ? vp : fp;}"
+        source = (
+            "int f(void){return 0;} int main(){void *vp=0; int (*fp)(void)=f; return 1 ? vp : fp;}"
+        )
         unit = parse(list(lex(source)))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Conditional type mismatch")
 
     def test_while_void_condition_error(self) -> None:
-        unit = parse(
-            list(lex("void foo(){return;} int main(){while(foo()) return 0;}"))
-        )
+        unit = parse(list(lex("void foo(){return;} int main(){while(foo()) return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be non-void")
 
     def test_while_non_scalar_condition_error(self) -> None:
         unit = parse(
-            list(
-                lex(
-                    "struct S{int x;}; int main(){struct S s={0}; while(s){return 0;} return 1;}"
-                )
-            )
+            list(lex("struct S{int x;}; int main(){struct S s={0}; while(s){return 0;} return 1;}"))
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be scalar")
 
     def test_do_while_void_condition_error(self) -> None:
-        unit = parse(
-            list(lex("void foo(){return;} int main(){do return 0; while(foo());}"))
-        )
+        unit = parse(list(lex("void foo(){return;} int main(){do return 0; while(foo());}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Condition must be non-void")
@@ -5167,9 +5214,7 @@ class SemaTests(unittest.TestCase):
 
     def test_for_non_scalar_condition_error(self) -> None:
         unit = parse(
-            list(
-                lex("struct S{int x;}; int main(){struct S s={0}; for(;s;){return 0;} return 1;}")
-            )
+            list(lex("struct S{int x;}; int main(){struct S s={0}; for(;s;){return 0;} return 1;}"))
         )
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
@@ -5248,7 +5293,9 @@ class SemaTests(unittest.TestCase):
                             ReturnStmt(
                                 SizeofExpr(
                                     None,
-                                    TypeSpec("int", declarator_ops=(("fn", ((TypeSpec("int"),), False)),)),
+                                    TypeSpec(
+                                        "int", declarator_ops=(("fn", ((TypeSpec("int"),), False)),)
+                                    ),
                                 )
                             )
                         ]
@@ -5364,7 +5411,9 @@ class SemaTests(unittest.TestCase):
                         [
                             ReturnStmt(
                                 CastExpr(
-                                    TypeSpec("int", declarator_ops=(("fn", ((TypeSpec("int"),), False)),)),
+                                    TypeSpec(
+                                        "int", declarator_ops=(("fn", ((TypeSpec("int"),), False)),)
+                                    ),
                                     IntLiteral("1"),
                                 )
                             )
@@ -5469,11 +5518,15 @@ class SemaTests(unittest.TestCase):
     def test_invalid_alignment_message_helper_paths(self) -> None:
         analyzer = Analyzer()
         self.assertEqual(
-            analyzer._invalid_alignment_message("file-scope object declaration", 0, natural_alignment=4),
+            analyzer._invalid_alignment_message(
+                "file-scope object declaration", 0, natural_alignment=4
+            ),
             "Invalid alignment specifier for file-scope object declaration: alignment must be positive",
         )
         self.assertEqual(
-            analyzer._invalid_alignment_message("file-scope object declaration", 8, natural_alignment=None),
+            analyzer._invalid_alignment_message(
+                "file-scope object declaration", 8, natural_alignment=None
+            ),
             "Invalid alignment specifier for file-scope object declaration: cannot determine natural alignment",
         )
 
@@ -5502,8 +5555,9 @@ class SemaTests(unittest.TestCase):
         analyzer = Analyzer()
         with self.assertRaises(SemaError) as ctx:
             analyzer._analyze_expr(GenericExpr(IntLiteral("1"), ()), Scope())
-        self.assertEqual(str(ctx.exception), "No matching generic association for control type 'int'")
-
+        self.assertEqual(
+            str(ctx.exception), "No matching generic association for control type 'int'"
+        )
 
     def test_typeof_expression_resolves_variable_type(self) -> None:
         unit = parse(list(lex("int f(int x) { typeof(x) y = x + 3; return y; }")), std="gnu11")
@@ -5511,12 +5565,16 @@ class SemaTests(unittest.TestCase):
         self.assertIsNotNone(sema)
 
     def test_typeof_dunder_expression_resolves_variable_type(self) -> None:
-        unit = parse(list(lex("int f(long x) { __typeof__(x) y = x + 4; return (int)y; }")), std="gnu11")
+        unit = parse(
+            list(lex("int f(long x) { __typeof__(x) y = x + 4; return (int)y; }")), std="gnu11"
+        )
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
     def test_typeof_unqual_expression_resolves_variable_type(self) -> None:
-        unit = parse(list(lex("int f(int x) { typeof_unqual(x) y = x + 5; return y; }")), std="gnu11")
+        unit = parse(
+            list(lex("int f(int x) { typeof_unqual(x) y = x + 5; return y; }")), std="gnu11"
+        )
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
@@ -5536,7 +5594,9 @@ class SemaTests(unittest.TestCase):
         self.assertIsNotNone(sema)
 
     def test_typeof_declarator_ops_array(self) -> None:
-        unit = parse(list(lex("int f(void) { int x; typeof(x) a[3]; a[0] = 1; return a[0]; }")), std="gnu11")
+        unit = parse(
+            list(lex("int f(void) { int x; typeof(x) a[3]; a[0] = 1; return a[0]; }")), std="gnu11"
+        )
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
@@ -5549,7 +5609,11 @@ class SemaTests(unittest.TestCase):
 
     def test_builtin_offsetof_returns_ulong(self) -> None:
         unit = parse(
-            list(lex("struct S { int a; long b; }; unsigned long f(void) { return __builtin_offsetof(struct S, b); }")),
+            list(
+                lex(
+                    "struct S { int a; long b; }; unsigned long f(void) { return __builtin_offsetof(struct S, b); }"
+                )
+            ),
             std="gnu11",
         )
         sema = analyze(unit, std="gnu11")
@@ -5559,7 +5623,11 @@ class SemaTests(unittest.TestCase):
 
     def test_builtin_offsetof_nested_member_returns_ulong(self) -> None:
         unit = parse(
-            list(lex("struct I { int leaf; }; struct O { int tag; struct I in; }; unsigned long f(void) { return __builtin_offsetof(struct O, in.leaf); }")),
+            list(
+                lex(
+                    "struct I { int leaf; }; struct O { int tag; struct I in; }; unsigned long f(void) { return __builtin_offsetof(struct O, in.leaf); }"
+                )
+            ),
             std="gnu11",
         )
         sema = analyze(unit, std="gnu11")
@@ -5570,12 +5638,15 @@ class SemaTests(unittest.TestCase):
     def test_builtin_offsetof_in_constant_expr_context(self) -> None:
         """offsetof in array size triggers _eval_int_constant_expr path (returns None → VLA)."""
         unit = parse(
-            list(lex("struct S { int a; long b; }; void f(void) { int arr[__builtin_offsetof(struct S, b)]; (void)arr; }")),
+            list(
+                lex(
+                    "struct S { int a; long b; }; void f(void) { int arr[__builtin_offsetof(struct S, b)]; (void)arr; }"
+                )
+            ),
             std="gnu11",
         )
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
-
 
     def test_builtin_expect_accepted_in_gnu11(self) -> None:
         source = "int f(int x) { if (__builtin_expect(x == 0, 0)) return -1; return x; }"
@@ -5583,11 +5654,42 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
+    def test_builtin_expect_accepted_in_c11(self) -> None:
+        source = "int f(int x) { if (__builtin_expect(x == 0, 0)) return -1; return x; }"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
     def test_builtin_unreachable_accepted_in_gnu11(self) -> None:
-        source = "int f(int x) { switch(x) { case 0: return 0; default: __builtin_unreachable(); } }"
+        source = (
+            "int f(int x) { switch(x) { case 0: return 0; default: __builtin_unreachable(); } }"
+        )
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
+
+    def test_builtin_unreachable_accepted_in_c11(self) -> None:
+        source = (
+            "int f(int x) { switch(x) { case 0: return 0; default: __builtin_unreachable(); } }"
+        )
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
+    def test_builtin_float_compare_family_accepted_in_c11(self) -> None:
+        for builtin in (
+            "__builtin_isgreater",
+            "__builtin_isgreaterequal",
+            "__builtin_isless",
+            "__builtin_islessequal",
+            "__builtin_islessgreater",
+            "__builtin_isunordered",
+        ):
+            with self.subTest(builtin=builtin):
+                source = f"int f(double x, long double y) {{ return {builtin}(x, y); }}"
+                unit = parse(list(lex(source)), std="c11")
+                sema = analyze(unit, std="c11")
+                self.assertIsNotNone(sema)
 
 
 if __name__ == "__main__":

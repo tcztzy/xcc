@@ -25,9 +25,9 @@ This repository aims to become a C11 compiler written in modern Python (CPython 
 
 ## Continuous Development Loop
 
-- Development loop: CPython trial -> failure bucket -> pick the highest-frequency blocker -> implement fix with tests -> verify `tox` is green -> commit -> repeat.
-- Every agent task must name one concrete failure to fix, provide its verification command, and leave `tox` green before handoff.
-- No speculative feature work: each change must trace to a concrete CPython compilation failure.
+- Development loop: failing unit test / fixture mismatch / backend regression -> tighten or add the reproducer -> implement fix with tests -> verify `tox` is green -> commit -> repeat.
+- Every agent task must name one concrete failure, behavior gap, or boundary cleanup to fix, provide its verification command, and leave `tox` green before handoff.
+- No speculative feature work: each change must trace to a concrete failing test, fixture mismatch, bug report, or explicit repository-boundary request.
 - Cron-job guidelines: run every 30 minutes, focus on one failure category per run, require green `tox` before commit, and auto-rollback when verification fails.
 
 ## Commit Discipline
