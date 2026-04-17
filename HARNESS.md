@@ -101,14 +101,30 @@ Maintain the active queue in `TODO.md` using this shape:
 - `status: todo|claimed|review|done|blocked`
 - `notes`
 
+## Supervisor cleanliness policy
+
+Supervisor root (`~/GitHub/xcc`) is allowed to carry orchestration-only metadata edits in:
+
+- `TODO.md`
+- `HARNESS.md`
+- `CHANGELOG.md`
+
+Do not launch workers if the supervisor root has uncommitted implementation changes in compiler or test code such as:
+
+- `src/xcc/**`
+- `tests/**` except queue/changelog-style metadata updates
+- scripts or tooling that would conflict with worker output
+
+Worker worktrees must always start clean, end clean after commit, and stay isolated to their claimed slice.
+
 ## Supervisor loop
 
 1. read `AGENTS.md`, `LESSONS.md`, `TODO.md`, `HARNESS.md`, `CHANGELOG.md`
-2. stop immediately if repo is dirty
+2. inspect supervisor-root dirtiness and continue only if any uncommitted changes are orchestration-only metadata edits; block on implementation-code dirtiness
 3. inspect current clang-suite failures/skips
 4. group candidate tests by `layer + family + subsystem`
 5. choose up to 3 non-conflicting ready slices
-6. dispatch one fresh Codex worker per slice
+6. dispatch one fresh Codex worker per slice in a clean isolated worktree/branch
 7. independently review each result for quality and anti-hardcoding
 8. accept, reject, or emit repair slices
 9. report remaining frontier and next core layer blockers
