@@ -129,3 +129,5 @@ Worker worktrees must always start clean, end clean after commit, and stay isola
 7. independently review each result for quality and anti-hardcoding
 8. accept, reject, or emit repair slices
 9. report remaining frontier and next core layer blockers
+
+For cron-safe selection without launching workers, use `python3 scripts/harness_supervisor.py`. It blocks on a dirty supervisor root, verifies claimed/review task state against live worktrees, reports clean orphan worktrees, and emits a stable JSON summary. Add `--claim` only when the caller wants the selected task claimed in `.worktrees/harness/tasks.json`.

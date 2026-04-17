@@ -12,5 +12,5 @@
 - Developer commands use `uv run`, and MkDocs is part of the locked dev toolchain.
 - Documentation is reduced to current state, active priorities, and roadmap.
 - `HARNESS.md` defines layered parallel LLVM/Clang reduction, worker slice rules, and anti-hardcoding quality gates.
-- Multi-agent helper scripts now exist for isolated worktrees (`scripts/agent_worktree.py`), queue claims (`scripts/harness_queue.py`), and skip-frontier bucketing (`scripts/clang_frontier.py`).
+- Multi-agent helper scripts now exist for isolated worktrees (`scripts/agent_worktree.py`), queue claims (`scripts/harness_queue.py`), skip-frontier bucketing (`scripts/clang_frontier.py`), and stable supervisor dry-run/claim selection (`scripts/harness_supervisor.py`).
 - Harness queue claim/status churn now lives in ignored JSON state under `.worktrees/harness/tasks.json` so the supervisor root stays clean.
