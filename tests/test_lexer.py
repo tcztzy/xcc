@@ -278,7 +278,6 @@ class ErrorTests(unittest.TestCase):
         with self.assertRaises(LexerError):
             lexer._read_ucn_escape()
 
-
     def test_pp_number_version_string(self) -> None:
         """Version-like pp-numbers (10.12.1) produce PP_NUMBER tokens."""
         tokens = lex("10.12.1")

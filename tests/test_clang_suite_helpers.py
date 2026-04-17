@@ -49,14 +49,14 @@ class ClangSuiteHelperTests(unittest.TestCase):
             "tests/external/clang/generated/Sema/warn-null.c",
         )
         self.assertEqual(case_id_from_upstream_path(upstream), "clang-sema-warn-null-c-a3c7de133a")
-        punctuated_case_id = case_id_from_upstream_path(
-            "clang/test/Sema/mixed.../warn+null!.c"
-        )
+        punctuated_case_id = case_id_from_upstream_path("clang/test/Sema/mixed.../warn+null!.c")
         self.assertTrue(punctuated_case_id.startswith("clang-sema-mixed-warn-null-c-"))
         self.assertNotIn("--", punctuated_case_id)
 
     def test_infer_expectation_from_source_prefers_expected_no_diagnostics(self) -> None:
-        source = "// expected-no-diagnostics\n// expected-error {{ignored by baseline classifier}}\n"
+        source = (
+            "// expected-no-diagnostics\n// expected-error {{ignored by baseline classifier}}\n"
+        )
         self.assertEqual(infer_expectation_from_source(source), "ok")
         self.assertEqual(
             infer_expectation_from_source("// expected-error {{bad}}\n"),

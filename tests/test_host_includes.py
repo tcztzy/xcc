@@ -37,7 +37,9 @@ class HostIncludesTests(unittest.TestCase):
             sdk_root.mkdir()
             calls: list[tuple[str, ...]] = []
 
-            def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            def fake_run(
+                cmd: tuple[str, ...], **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
                 calls.append(cmd)
                 self.assertEqual(
                     cmd,
@@ -87,4 +89,3 @@ class HostIncludesTests(unittest.TestCase):
             with patch.dict("os.environ", {}, clear=True):
                 with patch("xcc.host_includes.subprocess.run", side_effect=fail_run):
                     self.assertEqual(host_includes.host_system_include_dirs(), ("/usr/include",))
-

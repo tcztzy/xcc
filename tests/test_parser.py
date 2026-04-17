@@ -1530,12 +1530,7 @@ class ParserTests(unittest.TestCase):
         self,
     ) -> None:
         unit = parse(
-            list(
-                lex(
-                    "void f(void){ struct Local { int value; }"
-                    " __attribute__((aligned(16))); }"
-                )
-            )
+            list(lex("void f(void){ struct Local { int value; } __attribute__((aligned(16))); }"))
         )
         declaration = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(declaration, DeclStmt)

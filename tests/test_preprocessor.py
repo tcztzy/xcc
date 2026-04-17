@@ -148,7 +148,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn('printf ( "%d" , 1 )', result.source)
 
     def test_variadic_macro_insufficient_arguments(self) -> None:
-        source = '#define LOG(fmt, ...) printf(fmt, __VA_ARGS__)\nLOG()\n'
+        source = "#define LOG(fmt, ...) printf(fmt, __VA_ARGS__)\nLOG()\n"
         with self.assertRaises(PreprocessorError):
             preprocess_source(source, filename="main.c")
 
@@ -188,7 +188,7 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source(
             "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n"
             "int gsi = __GNUC_STDC_INLINE__;\n"
-            'const char *v = __VERSION__;\n',
+            "const char *v = __VERSION__;\n",
             filename="main.c",
             options=FrontendOptions(std="gnu11"),
         )
@@ -838,29 +838,13 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("__WCHAR_TYPE__ w;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
-        source = (
-            "#define FLAG 1\n"
-            "#ifdef FLAG\n"
-            "int a;\n"
-            "#endif\n"
-            "#ifndef FLAG\n"
-            "int b;\n"
-            "#endif\n"
-        )
+        source = "#define FLAG 1\n#ifdef FLAG\nint a;\n#endif\n#ifndef FLAG\nint b;\n#endif\n"
         result = preprocess_source(source, filename="if.c")
         self.assertIn("int a ;", result.source)
         self.assertNotIn("int b;", result.source)
 
     def test_if_elif_else(self) -> None:
-        source = (
-            "#if 0\n"
-            "int a;\n"
-            "#elif 2 > 1\n"
-            "int b;\n"
-            "#else\n"
-            "int c;\n"
-            "#endif\n"
-        )
+        source = "#if 0\nint a;\n#elif 2 > 1\nint b;\n#else\nint c;\n#endif\n"
         result = preprocess_source(source, filename="if.c")
         self.assertNotIn("int a;", result.source)
         self.assertIn("int b;", result.source)
@@ -981,7 +965,9 @@ class PreprocessorTests(unittest.TestCase):
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#if 9223372036854775807LL + 1LL\nint x;\n#endif\n", filename="if.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
-        self.assertEqual(str(ctx.exception), "Integer overflow in preprocessor expression at if.c:1:1")
+        self.assertEqual(
+            str(ctx.exception), "Integer overflow in preprocessor expression at if.c:1:1"
+        )
 
     def test_invalid_if_expression_rejects_too_large_integer_literal(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
@@ -1037,7 +1023,7 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_block_comment_sigil_inside_string_does_not_disable_directives(self) -> None:
         result = preprocess_source(
-            'const char *s="\\\"/*";\n#define A 2\nint x=A;\n',
+            'const char *s="\\"/*";\n#define A 2\nint x=A;\n',
             filename="string.c",
         )
         self.assertIn("int x = 2 ;", result.source)
@@ -1072,7 +1058,7 @@ class PreprocessorTests(unittest.TestCase):
             (root / "present.h").write_text("int x;\n", encoding="utf-8")
             source_path = root / "main.c"
             source_path.write_text(
-                "#if __has_include(\"present.h\")\nint ok;\n#endif\n",
+                '#if __has_include("present.h")\nint ok;\n#endif\n',
                 encoding="utf-8",
             )
             source = source_path.read_text(encoding="utf-8")
@@ -1116,7 +1102,7 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_if_expression_with_has_include_missing(self) -> None:
         result = preprocess_source(
-            "#if __has_include(\"missing.h\")\nint bad;\n#endif\n",
+            '#if __has_include("missing.h")\nint bad;\n#endif\n',
             filename="main.c",
         )
         self.assertNotIn("int bad;", result.source)
@@ -1147,10 +1133,9 @@ class PreprocessorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "present.h").write_text("int x;\n", encoding="utf-8")
-            source = "#define HAS(x) __has_include(x)\n#if HAS(\"present.h\")\nint ok;\n#endif\n"
+            source = '#define HAS(x) __has_include(x)\n#if HAS("present.h")\nint ok;\n#endif\n'
             result = preprocess_source(source, filename=str(root / "main.c"))
         self.assertIn("int ok ;", result.source)
-
 
     def test_if_expression_with_has_include_macro_expands_to_invalid_header(self) -> None:
         source = "#define HDR present.h\n#if __has_include(HDR)\nint bad;\n#endif\n"
@@ -1175,11 +1160,13 @@ class PreprocessorTests(unittest.TestCase):
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#if __has_include()\nint x;\n#endif\n", filename="if.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
-        self.assertIn("Invalid __has_include expression: missing header operand", str(ctx.exception))
+        self.assertIn(
+            "Invalid __has_include expression: missing header operand", str(ctx.exception)
+        )
 
     def test_if_expression_with_has_include_missing_closing_paren(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source("#if __has_include(\"x.h\"\nint x;\n#endif\n", filename="if.c")
+            preprocess_source('#if __has_include("x.h"\nint x;\n#endif\n', filename="if.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
         self.assertIn("Invalid __has_include expression: missing closing ')'", str(ctx.exception))
 
@@ -1261,8 +1248,8 @@ class PreprocessorTests(unittest.TestCase):
             "#if !__has_feature(c_static_assert)\nint ok_feature;\n#endif\n"
             "#if __has_extension(attribute_deprecated_with_message)\nint bad_extension;\n#endif\n"
             "#if !__has_extension(attribute_deprecated_with_message)\nint ok_extension;\n#endif\n"
-            "#if __has_warning(\"-Wall\")\nint ok_warning;\n#endif\n"
-            "#if __has_warning(\"-Wdoes-not-exist\")\nint bad_warning;\n#endif\n",
+            '#if __has_warning("-Wall")\nint ok_warning;\n#endif\n'
+            '#if __has_warning("-Wdoes-not-exist")\nint bad_warning;\n#endif\n',
             filename="if.c",
         )
         self.assertNotIn("bad_builtin", result.source)
@@ -1289,8 +1276,8 @@ class PreprocessorTests(unittest.TestCase):
     def test_if_expression_with_macro_expanded_has_warning_operator(self) -> None:
         result = preprocess_source(
             "#define HAS_WARNING(x) __has_warning(x)\n"
-            "#if HAS_WARNING(\"-Wextra\")\nint ok;\n#endif\n"
-            "#if HAS_WARNING(\"-Wunknown\")\nint bad;\n#endif\n",
+            '#if HAS_WARNING("-Wextra")\nint ok;\n#endif\n'
+            '#if HAS_WARNING("-Wunknown")\nint bad;\n#endif\n',
             filename="if.c",
         )
         self.assertIn("int ok ;", result.source)
@@ -1337,7 +1324,9 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_if_expression_with_has_c_attribute_rejects_non_identifier_operand(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source("#if __has_c_attribute(\"nodiscard\")\nint x;\n#endif\n", filename="if.c")
+            preprocess_source(
+                '#if __has_c_attribute("nodiscard")\nint x;\n#endif\n', filename="if.c"
+            )
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
         self.assertIn(
             "Invalid __has_c_attribute expression: attribute operand must be an identifier or scoped identifier",
@@ -1413,9 +1402,7 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_gcc_visibility_pragma_valid_forms_are_ignored(self) -> None:
         result = preprocess_source(
-            "#pragma GCC visibility push(hidden)\n"
-            "#pragma GCC visibility pop\n"
-            "int x;\n",
+            "#pragma GCC visibility push(hidden)\n#pragma GCC visibility pop\nint x;\n",
             filename="main.c",
         )
         self.assertEqual(result.source, "\n\nint x;\n")
@@ -1441,9 +1428,7 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_fenv_access_pragma_valid_forms_are_ignored(self) -> None:
         result = preprocess_source(
-            "#pragma fenv_access (on)\n"
-            "#pragma fenv_access (off)\n"
-            "int x;\n",
+            "#pragma fenv_access (on)\n#pragma fenv_access (off)\nint x;\n",
             filename="main.c",
         )
         self.assertEqual(result.source, "\n\nint x;\n")
@@ -1471,10 +1456,10 @@ class PreprocessorTests(unittest.TestCase):
     def test_clang_diagnostic_pragma_valid_forms_are_ignored(self) -> None:
         result = preprocess_source(
             "#pragma clang diagnostic push\n"
-            "#pragma clang diagnostic ignored \"-Wmultichar\"\n"
-            "#pragma clang diagnostic warning \"-Weverything\"\n"
-            "#pragma GCC diagnostic error \"-Wundef\"\n"
-            "#pragma clang diagnostic fatal \"-Wall\"\n"
+            '#pragma clang diagnostic ignored "-Wmultichar"\n'
+            '#pragma clang diagnostic warning "-Weverything"\n'
+            '#pragma GCC diagnostic error "-Wundef"\n'
+            '#pragma clang diagnostic fatal "-Wall"\n'
             "#pragma clang diagnostic pop\n"
             "int x;\n",
             filename="main.c",
@@ -1486,8 +1471,8 @@ class PreprocessorTests(unittest.TestCase):
             "#pragma clang diagnostic\n",
             "#pragma clang diagnostic puhs\n",
             "#pragma clang diagnostic error 42\n",
-            "#pragma clang diagnostic push ignored \"-Wdeprecated-declarations\"\n",
-            "#pragma GCC diagnostic error \"invalid-name\"\n",
+            '#pragma clang diagnostic push ignored "-Wdeprecated-declarations"\n',
+            '#pragma GCC diagnostic error "invalid-name"\n',
         )
         for source in cases:
             with self.subTest(source=source.strip()):
@@ -1566,7 +1551,9 @@ class PreprocessorTests(unittest.TestCase):
             header.write_text("#pragma once\nint from_once;\n", encoding="utf-8")
             source_path = root / "main.c"
             source_path.write_text('#include "once.h"\n#include "once.h"\n', encoding="utf-8")
-            result = preprocess_source(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+            result = preprocess_source(
+                source_path.read_text(encoding="utf-8"), filename=str(source_path)
+            )
         self.assertEqual(result.source, "\nint from_once;\n")
 
     def test_pragma_once_applies_across_nested_includes(self) -> None:
@@ -1688,7 +1675,9 @@ class PreprocessorTests(unittest.TestCase):
             try:
                 os.chdir(root)
                 with patch.dict("os.environ", {"CPATH": f"{os.pathsep}"}, clear=False):
-                    result = preprocess_source(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+                    result = preprocess_source(
+                        source_path.read_text(encoding="utf-8"), filename=str(source_path)
+                    )
             finally:
                 os.chdir(previous_cwd)
         self.assertEqual(result.source, "int from_cwd;\n")
@@ -1786,7 +1775,9 @@ class PreprocessorTests(unittest.TestCase):
                 include_dirs=(str(include_dir),),
                 system_include_dirs=(str(system_dir),),
             )
-            result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main), options=options)
+            result = preprocess_source(
+                main.read_text(encoding="utf-8"), filename=str(main), options=options
+            )
         self.assertEqual(result.source, "int from_quote;\n")
 
     def test_include_angle_ignores_quote_include_dirs(self) -> None:
@@ -1821,7 +1812,9 @@ class PreprocessorTests(unittest.TestCase):
                 include_dirs=(str(include_dir),),
                 system_include_dirs=(str(system_dir),),
             )
-            result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main), options=options)
+            result = preprocess_source(
+                main.read_text(encoding="utf-8"), filename=str(main), options=options
+            )
         self.assertEqual(result.source, "int from_system;\n")
 
     def test_include_quoted_prefers_source_directory_over_include_path(self) -> None:
@@ -1836,7 +1829,9 @@ class PreprocessorTests(unittest.TestCase):
             main = source_dir / "main.c"
             main.write_text('#include "inc.h"\n', encoding="utf-8")
             options = FrontendOptions(include_dirs=(str(include_dir),))
-            result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main), options=options)
+            result = preprocess_source(
+                main.read_text(encoding="utf-8"), filename=str(main), options=options
+            )
         self.assertEqual(result.source, "int from_source;\n")
 
     def test_include_angle_skips_source_directory_and_uses_include_path(self) -> None:
@@ -1860,7 +1855,9 @@ class PreprocessorTests(unittest.TestCase):
             second_dir = root / "second"
             first_dir.mkdir()
             second_dir.mkdir()
-            (first_dir / "inc.h").write_text("#include_next <inc.h>\nint from_first;\n", encoding="utf-8")
+            (first_dir / "inc.h").write_text(
+                "#include_next <inc.h>\nint from_first;\n", encoding="utf-8"
+            )
             (second_dir / "inc.h").write_text("int from_second;\n", encoding="utf-8")
             options = FrontendOptions(
                 std="gnu11",
@@ -1876,7 +1873,9 @@ class PreprocessorTests(unittest.TestCase):
             include_dir = root / "include"
             source_dir.mkdir()
             include_dir.mkdir()
-            (source_dir / "inc.h").write_text('#include_next "inc.h"\nint from_source;\n', encoding="utf-8")
+            (source_dir / "inc.h").write_text(
+                '#include_next "inc.h"\nint from_source;\n', encoding="utf-8"
+            )
             (include_dir / "inc.h").write_text("int from_include;\n", encoding="utf-8")
             main = source_dir / "main.c"
             options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),))
@@ -1892,7 +1891,9 @@ class PreprocessorTests(unittest.TestCase):
             first_dir.mkdir()
             second_dir.mkdir()
             first_alias.symlink_to(first_dir, target_is_directory=True)
-            (first_dir / "inc.h").write_text('#include_next "inc.h"\nint from_first;\n', encoding="utf-8")
+            (first_dir / "inc.h").write_text(
+                '#include_next "inc.h"\nint from_first;\n', encoding="utf-8"
+            )
             (second_dir / "inc.h").write_text("int from_second;\n", encoding="utf-8")
             options = FrontendOptions(
                 std="gnu11",
@@ -1909,7 +1910,7 @@ class PreprocessorTests(unittest.TestCase):
             first_dir.mkdir()
             first_alias.symlink_to(first_dir, target_is_directory=True)
             (first_dir / "inc.h").write_text(
-                "#if __has_include_next(\"inc.h\")\nint has_next;\n#endif\n",
+                '#if __has_include_next("inc.h")\nint has_next;\n#endif\n',
                 encoding="utf-8",
             )
             options = FrontendOptions(
@@ -1928,7 +1929,9 @@ class PreprocessorTests(unittest.TestCase):
             include_dir.mkdir()
             (source_dir / "inc.h").write_text('#include_next "inc.h"\n', encoding="utf-8")
             main = source_dir / "main.c"
-            options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),), no_standard_includes=True)
+            options = FrontendOptions(
+                std="gnu11", include_dirs=(str(include_dir),), no_standard_includes=True
+            )
             with self.assertRaises(PreprocessorError) as ctx:
                 preprocess_source('#include "inc.h"\n', filename=str(main), options=options)
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
@@ -1950,7 +1953,9 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(len(result.include_trace), 2)
         self.assertIn("main.c:1: #include <inc.h>", result.include_trace[0])
-        self.assertIn(f'{(first_dir / "inc.h").resolve()}:1: #include_next <inc.h>', result.include_trace[1])
+        self.assertIn(
+            f"{(first_dir / 'inc.h').resolve()}:1: #include_next <inc.h>", result.include_trace[1]
+        )
 
     def test_include_next_is_allowed_in_c11_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1959,7 +1964,9 @@ class PreprocessorTests(unittest.TestCase):
             second_dir = root / "second"
             first_dir.mkdir()
             second_dir.mkdir()
-            (first_dir / "inc.h").write_text("#include_next <inc.h>\nint from_first;\n", encoding="utf-8")
+            (first_dir / "inc.h").write_text(
+                "#include_next <inc.h>\nint from_first;\n", encoding="utf-8"
+            )
             (second_dir / "inc.h").write_text("int from_second;\n", encoding="utf-8")
             options = FrontendOptions(
                 std="c11",
@@ -1984,7 +1991,9 @@ class PreprocessorTests(unittest.TestCase):
             (root / "inc.h").write_text("int from_header;\n", encoding="utf-8")
             source_path = root / "main.c"
             source_path.write_text('#define HDR "inc.h"\n#include HDR\n', encoding="utf-8")
-            result = preprocess_source(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+            result = preprocess_source(
+                source_path.read_text(encoding="utf-8"), filename=str(source_path)
+            )
         self.assertEqual(result.source, "\nint from_header ;\n")
 
     def test_include_macro_expands_to_angle_header(self) -> None:
@@ -2011,7 +2020,9 @@ class PreprocessorTests(unittest.TestCase):
             root = Path(tmp)
             include_dir = root / "include"
             include_dir.mkdir()
-            (include_dir / "defs.h").write_text("#define VALUE 17\nint ignored;\n", encoding="utf-8")
+            (include_dir / "defs.h").write_text(
+                "#define VALUE 17\nint ignored;\n", encoding="utf-8"
+            )
             options = FrontendOptions(
                 include_dirs=(str(include_dir),),
                 macro_includes=("defs.h",),
@@ -2093,7 +2104,9 @@ class PreprocessorTests(unittest.TestCase):
     def test_include_not_found_uses_line_mapped_source_location(self) -> None:
         options = FrontendOptions(no_standard_includes=True)
         with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source('#line 77 "mapped.c"\n#include "missing.h"\n', filename="main.c", options=options)
+            preprocess_source(
+                '#line 77 "mapped.c"\n#include "missing.h"\n', filename="main.c", options=options
+            )
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
         self.assertEqual((ctx.exception.filename, ctx.exception.line), ("mapped.c", 77))
         self.assertEqual(
@@ -2113,9 +2126,13 @@ class PreprocessorTests(unittest.TestCase):
                 '#line 41 "mapped/header.h"\n#include_next "inc.h"\n',
                 encoding="utf-8",
             )
-            options = FrontendOptions(std="gnu11", include_dirs=(str(include_dir),), no_standard_includes=True)
+            options = FrontendOptions(
+                std="gnu11", include_dirs=(str(include_dir),), no_standard_includes=True
+            )
             with self.assertRaises(PreprocessorError) as ctx:
-                preprocess_source('#include "inc.h"\n', filename=str(source_dir / "main.c"), options=options)
+                preprocess_source(
+                    '#include "inc.h"\n', filename=str(source_dir / "main.c"), options=options
+                )
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
         self.assertEqual((ctx.exception.filename, ctx.exception.line), ("mapped/header.h", 41))
         self.assertEqual(
@@ -2576,8 +2593,12 @@ class PreprocessorTests(unittest.TestCase):
                 encoding="utf-8",
             )
             source_path = root / "main.c"
-            source_path.write_text('#include "mid.h"\nint top = __INCLUDE_LEVEL__;\n', encoding="utf-8")
-            result = preprocess_source(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+            source_path.write_text(
+                '#include "mid.h"\nint top = __INCLUDE_LEVEL__;\n', encoding="utf-8"
+            )
+            result = preprocess_source(
+                source_path.read_text(encoding="utf-8"), filename=str(source_path)
+            )
 
         self.assertIn("int leaf = 2 ;", result.source)
         self.assertIn("int mid = 1 ;", result.source)
@@ -2705,7 +2726,7 @@ class PreprocessorTests(unittest.TestCase):
         with patch("xcc.preprocessor.datetime") as mock_datetime:
             mock_datetime.now.return_value = datetime(2026, 2, 23, 22, 21, 9)
             result = preprocess_source(
-                'const char *d = __DATE__;\nconst char *t = __TIME__;\nconst char *ts = __TIMESTAMP__;\n',
+                "const char *d = __DATE__;\nconst char *t = __TIME__;\nconst char *ts = __TIMESTAMP__;\n",
                 filename="main.c",
             )
         self.assertIn('const char * d = "Feb 23 2026" ;', result.source)
@@ -2721,9 +2742,13 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_c11_rejects_gnu_asm_extensions(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source('asm("inst");\n', filename="main.c", options=FrontendOptions(std="c11"))
+            preprocess_source(
+                'asm("inst");\n', filename="main.c", options=FrontendOptions(std="c11")
+            )
         self.assertEqual(ctx.exception.code, "XCC-PP-0105")
-        self.assertEqual(str(ctx.exception), "GNU asm extension is not allowed in c11 at main.c:1:1")
+        self.assertEqual(
+            str(ctx.exception), "GNU asm extension is not allowed in c11 at main.c:1:1"
+        )
 
     def test_include_trace_and_macro_table(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2872,7 +2897,9 @@ class PreprocessorTests(unittest.TestCase):
             str(ctx.exception),
             "Unsupported preprocessor comparison shape: expected 1 comparator, got 2",
         )
-        unsupported_cmp = ast.Compare(left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)])
+        unsupported_cmp = ast.Compare(
+            left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)]
+        )
         with self.assertRaises(ValueError) as ctx:
             _eval_pp_node(unsupported_cmp)
         self.assertEqual(str(ctx.exception), "Unsupported preprocessor comparison operator: Is")
@@ -2890,11 +2917,15 @@ class PreprocessorTests(unittest.TestCase):
         unsupported_unary = ast.UnaryOp(op=ast.MatMult(), operand=ast.Constant(1))
         with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_unary)
-        self.assertEqual(str(ctx.exception), "Unsupported integer-expression unary operator: MatMult")
+        self.assertEqual(
+            str(ctx.exception), "Unsupported integer-expression unary operator: MatMult"
+        )
         unsupported_bool = ast.BoolOp(op=ast.BitAnd(), values=[ast.Constant(1), ast.Constant(1)])
         with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_bool)
-        self.assertEqual(str(ctx.exception), "Unsupported integer-expression boolean operator: BitAnd")
+        self.assertEqual(
+            str(ctx.exception), "Unsupported integer-expression boolean operator: BitAnd"
+        )
         unsupported_bin = ast.BinOp(left=ast.Constant(1), op=ast.Pow(), right=ast.Constant(1))
         with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_bin)
@@ -2921,10 +2952,14 @@ class PreprocessorTests(unittest.TestCase):
             str(ctx.exception),
             "Unsupported integer-expression comparison shape: expected 1 comparator, got 2",
         )
-        unsupported_cmp = ast.Compare(left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)])
+        unsupported_cmp = ast.Compare(
+            left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)]
+        )
         with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_cmp)
-        self.assertEqual(str(ctx.exception), "Unsupported integer-expression comparison operator: Is")
+        self.assertEqual(
+            str(ctx.exception), "Unsupported integer-expression comparison operator: Is"
+        )
         unsupported_literal = ast.Constant("x")
         with self.assertRaises(ValueError) as ctx:
             _eval_node(unsupported_literal)
@@ -3010,13 +3045,7 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_strip_gnu_asm_extensions(self) -> None:
         self.assertEqual(_strip_gnu_asm_extensions(""), "")
-        source = (
-            'asm("inst");\n'
-            'int x __asm("foo") = 0;\n'
-            "asm volatile(\n"
-            '  "inst"\n'
-            ");\n"
-        )
+        source = 'asm("inst");\nint x __asm("foo") = 0;\nasm volatile(\n  "inst"\n);\n'
         stripped = _strip_gnu_asm_extensions(source)
         self.assertEqual(stripped.splitlines(), ["", "int x  = 0;", "", "", ""])
 
@@ -3314,9 +3343,15 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
 
     def test_eval_node_boolean_paths_cover_and_or_outcomes(self) -> None:
-        self.assertEqual(_eval_node(ast.BoolOp(op=ast.And(), values=[ast.Constant(1), ast.Constant(2)])), 1)
-        self.assertEqual(_eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(2)])), 1)
-        self.assertEqual(_eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(0)])), 0)
+        self.assertEqual(
+            _eval_node(ast.BoolOp(op=ast.And(), values=[ast.Constant(1), ast.Constant(2)])), 1
+        )
+        self.assertEqual(
+            _eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(2)])), 1
+        )
+        self.assertEqual(
+            _eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(0)])), 0
+        )
 
     def test_ternary_if_true(self) -> None:
         source = "#if 1 ? 1 : 0\nint yes;\n#endif\n"
@@ -3346,7 +3381,9 @@ class PreprocessorTests(unittest.TestCase):
     def test_ternary_limits_h_pattern(self) -> None:
         # Pattern: defined(A) ? defined(B) : !defined(C)
         # Case 1: A defined, B defined -> true
-        source = "#define A\n#define B\n#if defined(A) ? defined(B) : !defined(C)\nint yes;\n#endif\n"
+        source = (
+            "#define A\n#define B\n#if defined(A) ? defined(B) : !defined(C)\nint yes;\n#endif\n"
+        )
         result = preprocess_source(source, filename="ternary.c")
         self.assertIn("int yes", result.source)
         # Case 2: A defined, B not defined -> false

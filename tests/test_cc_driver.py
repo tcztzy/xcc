@@ -30,7 +30,9 @@ class CcDriverTests(unittest.TestCase):
             source = Path(tmp) / "ok.c"
             source.write_text("int main(void){return 0;}\n", encoding="utf-8")
 
-            def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            def fake_run(
+                cmd: tuple[str, ...], **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
                 self.assertEqual(cmd[0], "clang")
                 self.assertTrue(cmd[1].endswith("input.s"))
                 self.assertEqual(cmd[-2:], ("-o", "a.out"))
@@ -53,7 +55,9 @@ class CcDriverTests(unittest.TestCase):
             obj = root / "ok.o"
             source.write_text("int main(void){return 0;}\n", encoding="utf-8")
 
-            def fake_run(cmd: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            def fake_run(
+                cmd: tuple[str, ...], **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
                 self.assertEqual(cmd[0], "clang")
                 self.assertEqual(cmd[1], "-c")
                 self.assertTrue(cmd[2].endswith("input.s"))
@@ -174,7 +178,9 @@ class CcDriverTests(unittest.TestCase):
     def test_cc_driver_backend_xcc_rejects_unsupported_float_codegen(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "float.c"
-            source.write_text("float f(float x){return x;} int main(void){return 0;}\n", encoding="utf-8")
+            source.write_text(
+                "float f(float x){return x;} int main(void){return 0;}\n", encoding="utf-8"
+            )
             with patch("xcc.codegen.native_backend_available", return_value=True):
                 with patch("xcc.cc_driver._run_clang") as run:
                     code, stdout, stderr = self._run_main(["--backend=xcc", str(source)])
