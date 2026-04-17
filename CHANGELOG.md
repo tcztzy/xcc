@@ -11,3 +11,4 @@
 - Clang fixture baseline entries match the current frontend behavior and pass `clang_suite`.
 - Developer commands use `uv run`, and MkDocs is part of the locked dev toolchain.
 - Documentation is reduced to current state, active priorities, and roadmap.
+- `HARNESS.md` defines layered parallel LLVM/Clang reduction, worker slice rules, and anti-hardcoding quality gates.
