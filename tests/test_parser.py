@@ -2,6 +2,14 @@ import unittest
 from enum import Enum, auto
 
 from tests import _bootstrap  # noqa: F401
+import xcc.parser.array_sizes as parser_array_sizes
+import xcc.parser.declarators as parser_declarators
+import xcc.parser.expressions as parser_expressions
+import xcc.parser.extensions as parser_extensions
+import xcc.parser.model as parser_model
+import xcc.parser.statements as parser_statements
+import xcc.parser.type_diagnostics as parser_type_diagnostics
+import xcc.parser.type_specs as parser_type_specs
 from xcc.ast import (
     AlignofExpr,
     ArrayDecl,
@@ -71,6 +79,94 @@ def _body(func):
 
 
 class ParserTests(unittest.TestCase):
+    def test_parser_extension_helpers_live_outside_entrypoint(self) -> None:
+        self.assertEqual(parser_model.ParserError.__module__, "xcc.parser.model")
+        self.assertEqual(parser_model.DeclSpecInfo.__module__, "xcc.parser.model")
+        self.assertEqual(
+            parser_array_sizes.eval_array_size_expr.__module__,
+            "xcc.parser.array_sizes",
+        )
+        self.assertEqual(
+            parser_type_diagnostics.unsupported_type_message.__module__,
+            "xcc.parser.type_diagnostics",
+        )
+        self.assertEqual(
+            parser_extensions._skip_decl_extensions.__module__,
+            "xcc.parser.extensions",
+        )
+        self.assertEqual(
+            parser_extensions._skip_asm_label.__module__,
+            "xcc.parser.extensions",
+        )
+        self.assertEqual(parser_type_specs.parse_type_spec.__module__, "xcc.parser.type_specs")
+        self.assertEqual(
+            parser_type_specs.consume_decl_specifiers.__module__, "xcc.parser.type_specs"
+        )
+        self.assertEqual(parser_declarators.parse_declarator.__module__, "xcc.parser.declarators")
+        self.assertEqual(
+            parser_declarators.parse_array_declarator.__module__,
+            "xcc.parser.declarators",
+        )
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        self.assertEqual(
+            parser._unsupported_type_name_token_message("", "end of input"),
+            "Type name is missing before end of input",
+        )
+        self.assertEqual(
+            parser._unsupported_declaration_type_token_message("", "end of input"),
+            "Declaration type is missing before end of input",
+        )
+        self.assertEqual(
+            parser._unsupported_type_name_punctuator_message("???"),
+            "Unsupported type name punctuator: '???'",
+        )
+        self.assertEqual(
+            parser._unsupported_declaration_type_punctuator_message("???"),
+            "Unsupported declaration type punctuator: '???'",
+        )
+
+    def test_parser_expression_statement_helpers_live_outside_entrypoint(self) -> None:
+        self.assertEqual(parser_expressions.parse_expression.__module__, "xcc.parser.expressions")
+        self.assertEqual(parser_expressions.parse_primary.__module__, "xcc.parser.expressions")
+        self.assertEqual(parser_statements.parse_statement.__module__, "xcc.parser.statements")
+        self.assertEqual(parser_statements.parse_initializer.__module__, "xcc.parser.statements")
+
+        expr = Parser(list(lex("1 + 2")))._parse_expression()
+        self.assertIsInstance(expr, BinaryExpr)
+        stmt = Parser(list(lex("return 3;")))._parse_statement()
+        self.assertIsInstance(stmt, ReturnStmt)
+        init = Parser(list(lex("{ [0] = 1 }")))._parse_initializer()
+        self.assertIsInstance(init, InitList)
+        string_parser = Parser(list(lex('"x"')))
+        string_token = string_parser._current()
+        self.assertEqual(string_parser._split_string_literal('u8"xy"', string_token), ("u8", "xy"))
+        self.assertEqual(string_parser._merge_string_prefix("", "u8", string_token), "u8")
+
+        class RaisingCompoundLiteralProbe:
+            _index = 0
+
+            def _is_parenthesized_type_name_start(self) -> bool:
+                return True
+
+            def _parse_parenthesized_type_name(self) -> None:
+                raise RuntimeError("probe")
+
+        with self.assertRaises(RuntimeError):
+            parser_expressions.looks_like_compound_literal(RaisingCompoundLiteralProbe())
+
+    def test_parser_extension_wrapper_methods_delegate(self) -> None:
+        parser = Parser(list(lex('__attribute__((overloadable)) int f __asm__("sym");')))
+        self.assertTrue(parser._is_gnu_attribute_start())
+        self.assertEqual(parser._consume_gnu_attributes(), (True, True))
+        parser._expect(TokenKind.KEYWORD)
+        parser._expect(TokenKind.IDENT)
+        self.assertTrue(parser._skip_asm_label())
+
+        parser = Parser(list(lex("__attribute__((unused)) __declspec(align(8)) int x;")))
+        self.assertEqual(parser._consume_decl_attributes(), (True, False))
+        self.assertEqual(parser._current().lexeme, "int")
+        self.assertFalse(parser._skip_gnu_attributes())
+
     def test_parse_function(self) -> None:
         source = "int main(){return 1+2*3;}"
         tokens = list(lex(source))
