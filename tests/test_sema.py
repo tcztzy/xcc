@@ -1,6 +1,16 @@
 import unittest
 
 from tests import _bootstrap  # noqa: F401
+import xcc.sema.constants as sema_constants
+import xcc.sema.declarations as sema_declarations
+import xcc.sema.expressions as sema_expressions
+import xcc.sema.initializers as sema_initializers
+import xcc.sema.layout as sema_layout
+import xcc.sema.records as sema_records
+import xcc.sema.statements as sema_statements
+import xcc.sema.symbols as sema_symbols
+import xcc.sema.type_helpers as sema_types
+import xcc.sema.type_resolution as sema_type_resolution
 from xcc.ast import (
     AlignofExpr,
     ArrayDecl,
@@ -32,6 +42,7 @@ from xcc.ast import (
     SizeofExpr,
     StaticAssertDecl,
     Stmt,
+    StringLiteral,
     SwitchStmt,
     TypedefDecl,
     TranslationUnit,
@@ -78,6 +89,90 @@ def _body(func):
 
 
 class SemaTests(unittest.TestCase):
+    def test_sema_symbol_helpers_live_outside_entrypoint(self) -> None:
+        self.assertEqual(
+            sema_declarations.analyze_file_scope_decl.__module__, "xcc.sema.declarations"
+        )
+        self.assertEqual(sema_expressions.analyze_expr.__module__, "xcc.sema.expressions")
+        self.assertEqual(sema_statements.analyze_stmt.__module__, "xcc.sema.statements")
+        self.assertEqual(sema_type_resolution.resolve_type.__module__, "xcc.sema.type_resolution")
+        self.assertEqual(
+            sema_type_resolution.register_type_spec.__module__, "xcc.sema.type_resolution"
+        )
+        self.assertEqual(sema_symbols.SemaError.__module__, "xcc.sema.symbols")
+        self.assertEqual(sema_symbols.Scope.__module__, "xcc.sema.symbols")
+        self.assertEqual(sema_symbols.TypeMap.__module__, "xcc.sema.symbols")
+        self.assertEqual(SemaError.__module__, "xcc.sema.symbols")
+        self.assertEqual(Scope.__module__, "xcc.sema.symbols")
+        self.assertEqual(VarSymbol.__module__, "xcc.sema.symbols")
+
+    def test_sema_type_helpers_live_outside_entrypoint(self) -> None:
+        analyzer = Analyzer()
+        const_int = Type("int", qualifiers=("const",))
+        self.assertEqual(sema_types.is_integer_type.__module__, "xcc.sema.type_helpers")
+        self.assertTrue(sema_types.is_integer_type(INT))
+        self.assertEqual(sema_types.integer_promotion(USHORT), INT)
+        self.assertEqual(sema_types.usual_arithmetic_conversion(UINT, LONG), LONG)
+        self.assertTrue(analyzer._is_floating_type(FLOAT))
+        self.assertTrue(analyzer._is_arithmetic_type(DOUBLE))
+        self.assertEqual(analyzer._unqualified_type(const_int), INT)
+        self.assertEqual(analyzer._integer_rank(LLONG), 6)
+        self.assertTrue(analyzer._is_signed_integer_type(LONG))
+        self.assertEqual(analyzer._integer_promotion(USHORT), INT)
+        self.assertEqual(analyzer._signed_range(INT), (-(1 << 31), (1 << 31) - 1))
+        self.assertEqual(analyzer._unsigned_max(UINT), (1 << 32) - 1)
+        self.assertTrue(analyzer._signed_can_represent_unsigned(LONG, UINT))
+        self.assertEqual(analyzer._usual_arithmetic_conversion(UINT, LONG), LONG)
+        self.assertTrue(analyzer._qualifiers_contain(const_int, INT))
+
+    def test_sema_record_helpers_live_outside_entrypoint(self) -> None:
+        analyzer = Analyzer()
+        members = (RecordMemberInfo("value", INT),)
+        record_spec = TypeSpec(
+            "struct",
+            record_members=(RecordMemberDecl(TypeSpec("int"), "value"),),
+            has_record_body=True,
+        )
+        self.assertEqual(sema_records.record_key.__module__, "xcc.sema.records")
+        self.assertEqual(sema_records.record_key("struct", "S"), "struct S")
+        self.assertEqual(analyzer._record_key("struct", "S"), "struct S")
+        self.assertEqual(analyzer._normalize_record_members((("value", INT),)), members)
+        analyzer._record_definitions["struct S"] = members
+        self.assertEqual(analyzer._record_members("struct S"), members)
+        self.assertFalse(analyzer._is_anonymous_record_member(members[0]))
+        self.assertEqual(analyzer._record_member_lookup("struct S"), {"value": (INT, 0)})
+        self.assertEqual(analyzer._record_type_name(record_spec), "struct <anon:1>")
+
+    def test_sema_initializer_constant_layout_helpers_live_outside_entrypoint(self) -> None:
+        analyzer = Analyzer()
+        scope = Scope()
+        self.assertEqual(sema_constants.parse_int_literal.__module__, "xcc.sema.constants")
+        self.assertEqual(sema_constants.decode_escaped_units.__module__, "xcc.sema.constants")
+        self.assertEqual(sema_initializers.analyze_initializer.__module__, "xcc.sema.initializers")
+        self.assertEqual(
+            sema_initializers.lookup_initializer_member.__module__, "xcc.sema.initializers"
+        )
+        self.assertEqual(sema_layout.sizeof_type.__module__, "xcc.sema.layout")
+        self.assertEqual(sema_layout.alignof_type.__module__, "xcc.sema.layout")
+
+        self.assertEqual(analyzer._parse_int_literal("42"), (42, INT))
+        self.assertTrue(analyzer._fits_integer_literal_value(255, UINT))
+        self.assertEqual(analyzer._eval_int_constant_expr(IntLiteral("4"), scope), 4)
+        self.assertEqual(analyzer._char_const_value("'\\n'"), 10)
+        self.assertEqual(analyzer._char_literal_body("'x'"), "x")
+        self.assertEqual(analyzer._decode_escaped_units("x\\n"), [ord("x"), 10])
+
+        self.assertEqual(analyzer._sizeof_type(INT), 4)
+        self.assertEqual(analyzer._alignof_type(LONG), 8)
+        self.assertEqual(analyzer._sizeof_object_base_type(INT, None), 4)
+        self.assertEqual(analyzer._alignof_object_base_type(INT), 4)
+
+        string_expr = StringLiteral('"ab"')
+        self.assertTrue(analyzer._is_char_array_string_initializer(CHAR.array_of(3), string_expr))
+        self.assertEqual(analyzer._string_literal_required_length('"ab"'), 3)
+        self.assertEqual(analyzer._string_literal_body('"ab"'), "ab")
+        analyzer._analyze_initializer(INT, IntLiteral("1"), scope)
+
     def test_type_str(self) -> None:
         self.assertEqual(str(INT), "int")
         self.assertEqual(str(UINT), "unsigned int")
