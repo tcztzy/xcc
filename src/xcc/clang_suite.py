@@ -7,6 +7,19 @@ ALLOWED_EXPECTATIONS = frozenset({"ok", "error", *STAGE_EXPECTATIONS})
 SKIP_REASON_KEY = "skip_reason"
 SUPPORTED_SUFFIXES = (".c",)
 _NON_ALNUM_RE = re.compile(r"[^0-9a-z]+")
+_GENERATED_FIXTURE_PATH_RE = re.compile(
+    r"(?:[A-Za-z]:)?[/\\][^,;()\s]*tests[/\\]external[/\\]clang[/\\]generated"
+    r"(?:[/\\][^,;()\s]*)?"
+)
+_XCODE_CLANG_INCLUDE_RE = re.compile(
+    r"/Applications/Xcode\.app/[^,;()]*?/usr/lib/clang/[^,;()]+?/include"
+)
+_XCODE_MACOS_SDK_INCLUDE_RE = re.compile(
+    r"/Applications/Xcode\.app/[^,;()]*?/MacOSX\.sdk/usr/include"
+)
+_HOST_ABSOLUTE_PATH_RE = re.compile(
+    r"(?<![\w.])/(?:Applications|Users|home|private|tmp|var)/[^,;()\s]+"
+)
 _NO_DIAGNOSTICS_MARKER = "expected-no-diagnostics"
 _DIAGNOSTIC_MARKERS = (
     "expected-error",
@@ -50,6 +63,20 @@ def matches_expectation(expectation: str, actual: str) -> bool:
     return actual == expectation
 
 
+def _generated_fixture_path_replacement(match: re.Match[str]) -> str:
+    path = match.group(0).replace("\\", "/")
+    _, _, suffix = path.partition("tests/external/clang/generated")
+    return f"tests/external/clang/generated{suffix}"
+
+
+def sanitize_baseline_detail(detail: str) -> str:
+    sanitized = _GENERATED_FIXTURE_PATH_RE.sub(_generated_fixture_path_replacement, detail)
+    sanitized = _XCODE_CLANG_INCLUDE_RE.sub("<clang-resource-include>", sanitized)
+    sanitized = _XCODE_MACOS_SDK_INCLUDE_RE.sub("<macos-sdk-include>", sanitized)
+    sanitized = _HOST_ABSOLUTE_PATH_RE.sub("<host-path>", sanitized)
+    return sanitized.replace("/usr/include", "<system-include>")
+
+
 def baseline_skip_reason(expectation: str, actual: str, detail: str | None = None) -> str:
     message = f"baseline skip: expected {expectation}, got {actual}"
-    return f"{message} ({detail})" if detail else message
+    return f"{message} ({sanitize_baseline_detail(detail)})" if detail else message

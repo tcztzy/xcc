@@ -82,6 +82,36 @@ class ClangSuiteHelperTests(unittest.TestCase):
             "baseline skip: expected error, got ok (compiled successfully)",
         )
 
+    def test_baseline_skip_reason_sanitizes_host_paths(self) -> None:
+        detail = (
+            'Include not found: "header.h"; searched: '
+            "/Users/me/work/xcc/tests/external/clang/generated/Sema, "
+            "/Applications/Xcode.app/Contents/Developer/Toolchains/"
+            "XcodeDefault.xctoolchain/usr/lib/clang/21/include, "
+            "/Applications/Xcode.app/Contents/Developer/Platforms/"
+            "MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include, "
+            "/usr/include"
+        )
+        reason = baseline_skip_reason("ok", "pp", detail)
+        self.assertIn("tests/external/clang/generated/Sema", reason)
+        self.assertIn("<clang-resource-include>", reason)
+        self.assertIn("<macos-sdk-include>", reason)
+        self.assertIn("<system-include>", reason)
+        for marker in HOST_PATH_MARKERS:
+            self.assertNotIn(marker, reason)
+        self.assertNotIn("/usr/include", reason)
+
+    def test_manifest_skip_reasons_do_not_capture_host_paths(self) -> None:
+        payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+        for case in payload["cases"]:
+            reason = case.get(SKIP_REASON_KEY)
+            if not isinstance(reason, str):
+                continue
+            with self.subTest(case=case["id"]):
+                for marker in HOST_PATH_MARKERS:
+                    self.assertNotIn(marker, reason)
+                self.assertNotIn("/usr/include", reason)
+
     def test_sync_script_materializes_and_checks_fixture_archive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
