@@ -3,38 +3,10 @@ name = "xcc"
 version = "0.2.0a1"
 description = "Python C11 compiler with deterministic diagnostics and zero runtime dependencies."
 readme = "README.md"
-authors = [
-    { name = "Tang Ziya", email = "tcztzy@gmail.com" }
-]
 requires-python = ">=3.11"
 dependencies = []
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-keywords = ["c", "c11", "compiler", "macos", "arm64"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Environment :: Console",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
-    "Operating System :: MacOS :: MacOS X",
-    "Programming Language :: C",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
-    "Topic :: Software Development :: Compilers",
-]
-
-[project.urls]
-Homepage = "https://github.com/tcztzy/xcc"
-Repository = "https://github.com/tcztzy/xcc"
-Issues = "https://github.com/tcztzy/xcc/issues"
-Changelog = "https://github.com/tcztzy/xcc/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/tcztzy/xcc/tree/main/docs"
 
 [project.scripts]
 xcc = "xcc:main"
@@ -46,8 +18,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "coverage>=7.13.3",
-    "pdfplumber>=0.11.9",
-    "pypdf>=6.6.2",
+    "mkdocs>=1.6.1",
     "ruff>=0.15.0",
     "tox>=4.34.1",
     "tox-docker>=5.0.0",
@@ -87,15 +58,10 @@ exclude = [
 [tool.coverage.run]
 branch = true
 source = ["src"]
-parallel = false
 
 [tool.coverage.report]
 show_missing = true
 fail_under = 100
-skip_covered = false
-omit = [
-    "tests/*",
-]
 
 [tool.tox]
 requires = ["tox>=4.34.1", "tox-docker>=5.0.0", "tox-uv>=1.29.0"]
@@ -103,42 +69,35 @@ env_list = ["py311", "py312", "py313", "py313t", "py314", "py314t", "pypy311", "
 skip_missing_interpreters = true
 
 [tool.tox.env_run_base]
-description = "Run unit tests"
 commands = [["coverage", "run", "-m", "unittest", "discover", "-v"], ["coverage", "report", "--fail-under=100"]]
 
 [tool.tox.env.lint]
-description = "Run Ruff lint and format checks"
 runner = "uv-venv-lock-runner"
 dependency_groups = ["dev"]
 package = "skip"
 commands = [["ruff", "check", "src"], ["ruff", "format", "--check", "src"]]
 
 [tool.tox.env.type]
-description = "Run ty type checks"
 runner = "uv-venv-lock-runner"
 dependency_groups = ["dev"]
 package = "skip"
 commands = [["ty", "check", "src"]]
 
 [tool.tox.env.clang_suite]
-description = "Run the pinned LLVM/Clang full-suite baseline"
 package = "skip"
 set_env = { XCC_RUN_CLANG_SUITE = "1" }
 commands = [["python", "-m", "unittest", "-v", "tests.test_clang_suite"]]
 
 [tool.tox.env.native_smoke]
-description = "Run macOS arm64 native backend smoke tests"
 package = "skip"
 commands = [["python", "-m", "unittest", "-v", "tests.test_native_backend"]]
 
 [tool.tox.env.docker_glibc]
-description = "Run unit tests inside a glibc container via tox-docker"
 docker = ["glibc"]
 allowlist_externals = ["./scripts/tox-docker-exec.sh", "docker"]
 commands = [["./scripts/tox-docker-exec.sh", "glibc", "coverage", "run", "-m", "unittest", "discover", "-v"], ["./scripts/tox-docker-exec.sh", "glibc", "coverage", "report", "--fail-under=100"]]
 
 [tool.tox.env.docker_musl]
-description = "Run unit tests inside a musl container via tox-docker"
 docker = ["musl"]
 allowlist_externals = ["./scripts/tox-docker-exec.sh", "docker"]
 commands = [["./scripts/tox-docker-exec.sh", "musl", "coverage", "run", "-m", "unittest", "discover", "-v"], ["./scripts/tox-docker-exec.sh", "musl", "coverage", "report", "--fail-under=100"]]

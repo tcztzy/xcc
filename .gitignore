@@ -1,34 +1,19 @@
-# Python-generated files
 __pycache__/
 *.py[oc]
 build/
 dist/
 wheels/
 *.egg-info
-
-# Virtual environments
 .venv
-
-# Local tool state
 .tox/
 .ruff_cache/
 .uv-cache/
 .coverage
 .cache/
-
-# Local workspace artifacts
 .open*/
 .worktrees/
 docs/plans/
-
-# Generated external fixtures and download cache
 tests/external/clang/generated/
-
-# MkDocs build output
 site/
-
-# Local cached specs (not versioned)
 docs/_sources/
-
-# macOS
 .DS_Store

@@ -3,8 +3,8 @@
 .tox
 __pycache__
 *.py[oc]
-/site
-/docs/_sources
-/build
-/dist
+site
+docs/_sources
+build
+dist
 *.egg-info
