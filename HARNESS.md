@@ -89,7 +89,7 @@ If these answers are weak, reject or send repair work.
 
 ## Queue format
 
-Maintain the active queue in `TODO.md` using this shape. Use `scripts/harness_queue.py` for claim/status operations rather than hand-editing when possible:
+Keep the human-readable queue summary in `TODO.md` using this shape. Live claim/status state is stored in `.worktrees/harness/tasks.json` and managed via `scripts/harness_queue.py`:
 
 - `id`
 - `layer`
@@ -98,16 +98,17 @@ Maintain the active queue in `TODO.md` using this shape. Use `scripts/harness_qu
 - `targets`
 - `expected_files`
 - `verification`
-- `status: todo|claimed|review|done|blocked`
+- `status: todo|claimed|review|done|blocked` as the default/manual status in `TODO.md`; active claim state comes from the JSON state file
 - `notes`
 
 ## Supervisor cleanliness policy
 
 Supervisor root (`~/GitHub/xcc`) is allowed to carry orchestration-only metadata edits in:
 
-- `TODO.md`
 - `HARNESS.md`
 - `CHANGELOG.md`
+
+Do not let queue claims dirty `TODO.md`; claim/status churn must stay in `.worktrees/harness/tasks.json`, which is ignored by Git.
 
 Do not launch workers if the supervisor root has uncommitted implementation changes in compiler or test code such as:
 

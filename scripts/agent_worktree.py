@@ -7,9 +7,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_WORKTREE_ROOT = ROOT.parent / f"{ROOT.name}-worktrees"
+DEFAULT_WORKTREE_ROOT = ROOT / ".worktrees"
 _TASK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$")
-_ALLOWED_METADATA_DIRTY_PATHS = {"TODO.md", "HARNESS.md", "CHANGELOG.md"}
+_ALLOWED_METADATA_DIRTY_PATHS = {"HARNESS.md", "CHANGELOG.md"}
 
 
 @dataclass(frozen=True)

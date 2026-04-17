@@ -102,3 +102,34 @@ class AgentWorktreeTests(unittest.TestCase):
         ]
         with self.assertRaises(RuntimeError):
             agent_worktree.merge_branch("codex/clang-p0-types-001", target_branch="master")
+
+    @patch("scripts.agent_worktree._run_git")
+    def test_merge_branch_rejects_todo_dirtiness(self, run_git: unittest.mock.Mock) -> None:
+        run_git.side_effect = [
+            unittest.mock.Mock(stdout="master\n"),
+            unittest.mock.Mock(stdout=" M TODO.md\n"),
+        ]
+        with self.assertRaises(RuntimeError):
+            agent_worktree.merge_branch("codex/clang-p0-types-001", target_branch="master")
+
+    @patch("scripts.agent_worktree._run_git")
+    def test_merge_branch_allows_other_metadata_on_target_branch(self, run_git: unittest.mock.Mock) -> None:
+        run_git.side_effect = [
+            unittest.mock.Mock(stdout="master\n"),
+            unittest.mock.Mock(stdout=" M HARNESS.md\n M CHANGELOG.md\n"),
+            unittest.mock.Mock(stdout=""),
+            unittest.mock.Mock(stdout=""),
+        ]
+        agent_worktree.merge_branch("codex/clang-p0-types-001", target_branch="master")
+        self.assertEqual(
+            run_git.call_args_list,
+            [
+                unittest.mock.call(["branch", "--show-current"], repo_root=agent_worktree.ROOT),
+                unittest.mock.call(["status", "--short"], repo_root=agent_worktree.ROOT),
+                unittest.mock.call(["checkout", "master"], repo_root=agent_worktree.ROOT),
+                unittest.mock.call(
+                    ["merge", "--no-ff", "--no-edit", "codex/clang-p0-types-001"],
+                    repo_root=agent_worktree.ROOT,
+                ),
+            ],
+        )

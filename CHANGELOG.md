@@ -13,3 +13,4 @@
 - Documentation is reduced to current state, active priorities, and roadmap.
 - `HARNESS.md` defines layered parallel LLVM/Clang reduction, worker slice rules, and anti-hardcoding quality gates.
 - Multi-agent helper scripts now exist for isolated worktrees (`scripts/agent_worktree.py`), queue claims (`scripts/harness_queue.py`), and skip-frontier bucketing (`scripts/clang_frontier.py`).
+- Harness queue claim/status churn now lives in ignored JSON state under `.worktrees/harness/tasks.json` so the supervisor root stays clean.

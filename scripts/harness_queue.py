@@ -9,6 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TODO = ROOT / "TODO.md"
+DEFAULT_STATE = ROOT / ".worktrees" / "harness" / "tasks.json"
+_STATE_VERSION = 1
 _VALID_STATUSES = {"todo", "claimed", "review", "done", "blocked"}
 _REQUIRED_FIELDS = {"layer", "family", "subsystem", "status"}
 _LAYER_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
@@ -60,10 +62,12 @@ def _parse_entry(lines: list[str], start: int, end: int) -> QueueEntry:
     missing = sorted(_REQUIRED_FIELDS - set(fields))
     if missing:
         raise ValueError(f"queue entry {task_id} missing required fields: {', '.join(missing)}")
+    if fields["status"] not in _VALID_STATUSES:
+        raise ValueError(f"queue entry {task_id} has invalid status: {fields['status']}")
     return QueueEntry(task_id=task_id, fields=fields, start_line=start, end_line=end)
 
 
-def load_queue(todo_path: Path = DEFAULT_TODO) -> list[QueueEntry]:
+def _base_queue(todo_path: Path) -> list[QueueEntry]:
     lines = todo_path.read_text(encoding="utf-8").splitlines()
     start, end = _queue_bounds(lines)
     entries: list[QueueEntry] = []
@@ -85,50 +89,101 @@ def load_queue(todo_path: Path = DEFAULT_TODO) -> list[QueueEntry]:
     return entries
 
 
-def _replace_field(entry_lines: list[str], key: str, value: str) -> list[str]:
-    rendered = f"`{value}`" if key in {"layer", "family", "subsystem", "expected_files", "verification", "status"} else value
-    prefix = f"  - {key}:"
-    for index, line in enumerate(entry_lines):
-        if line.startswith(prefix):
-            entry_lines[index] = f"{prefix} {rendered}"
-            return entry_lines
-    entry_lines.append(f"  - {key}: {rendered}")
-    return entry_lines
+def _load_state_file(state_path: Path) -> dict[str, dict[str, str]]:
+    if not state_path.exists():
+        return {}
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"invalid queue state file: {state_path}")
+    version = payload.get("version", _STATE_VERSION)
+    if version != _STATE_VERSION:
+        raise ValueError(f"unsupported queue state version: {version}")
+    tasks = payload.get("tasks", {})
+    if not isinstance(tasks, dict):
+        raise ValueError(f"invalid queue state tasks: {state_path}")
+    normalized: dict[str, dict[str, str]] = {}
+    for task_id, raw_task in tasks.items():
+        if not isinstance(task_id, str) or not isinstance(raw_task, dict):
+            raise ValueError(f"invalid queue state entry: {task_id}")
+        task_state: dict[str, str] = {}
+        for key in ("status", "owner"):
+            value = raw_task.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise ValueError(f"invalid queue state field: {task_id}.{key}")
+            task_state[key] = value
+        status = task_state.get("status")
+        if status is not None and status not in _VALID_STATUSES:
+            raise ValueError(f"invalid queued status for {task_id}: {status}")
+        normalized[task_id] = task_state
+    return normalized
 
 
-def _rewrite_entry(todo_path: Path, entry: QueueEntry, updates: dict[str, str]) -> QueueEntry:
-    lines = todo_path.read_text(encoding="utf-8").splitlines()
-    entry_lines = lines[entry.start_line : entry.end_line]
-    for key, value in updates.items():
-        entry_lines = _replace_field(entry_lines, key, value)
-    new_lines = lines[: entry.start_line] + entry_lines + lines[entry.end_line :]
-    rendered = "\n".join(new_lines) + "\n"
+def _write_state_file(state_path: Path, tasks: dict[str, dict[str, str]]) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": _STATE_VERSION,
+        "tasks": {task_id: tasks[task_id] for task_id in sorted(tasks)},
+    }
+    rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
-        dir=todo_path.parent,
-        prefix=f"{todo_path.name}.",
+        dir=state_path.parent,
+        prefix=f"{state_path.name}.",
         suffix=".tmp",
         delete=False,
     ) as handle:
         handle.write(rendered)
         temp_path = Path(handle.name)
-    temp_path.replace(todo_path)
-    for candidate in load_queue(todo_path):
-        if candidate.task_id == entry.task_id:
-            return candidate
-    raise ValueError(f"queue entry disappeared: {entry.task_id}")
+    temp_path.replace(state_path)
 
 
-def _find_entry(todo_path: Path, task_id: str) -> QueueEntry:
-    for entry in load_queue(todo_path):
+def _effective_fields(fields: dict[str, str], state: dict[str, str] | None) -> dict[str, str]:
+    effective = dict(fields)
+    if not state:
+        return effective
+    status = state.get("status")
+    if status is not None:
+        effective["status"] = status
+    owner = state.get("owner")
+    if owner is not None:
+        effective["owner"] = owner
+    else:
+        effective.pop("owner", None)
+    return effective
+
+
+def load_queue(todo_path: Path = DEFAULT_TODO, state_path: Path = DEFAULT_STATE) -> list[QueueEntry]:
+    state = _load_state_file(state_path)
+    return [
+        QueueEntry(
+            task_id=entry.task_id,
+            fields=_effective_fields(entry.fields, state.get(entry.task_id)),
+            start_line=entry.start_line,
+            end_line=entry.end_line,
+        )
+        for entry in _base_queue(todo_path)
+    ]
+
+
+def _find_entry(todo_path: Path, state_path: Path, task_id: str) -> QueueEntry:
+    for entry in load_queue(todo_path, state_path):
         if entry.task_id == task_id:
             return entry
     raise ValueError(f"unknown queue entry: {task_id}")
 
 
-def _lock_path(todo_path: Path) -> Path:
-    return todo_path.with_suffix(todo_path.suffix + ".lock")
+def _find_base_entry(todo_path: Path, task_id: str) -> QueueEntry:
+    for entry in _base_queue(todo_path):
+        if entry.task_id == task_id:
+            return entry
+    raise ValueError(f"unknown queue entry: {task_id}")
+
+
+def _lock_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".lock")
 
 
 def _read_lock_metadata(lock_path: Path) -> tuple[int, float] | None:
@@ -164,9 +219,10 @@ def _stale_lock(lock_path: Path) -> bool:
     return time.time() - created_at > _STALE_LOCK_SECONDS
 
 
-def _acquire_lock(todo_path: Path, *, timeout_seconds: float = 5.0) -> int:
+def _acquire_lock(path: Path, *, timeout_seconds: float = 5.0) -> int:
     deadline = time.monotonic() + timeout_seconds
-    lock_path = _lock_path(todo_path)
+    lock_path = _lock_path(path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     while True:
         try:
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -181,42 +237,57 @@ def _acquire_lock(todo_path: Path, *, timeout_seconds: float = 5.0) -> int:
             time.sleep(0.05)
 
 
-def _release_lock(todo_path: Path, fd: int) -> None:
+def _release_lock(path: Path, fd: int) -> None:
     os.close(fd)
-    _lock_path(todo_path).unlink(missing_ok=True)
+    _lock_path(path).unlink(missing_ok=True)
 
 
-def claim_entry(todo_path: Path, task_id: str, *, owner: str | None = None) -> QueueEntry:
-    fd = _acquire_lock(todo_path)
+def claim_entry(
+    todo_path: Path,
+    task_id: str,
+    *,
+    owner: str | None = None,
+    state_path: Path = DEFAULT_STATE,
+) -> QueueEntry:
+    fd = _acquire_lock(state_path)
     try:
-        entry = _find_entry(todo_path, task_id)
+        entry = _find_entry(todo_path, state_path, task_id)
         if entry.fields.get("status") != "todo":
             raise ValueError(f"entry is not claimable: {task_id}")
-        notes = entry.fields.get("notes", "")
+        tasks = _load_state_file(state_path)
+        task_state = {"status": "claimed"}
         if owner:
-            note = f"claimed by {owner}"
-            notes = note if not notes else f"{notes}; {note}"
-        updates = {"status": "claimed"}
-        if notes:
-            updates["notes"] = notes
-        return _rewrite_entry(todo_path, entry, updates)
+            task_state["owner"] = owner
+        tasks[task_id] = task_state
+        _write_state_file(state_path, tasks)
+        return _find_entry(todo_path, state_path, task_id)
     finally:
-        _release_lock(todo_path, fd)
+        _release_lock(state_path, fd)
 
 
-def set_status(todo_path: Path, task_id: str, status: str) -> QueueEntry:
+def set_status(todo_path: Path, task_id: str, status: str, *, state_path: Path = DEFAULT_STATE) -> QueueEntry:
     if status not in _VALID_STATUSES:
         raise ValueError(f"invalid status: {status}")
-    fd = _acquire_lock(todo_path)
+    fd = _acquire_lock(state_path)
     try:
-        entry = _find_entry(todo_path, task_id)
-        return _rewrite_entry(todo_path, entry, {"status": status})
+        base_entry = _find_base_entry(todo_path, task_id)
+        tasks = _load_state_file(state_path)
+        if status == base_entry.fields.get("status"):
+            tasks.pop(task_id, None)
+        else:
+            task_state = dict(tasks.get(task_id, {}))
+            task_state["status"] = status
+            if status != "claimed":
+                task_state.pop("owner", None)
+            tasks[task_id] = task_state
+        _write_state_file(state_path, tasks)
+        return _find_entry(todo_path, state_path, task_id)
     finally:
-        _release_lock(todo_path, fd)
+        _release_lock(state_path, fd)
 
 
-def next_claimable(todo_path: Path = DEFAULT_TODO) -> QueueEntry | None:
-    candidates = [entry for entry in load_queue(todo_path) if entry.fields.get("status") == "todo"]
+def next_claimable(todo_path: Path = DEFAULT_TODO, state_path: Path = DEFAULT_STATE) -> QueueEntry | None:
+    candidates = [entry for entry in load_queue(todo_path, state_path) if entry.fields.get("status") == "todo"]
     if not candidates:
         return None
     candidates.sort(
@@ -234,19 +305,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
     list_parser = subparsers.add_parser("list")
     list_parser.add_argument("--todo-path", type=Path, default=DEFAULT_TODO)
+    list_parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE)
 
     claim_parser = subparsers.add_parser("claim")
     claim_parser.add_argument("task_id")
     claim_parser.add_argument("--owner")
     claim_parser.add_argument("--todo-path", type=Path, default=DEFAULT_TODO)
+    claim_parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE)
 
     status_parser = subparsers.add_parser("set-status")
     status_parser.add_argument("task_id")
     status_parser.add_argument("status")
     status_parser.add_argument("--todo-path", type=Path, default=DEFAULT_TODO)
+    status_parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE)
 
     next_parser = subparsers.add_parser("next")
     next_parser.add_argument("--todo-path", type=Path, default=DEFAULT_TODO)
+    next_parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE)
 
     return parser
 
@@ -255,17 +330,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     if args.command == "list":
-        print(json.dumps([entry.fields | {"id": entry.task_id} for entry in load_queue(args.todo_path)]))
+        print(json.dumps([entry.fields | {"id": entry.task_id} for entry in load_queue(args.todo_path, args.state_path)]))
         return 0
     if args.command == "claim":
-        entry = claim_entry(args.todo_path, args.task_id, owner=args.owner)
+        entry = claim_entry(args.todo_path, args.task_id, owner=args.owner, state_path=args.state_path)
         print(json.dumps(entry.fields | {"id": entry.task_id}))
         return 0
     if args.command == "set-status":
-        entry = set_status(args.todo_path, args.task_id, args.status)
+        entry = set_status(args.todo_path, args.task_id, args.status, state_path=args.state_path)
         print(json.dumps(entry.fields | {"id": entry.task_id}))
         return 0
-    entry = next_claimable(args.todo_path)
+    entry = next_claimable(args.todo_path, args.state_path)
     print(json.dumps(None if entry is None else entry.fields | {"id": entry.task_id}))
     return 0
 
