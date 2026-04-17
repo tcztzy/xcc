@@ -140,7 +140,11 @@ def _ensure_archive(
             raise ValueError(f"archive file does not exist: {archive_path}")
     else:
         archive_path = (cache_dir / upstream["archive_name"]).resolve()
-        if not force_download and archive_path.is_file() and _sha256_file(archive_path) == expected_sha:
+        if (
+            not force_download
+            and archive_path.is_file()
+            and _sha256_file(archive_path) == expected_sha
+        ):
             return archive_path
         if archive_path.is_file():
             archive_path.unlink()
@@ -159,12 +163,18 @@ def _build_member_index(archive: tarfile.TarFile, *, strip_components: int) -> d
     for member in archive.getmembers():
         if not member.isfile():
             continue
-        parts = [part for part in PurePosixPath(member.name).parts if part not in ("", ".")]
-        if len(parts) <= strip_components:
+        relative = _relative_member_path(member.name, strip_components=strip_components)
+        if relative is None:
             continue
-        relative = "/".join(parts[strip_components:])
         index[relative] = member.name
     return index
+
+
+def _relative_member_path(member_name: str, *, strip_components: int) -> str | None:
+    parts = [part for part in PurePosixPath(member_name).parts if part not in ("", ".")]
+    if len(parts) <= strip_components:
+        return None
+    return "/".join(parts[strip_components:])
 
 
 def _read_member_bytes(
@@ -195,20 +205,30 @@ def _materialize_external_cases(
     strip_components = upstream["strip_components"]
     changed = False
     expected_external_paths: set[Path] = set()
+    external_cases = {
+        case["upstream"]: case for case in payload["cases"] if _is_external_case(case)
+    }
+    missing_upstream_paths = set(external_cases)
 
     with tarfile.open(archive_path, mode="r:*") as archive:
-        member_index = _build_member_index(archive, strip_components=strip_components)
-        for case in payload["cases"]:
-            if not _is_external_case(case):
+        for member in archive:
+            if not member.isfile():
                 continue
+            upstream_path = _relative_member_path(
+                member.name, strip_components=strip_components
+            )
+            if upstream_path is None:
+                continue
+            case = external_cases.get(upstream_path)
+            if case is None:
+                continue
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                raise ValueError(f"archive member is unreadable for {case['id']}: {member.name}")
+            data = extracted.read()
+            missing_upstream_paths.discard(upstream_path)
             fixture_path = _fixture_path(case)
             fixture_path.parent.mkdir(parents=True, exist_ok=True)
-            data = _read_member_bytes(
-                archive,
-                member_index=member_index,
-                upstream_path=case["upstream"],
-                case_id=case["id"],
-            )
             digest = _sha256(data)
             if case["sha256"] != digest:
                 if not update_sha:
@@ -221,6 +241,11 @@ def _materialize_external_cases(
             if not fixture_path.is_file() or fixture_path.read_bytes() != data:
                 fixture_path.write_bytes(data)
             expected_external_paths.add(fixture_path.resolve())
+
+    if missing_upstream_paths:
+        missing = sorted(missing_upstream_paths)[0]
+        case_id = external_cases[missing]["id"]
+        raise ValueError(f"archive missing upstream fixture for {case_id}: {missing}")
 
     if clean_external:
         generated_root = ROOT / "tests/external/clang/generated"
@@ -241,27 +266,46 @@ def _run_check(*, payload: dict[str, Any], archive_path: Path) -> int:
     failures: list[str] = []
     upstream = payload["upstream"]
     strip_components = upstream["strip_components"]
+    checked_external_cases: dict[str, tuple[str, bytes]] = {}
+    missing_upstream_paths: set[str] = set()
+    for case in payload["cases"]:
+        fixture = _fixture_path(case)
+        if not fixture.is_file():
+            failures.append(f"missing fixture: {fixture}")
+            continue
+        local_data = fixture.read_bytes()
+        local_sha = _sha256(local_data)
+        if local_sha != case["sha256"]:
+            failures.append(f"checksum mismatch: {case['id']}")
+            continue
+        if _is_external_case(case):
+            checked_external_cases[case["upstream"]] = (case["id"], local_data)
+            missing_upstream_paths.add(case["upstream"])
     with tarfile.open(archive_path, mode="r:*") as archive:
-        member_index = _build_member_index(archive, strip_components=strip_components)
-        for case in payload["cases"]:
-            fixture = _fixture_path(case)
-            if not fixture.is_file():
-                failures.append(f"missing fixture: {fixture}")
+        for member in archive:
+            if not member.isfile():
                 continue
-            local_data = fixture.read_bytes()
-            local_sha = _sha256(local_data)
-            if local_sha != case["sha256"]:
-                failures.append(f"checksum mismatch: {case['id']}")
+            upstream_path = _relative_member_path(
+                member.name, strip_components=strip_components
+            )
+            if upstream_path is None:
                 continue
-            if _is_external_case(case):
-                upstream_data = _read_member_bytes(
-                    archive,
-                    member_index=member_index,
-                    upstream_path=case["upstream"],
-                    case_id=case["id"],
-                )
-                if upstream_data != local_data:
-                    failures.append(f"content mismatch: {case['id']}")
+            checked = checked_external_cases.get(upstream_path)
+            if checked is None:
+                continue
+            case_id, local_data = checked
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                failures.append(f"unreadable upstream fixture: {case_id}")
+                missing_upstream_paths.discard(upstream_path)
+                continue
+            upstream_data = extracted.read()
+            missing_upstream_paths.discard(upstream_path)
+            if upstream_data != local_data:
+                failures.append(f"content mismatch: {case_id}")
+    for upstream_path in sorted(missing_upstream_paths):
+        case_id, _ = checked_external_cases[upstream_path]
+        failures.append(f"archive missing upstream fixture for {case_id}: {upstream_path}")
     if failures:
         for failure in failures:
             print(failure)

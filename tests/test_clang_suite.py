@@ -71,7 +71,7 @@ def _assert_external_fixtures_ready(cases: list[dict[str, Any]]) -> None:
         return
     raise AssertionError(
         "external clang fixtures are missing or stale; run "
-        "`python scripts/sync_clang_fixtures.py --rebuild-full-suite-baseline --force-download` first"
+        "`uv run python scripts/sync_clang_fixtures.py` first"
     )
 
 
