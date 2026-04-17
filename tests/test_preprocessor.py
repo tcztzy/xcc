@@ -6,36 +6,43 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+import xcc.preprocessor.macro_expansion as preprocessor_macro_expansion
+import xcc.preprocessor.conditionals as preprocessor_conditionals
+import xcc.preprocessor.process as preprocessor_process
+import xcc.preprocessor.probes as preprocessor_probes
 from tests import _bootstrap  # noqa: F401
 from xcc.lexer import TokenKind
 from xcc.options import FrontendOptions
 from xcc.preprocessor import (
     PreprocessorError,
-    _Macro,
-    _MacroToken,
-    _Preprocessor,
-    _DirectiveCursor,
-    _LineMapBuilder,
-    _LogicalCursor,
-    _SourceLocation,
     _blank_line,
+    _ConditionalFrame,
+    _DirectiveCursor,
+    _env_path_list,
     _eval_node,
     _eval_pp_node,
     _expand_macro_tokens,
     _expand_object_like_macros,
     _is_unsigned_pp_integer,
+    _LineMapBuilder,
+    _LogicalCursor,
+    _Macro,
     _macro_name_from_cli_define,
+    _MacroToken,
     _parse_cli_define_head,
+    _parse_directive,
+    _parse_header_name_operand,
     _parse_macro_parameters,
     _parse_pp_char_literal,
     _parse_pp_integer_literal,
-    _parse_directive,
     _paste_token_pair,
-    _safe_eval_pp_expr,
+    _Preprocessor,
     _safe_eval_int_expr,
+    _safe_eval_pp_expr,
+    _SourceLocation,
     _strip_gnu_asm_extensions,
-    _tokenize_macro_replacement,
     _tokenize_expr,
+    _tokenize_macro_replacement,
     _translate_expr_to_python,
     _validate_defined_syntax,
     _validate_fenv_access_pragma,
@@ -46,6 +53,55 @@ from xcc.preprocessor import (
 
 
 class PreprocessorTests(unittest.TestCase):
+    def test_preprocessor_package_keeps_entry_exports_stable(self) -> None:
+        self.assertEqual(PreprocessorError.__module__, "xcc.preprocessor.common")
+        self.assertEqual(_SourceLocation.__module__, "xcc.preprocessor.common")
+        self.assertEqual(_LineMapBuilder.__module__, "xcc.preprocessor.common")
+        self.assertEqual(_DirectiveCursor.__module__, "xcc.preprocessor.common")
+        self.assertEqual(_Macro.__module__, "xcc.preprocessor.macros")
+        self.assertEqual(_MacroToken.__module__, "xcc.preprocessor.macros")
+        self.assertEqual(_parse_macro_parameters.__module__, "xcc.preprocessor.macros")
+        self.assertEqual(
+            preprocessor_macro_expansion._paste_token_pair.__module__,
+            "xcc.preprocessor.macro_expansion",
+        )
+        self.assertEqual(
+            preprocessor_macro_expansion._expand_macro_tokens.__module__,
+            "xcc.preprocessor.macro_expansion",
+        )
+        self.assertEqual(_env_path_list.__module__, "xcc.preprocessor.includes")
+        self.assertEqual(_parse_header_name_operand.__module__, "xcc.preprocessor.includes")
+        self.assertEqual(_translate_expr_to_python.__module__, "xcc.preprocessor.expressions")
+        self.assertEqual(_safe_eval_pp_expr.__module__, "xcc.preprocessor.expressions")
+        self.assertEqual(_validate_defined_syntax.__module__, "xcc.preprocessor.pragmas")
+        self.assertEqual(_validate_stdc_pragma.__module__, "xcc.preprocessor.pragmas")
+        self.assertEqual(_validate_gcc_visibility_pragma.__module__, "xcc.preprocessor.pragmas")
+        self.assertEqual(_validate_fenv_access_pragma.__module__, "xcc.preprocessor.pragmas")
+        self.assertEqual(_blank_line.__module__, "xcc.preprocessor.text")
+        self.assertEqual(_expand_object_like_macros.__module__, "xcc.preprocessor.text")
+        self.assertEqual(_strip_gnu_asm_extensions.__module__, "xcc.preprocessor.text")
+        self.assertEqual(
+            preprocessor_conditionals._ConditionalFrame.__module__,
+            "xcc.preprocessor.conditionals",
+        )
+        self.assertEqual(
+            preprocessor_conditionals._handle_conditional.__module__,
+            "xcc.preprocessor.conditionals",
+        )
+        self.assertEqual(
+            preprocessor_probes._replace_feature_probe_operators.__module__,
+            "xcc.preprocessor.probes",
+        )
+        self.assertEqual(
+            preprocessor_probes._replace_has_include_operators.__module__,
+            "xcc.preprocessor.probes",
+        )
+        self.assertEqual(_ConditionalFrame.__module__, "xcc.preprocessor.conditionals")
+        self.assertEqual(preprocessor_process.process_text.__module__, "xcc.preprocessor.process")
+        self.assertEqual(_expand_macro_tokens.__module__, "xcc.preprocessor")
+        self.assertEqual(preprocess_source.__module__, "xcc.preprocessor")
+        self.assertEqual(_parse_directive.__module__, "xcc.preprocessor.text")
+
     def test_preprocess_empty_source(self) -> None:
         result = preprocess_source("", filename="empty.c")
         self.assertEqual(result.source, "")
