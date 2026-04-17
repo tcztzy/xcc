@@ -89,7 +89,7 @@ If these answers are weak, reject or send repair work.
 
 ## Queue format
 
-Maintain the active queue in `TODO.md` using this shape:
+Maintain the active queue in `TODO.md` using this shape. Use `scripts/harness_queue.py` for claim/status operations rather than hand-editing when possible:
 
 - `id`
 - `layer`
