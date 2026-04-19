@@ -231,6 +231,16 @@ def supervise(
             "active_worktree_mismatch",
             missing_active_worktrees=missing_active_worktrees,
             orphan_worktrees=sorted(orphan_worktrees),
+            selected_task=None,
+        )
+
+    if matched_active:
+        return _blocked_payload(
+            "claimed or review task already has a matching worktree",
+            "active_task_in_progress",
+            active_task_ids=sorted(matched_active),
+            orphan_worktrees=sorted(orphan_worktrees),
+            selected_task=None,
         )
 
     frontier = _frontier_index(manifest_path)
