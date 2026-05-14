@@ -58,7 +58,14 @@ ASSIGNMENT_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "
 INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
 SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | FLOATING_TYPE_KEYWORDS | {"void"}
-TYPEOF_KEYWORDS = {"typeof", "typeof_unqual", "__typeof__"}
+TYPEOF_KEYWORDS = {
+    "typeof",
+    "typeof_unqual",
+    "__typeof__",
+    "__typeof",
+    "__typeof_unqual__",
+    "__typeof_unqual",
+}
 ALIGNOF_KEYWORDS = {"_Alignof", "__alignof__"}
 PAREN_TYPE_NAME_KEYWORDS = (
     SIMPLE_TYPE_SPEC_KEYWORDS

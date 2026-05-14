@@ -7,7 +7,14 @@ from xcc.parser.model import DeclSpecInfo, ParserError
 INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
 SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | FLOATING_TYPE_KEYWORDS | {"void"}
-TYPEOF_KEYWORDS = {"typeof", "typeof_unqual", "__typeof__"}
+TYPEOF_KEYWORDS = {
+    "typeof",
+    "typeof_unqual",
+    "__typeof__",
+    "__typeof",
+    "__typeof_unqual__",
+    "__typeof_unqual",
+}
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 _NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
@@ -112,8 +119,6 @@ def parse_type_spec(
         raise ParserError(p._unsupported_type_message(context, token), token)
     p._advance()
     if token.lexeme in TYPEOF_KEYWORDS:
-        if p._std == "c11":
-            raise ParserError("typeof is a GNU extension", token)
         type_spec = p._parse_typeof_type_spec()
         pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
         if pointer_depth:

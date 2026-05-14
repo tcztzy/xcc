@@ -3324,15 +3324,13 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
 
-    def test_typeof_rejected_in_c11(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex("int main(void){typeof(int) x; return 0;}")), std="c11")
-        self.assertEqual(ctx.exception.message, "typeof is a GNU extension")
+    def test_typeof_accepted_in_c11(self) -> None:
+        unit = parse(list(lex("int main(void){typeof(int) x; return 0;}")), std="c11")
+        self.assertIsNotNone(unit)
 
-    def test_typeof_unqual_rejected_in_c11(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex("int main(void){typeof_unqual(int) x; return 0;}")), std="c11")
-        self.assertEqual(ctx.exception.message, "typeof is a GNU extension")
+    def test_typeof_unqual_accepted_in_c11(self) -> None:
+        unit = parse(list(lex("int main(void){typeof_unqual(int) x; return 0;}")), std="c11")
+        self.assertIsNotNone(unit)
 
     def test_generic_selection_expression(self) -> None:
         unit = parse(list(lex("int main(){int x=0; return _Generic(x, int: 1, default: 2);}")))

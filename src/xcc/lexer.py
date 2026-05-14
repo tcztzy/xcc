@@ -64,6 +64,9 @@ KEYWORDS = {
     "typeof",
     "typeof_unqual",
     "__typeof__",
+    "__typeof",
+    "__typeof_unqual__",
+    "__typeof_unqual",
     "__extension__",
 }
 
