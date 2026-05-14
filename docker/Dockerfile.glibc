@@ -9,8 +9,12 @@ RUN apt-get update \
         build-essential \
         mold \
         pkg-config \
-        python3-coverage \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV VIRTUAL_ENV=/opt/venv
+RUN uv venv /opt/venv
 
 WORKDIR /work
 

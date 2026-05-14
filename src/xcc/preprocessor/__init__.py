@@ -438,7 +438,8 @@ class _Preprocessor:
         for define in mode_defines:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
-        for define in _HOST_ARCH_PREDEFINED_MACROS.get(platform.machine(), ()):
+        host_machine = self._options.host_machine or platform.machine()
+        for define in _HOST_ARCH_PREDEFINED_MACROS.get(host_machine, ()):
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
         self._macros["__DATE__"] = _Macro(

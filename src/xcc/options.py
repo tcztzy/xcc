@@ -20,6 +20,7 @@ class FrontendOptions:
     no_standard_includes: bool = False
     diag_format: DiagFormat = "human"
     warn_as_error: bool = False
+    host_machine: str | None = None
 
     def __post_init__(self) -> None:
         if self.std not in {"c11", "gnu11"}:

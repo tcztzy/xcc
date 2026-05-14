@@ -314,7 +314,7 @@ def _run_check(*, payload: dict[str, Any], archive_path: Path) -> int:
     return 0
 
 
-def _evaluate_case(data: bytes, *, fixture_path: str, std: str) -> tuple[str, str | None]:
+def _evaluate_case(data: bytes, *, fixture_path: str, std: str, host_machine: str | None = None) -> tuple[str, str | None]:
     def _raise_case_timeout(signum: int, frame: object) -> None:
         raise _CaseTimeoutError(f"fixture exceeded {CASE_TIMEOUT_SECONDS:.1f}s")
 
@@ -333,6 +333,7 @@ def _evaluate_case(data: bytes, *, fixture_path: str, std: str) -> tuple[str, st
                 std=std,
                 no_standard_includes=True,
                 system_include_dirs=(str(ROOT / "tests/external/clang/stubs"),),
+                host_machine=host_machine,
             ),
         )
     except _CaseTimeoutError as exc:
@@ -353,6 +354,7 @@ def _build_full_suite_cases(
     archive_path: Path,
     payload: dict[str, Any],
     std: str,
+    host_machine: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     cases: list[dict[str, Any]] = []
     counters = {
@@ -384,7 +386,7 @@ def _build_full_suite_cases(
                 case_id=upstream_path,
             )
             fixture_path = fixture_path_from_upstream_path(upstream_path)
-            actual, detail = _evaluate_case(data, fixture_path=fixture_path, std=std)
+            actual, detail = _evaluate_case(data, fixture_path=fixture_path, std=std, host_machine=host_machine)
             try:
                 source = data.decode("utf-8")
             except UnicodeDecodeError:
@@ -414,8 +416,9 @@ def _rewrite_full_suite_baseline(
     archive_path: Path,
     manifest_path: Path,
     std: str,
+    host_machine: str | None = None,
 ) -> int:
-    cases, counters = _build_full_suite_cases(archive_path=archive_path, payload=payload, std=std)
+    cases, counters = _build_full_suite_cases(archive_path=archive_path, payload=payload, std=std, host_machine=host_machine)
     payload = {"upstream": payload["upstream"], "cases": cases}
     manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     _materialize_external_cases(
@@ -486,6 +489,12 @@ def main() -> int:
         choices=("c11", "gnu11"),
         help="frontend language mode used while baselining the full suite",
     )
+    parser.add_argument(
+        "--host-machine",
+        default=None,
+        choices=("aarch64", "arm64", "amd64", "x86_64"),
+        help="override host machine for predefined arch macros (default: detect from platform)",
+    )
     args = parser.parse_args()
     if args.check and args.rebuild_full_suite_baseline:
         raise ValueError("--check cannot be combined with --rebuild-full-suite-baseline")
@@ -506,6 +515,7 @@ def main() -> int:
             archive_path=archive_path,
             manifest_path=manifest_path,
             std=args.std,
+            host_machine=args.host_machine,
         )
     if args.check:
         return _run_check(payload=payload, archive_path=archive_path)
