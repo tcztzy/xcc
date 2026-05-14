@@ -174,11 +174,6 @@ def parse_unary(parser: object) -> Expr:
         operand = parser._parse_unary()  # type: ignore[attr-defined]
         return UpdateExpr(op, operand, False)
     if parser._check_punct("&&"):  # type: ignore[attr-defined]
-        if parser._std == "c11":  # type: ignore[attr-defined]
-            raise parser._make_error(  # type: ignore[attr-defined]
-                "Label address is a GNU extension",
-                parser._current(),  # type: ignore[attr-defined]
-            )
         parser._advance()  # type: ignore[attr-defined]
         label = parser._expect(TokenKind.IDENT)  # type: ignore[attr-defined]
         assert isinstance(label.lexeme, str)
@@ -361,11 +356,6 @@ def parse_primary(parser: object) -> Expr:
         return Identifier(token.lexeme)
     if parser._check_punct("("):  # type: ignore[attr-defined]
         if parser._peek_punct("{"):  # type: ignore[attr-defined]
-            if parser._std == "c11":  # type: ignore[attr-defined]
-                raise parser._make_error(  # type: ignore[attr-defined]
-                    "Statement expression is a GNU extension",
-                    parser._current(),  # type: ignore[attr-defined]
-                )
             return parser._parse_statement_expr()  # type: ignore[attr-defined]
         parser._advance()  # type: ignore[attr-defined]
         expr = parser._parse_expression()  # type: ignore[attr-defined]

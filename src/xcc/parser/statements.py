@@ -250,11 +250,6 @@ def parse_label_stmt(parser: object) -> LabelStmt:
 def parse_goto_stmt(parser: object) -> Stmt:
     parser._advance()  # type: ignore[attr-defined]
     if parser._check_punct("*"):  # type: ignore[attr-defined]
-        if parser._std == "c11":  # type: ignore[attr-defined]
-            raise parser._make_error(  # type: ignore[attr-defined]
-                "Indirect goto is a GNU extension",
-                parser._current(),  # type: ignore[attr-defined]
-            )
         parser._advance()  # type: ignore[attr-defined]
         target = parser._parse_expression()  # type: ignore[attr-defined]
         parser._expect_punct(";")  # type: ignore[attr-defined]
