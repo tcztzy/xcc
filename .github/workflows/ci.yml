@@ -21,6 +21,8 @@ jobs:
         run: uv run tox -e lint
       - name: Type check
         run: uv run tox -e type
+      - name: Sync clang fixtures
+        run: uv run python scripts/sync_clang_fixtures.py
       - name: Clang fixture suite
         run: uv run tox -e clang_suite
       - name: Build package
