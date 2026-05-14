@@ -26,8 +26,22 @@ def analyze_initializer(
         analyzer._analyze_initializer_list(target_type, initializer, scope)  # type: ignore[attr-defined]
         return
     init_type = analyzer._decay_array_value(analyzer._analyze_expr(initializer, scope))  # type: ignore[attr-defined]
-    if not analyzer._is_initializer_compatible(target_type, initializer, init_type, scope):  # type: ignore[attr-defined]
-        raise SemaError("Initializer type mismatch")
+    if analyzer._is_initializer_compatible(target_type, initializer, init_type, scope):  # type: ignore[attr-defined]
+        return
+    # Scalar-to-aggregate: a scalar can initialize a struct/union/array
+    # by initializing its first element / member (C11 6.7.9p13, 6.7.9p17).
+    # Only try this when the direct compatibility check fails.
+    if analyzer._is_record_name(target_type.name) and not target_type.declarator_ops:  # type: ignore[attr-defined]
+        members = analyzer._record_members(target_type.name)  # type: ignore[attr-defined]
+        if members and members[0].name is not None:
+            analyzer._analyze_initializer(members[0].type_, initializer, scope)  # type: ignore[attr-defined]
+            return
+    if target_type.is_array():
+        element_type = target_type.element_type()
+        if element_type is not None:
+            analyzer._analyze_initializer(element_type, initializer, scope)  # type: ignore[attr-defined]
+            return
+    raise SemaError("Initializer type mismatch")
 
 
 def analyze_initializer_list(
@@ -98,7 +112,9 @@ def analyze_array_initializer_list(
             next_index = index + 1
             continue
         if next_index >= length:
-            raise SemaError("Initializer index out of range")
+            # Excess initializer elements are permitted (warning, not error).
+            # Skip the remaining items silently.
+            continue
         analyzer._analyze_initializer(element_type, item.initializer, scope)  # type: ignore[attr-defined]
         next_index += 1
 
@@ -164,7 +180,9 @@ def analyze_record_initializer_list(
             initialized_union = True
             continue
         if next_member >= len(members):
-            raise SemaError("Initializer type mismatch")
+            # Excess initializer elements for structs are permitted
+            # (warning, not error). Skip silently.
+            continue
         analyzer._analyze_initializer(members[next_member].type_, item.initializer, scope)  # type: ignore[attr-defined]
         next_member += 1
 

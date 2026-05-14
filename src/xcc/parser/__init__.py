@@ -218,7 +218,7 @@ class Parser:
             self._skip_extension_markers()
             if self._match(TokenKind.EOF):
                 break
-            if self._check_keyword("_Static_assert"):
+            if self._check_keyword("_Static_assert") or self._is_static_assert_ident():
                 declaration = self._parse_static_assert_decl()
                 declarations.append(declaration)
                 externals.append(declaration)
@@ -625,7 +625,7 @@ class Parser:
 
     def _parse_decl_stmt(self) -> Stmt:
         self._skip_extension_markers()
-        if self._check_keyword("_Static_assert"):
+        if self._check_keyword("_Static_assert") or self._is_static_assert_ident():
             return self._parse_static_assert_decl()
         decl_specs = self._consume_decl_specifiers()
         is_typedef = decl_specs.is_typedef
@@ -1103,6 +1103,15 @@ class Parser:
     def _check_keyword(self, value: str) -> bool:
         token = self._current()
         return token.kind == TokenKind.KEYWORD and token.lexeme == value
+
+    def _is_static_assert_ident(self) -> bool:
+        """Check for C23 static_assert contextual keyword (IDENT token)."""
+        token = self._current()
+        return (
+            token.kind == TokenKind.IDENT
+            and isinstance(token.lexeme, str)
+            and token.lexeme == "static_assert"
+        )
 
     def _skip_extension_markers(self) -> None:
         _extensions._skip_extension_markers(self)

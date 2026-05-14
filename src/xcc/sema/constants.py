@@ -8,8 +8,11 @@ from xcc.ast import (
     Expr,
     GenericExpr,
     Identifier,
+    InitList,
     IntLiteral,
+    MemberExpr,
     SizeofExpr,
+    SubscriptExpr,
     UnaryExpr,
 )
 from xcc.types import (
@@ -22,7 +25,7 @@ from xcc.types import (
     Type,
 )
 
-from .symbols import EnumConstSymbol, Scope
+from .symbols import EnumConstSymbol, Scope, VarSymbol
 from .type_helpers import SIGNED_INTEGER_TYPE_LIMITS, UNSIGNED_INTEGER_TYPE_LIMITS
 
 HEX_DIGITS = "0123456789abcdefABCDEF"
@@ -137,12 +140,16 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
             return None
         return analyzer._eval_int_constant_expr(expr.expr, scope)  # type: ignore[attr-defined]
     if isinstance(expr, SizeofExpr):
-        if expr.type_spec is None:
-            return None
-        analyzer._register_type_spec(expr.type_spec)  # type: ignore[attr-defined]
-        if analyzer._is_invalid_sizeof_type_spec(expr.type_spec):  # type: ignore[attr-defined]
-            return None
-        return analyzer._sizeof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore[attr-defined]
+        if expr.type_spec is not None:
+            analyzer._register_type_spec(expr.type_spec)  # type: ignore[attr-defined]
+            if analyzer._is_invalid_sizeof_type_spec(expr.type_spec):  # type: ignore[attr-defined]
+                return None
+            return analyzer._sizeof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore[attr-defined]
+        if expr.expr is not None:
+            operand_type = analyzer._type_map.get(expr.expr)  # type: ignore[attr-defined]
+            if operand_type is not None:
+                return analyzer._sizeof_type(operand_type)  # type: ignore[attr-defined]
+        return None
     if isinstance(expr, AlignofExpr):
         if expr.type_spec is None:
             return None
@@ -158,6 +165,76 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
         symbol = scope.lookup(expr.name)
         if isinstance(symbol, EnumConstSymbol):
             return symbol.value
+        if isinstance(symbol, VarSymbol) and symbol.constant_value is not None:
+            if getattr(analyzer, "_allow_const_var_folding", False):  # type: ignore[attr-defined]
+                return symbol.constant_value
+    if isinstance(expr, SubscriptExpr):
+        if not getattr(analyzer, "_allow_const_var_folding", False):  # type: ignore[attr-defined]
+            return None
+        index = analyzer._eval_int_constant_expr(expr.index, scope)  # type: ignore[attr-defined]
+        if index is None:
+            return None
+        if isinstance(expr.base, Identifier):
+            symbol = scope.lookup(expr.base.name)
+            if isinstance(symbol, VarSymbol) and symbol._init_expr is not None:
+                init_list = symbol._init_expr
+                if isinstance(init_list, InitList) and 0 <= index < len(init_list.items):
+                    item = init_list.items[index]
+                    if item.designators:
+                        return None
+                    init_val = item.initializer
+                    if isinstance(init_val, InitList):
+                        return None
+                    return analyzer._eval_int_constant_expr(init_val, scope)  # type: ignore[attr-defined]
+    if isinstance(expr, MemberExpr):
+        if not getattr(analyzer, "_allow_const_var_folding", False):  # type: ignore[attr-defined]
+            return None
+        return _eval_member_expr(analyzer, expr, scope)
+    return None
+
+
+def _eval_member_expr(analyzer: object, expr: "MemberExpr", scope: Scope) -> int | None:
+    """Evaluate a member access expression in a const context."""
+    # Evaluate the base expression first
+    base_val = analyzer._eval_int_constant_expr(expr.base, scope)  # type: ignore[attr-defined]
+    if base_val is not None:
+        # If base is a scalar, the member access resolves to that scalar
+        # (scalar initializes struct's first member recursively).
+        return base_val
+    # If base is an Identifier, resolve the member through the init_list.
+    from xcc.sema.symbols import VarSymbol as _VarSymbol
+
+    if isinstance(expr.base, Identifier):
+        symbol = scope.lookup(expr.base.name)
+        if isinstance(symbol, _VarSymbol) and symbol._init_expr is not None:
+            base_type = symbol.type_
+            if isinstance(symbol._init_expr, InitList):
+                return _lookup_member_in_init(
+                    analyzer, symbol._init_expr, base_type, expr.member, scope
+                )
+    return None
+
+
+def _lookup_member_in_init(
+    analyzer: object,
+    init_list: "InitList",
+    base_type: object,
+    member_name: str,
+    scope: Scope,
+) -> int | None:
+    """Find a member's initializer value in an InitList."""
+    if not analyzer._is_record_name(base_type.name):  # type: ignore[attr-defined]
+        return None
+    members = analyzer._record_members(base_type.name)  # type: ignore[attr-defined]
+    if members is None:
+        return None
+    for idx, m in enumerate(members):
+        if m.name == member_name:
+            if idx < len(init_list.items):
+                item = init_list.items[idx]
+                if item.designators:
+                    return None
+                return analyzer._eval_int_constant_expr(item.initializer, scope)  # type: ignore[attr-defined]
     return None
 
 

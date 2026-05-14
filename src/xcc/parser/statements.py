@@ -83,7 +83,7 @@ def parse_statement(parser: object) -> Stmt:
         return ContinueStmt()
     if parser._check_keyword("return"):  # type: ignore[attr-defined]
         return parser._parse_return_stmt()  # type: ignore[attr-defined]
-    if parser._check_keyword("_Static_assert"):  # type: ignore[attr-defined]
+    if _is_static_assert_keyword(parser):
         return parser._parse_static_assert_decl()  # type: ignore[attr-defined]
     if parser._is_declaration_start():  # type: ignore[attr-defined]
         return parser._parse_decl_stmt()  # type: ignore[attr-defined]
@@ -142,7 +142,7 @@ def is_declaration_start(parser: object) -> bool:
     token = parser._current()  # type: ignore[attr-defined]
     if token.kind != TokenKind.IDENT or not isinstance(token.lexeme, str):
         return False
-    if token.lexeme in {"__thread", "__inline", "__inline__", "__unaligned"}:
+    if token.lexeme in {"__thread", "__inline", "__inline__", "__unaligned", "static_assert"}:
         return True
     if token.lexeme == _MS_DECLSPEC_KEYWORD and parser._peek_punct("("):  # type: ignore[attr-defined]
         return True
@@ -265,19 +265,32 @@ def is_label_start(parser: object) -> bool:
     return token.kind == TokenKind.IDENT and parser._peek_punct(":")  # type: ignore[attr-defined]
 
 
+def _is_static_assert_keyword(parser: object) -> bool:
+    """Check for _Static_assert or C23 static_assert (contextual keyword)."""
+    tok = parser._current()  # type: ignore[attr-defined]
+    if tok.kind == TokenKind.IDENT and isinstance(tok.lexeme, str) and tok.lexeme == "static_assert":
+        return True
+    return parser._check_keyword("_Static_assert")  # type: ignore[attr-defined]
+
+
 def parse_static_assert_decl(parser: object) -> StaticAssertDecl:
-    if not parser._check_keyword("_Static_assert"):  # type: ignore[attr-defined]
+    if not _is_static_assert_keyword(parser):
         raise parser._make_error("Expected _Static_assert", parser._current())  # type: ignore[attr-defined]
     parser._advance()  # type: ignore[attr-defined]
     parser._expect_punct("(")  # type: ignore[attr-defined]
     condition = parser._parse_conditional()  # type: ignore[attr-defined]
-    parser._expect_punct(",")  # type: ignore[attr-defined]
-    if parser._current().kind != TokenKind.STRING_LITERAL:  # type: ignore[attr-defined]
-        raise parser._make_error(  # type: ignore[attr-defined]
-            "Expected static assertion message",
-            parser._current(),  # type: ignore[attr-defined]
-        )
-    message = parser._parse_string_literal()  # type: ignore[attr-defined]
+    if parser._check_punct(","):  # type: ignore[attr-defined]
+        parser._expect_punct(",")  # type: ignore[attr-defined]
+        if parser._current().kind != TokenKind.STRING_LITERAL:  # type: ignore[attr-defined]
+            raise parser._make_error(  # type: ignore[attr-defined]
+                "Expected static assertion message",
+                parser._current(),  # type: ignore[attr-defined]
+            )
+        message = parser._parse_string_literal()  # type: ignore[attr-defined]
+    else:
+        # C23: single-argument form with no message
+        from xcc.ast import StringLiteral
+        message = StringLiteral('""')
     parser._expect_punct(")")  # type: ignore[attr-defined]
     parser._expect_punct(";")  # type: ignore[attr-defined]
     return StaticAssertDecl(condition, message)

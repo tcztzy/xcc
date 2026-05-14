@@ -56,6 +56,7 @@ _env_path_list = _includes._env_path_list
 _parse_header_name_operand = _includes._parse_header_name_operand
 _parse_include_target = _includes._parse_include_target
 _resolve_include = _includes._resolve_include
+_resolve_embed = _includes._resolve_embed
 _source_dir = _includes._source_dir
 _apply_token_paste = _macro_expansion._apply_token_paste
 _expand_function_like_macro = _macro_expansion._expand_function_like_macro
@@ -120,6 +121,9 @@ _PREDEFINED_MACROS = (
     "__STDC_NO_COMPLEX__=1",
     "__STDC_NO_THREADS__=1",
     "__STDC_NO_VLA__=1",
+    "__STDC_EMBED_NOT_FOUND__=0",
+    "__STDC_EMBED_FOUND__=1",
+    "__STDC_EMBED_EMPTY__=2",
     "__ATOMIC_RELAXED=0",
     "__ATOMIC_CONSUME=1",
     "__ATOMIC_ACQUIRE=2",
@@ -740,6 +744,121 @@ class _Preprocessor:
             self._pragma_once_files.add(include_path_text)
         return result
 
+    def _handle_embed(
+        self,
+        body: str,
+        location: _SourceLocation,
+        *,
+        base_dir: Path | None,
+    ) -> _ProcessedText:
+        _parse_embed_body = _includes._parse_embed_body
+        # Try direct parse first (for literal <file> or "file"), then
+        # macro-expand (for __FILE__ etc.), matching #include behavior.
+        try:
+            embed_name, is_angled, params = _parse_embed_body(body)
+        except ValueError:
+            expanded_body = self._expand_macro_text(body, location)
+            try:
+                embed_name, is_angled, params = _parse_embed_body(expanded_body)
+            except ValueError as exc:
+                raise PreprocessorError(
+                    str(exc),
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_DIRECTIVE,
+                ) from exc
+
+        embed_path, search_roots = self._resolve_embed(
+            embed_name,
+            is_angled=is_angled,
+            base_dir=base_dir,
+        )
+        if embed_path is None:
+            # if_empty: use fallback tokens
+            if "if_empty" in params:
+                return _ProcessedText(params["if_empty"] + "\n", ())
+            raise PreprocessorError(
+                f"Embed not found: {_format_include_reference(embed_name, is_angled)}; "
+                f"searched: {_format_include_search_roots(search_roots)}",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INCLUDE_NOT_FOUND,
+            )
+
+        try:
+            raw = embed_path.read_bytes()
+        except OSError as error:
+            raise PreprocessorError(
+                f"Unable to read embed: {embed_name}: {error}",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INCLUDE_READ_ERROR,
+            ) from error
+
+        has_if_empty = "if_empty" in params
+        if not raw:
+            if has_if_empty:
+                return _ProcessedText(params["if_empty"] + "\n", ())
+            return _ProcessedText("\n", ())
+
+        # Apply limit / offset
+        limit: int | None = None
+        offset: int = 0
+        if "limit" in params:
+            limit = self._eval_embed_int_param(params["limit"], "limit", location)
+        if "clang::limit" in params:
+            limit = self._eval_embed_int_param(params["clang::limit"], "clang::limit", location)
+        if "offset" in params:
+            offset = self._eval_embed_int_param(params["offset"], "offset", location)
+        if "clang::offset" in params:
+            offset = self._eval_embed_int_param(params["clang::offset"], "clang::offset", location)
+
+        if offset:
+            raw = raw[offset:]
+        if limit is not None:
+            raw = raw[:limit]
+
+        if not raw:
+            if has_if_empty:
+                return _ProcessedText(params["if_empty"] + "\n", ())
+            return _ProcessedText("\n", ())
+
+        # Build comma-separated integer list (no trailing comma)
+        parts = [str(b) for b in raw]
+        inner = ", ".join(parts)
+
+        prefix = params.get("prefix", "")
+        suffix = params.get("suffix", "")
+
+        result_text = ""
+        if prefix:
+            result_text += prefix
+        result_text += inner
+        if suffix:
+            result_text += suffix
+        result_text += "\n"
+
+        return _ProcessedText(result_text, ())
+
+    def _eval_embed_int_param(
+        self, raw: str, param_name: str, location: _SourceLocation
+    ) -> int:
+        expanded = self._expand_macro_text(raw, location)
+        try:
+            py_expr = _translate_expr_to_python(expanded)
+            return _safe_eval_pp_expr(py_expr)
+        except ValueError as error:
+            raise PreprocessorError(
+                f"expected value in {param_name} expression",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_DIRECTIVE,
+            ) from error
+
     def _process_macro_include(
         self,
         include_name: str,
@@ -914,6 +1033,23 @@ class _Preprocessor:
             include_next_from=include_next_from,
         )
 
+    def _resolve_embed(
+        self,
+        embed_name: str,
+        *,
+        is_angled: bool,
+        base_dir: Path | None,
+    ) -> tuple[Path | None, tuple[Path, ...]]:
+        return _resolve_embed(
+            embed_name,
+            is_angled=is_angled,
+            base_dir=base_dir,
+            embed_dirs=self._options.embed_dirs,
+            quote_include_dirs=self._options.quote_include_dirs,
+            include_dirs=self._options.include_dirs,
+            system_include_dirs=self._options.system_include_dirs,
+        )
+
     def _parse_cli_define(self, define: str) -> _Macro:
         if "=" in define:
             head, replacement = define.split("=", 1)
@@ -973,11 +1109,21 @@ class _Preprocessor:
                 location,
                 base_dir=base_dir,
             )
+            expanded = self._replace_has_embed_operators(
+                expanded,
+                location,
+                base_dir=base_dir,
+            )
             expanded = self._replace_feature_probe_operators(expanded, location)
             expanded = self._expand_macro_text(expanded, location)
             # Run include-operator rewriting again so operators introduced via
             # macro expansion (for example HAS(x) -> __has_include(x)) are handled.
             expanded = self._replace_has_include_operators(
+                expanded,
+                location,
+                base_dir=base_dir,
+            )
+            expanded = self._replace_has_embed_operators(
                 expanded,
                 location,
                 base_dir=base_dir,
@@ -1017,6 +1163,21 @@ class _Preprocessor:
             base_dir=base_dir,
             parse_header_name_operand=self._parse_header_name_operand,
             resolve_include=self._resolve_include,
+            code=_PP_INVALID_IF_EXPR,
+        )
+
+    def _replace_has_embed_operators(
+        self,
+        expr: str,
+        location: _SourceLocation,
+        *,
+        base_dir: Path | None,
+    ) -> str:
+        return _probes._replace_has_embed_operators(
+            expr,
+            location=location,
+            base_dir=base_dir,
+            resolve_embed=self._resolve_embed,
             code=_PP_INVALID_IF_EXPR,
         )
 

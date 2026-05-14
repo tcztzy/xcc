@@ -10,6 +10,12 @@ from .common import PreprocessorError, _SourceLocation
 from .macros import _MacroToken, _tokenize_macro_text
 
 _INCLUDE_RE = re.compile(r"^(?:\"(?P<quote>[^\"\n]+)\"|<(?P<angle>[^>\n]+)>)$")
+_EMBED_FILENAME_RE = re.compile(
+    r'^\s*(?:"(?P<quote>[^\"\n]+)"|<(?P<angle>[^>\n]+)>)\s*(?P<tail>.*)$'
+)
+_EMBED_PARAM_RE = re.compile(
+    r'\s*(?P<name>[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*\('
+)
 
 
 def _env_path_list(name: str) -> tuple[str, ...]:
@@ -134,6 +140,93 @@ def _resolve_include(
         if candidate.is_file():
             return candidate.resolve(), searched_roots
     return None, searched_roots
+
+
+def _parse_embed_body(body: str) -> tuple[str, bool, dict[str, str]]:
+    """Parse #embed body into (filename, is_angled, params).
+
+    Returns the filename, whether it's angle-bracketed, and a dict of
+    parameter name -> raw argument text (the tokens between parens).
+    """
+    m = _EMBED_FILENAME_RE.match(body)
+    if m is None:
+        raise ValueError("expected \"FILENAME\" or <FILENAME>")
+    quoted = m.group("quote")
+    if quoted is not None:
+        filename = quoted
+        is_angled = False
+    else:
+        filename = m.group("angle")
+        assert filename is not None
+        is_angled = True
+    tail = m.group("tail") or ""
+
+    params: dict[str, str] = {}
+    while tail.strip():
+        pm = _EMBED_PARAM_RE.match(tail)
+        if pm is None:
+            token = tail.strip().split(None, 1)[0]
+            raise ValueError(f"unknown embed preprocessor parameter '{token}'")
+        param_name = pm.group("name")
+        tail = tail[pm.end():]
+        # Find matching close paren for the argument list
+        depth = 1
+        close_idx = 0
+        while close_idx < len(tail) and depth > 0:
+            ch = tail[close_idx]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            close_idx += 1
+        if depth != 0:
+            raise ValueError(f"expected ')'")
+        raw_args = tail[:close_idx].strip()
+        tail = tail[close_idx + 1:]
+        if param_name in params:
+            raise ValueError(
+                f"cannot specify parameter '{param_name}' twice "
+                f"in the same '#embed' directive"
+            )
+        params[param_name] = raw_args
+    return filename, is_angled, params
+
+
+def _resolve_embed(
+    embed_name: str,
+    *,
+    is_angled: bool,
+    base_dir: Path | None,
+    embed_dirs: Iterable[str],
+    quote_include_dirs: Iterable[str],
+    include_dirs: Iterable[str],
+    system_include_dirs: Iterable[str],
+) -> tuple[Path | None, tuple[Path, ...]]:
+    # Absolute paths: check directly without relative-to-root search.
+    embed_path = Path(embed_name)
+    if embed_path.is_absolute() and embed_path.is_file():
+        return embed_path.resolve(), (embed_path.parent,)
+
+    search_roots: list[Path] = []
+    if not is_angled and base_dir is not None:
+        search_roots.append(base_dir)
+    for path in embed_dirs:
+        search_roots.append(Path(path))
+    if not is_angled:
+        search_roots.extend(Path(path) for path in quote_include_dirs)
+    search_roots.extend(Path(path) for path in include_dirs)
+    search_roots.extend(Path(path) for path in system_include_dirs)
+
+    searched_roots_list: list[Path] = []
+    for root in search_roots:
+        resolved_root = root.resolve()
+        searched_roots_list.append(resolved_root)
+        candidate = resolved_root / embed_name
+        if candidate.is_file():
+            return candidate.resolve(), tuple(searched_roots_list)
+    return None, tuple(searched_roots_list)
 
 
 def _include_next_start_index(

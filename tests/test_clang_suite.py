@@ -13,6 +13,7 @@ from xcc.clang_suite import (
 )
 from xcc.frontend import FrontendError, compile_source
 from xcc.options import FrontendOptions
+from xcc.preprocessor import preprocess_source
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "tests/external/clang/manifest.json"
@@ -49,6 +50,30 @@ def _load_manifest() -> dict[str, Any]:
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _is_file_scope_embed_test(source: str) -> bool:
+    """Check if source has #embed at file scope (outside any function/declaration).
+
+    These tests produce bare integer constants at file scope after
+    preprocessing, which can't be parsed. They need preprocess-only mode.
+    """
+    import re
+    # Remove comments and preprocessor lines to find bare #embed at top level
+    lines = source.splitlines()
+    in_function = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("//"):
+            continue
+        if stripped.startswith("#embed"):
+            if not in_function:
+                return True
+        if "{" in stripped:
+            in_function = True
+        if "}" in stripped:
+            in_function = False
+    return False
 
 
 def _is_external_case(case: dict[str, Any]) -> bool:
@@ -136,10 +161,16 @@ class ClangSuiteTests(unittest.TestCase):
 
     _STUBS_DIR = str(ROOT / "tests/external/clang/stubs")
 
-    def _compile_options(self) -> FrontendOptions:
+    def _compile_options(self, fixture: Path | None = None) -> FrontendOptions:
+        embed_dirs: tuple[str, ...] = ()
+        if fixture is not None:
+            inputs_dir = fixture.parent / "Inputs"
+            if inputs_dir.is_dir():
+                embed_dirs = (str(inputs_dir),)
         return FrontendOptions(
             no_standard_includes=True,
             system_include_dirs=(self._STUBS_DIR,),
+            embed_dirs=embed_dirs,
         )
 
     def _assert_case_matches_expectation(self, case: dict[str, Any]) -> None:
@@ -147,7 +178,22 @@ class ClangSuiteTests(unittest.TestCase):
         fixture = ROOT / case["fixture"]
         source = fixture.read_text(encoding="utf-8")
         self.assertIn(expectation, ALLOWED_EXPECTATIONS)
-        opts = self._compile_options()
+        opts = self._compile_options(fixture)
+        # Tests where #embed is used at file scope (not inside a function
+        # or declaration) need preprocess-only evaluation, since the
+        # expansion produces bare integer constants.
+        if _is_file_scope_embed_test(source):
+            if expectation == "ok":
+                try:
+                    preprocess_source(source, filename=str(fixture), options=opts)
+                except Exception as exc:
+                    raise AssertionError(
+                        f"Preprocess-only test raised: {exc}"
+                    ) from exc
+                return
+            with self.assertRaises(Exception) as ctx:
+                preprocess_source(source, filename=str(fixture), options=opts)
+            return
         if expectation == "ok":
             compile_source(source, filename=str(fixture), options=opts)
             return

@@ -782,7 +782,11 @@ class Analyzer:
 
     def _check_static_assert(self, declaration: StaticAssertDecl, scope: Scope) -> None:
         self._analyze_expr(declaration.condition, scope)
-        value = self._eval_int_constant_expr(declaration.condition, scope)
+        self._allow_const_var_folding = True
+        try:
+            value = self._eval_int_constant_expr(declaration.condition, scope)
+        finally:
+            self._allow_const_var_folding = False
         if value is None:
             raise SemaError("Static assertion condition is not integer constant")
         if value == 0:
@@ -974,6 +978,30 @@ class Analyzer:
 
     def _eval_int_constant_expr(self, expr: Expr, scope: Scope) -> int | None:
         return eval_int_constant_expr(self, expr, scope)
+
+    def _is_const_qualified(self, type_: Type) -> bool:
+        return "const" in type_.qualifiers
+
+    def _infer_array_size_from_init(
+        self, initializer: Expr | InitList
+    ) -> int | None:
+        from xcc.ast import InitList as _InitList
+        if isinstance(initializer, _InitList):
+            return len(initializer.items)
+        return None
+
+    def _try_eval_scalar_initializer(
+        self, initializer: Expr | InitList, scope: Scope
+    ) -> int | None:
+        from xcc.ast import InitList as _InitList
+        if isinstance(initializer, _InitList):
+            if len(initializer.items) != 1:
+                return None
+            item = initializer.items[0]
+            if item.designators:
+                return None
+            return self._try_eval_scalar_initializer(item.initializer, scope)
+        return self._eval_int_constant_expr(initializer, scope)
 
     def _char_const_value(self, lexeme: str) -> int | None:
         return char_const_value(self, lexeme)

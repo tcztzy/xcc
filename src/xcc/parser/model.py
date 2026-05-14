@@ -4,7 +4,7 @@ from xcc.ast import StorageClass
 from xcc.lexer import Token
 
 
-@dataclass(frozen=True)
+@dataclass
 class ParserError(ValueError):
     message: str
     token: Token

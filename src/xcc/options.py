@@ -17,6 +17,7 @@ class FrontendOptions:
     macro_includes: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
     undefs: tuple[str, ...] = ()
+    embed_dirs: tuple[str, ...] = ()
     no_standard_includes: bool = False
     diag_format: DiagFormat = "human"
     warn_as_error: bool = False

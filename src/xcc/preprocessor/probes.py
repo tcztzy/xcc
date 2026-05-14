@@ -272,3 +272,117 @@ def _replace_has_include_operators(
         resolve_include=resolve_include,
         code=code,
     )
+
+
+def _replace_single_has_embed_operator(
+    expr: str,
+    *,
+    marker: str,
+    location: _SourceLocation,
+    base_dir: Path | None,
+    resolve_embed: Callable[..., tuple[Path | None, tuple[Path, ...]]],
+    code: str,
+) -> str:
+    from .includes import _parse_embed_body
+
+    def rewrite_operand(operand: str) -> str:
+        try:
+            embed_name, is_angled, params = _parse_embed_body(operand)
+        except ValueError:
+            # Operand may be a macro like __FILE__ that hasn't been
+            # expanded yet. Return 0 (not found) so the second pass
+            # after macro expansion can re-evaluate.
+            return "0"
+
+        embed_path, _ = resolve_embed(
+            embed_name,
+            is_angled=is_angled,
+            base_dir=base_dir,
+        )
+        if embed_path is None:
+            return "0"
+
+        # Supported parameters: limit, offset, prefix, suffix, if_empty,
+        # clang::limit, clang::offset, and unrecognized vendor params.
+        # Unrecognized => return __STDC_EMBED_NOT_FOUND__ (0).
+        supported = frozenset({
+            "limit", "offset", "prefix", "suffix", "if_empty",
+            "clang::limit", "clang::offset",
+        })
+        for pname in params:
+            if pname not in supported:
+                # Unknown vendor namespace (like dajwdwdjdahwk::meow) => not found
+                if "::" in pname:
+                    return "0"
+                # Standard but we don't support all features yet — but for
+                # file existence check, just check the file.
+                pass
+
+        # Check if empty: for empty files, or limit(0) etc.
+        try:
+            embedded_raw = embed_path.read_bytes()
+        except OSError:
+            return "0"
+
+        if not embedded_raw:
+            return "2"
+
+        # Apply limit/offset to check if result would be empty
+        offset = 0
+        limit: int | None = None
+        if "offset" in params:
+            try:
+                offset = int(params["offset"])
+            except ValueError:
+                pass
+        if "clang::offset" in params:
+            try:
+                offset = int(params["clang::offset"])
+            except ValueError:
+                pass
+        if "limit" in params:
+            try:
+                limit = int(params["limit"])
+            except ValueError:
+                pass
+        if "clang::limit" in params:
+            try:
+                limit = int(params["clang::limit"])
+            except ValueError:
+                pass
+
+        if offset:
+            embedded_raw = embedded_raw[offset:]
+        if limit is not None:
+            embedded_raw = embedded_raw[:limit]
+
+        if not embedded_raw:
+            return "2"
+        return "1"
+
+    return _replace_probe_operator(
+        expr,
+        marker=marker,
+        location=location,
+        missing_operand_message="missing embed operand",
+        code=code,
+        rewrite_operand=rewrite_operand,
+    )
+
+
+def _replace_has_embed_operators(
+    expr: str,
+    *,
+    location: _SourceLocation,
+    base_dir: Path | None,
+    resolve_embed: Callable[..., tuple[Path | None, tuple[Path, ...]]],
+    code: str,
+) -> str:
+    return _replace_single_has_embed_operator(
+        expr,
+        marker="__has_embed",
+        location=location,
+        base_dir=base_dir,
+        resolve_embed=resolve_embed,
+        code=code,
+    )

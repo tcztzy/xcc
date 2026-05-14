@@ -1,6 +1,7 @@
 from typing import Any, cast
 
 from xcc.ast import DeclGroupStmt, DeclStmt, StaticAssertDecl, Stmt, TypedefDecl
+from xcc.types import Type
 
 from .symbols import SemaError, VarSymbol
 
@@ -89,18 +90,35 @@ def analyze_file_scope_decl(analyzer: object, declaration: Stmt) -> None:
                 )
             )
         a._ensure_array_size_limit(var_type)
-        a._file_scope.define(
-            VarSymbol(
-                declaration.name,
-                var_type,
-                declaration.alignment if declaration.alignment is not None else var_alignment,
-                is_extern=declaration.storage_class == "extern",
-            )
+        symbol = VarSymbol(
+            declaration.name,
+            var_type,
+            declaration.alignment if declaration.alignment is not None else var_alignment,
+            is_extern=declaration.storage_class == "extern",
         )
+        a._file_scope.define(symbol)
         if declaration.init is not None:
             if declaration.storage_class == "extern":
                 raise SemaError(a._extern_initializer_message("file-scope"))
             a._analyze_initializer(var_type, declaration.init, a._file_scope)
+            if a._is_const_qualified(var_type):
+                symbol.constant_value = a._try_eval_scalar_initializer(
+                    declaration.init, a._file_scope
+                )
+                from xcc.ast import InitList as _InitList
+                if isinstance(declaration.init, _InitList):
+                    symbol._init_expr = declaration.init
+            if var_type.is_array() and var_type.declarator_ops[0][1] < 0:
+                inferred = a._infer_array_size_from_init(declaration.init)
+                if inferred is not None:
+                    new_ops = (("arr", inferred),) + var_type.declarator_ops[1:]
+                    new_type = Type(
+                        var_type.name,
+                        declarator_ops=new_ops,
+                        qualifiers=var_type.qualifiers,
+                    )
+                    symbol.type_ = new_type
+                    var_type = new_type
         return
     if isinstance(declaration, StaticAssertDecl):
         a._check_static_assert(declaration, a._file_scope)

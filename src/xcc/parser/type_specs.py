@@ -17,7 +17,7 @@ TYPEOF_KEYWORDS = {
 }
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 _NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
-_IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
+_IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned", "constexpr"}
 _GNU_EXTENSION_TYPES = {
     "_Float16",
     "_Float32",
@@ -208,11 +208,19 @@ def consume_type_qualifiers(parser: object, *, allow_atomic: bool = False) -> tu
             seen.append(lexeme)
             continue
         if token.kind == TokenKind.IDENT and token.lexeme in _IGNORED_IDENT_TYPE_QUALIFIERS:
+            # For contextual keywords like constexpr, only consume as a
+            # qualifier if the next token looks like a type start.
+            # If followed by ; or , or =, treat as an identifier.
+            if token.lexeme == "constexpr":
+                nxt = p._peek()
+                if nxt.kind == TokenKind.PUNCTUATOR and nxt.lexeme in {";", ",", "="}:
+                    break
             token = p._advance()
             lexeme = str(token.lexeme)
             if lexeme in seen:
                 raise ParserError(f"Duplicate type qualifier: '{lexeme}'", token)
-            seen.append(lexeme)
+            # constexpr implies const
+            seen.append("const" if lexeme == "constexpr" else lexeme)
             continue
         if p._is_ms_declspec_start():
             p._skip_ms_declspecs()

@@ -12,12 +12,15 @@ class SemaError(ValueError):
         return self.message
 
 
-@dataclass(frozen=True)
+@dataclass
 class VarSymbol:
     name: str
     type_: Type
     alignment: int | None = None
     is_extern: bool = False
+    constant_value: int | None = None
+    # For arrays: the InitList expression, used to evaluate const subscripts.
+    _init_expr: object | None = None
 
 
 @dataclass(frozen=True)

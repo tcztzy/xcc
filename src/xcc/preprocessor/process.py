@@ -187,6 +187,19 @@ def process_text(
             in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
             line_index += 1
             continue
+        if name == "embed":
+            embed_processed = self._handle_embed(
+                body,
+                directive_cursor.first_location(),
+                base_dir=base_dir,
+            )
+            out.extend_processed(embed_processed)
+            for directive_index, chunk in enumerate(directive_lines[1:], start=1):
+                out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
+            logical_cursor.advance(len(directive_lines))
+            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            line_index += 1
+            continue
         if name == "pragma":
             stripped_body = body.strip()
             if stripped_body == "once":
