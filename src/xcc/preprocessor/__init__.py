@@ -595,15 +595,19 @@ class _Preprocessor:
 
     def _expand_line(self, line: str, location: _SourceLocation) -> str:
         if not self._macros:
-            return line
+            return self._handle_pragma_operator(line)
         trailing_newline = "\n" if line.endswith("\n") else ""
         text = line[:-1] if trailing_newline else line
         if self._macros.keys() <= _PREDEFINED_MACRO_NAMES and not self._line_needs_macro_expansion(
             text
         ):
-            return line
+            return self._handle_pragma_operator(line)
         expanded = self._expand_macro_text(text, location)
-        return expanded + trailing_newline
+        result = self._handle_pragma_operator(expanded)
+        return result + trailing_newline
+
+    def _handle_pragma_operator(self, text: str) -> str:
+        return re.sub(r'_Pragma\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)', "\n", text)
 
     def _line_needs_macro_expansion(self, text: str) -> bool:
         tokens = _tokenize_macro_text(text)
