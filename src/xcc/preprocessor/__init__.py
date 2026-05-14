@@ -339,7 +339,7 @@ _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__", "__TIMESTAMP__"})
 _STRICT_MODE_PREDEFINED_MACROS = ("__STRICT_ANSI__=1",)
 _GNU_MODE_PREDEFINED_MACROS = (
     "__GNUC__=4",
-    "__GNUC_MINOR__=2",
+    "__GNUC_MINOR__=8",
     "__GNUC_PATCHLEVEL__=1",
     "__GNUC_STDC_INLINE__=1",
     '__VERSION__="xcc gnu11"',

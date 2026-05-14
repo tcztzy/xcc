@@ -174,6 +174,30 @@ class Analyzer:
                 is_variadic=False,
             )
 
+        # GCC atomic builtins — generic (params=None accepts any args).
+        # Return type INT is a pragmatic default; callers wrap these in
+        # static inline functions whose return types provide the real type.
+        _ATOMIC_BUILTINS = (
+            "__atomic_load",
+            "__atomic_load_n",
+            "__atomic_store",
+            "__atomic_store_n",
+            "__atomic_fetch_add",
+            "__atomic_fetch_sub",
+            "__atomic_fetch_and",
+            "__atomic_fetch_or",
+            "__atomic_fetch_xor",
+            "__atomic_exchange_n",
+            "__atomic_compare_exchange_n",
+            "__atomic_thread_fence",
+            "__atomic_signal_fence",
+            "__atomic_is_lock_free",
+            "__atomic_always_lock_free",
+        )
+        _atomic_sig = FunctionSignature(return_type=INT, params=None, is_variadic=True)
+        for name in _ATOMIC_BUILTINS:
+            self._function_signatures[name] = _atomic_sig
+
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]
         for external in externals:
