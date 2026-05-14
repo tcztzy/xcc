@@ -44,6 +44,7 @@ _BASE_TYPE_SIZES = {
     "long double": 16,
     "enum": 4,
     "_Float16": 2,
+    "__fp16": 2,
     "_Float32": 4,
     "_Float64": 8,
     "_Float128": 16,

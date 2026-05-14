@@ -147,13 +147,14 @@ def process_text(
             in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
             line_index += 1
             continue
-        if name in {"include", "include_next"}:
+        if name in {"include", "include_next", "import"}:
             include_processed = self._handle_include(
                 body,
                 directive_cursor.first_location(),
                 base_dir=base_dir,
                 include_stack=include_stack,
                 include_next=name == "include_next",
+                is_import=name == "import",
             )
             out.extend_processed(include_processed)
             for directive_index, chunk in enumerate(directive_lines[1:], start=1):

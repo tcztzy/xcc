@@ -475,6 +475,7 @@ class _Preprocessor:
     def process(self, source: str, *, filename: str) -> _ProcessedText:
         self._base_filename = filename
         base_dir = self._source_dir(filename)
+        resolved_filename = str(Path(filename).resolve())
         out = _OutputBuilder()
         command_line_index = 1
         for include_name in self._options.macro_includes:
@@ -482,7 +483,7 @@ class _Preprocessor:
                 include_name,
                 location=_SourceLocation("<command line>", command_line_index),
                 base_dir=base_dir,
-                include_stack=(filename,),
+                include_stack=(resolved_filename,),
             )
             command_line_index += 1
         for include_name in self._options.forced_includes:
@@ -491,7 +492,7 @@ class _Preprocessor:
                     include_name,
                     location=_SourceLocation("<command line>", command_line_index),
                     base_dir=base_dir,
-                    include_stack=(filename,),
+                    include_stack=(resolved_filename,),
                 )
             )
             command_line_index += 1
@@ -501,7 +502,7 @@ class _Preprocessor:
                 filename=filename,
                 source_id=filename,
                 base_dir=base_dir,
-                include_stack=(filename,),
+                include_stack=(resolved_filename,),
             )
         )
         return out.build()
@@ -654,6 +655,7 @@ class _Preprocessor:
         base_dir: Path | None,
         include_stack: tuple[str, ...],
         include_next: bool = False,
+        is_import: bool = False,
     ) -> _ProcessedText:
         include_name, is_angled = self._parse_include_target(body, location)
         include_path, search_roots = self._resolve_include(
@@ -663,7 +665,12 @@ class _Preprocessor:
             include_next_from=base_dir if include_next else None,
         )
         if include_path is None:
-            prefix = "Include not found via #include_next" if include_next else "Include not found"
+            if is_import:
+                prefix = "Import not found"
+            elif include_next:
+                prefix = "Include not found via #include_next"
+            else:
+                prefix = "Include not found"
             raise PreprocessorError(
                 (
                     f"{prefix}: "
@@ -678,17 +685,9 @@ class _Preprocessor:
         include_path_text = str(include_path)
         if include_path_text in self._pragma_once_files:
             return _ProcessedText("", ())
-        self.include_trace.append(
-            _format_include_trace(
-                location.filename,
-                location.line,
-                include_name,
-                include_path_text,
-                is_angled,
-                directive="include_next" if include_next else "include",
-            )
-        )
         if include_path_text in include_stack:
+            if is_import:
+                return _ProcessedText("", ())
             raise PreprocessorError(
                 (
                     "Circular include detected: "
@@ -699,6 +698,22 @@ class _Preprocessor:
                 filename=location.filename,
                 code=_PP_INCLUDE_CYCLE,
             )
+        if is_import:
+            directive = "import"
+        elif include_next:
+            directive = "include_next"
+        else:
+            directive = "include"
+        self.include_trace.append(
+            _format_include_trace(
+                location.filename,
+                location.line,
+                include_name,
+                include_path_text,
+                is_angled,
+                directive=directive,
+            )
+        )
         try:
             include_source = include_path.read_text(encoding="utf-8")
         except OSError as error:
@@ -709,13 +724,16 @@ class _Preprocessor:
                 filename=location.filename,
                 code=_PP_INCLUDE_READ_ERROR,
             ) from error
-        return self._process_text(
+        result = self._process_text(
             include_source,
             filename=include_path_text,
             source_id=include_path_text,
             base_dir=include_path.parent,
             include_stack=(*include_stack, include_path_text),
         )
+        if is_import:
+            self._pragma_once_files.add(include_path_text)
+        return result
 
     def _process_macro_include(
         self,

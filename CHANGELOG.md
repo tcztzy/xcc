@@ -2,7 +2,8 @@
 
 ## Current
 
-- Parser, preprocessor, and sema are package-based modules with compatibility entrypoints.
+- Preprocessor supports `#import` directive with include-once semantics (silently skips already-imported or currently-importing files).
+- Parser recognizes `__fp16` as a GNU extension floating-point type (alias for `_Float16`).
 - Driver mode validates with XCC before native or `clang` backend selection.
 - Native backend emits macOS `arm64` assembly for the implemented subset; assembly and linking still use `clang`.
 - Curated LLVM/Clang fixture metadata is pinned in `tests/external/clang/manifest.json`.

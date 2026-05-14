@@ -1566,6 +1566,40 @@ class PreprocessorTests(unittest.TestCase):
             result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main))
         self.assertEqual(result.source, "\nint from_once;\n")
 
+    def test_import_skips_second_include_of_same_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "imported.h").write_text("int from_import;\n", encoding="utf-8")
+            source_path = root / "main.c"
+            source_path.write_text('#import "imported.h"\n#import "imported.h"\n', encoding="utf-8")
+            result = preprocess_source(
+                source_path.read_text(encoding="utf-8"), filename=str(source_path)
+            )
+        self.assertEqual(result.source, "int from_import;\n")
+
+    def test_import_self_is_silently_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_path = root / "self.c"
+            source_path.write_text(
+                '#import "self.c"\nint self_ok;\n', encoding="utf-8"
+            )
+            result = preprocess_source(
+                source_path.read_text(encoding="utf-8"), filename=str(source_path)
+            )
+        self.assertIn("int self_ok;", result.source)
+
+    def test_import_guards_against_later_include(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "guard.h").write_text("int guarded;\n", encoding="utf-8")
+            source_path = root / "main.c"
+            source_path.write_text('#import "guard.h"\n#include "guard.h"\n', encoding="utf-8")
+            result = preprocess_source(
+                source_path.read_text(encoding="utf-8"), filename=str(source_path)
+            )
+        self.assertEqual(result.source, "int guarded;\n")
+
     def test_include_quoted_from_source_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2078,6 +2112,17 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(
             ctx.exception.args[0],
             f'Forced include not found: "missing.h"; searched: {Path.cwd().resolve()} at <command line>:1:1',
+        )
+
+    def test_import_not_found(self) -> None:
+        options = FrontendOptions(no_standard_includes=True)
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source('#import "missing.h"\n', filename="main.c", options=options)
+        self.assertEqual(ctx.exception.code, "XCC-PP-0102")
+        self.assertEqual((ctx.exception.filename, ctx.exception.line), ("main.c", 1))
+        self.assertEqual(
+            ctx.exception.args[0],
+            f'Import not found: "missing.h"; searched: {Path.cwd().resolve()} at main.c:1:1',
         )
 
     def test_include_not_found(self) -> None:

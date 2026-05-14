@@ -77,6 +77,7 @@ _NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
 _GNU_EXTENSION_TYPES = {
     "_Float16",
+    "__fp16",
     "_Float32",
     "_Float64",
     "_Float128",
