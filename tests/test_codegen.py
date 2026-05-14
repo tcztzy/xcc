@@ -45,6 +45,7 @@ from xcc.codegen import (
     _NativeCodeGenerator,
     _StackSlot,
     generate_native_assembly,
+    native_backend_available,
 )
 from xcc.diag import CodegenError
 from xcc.frontend import FrontendResult, compile_source
@@ -551,3 +552,14 @@ int main(void) {
             ):
                 with self.assertRaisesRegex(CodegenError, "Unsupported native conversion"):
                     generator._coerce_primary(INT, LONG)
+
+    def test_native_backend_available(self) -> None:
+        self.assertIsInstance(native_backend_available(), bool)
+
+    def test_emit_stmt_local_decl_without_init(self) -> None:
+        generator = self._generator()
+        self._enter_function(generator)
+        stmt = DeclStmt(TypeSpec("int"), "x", None)
+        generator._current_layout = _FunctionLayout({}, {id(stmt): _StackSlot(4, INT)}, 0)
+        generator._emit_stmt(stmt)
+        self.assertIn("x", generator._current_scopes[-1])
