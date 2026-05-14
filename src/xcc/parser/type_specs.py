@@ -18,6 +18,7 @@ _GNU_EXTENSION_TYPES = {
     "_Float128",
     "_Float32x",
     "_Float64x",
+    "__bf16",
     "__fp16",
     "__int128_t",
     "__uint128_t",

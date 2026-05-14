@@ -45,6 +45,7 @@ PAREN_TYPE_NAME_KEYWORDS = {
     "__uint128_t",
     "__typeof__",
     "_Float16",
+    "__bf16",
     "__fp16",
     "_Float32",
     "_Float32x",
