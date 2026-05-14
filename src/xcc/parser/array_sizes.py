@@ -301,6 +301,8 @@ def sizeof_type_spec(parser: object, type_spec: TypeSpec) -> int | None:
 def alignof_type_spec(parser: object, type_spec: TypeSpec) -> int | None:
     p = cast(Any, parser)
     if not type_spec.declarator_ops:
+        if type_spec.record_tag is not None or type_spec.enum_tag is not None:
+            return 16  # Conservative: actual alignment computed at codegen
         return _BASE_TYPE_SIZES.get(type_spec.name)
     kind, _ = type_spec.declarator_ops[0]
     if kind == "ptr":
