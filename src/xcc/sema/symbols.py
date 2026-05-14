@@ -4,7 +4,7 @@ from xcc.ast import Expr
 from xcc.types import INT, Type
 
 
-@dataclass(frozen=True)
+@dataclass
 class SemaError(ValueError):
     message: str
 
