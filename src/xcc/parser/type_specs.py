@@ -27,9 +27,12 @@ _GNU_EXTENSION_TYPES = {
     "_Float64x",
     "__bf16",
     "__fp16",
+    "__int128",
+    "__uint128",
     "__int128_t",
     "__uint128_t",
 }
+_GNU_EXTENSION_INT_TYPES = {"__int128", "__uint128", "__int128_t", "__uint128_t"}
 STORAGE_CLASS_KEYWORDS = {"auto", "register", "static", "extern", "typedef"}
 FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
@@ -302,6 +305,12 @@ def parse_integer_type_spec(
             return
         raise ParserError(invalid_order(keyword, current_base=base), token)
 
+    def _consume_gnu_int_type(token: Token) -> str | None:
+        assert isinstance(token.lexeme, str)
+        if token.lexeme in _GNU_EXTENSION_INT_TYPES:
+            return str(token.lexeme)
+        return None
+
     consume(first_keyword, first_token)
     while p._current().kind == TokenKind.KEYWORD:
         token = p._current()
@@ -310,6 +319,12 @@ def parse_integer_type_spec(
             break
         p._advance()
         consume(token.lexeme, token)
+
+    if base is None and p._current().kind == TokenKind.IDENT:
+        gnu_base = _consume_gnu_int_type(p._current())
+        if gnu_base is not None:
+            p._advance()
+            base = gnu_base
 
     if base is None:
         base = "int"
@@ -321,6 +336,8 @@ def parse_integer_type_spec(
         return "unsigned long" if signedness == "unsigned" else "long"
     if base == "long long":
         return "unsigned long long" if signedness == "unsigned" else "long long"
+    if base in _GNU_EXTENSION_INT_TYPES:
+        return f"unsigned {base}" if signedness == "unsigned" else base
     return "unsigned int" if signedness == "unsigned" else "int"
 
 

@@ -31,6 +31,8 @@ from xcc.ast import (
 )
 from xcc.lexer import Token, TokenKind
 
+from .type_specs import _GNU_EXTENSION_TYPES
+
 FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 _EXTENSION_MARKER = "__extension__"
@@ -41,6 +43,8 @@ PAREN_TYPE_NAME_KEYWORDS = {
     "_Atomic",
     "_Bool",
     "_Complex",
+    "__int128",
+    "__uint128",
     "__int128_t",
     "__uint128_t",
     "__typeof__",
@@ -252,7 +256,10 @@ def is_parenthesized_type_name_start(parser: object) -> bool:
     if token.kind == TokenKind.KEYWORD:
         return str(token.lexeme) in PAREN_TYPE_NAME_KEYWORDS
     if token.kind == TokenKind.IDENT and isinstance(token.lexeme, str):
-        return parser._is_typedef_name(token.lexeme)  # type: ignore[attr-defined]
+        return (
+            parser._is_typedef_name(token.lexeme)  # type: ignore[attr-defined]
+            or token.lexeme in _GNU_EXTENSION_TYPES
+        )
     return False
 
 
