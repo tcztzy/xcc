@@ -388,6 +388,7 @@ def parse_enum_member(parser: object) -> tuple[str, Expr | None]:
     p = cast(Any, parser)
     token = p._expect(TokenKind.IDENT)
     assert isinstance(token.lexeme, str)
+    p._skip_decl_attributes()
     if not p._check_punct("="):
         return token.lexeme, None
     p._advance()

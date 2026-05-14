@@ -219,6 +219,7 @@ def parse_direct_declarator(
         token = p._advance()
         assert isinstance(token.lexeme, str)
         name = token.lexeme
+        p._skip_decl_attributes()
         ops = ()
     elif p._check_punct("("):
         p._advance()
