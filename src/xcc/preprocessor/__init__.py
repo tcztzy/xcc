@@ -394,6 +394,7 @@ class PreprocessResult:
     line_map: tuple[tuple[str, int], ...]
     include_trace: tuple[str, ...]
     macro_table: tuple[str, ...]
+    embed_used: bool
 
 
 def preprocess_source(
@@ -415,6 +416,7 @@ def preprocess_source(
         processed.line_map,
         tuple(processor.include_trace),
         tuple(_macro_table_line(macro) for _, macro in sorted(processor.macro_table.items())),
+        processor._embed_used,
     )
 
 
@@ -427,6 +429,7 @@ class _Preprocessor:
         self._timestamp_literal = _quote_string_literal(_format_timestamp_macro(translation_start))
         self._counter = 0
         self._base_filename = "<input>"
+        self._embed_used = False
         self._macros: dict[str, _Macro] = {}
         for define in _PREDEFINED_MACROS:
             macro = self._parse_cli_define(define)
@@ -751,6 +754,7 @@ class _Preprocessor:
         *,
         base_dir: Path | None,
     ) -> _ProcessedText:
+        self._embed_used = True
         _parse_embed_body = _includes._parse_embed_body
         # Try direct parse first (for literal <file> or "file"), then
         # macro-expand (for __FILE__ etc.), matching #include behavior.

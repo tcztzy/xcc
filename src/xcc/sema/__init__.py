@@ -130,8 +130,9 @@ _FLOAT_COMPARE_BUILTINS = (
 
 
 class Analyzer:
-    def __init__(self, *, std: StdMode = "c11") -> None:
+    def __init__(self, *, std: StdMode = "c11", excess_init_ok: bool = False) -> None:
         self._std = std
+        self._excess_init_ok = excess_init_ok
         self._functions: dict[str, FunctionSymbol] = {}
         self._type_map = TypeMap()
         self._function_signatures: dict[str, FunctionSignature] = {}
@@ -1031,5 +1032,5 @@ class Analyzer:
         return type_.decay_parameter_type()
 
 
-def analyze(unit: TranslationUnit, *, std: StdMode = "c11") -> SemaUnit:
-    return Analyzer(std=std).analyze(unit)
+def analyze(unit: TranslationUnit, *, std: StdMode = "c11", excess_init_ok: bool = False) -> SemaUnit:
+    return Analyzer(std=std, excess_init_ok=excess_init_ok).analyze(unit)

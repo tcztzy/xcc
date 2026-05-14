@@ -112,9 +112,9 @@ def analyze_array_initializer_list(
             next_index = index + 1
             continue
         if next_index >= length:
-            # Excess initializer elements are permitted (warning, not error).
-            # Skip the remaining items silently.
-            continue
+            if analyzer._excess_init_ok:  # type: ignore[attr-defined]
+                continue
+            raise SemaError("Initializer index out of range")
         analyzer._analyze_initializer(element_type, item.initializer, scope)  # type: ignore[attr-defined]
         next_index += 1
 
@@ -180,9 +180,9 @@ def analyze_record_initializer_list(
             initialized_union = True
             continue
         if next_member >= len(members):
-            # Excess initializer elements for structs are permitted
-            # (warning, not error). Skip silently.
-            continue
+            if analyzer._excess_init_ok:  # type: ignore[attr-defined]
+                continue
+            raise SemaError("Initializer type mismatch")
         analyzer._analyze_initializer(members[next_member].type_, item.initializer, scope)  # type: ignore[attr-defined]
         next_member += 1
 
