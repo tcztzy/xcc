@@ -309,6 +309,139 @@ class FrontendTests(unittest.TestCase):
         self.assertEqual(format_token(result.tokens[0]), "1:1\tKEYWORD\tint")
         self.assertEqual(format_token(result.tokens[-1]), "1:22\tEOF")
 
+    def test_printf_format_int_mismatch(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%zu", (double)42); }'
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(source)
+        self.assertEqual(ctx.exception.diagnostic.stage, "sema")
+        self.assertIn("format specifies type", ctx.exception.diagnostic.message)
+        self.assertIn("double", ctx.exception.diagnostic.message)
+
+    def test_printf_format_int_valid(self) -> None:
+        source = (
+            "int printf(const char *, ...);"
+            "typedef unsigned long size_t;"
+            "void f(void) { printf(\"%zu\", (size_t)0); }"
+        )
+        compile_source(source)
+
+    def test_printf_format_float_mismatch(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%f", (int)42); }'
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(source)
+        self.assertEqual(ctx.exception.diagnostic.stage, "sema")
+        self.assertIn("floating-point", ctx.exception.diagnostic.message)
+
+    def test_printf_format_float_valid(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%f", 3.14); }'
+        compile_source(source)
+
+    def test_printf_format_char_valid(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%c", 65); }'
+        compile_source(source)
+
+    def test_printf_format_char_mismatch(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%c", 3.14); }'
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(source)
+        self.assertIn("integer", ctx.exception.diagnostic.message)
+
+    def test_printf_format_string_valid(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%s", "hello"); }'
+        compile_source(source)
+
+    def test_printf_format_string_mismatch(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%s", 42); }'
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(source)
+        self.assertIn("pointer to char", ctx.exception.diagnostic.message)
+
+    def test_printf_format_pointer_valid(self) -> None:
+        source = 'int printf(const char *, ...); void f(int *p) { printf("%p", (void*)0); }'
+        compile_source(source)
+
+    def test_printf_format_pointer_mismatch(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%p", 42); }'
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(source)
+        self.assertIn("pointer", ctx.exception.diagnostic.message)
+
+    def test_printf_format_writeback_valid(self) -> None:
+        source = 'int printf(const char *, ...); void f(int *p) { printf("%n", p); }'
+        compile_source(source)
+
+    def test_printf_format_writeback_mismatch(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%n", 42); }'
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(source)
+        self.assertIn("pointer to integer", ctx.exception.diagnostic.message)
+
+    def test_printf_format_all_specs_valid(self) -> None:
+        source = (
+            "int printf(const char *, ...);"
+            "typedef unsigned long size_t;"
+            "void f(int *p, double d, char *s) {"
+            "  printf(\"%d %i %u %o %x %f %e %g %a %c %s %p %n %zu %jd %ju %td\","
+            "         1, 2, 3U, 4, 5, d, d, d, d, 'x', s, (void*)0, p, (size_t)0,"
+            "         1L, 2UL, 3L);"
+            "}"
+        )
+        compile_source(source)
+
+    def test_printf_non_literal_format_skips_check(self) -> None:
+        source = 'int printf(const char *, ...); void f(const char *fmt) { printf(fmt, 42); }'
+        compile_source(source)
+
+    def test_printf_percent_escape(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%% no args"); }'
+        compile_source(source)
+
+    def test_printf_format_with_flags_width_precision_length(self) -> None:
+        source = (
+            "int printf(const char *, ...);"
+            "void f(int i, double d) {"
+            "  printf(\"%-5d %+d % d %#x %04d %5d %.5f %hd %ld %lld %Lf\","
+            "         i, i, i, i, i, i, d, (short)i, 1L, 2LL, (long double)d);"
+            "}"
+        )
+        compile_source(source)
+
+    def test_printf_format_trailing_percent(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("trailing %"); }'
+        compile_source(source)
+
+    def test_printf_format_precision_star(self) -> None:
+        source = 'int printf(const char *, ...); void f(int w, int p, double d) { printf("%*.*f", w, p, d); }'
+        compile_source(source)
+
+    def test_printf_format_ll_length(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%lld", 1LL); }'
+        compile_source(source)
+
+    def test_printf_format_L_length(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%Lf", 1.0L); }'
+        compile_source(source)
+
+    def test_printf_format_string_wrong_pointee(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%s", (int*)0); }'
+        with self.assertRaises(FrontendError) as ctx:
+            compile_source(source)
+        self.assertIn("pointer to char", ctx.exception.diagnostic.message)
+
+    def test_printf_format_more_specs_than_args(self) -> None:
+        source = 'int printf(const char *, ...); void f(void) { printf("%d %d", 1); }'
+        compile_source(source)
+
+    def test_printf_every_parser_feature(self) -> None:
+        source = (
+            "int printf(const char *, ...);"
+            "void f(int i, char *s, double d) {"
+            "  printf(\"%% %-5d %+d % d %#x %04d %5d %.5f %hd %ld %lld %Lf %hhx %hhd %c %s %p %n\","
+            "         i, i, i, i, i, i, d, (short)i, 1L, 2LL, (long double)d, (char)i, (char)i, 'x', s, (void*)0, &i);"
+            "}"
+        )
+        compile_source(source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,7 @@ from xcc.clang_suite import (
     case_id_from_upstream_path,
 )
 from xcc.frontend import FrontendError, compile_source
+from xcc.options import FrontendOptions
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "tests/external/clang/manifest.json"
@@ -133,16 +134,25 @@ class ClangSuiteTests(unittest.TestCase):
                     self.assertIsInstance(case[SKIP_REASON_KEY], str)
                     self.assertNotEqual(case[SKIP_REASON_KEY], "")
 
+    _STUBS_DIR = str(ROOT / "tests/external/clang/stubs")
+
+    def _compile_options(self) -> FrontendOptions:
+        return FrontendOptions(
+            no_standard_includes=True,
+            system_include_dirs=(self._STUBS_DIR,),
+        )
+
     def _assert_case_matches_expectation(self, case: dict[str, Any]) -> None:
         expectation = case["expect"]
         fixture = ROOT / case["fixture"]
         source = fixture.read_text(encoding="utf-8")
         self.assertIn(expectation, ALLOWED_EXPECTATIONS)
+        opts = self._compile_options()
         if expectation == "ok":
-            compile_source(source, filename=str(fixture))
+            compile_source(source, filename=str(fixture), options=opts)
             return
         with self.assertRaises(FrontendError) as ctx:
-            compile_source(source, filename=str(fixture))
+            compile_source(source, filename=str(fixture), options=opts)
         diagnostic = ctx.exception.diagnostic
         if expectation != "error":
             self.assertEqual(diagnostic.stage, expectation)

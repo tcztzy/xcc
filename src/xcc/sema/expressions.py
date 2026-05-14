@@ -28,6 +28,7 @@ from xcc.ast import (
 )
 from xcc.types import CHAR, INT, ULONG, VOID, Type
 
+from .format_checking import check_printf_format
 from .symbols import EnumConstSymbol, Scope, SemaError
 
 
@@ -572,6 +573,13 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
                     scope,
                     default=signature,
                 )
+                if expr.callee.name == "printf" and expr.args:
+                    check_printf_format(
+                        self,
+                        expr.args[0],
+                        expr.args[1:],
+                        scope,
+                    )
                 self._type_map.set(expr, signature.return_type)
                 return signature.return_type
             symbol = scope.lookup(expr.callee.name)
@@ -603,6 +611,15 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
             None,
             scope,
         )
+        if (
+            isinstance(expr.callee, Identifier) and expr.callee.name == "printf" and expr.args
+        ):  # pragma: no cover
+            check_printf_format(
+                self,
+                expr.args[0],
+                expr.args[1:],
+                scope,
+            )
         self._type_map.set(expr, return_type)
         return return_type
     node_name = type(expr).__name__
