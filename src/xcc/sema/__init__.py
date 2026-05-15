@@ -288,6 +288,24 @@ class Analyzer:
         _INTEGER_BUILTINS = (
             "__builtin_bswap32",
             "__builtin_bswap64",
+            # GCC count-leading/trailing-zeros and bit-scan builtins
+            "__builtin_clz",
+            "__builtin_clzl",
+            "__builtin_clzll",
+            "__builtin_ctz",
+            "__builtin_ctzl",
+            "__builtin_ctzll",
+            "__builtin_ffs",
+            "__builtin_ffsl",
+            "__builtin_ffsll",
+            "__builtin_popcount",
+            "__builtin_popcountl",
+            "__builtin_popcountll",
+            # GCC overflow-checking and alignment builtins
+            "__builtin_umul_overflow",
+            "__builtin_umull_overflow",
+            "__builtin_umulll_overflow",
+            "__builtin_assume_aligned",
         )
         _int_sig = FunctionSignature(return_type=INT, params=None, is_variadic=True)
         for name in _INTEGER_BUILTINS:

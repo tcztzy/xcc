@@ -87,7 +87,7 @@ def is_compatible_nonvoid_object_pointer_pair(
     if left_pointee is None or right_pointee is None:
         return False
     if left_pointee.name == VOID.name or right_pointee.name == VOID.name:
-        return False
+        return getattr(analyzer, "_std", "c11") == "gnu11"
     if left_pointee.declarator_ops and left_pointee.declarator_ops[0][0] == "fn":
         return False
     if right_pointee.declarator_ops and right_pointee.declarator_ops[0][0] == "fn":
