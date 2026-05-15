@@ -50,6 +50,20 @@ def process_text(
                 inner_stack: list[_ConditionalFrame] = []
                 expanded = None
                 while expanded is None:
+                    # Phase 2: splice backslash-newline continuations before
+                    # each macro expansion attempt, so that string literals
+                    # spanning physical lines are joined correctly.
+                    while line_index + len(all_lines) < len(lines):
+                        joined_check = "".join(text_parts)
+                        if not joined_check.rstrip().endswith("\\"):
+                            break
+                        next_line = lines[line_index + len(all_lines)]
+                        # Delete the backslash-newline: remove \ from the
+                        # current last part and merge with the next line.
+                        # The output will show both lines concatenated,
+                        # and continuation lines are blanked separately.
+                        text_parts[-1] = text_parts[-1].rstrip()[:-1] + next_line
+                        all_lines.append(next_line)
                     joined = "".join(text_parts)
                     try:
                         expanded = self._expand_line(joined, location)

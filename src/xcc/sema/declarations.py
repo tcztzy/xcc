@@ -1,6 +1,6 @@
 from typing import Any, cast
 
-from xcc.ast import DeclGroupStmt, DeclStmt, StaticAssertDecl, Stmt, TypedefDecl
+from xcc.ast import DeclGroupStmt, DeclStmt, NullStmt, StaticAssertDecl, Stmt, TypedefDecl
 from xcc.types import Type
 
 from .symbols import SemaError, VarSymbol
@@ -125,6 +125,8 @@ def analyze_file_scope_decl(analyzer: object, declaration: Stmt) -> None:
     if isinstance(declaration, StaticAssertDecl):
         a._check_static_assert(declaration, a._file_scope)
         return
+    if isinstance(declaration, NullStmt):
+        return  # Empty statement at file scope: nothing to do
     raise SemaError(
         "Unsupported file-scope declaration node: "
         f"{type(declaration).__name__} (internal sema bug: unexpected AST "

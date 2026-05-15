@@ -534,6 +534,7 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         value_type = self._decay_array_value(self._analyze_expr(expr.value, scope))
         if target_type.is_array():
             raise SemaError("Assignment target is not assignable")
+            raise SemaError("Assignment target is not assignable")
         if expr.op == "=":
             if not self._is_assignment_expr_compatible(
                 target_type,

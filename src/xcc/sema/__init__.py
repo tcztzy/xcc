@@ -31,6 +31,8 @@ from xcc.types import (
     Type,
 )
 
+VOID_PTR = Type("void", pointer_depth=1)
+
 from . import type_resolution as _type_resolution
 from .calls import check_call_arguments
 from .constants import (
@@ -301,15 +303,25 @@ class Analyzer:
             "__builtin_popcount",
             "__builtin_popcountl",
             "__builtin_popcountll",
-            # GCC overflow-checking and alignment builtins
+            # GCC overflow-checking builtins (return bool/int)
             "__builtin_umul_overflow",
             "__builtin_umull_overflow",
             "__builtin_umulll_overflow",
-            "__builtin_assume_aligned",
         )
         _int_sig = FunctionSignature(return_type=INT, params=None, is_variadic=True)
         for name in _INTEGER_BUILTINS:
             self._function_signatures[name] = _int_sig
+        # __builtin_assume_aligned returns the same pointer type as its
+        # first argument. Register it separately with a void* signature
+        # so that void *p = __builtin_assume_aligned(q, N) type-checks.
+        self._function_signatures["__builtin_assume_aligned"] = FunctionSignature(
+            return_type=VOID_PTR, params=None, is_variadic=True
+        )
+        # __builtin_frame_address / __builtin_return_address return void*
+        for name in ("__builtin_frame_address", "__builtin_return_address"):
+            self._function_signatures[name] = FunctionSignature(
+                return_type=VOID_PTR, params=None, is_variadic=True
+            )
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]

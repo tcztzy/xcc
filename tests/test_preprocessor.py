@@ -4303,6 +4303,25 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("prefix_add", result.source)
         self.assertIn("( ( 3 ) + ( 4 ) )", result.source)
 
+    def test_backslash_newline_splicing_in_string_literal(self) -> None:
+        """Backslash-newline in a string literal is spliced before expansion."""
+        result = preprocess_source(
+            '"hello\\\n world"\n',
+            filename="splice.c",
+        )
+        self.assertIn('"hello world"', result.source)
+        self.assertNotIn("\\\n", result.source)
+
+    def test_backslash_newline_splicing_in_macro_argument(self) -> None:
+        """Backslash-newline inside a macro argument is spliced."""
+        result = preprocess_source(
+            "#define ECHO(x) x\n"
+            'ECHO("hello\\\n world")\n',
+            filename="splice_macro.c",
+        )
+        self.assertIn('"hello world"', result.source)
+        self.assertNotIn("\\\n", result.source)
+
 
 if __name__ == "__main__":
     unittest.main()

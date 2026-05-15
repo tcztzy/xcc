@@ -3491,6 +3491,12 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_null_stmt_at_file_scope_is_ignored(self) -> None:
+        """Empty statements (lone ';') at file scope should be ignored."""
+        unit = parse(list(lex("; int main(){return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_file_scope_multi_declarator_declaration_ok(self) -> None:
         source = "int x=1, y=2; int main(){return x+y;}"
         unit = parse(list(lex(source)))

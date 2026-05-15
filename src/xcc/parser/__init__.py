@@ -21,6 +21,7 @@ from xcc.ast import (
     IfStmt,
     InitList,
     LabelStmt,
+    NullStmt,
     Param,
     RecordMemberDecl,
     ReturnStmt,
@@ -644,6 +645,11 @@ class Parser:
         self._skip_extension_markers()
         if self._check_keyword("_Static_assert") or self._is_static_assert_ident():
             return self._parse_static_assert_decl()
+        # Empty declaration: lone ';' at file scope (e.g. trailing semicolon
+        # after a macro-generated function body).
+        if self._current().lexeme == ";":
+            self._advance()
+            return NullStmt()
         decl_specs = self._consume_decl_specifiers()
         is_typedef = decl_specs.is_typedef
         if is_typedef and decl_specs.alignment is not None:

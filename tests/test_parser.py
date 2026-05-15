@@ -2000,11 +2000,13 @@ class ParserTests(unittest.TestCase):
         )
 
     def test_unsupported_declaration_type_punctuator_reports_semicolon_message(self) -> None:
+        # A lone ';' at file scope is accepted as an empty statement (NullStmt).
+        # The remaining "value;" still triggers an error since "value" is not a type.
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("; value;")))
         self.assertEqual(
             ctx.exception.message,
-            "Declaration type is missing before ';'",
+            "Unknown declaration type name: 'value'",
         )
 
     def test_unsupported_declaration_type_punctuator_reports_left_brace_message(self) -> None:
