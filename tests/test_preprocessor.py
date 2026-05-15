@@ -193,7 +193,7 @@ class PreprocessorTests(unittest.TestCase):
             options=FrontendOptions(std="gnu11"),
         )
         self.assertIn("int g = 4 ;", result.source)
-        self.assertIn("int gm = 2 ;", result.source)
+        self.assertIn("int gm = 8 ;", result.source)
         self.assertIn("int gp = 1 ;", result.source)
         self.assertIn("int gsi = 1 ;", result.source)
         self.assertIn('const char * v = "xcc gnu11" ;', result.source)

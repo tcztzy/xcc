@@ -124,15 +124,14 @@ def _strip_gnu_asm_extensions(source: str) -> str:
             if ";" in line:
                 in_asm_statement = False
             continue
-        # Strip __asm("name") function attributes first, then handle
-        # inline asm statements.  This preserves the trailing ';' on
-        # declarations like:
-        #   size_t wcsftime(...) __asm("_wcsftime");
-        stripped = _ASM_LABEL_RE.sub("", line)
-        if _ASM_PREFIX_RE.match(stripped):
+        # Check for asm statements first (line starts with asm keyword).
+        # Label stripping happens afterward so that declarations with
+        # __asm("name") attributes keep their trailing semicolon.
+        if _ASM_PREFIX_RE.match(line):
             stripped_lines.append(_blank_line(line))
-            in_asm_statement = ";" not in stripped
+            in_asm_statement = ";" not in line
             continue
+        stripped = _ASM_LABEL_RE.sub("", line)
         stripped_lines.append(stripped)
     return "".join(stripped_lines)
 
