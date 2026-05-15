@@ -5345,6 +5345,29 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(members), 1)
         self.assertEqual(members[0].name, "x")
 
+    def test_constexpr_as_leading_qualifier(self) -> None:
+        """constexpr followed by type keyword is consumed as qualifier."""
+        unit = parse(
+            list(lex("constexpr int x;")),
+            std="c11",
+        )
+        self.assertEqual(unit.declarations[0].name, "x")
+        self.assertIn("const", unit.declarations[0].type_spec.qualifiers)
+
+    def test_constexpr_before_semicolon_in_qualifier_consume(self) -> None:
+        """constexpr followed by ; reaches break in consume_type_qualifiers."""
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("constexpr;")), std="c11")
+        self.assertIn("Unknown declaration type", ctx.exception.message)
+
+    def test_constexpr_after_type_keyword_is_qualifier(self) -> None:
+        """constexpr after type keyword skipped by skip_type_qualifiers."""
+        unit = parse(
+            list(lex("int constexpr x;")),
+            std="c11",
+        )
+        self.assertEqual(unit.declarations[0].name, "x")
+
 
 if __name__ == "__main__":
     unittest.main()

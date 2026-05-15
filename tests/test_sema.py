@@ -6123,6 +6123,63 @@ class SemaTests(unittest.TestCase):
             )
             self.assertIsNotNone(result)
 
+    def test_struct_member_as_vla_size_no_folding(self) -> None:
+        """Struct member access without const folding flag."""
+        source = (
+            "struct S { int a; };\n"
+            "const struct S s = {10};\n"
+            "void f(void) {\n"
+            "    int x[s.a];\n"
+            "    (void)x;\n"
+            "}\n"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_const_struct_member_in_static_assert(self) -> None:
+        """Const struct member access evaluated in static_assert."""
+        source = (
+            "struct S { int a; int b; };\n"
+            "const struct S s = {5, 10};\n"
+            '_Static_assert(s.b == 10, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_forward_declared_record_member_init(self) -> None:
+        """Forward-declared struct with no members triggers empty members path."""
+        source = (
+            "struct S;\n"
+            "struct S { int a; };\n"
+            "struct S s = {5};\n"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_extern_identifier_sizeof_in_static_assert(self) -> None:
+        """sizeof(extern_var) in static_assert with type not in map."""
+        source = (
+            "extern int x;\n"
+            '_Static_assert(sizeof(x) == sizeof(int), "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_two_dimensional_array_subscript_static_assert(self) -> None:
+        """2D array subscript in static_assert hits nested init list path."""
+        source = (
+            "const int arr[2][2] = {{1, 2}, {3, 4}};\n"
+            '_Static_assert(arr[0][0] == 1, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

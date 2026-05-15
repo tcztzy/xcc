@@ -642,6 +642,9 @@ def skip_type_qualifiers(parser: object, *, allow_atomic: bool = False) -> bool:
                 nxt = p._peek()
                 if nxt.kind == TokenKind.PUNCTUATOR and nxt.lexeme in {";", ",", "="}:
                     break
+                found = True
+                p._advance()
+                continue
             found = True
             p._advance()
             continue
