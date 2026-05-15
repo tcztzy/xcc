@@ -2,6 +2,7 @@ from typing import Any, cast
 
 from xcc.ast import (
     BreakStmt,
+    CallExpr,
     CaseStmt,
     CompoundStmt,
     ContinueStmt,
@@ -13,6 +14,7 @@ from xcc.ast import (
     ExprStmt,
     ForStmt,
     GotoStmt,
+    Identifier,
     IfStmt,
     IndirectGotoStmt,
     LabelStmt,
@@ -27,6 +29,14 @@ from xcc.ast import (
 from xcc.types import VOID, Type
 
 from .symbols import Scope, SemaError, SwitchContext, VarSymbol
+
+
+def _is_call_to_generic_builtin(analyzer: object, expr: Expr) -> bool:
+    """Check if expr is a call to a builtin with params=None (generic return)."""
+    if not isinstance(expr, CallExpr) or not isinstance(expr.callee, Identifier):
+        return False
+    sig = analyzer._function_signatures.get(expr.callee.name)  # type: ignore[attr-defined]
+    return sig is not None and sig.params is None
 
 
 def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) -> None:
@@ -125,7 +135,11 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
             value_type,
             scope,
         ):
-            raise SemaError("Return value is not compatible with function return type")
+            # Allow type mismatch for generic-return builtins (params=None
+            # means the builtin's return type is a placeholder that should
+            # match whatever the calling function expects).
+            if not _is_call_to_generic_builtin(a, stmt.value):
+                raise SemaError("Return value is not compatible with function return type")
         return
     if isinstance(stmt, ForStmt):
         inner_scope = Scope(scope)

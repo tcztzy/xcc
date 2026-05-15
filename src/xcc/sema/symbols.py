@@ -42,6 +42,7 @@ class FunctionSignature:
     return_type: Type
     params: tuple[Type, ...] | None
     is_variadic: bool
+    generic_return: bool = False
 
 
 @dataclass(frozen=True)

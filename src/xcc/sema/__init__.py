@@ -251,8 +251,6 @@ class Analyzer:
             "__builtin_inf",
             "__builtin_inff",
             "__builtin_infl",
-            "__builtin_bswap32",
-            "__builtin_bswap64",
             "__builtin_nan",
             "__builtin_nanf",
             "__builtin_nanl",
@@ -269,6 +267,15 @@ class Analyzer:
         _math_sig = FunctionSignature(return_type=DOUBLE, params=None, is_variadic=True)
         for name in _MATH_BUILTINS:
             self._function_signatures[name] = _math_sig
+
+        # Integer-returning builtins
+        _INTEGER_BUILTINS = (
+            "__builtin_bswap32",
+            "__builtin_bswap64",
+        )
+        _int_sig = FunctionSignature(return_type=INT, params=None, is_variadic=True)
+        for name in _INTEGER_BUILTINS:
+            self._function_signatures[name] = _int_sig
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]
