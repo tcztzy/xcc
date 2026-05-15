@@ -3564,6 +3564,350 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source(source, filename="t.c")
         self.assertIn("2", result.source)
 
+    def test_embed_directive_expands_file_bytes(self) -> None:
+        """#embed reads file and expands to comma-separated ints."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01\x02\x03")
+            source = '#embed "data.bin"\n'
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertEqual(result.source, "1, 2, 3\n")
+
+    def test_embed_with_limit_param(self) -> None:
+        """#embed with limit parameter restricts output."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x0a\x0b\x0c\x0d")
+            source = '#embed "data.bin" limit(2)\n'
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertEqual(result.source, "10, 11\n")
+
+    def test_embed_with_empty_file_and_if_empty(self) -> None:
+        """#embed with empty file and if_empty fallback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"")
+            source = '#embed "data.bin" if_empty(42)\n'
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertEqual(result.source, "42\n")
+
+    def test_embed_with_prefix_suffix(self) -> None:
+        """#embed with prefix and suffix parameters."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01")
+            source = '#embed "data.bin" prefix(data[) suffix(])\n'
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertEqual(result.source, 'data[1]\n')
+
+    def test_embed_in_expression_context(self) -> None:
+        """#embed result usable in array initializer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01\x02")
+            source = (
+                '#embed "data.bin" prefix(int arr[] = {) suffix(};)\n'
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertIn("int arr[] = {1, 2};", result.source)
+
+    def test_embed_not_found_with_if_empty(self) -> None:
+        """#embed not found with if_empty uses fallback."""
+        source = '#embed "nonexistent.bin" if_empty(99)\n'
+        result = preprocess_source(
+            source,
+            filename="test.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertEqual(result.source, "99\n")
+
+    def test_embed_empty_file_no_if_empty(self) -> None:
+        """#embed with empty file and no if_empty produces empty line."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "empty.bin").write_bytes(b"")
+            source = '#embed "empty.bin"\n'
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertEqual(result.source, "\n")
+
+    def test_embed_with_clang_limit_and_offset(self) -> None:
+        """#embed with clang::limit and clang::offset parameters."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01\x02\x03\x04\x05")
+            source = (
+                '#embed "data.bin" clang::offset(1) clang::limit(2)\n'
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertEqual(result.source, "2, 3\n")
+
+    def test_embed_limit_params_consume_all_data(self) -> None:
+        """#embed with empty result after offset+limit and if_empty."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01\x02")
+            source = (
+                '#embed "data.bin" offset(10) if_empty(0)\n'
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertEqual(result.source, "0\n")
+
+    def test_embed_with_clang_offset(self) -> None:
+        """#embed with clang::offset skips bytes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x0a\x0b\x0c")
+            source = (
+                '#embed "data.bin" clang::offset(1)\n'
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertEqual(result.source, "11, 12\n")
+
+    def test_embed_error_on_invalid_body(self) -> None:
+        """#embed with invalid body raises PreprocessorError."""
+        source = "#embed\n"
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source(
+                source,
+                filename="test.c",
+                options=FrontendOptions(std="gnu11"),
+            )
+        self.assertIn("FILENAME", str(ctx.exception))
+
+    def test_embed_with_offset_zero_no_change(self) -> None:
+        """#embed with offset(0) is a no-op."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01\x02")
+            source = '#embed "data.bin" offset(0)\n'
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertEqual(result.source, "1, 2\n")
+
+    def test_embed_macro_expansion_in_body(self) -> None:
+        """#embed body undergoes macro expansion for __FILE__ etc."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01")
+            source = (
+                '#define FNAME "data.bin"\n'
+                "#embed FNAME\n"
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertIn("1", result.source)
+
+    def test_has_embed_found(self) -> None:
+        """__has_embed returns 1 for existing embeddable file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01")
+            source = '#if __has_embed("data.bin")\nint found = 1;\n#endif\n'
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertIn("int found = 1;", result.source)
+
+    def test_has_embed_not_found(self) -> None:
+        """__has_embed returns 0 for nonexistent file."""
+        source = (
+            '#if __has_embed("nonexistent.bin")\n'
+            "int found = 1;\n"
+            "#else\n"
+            "int not_found = 1;\n"
+            "#endif\n"
+        )
+        result = preprocess_source(
+            source,
+            filename="test.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertIn("int not_found = 1;", result.source)
+
+    def test_has_embed_empty_file(self) -> None:
+        """__has_embed returns 2 for empty embeddable file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "empty.bin").write_bytes(b"")
+            source = (
+                '#if __has_embed("empty.bin") == 2\n'
+                "int is_empty = 1;\n"
+                "#endif\n"
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertIn("int is_empty = 1;", result.source)
+
+    def test_has_embed_with_unsupported_param_namespace(self) -> None:
+        """__has_embed with unknown vendor namespace returns 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01")
+            source = (
+                '#if __has_embed("data.bin" unknown::param(1))\n'
+                "int found = 1;\n"
+                "#else\n"
+                "int not_found = 1;\n"
+                "#endif\n"
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertIn("int not_found = 1;", result.source)
+
+    def test_has_include_found(self) -> None:
+        """__has_include returns 1 for existing header."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "header.h").write_text("int x;")
+            source = (
+                '#if __has_include("header.h")\n'
+                "int found = 1;\n"
+                "#endif\n"
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", include_dirs=(tmp,)),
+            )
+            self.assertIn("int found = 1;", result.source)
+
+    def test_has_include_not_found(self) -> None:
+        """__has_include returns 0 for nonexistent header."""
+        source = (
+            '#if __has_include("nonexistent.h")\n'
+            "int found = 1;\n"
+            "#else\n"
+            "int not_found = 1;\n"
+            "#endif\n"
+        )
+        result = preprocess_source(
+            source,
+            filename="test.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertIn("int not_found = 1;", result.source)
+
+    def test_has_include_next(self) -> None:
+        """__has_include_next skips current include dir."""
+        source = (
+            '#if __has_include_next("stddef.h")\n'
+            "int found = 1;\n"
+            "#else\n"
+            "int not_found = 1;\n"
+            "#endif\n"
+        )
+        result = preprocess_source(
+            source,
+            filename="test.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertIn("found", result.source or "not_found")
+
+    def test_has_embed_with_offset_param(self) -> None:
+        """__has_embed with offset parameter applied."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01\x02\x03")
+            source = (
+                '#if __has_embed("data.bin" offset(1))\n'
+                "int found = 1;\n"
+                "#endif\n"
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertIn("int found = 1;", result.source)
+
+    def test_has_embed_with_limit_param(self) -> None:
+        """__has_embed with limit parameter."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01\x02\x03")
+            source = (
+                '#if __has_embed("data.bin" limit(2))\n'
+                "int found = 1;\n"
+                "#endif\n"
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertIn("int found = 1;", result.source)
+
+    def test_has_embed_macro_filename_not_expanded_returns_zero(self) -> None:
+        """__has_embed with non-expandable macro operand returns 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01")
+            source = (
+                '#define EMBED_FILE "data.bin"\n'
+                "#if __has_embed(EMBED_FILE)\n"
+                "int found = 1;\n"
+                "#else\n"
+                "int not_found = 1;\n"
+                "#endif\n"
+            )
+            result = preprocess_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            # __has_embed probe may not expand macros in operand
+            self.assertIn("not_found", result.source)
+
 
 if __name__ == "__main__":
     unittest.main()

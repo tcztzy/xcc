@@ -761,9 +761,6 @@ class Analyzer:
     def _is_integer_type(self, type_: Type) -> bool:
         return is_integer_type(type_)
 
-    def _is_const_qualified(self, type_: Type) -> bool:
-        return is_const_qualified(type_)
-
     def _is_floating_type(self, type_: Type) -> bool:
         return is_floating_type(type_)
 
@@ -1084,7 +1081,7 @@ class Analyzer:
         return eval_int_constant_expr(self, expr, scope)
 
     def _is_const_qualified(self, type_: Type) -> bool:
-        return "const" in type_.qualifiers
+        return is_const_qualified(type_)
 
     def _infer_array_size_from_init(
         self, initializer: Expr | InitList

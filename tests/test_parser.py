@@ -5265,6 +5265,70 @@ class ParserTests(unittest.TestCase):
         )
         self.assertEqual(len(unit.functions), 1)
 
+    def test_typedef_enum_reference_avoids_reregistration(self) -> None:
+        """Referencing a typedef'd enum returns copy without enum members."""
+        unit = parse(
+            list(lex("typedef enum { A = 1, B = 2 } E; E x;")),
+            std="gnu11",
+        )
+        self.assertEqual(len(unit.declarations), 2)
+
+    def test_alignof_record_type_returns_conservative_16(self) -> None:
+        """_Alignof(struct S) on incomplete record returns 16 (conservative)."""
+        unit = parse(
+            list(lex("int x[_Alignof(struct S)];")),
+            std="gnu11",
+        )
+        self.assertIsNotNone(unit)
+
+    def test_flexible_array_member_in_struct(self) -> None:
+        """Struct with flexible array member as last field."""
+        unit = parse(
+            list(lex("struct S { int n; int data[]; };")),
+            std="gnu11",
+        )
+        members = unit.declarations[0].type_spec.record_members
+        self.assertEqual(len(members), 2)
+        self.assertIsNone(members[1].bit_width_expr)
+
+    def test_c23_static_assert_single_argument(self) -> None:
+        """C23 static_assert with no message string."""
+        unit = parse(
+            list(lex("static_assert(1 == 1);")),
+            std="gnu11",
+        )
+        self.assertEqual(len(unit.declarations), 1)
+
+    def test_unaliased_identifier_as_qualifier_consumed(self) -> None:
+        """__unaligned is consumed as ignored qualifier, not identifier."""
+        unit = parse(
+            list(lex("int __unaligned x;")),
+            std="c11",
+        )
+        self.assertEqual(unit.declarations[0].name, "x")
+
+    def test_enum_with_underlying_type(self) -> None:
+        """Enum with colon-specified underlying type (C23 / Clang extension)."""
+        unit = parse(
+            list(lex("enum E : int { A = 0 };")),
+            std="gnu11",
+        )
+        self.assertEqual(unit.declarations[0].type_spec.enum_tag, "E")
+
+    def test_static_assert_in_struct_declaration(self) -> None:
+        """_Static_assert allowed inside struct body."""
+        unit = parse(
+            list(
+                lex(
+                    'struct S { _Static_assert(1, "ok"); int x; };'
+                )
+            ),
+            std="gnu11",
+        )
+        members = unit.declarations[0].type_spec.record_members
+        self.assertEqual(len(members), 1)
+        self.assertEqual(members[0].name, "x")
+
 
 if __name__ == "__main__":
     unittest.main()

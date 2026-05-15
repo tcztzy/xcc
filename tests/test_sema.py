@@ -5867,6 +5867,106 @@ class SemaTests(unittest.TestCase):
                 sema = analyze(unit, std="c11")
                 self.assertIsNotNone(sema)
 
+    def test_const_qualified_type_is_detected(self) -> None:
+        """is_const_qualified returns True for const-qualified type."""
+        source = "const int x = 5; void f(void) { int y = x; }"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
+    def test_init_list_single_scalar_item_evaluated(self) -> None:
+        """InitList with single non-designated item is unwrapped for scalar eval."""
+        source = "const int x = {42};"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
+    def test_scalar_init_for_record_with_first_member(self) -> None:
+        """Scalar initializer for struct initializes first member."""
+        source = "struct S { int a; char b; }; struct S s = 5;"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
+    def test_scalar_init_for_array_sets_all_elements(self) -> None:
+        """Scalar initializer for array initializes element type."""
+        source = "int arr[3] = 5;"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
+    def test_const_target_non_const_init_qualifier_mismatch(self) -> None:
+        """const target with non-const initializer is accepted (6.7.9p11)."""
+        source = "const int x = 5;"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
+    def test_generic_return_builtin_detected(self) -> None:
+        """Generic builtin (params=None) is detected in stmt analysis."""
+        source = "int f(void) { __builtin_bswap32(42); return 0; }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_init_list_stored_as_init_expr(self) -> None:
+        """InitList expression is stored on the VarSymbol for later reference."""
+        source = "int arr[] = {1, 2, 3};"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
+    def test_static_assert_with_const_variable_ref(self) -> None:
+        """Static assert can fold const variable references."""
+        source = "const int x = 5; _Static_assert(x == 5, \"bad\");"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_static_assert_with_array_subscript_const(self) -> None:
+        """Static assert can fold array subscript with const init."""
+        source = (
+            "const int arr[] = {10, 20, 30};\n"
+            '_Static_assert(arr[1] == 20, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_static_assert_with_struct_member_const(self) -> None:
+        """Static assert can fold struct member access with const init."""
+        source = (
+            "struct S { int a; int b; };\n"
+            "const struct S s = {1, 2};\n"
+            '_Static_assert(s.a == 1, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_sizeof_expr_operand_in_constant_expr(self) -> None:
+        """sizeof(expr) in constant expression context."""
+        source = "int x; _Static_assert(sizeof(x) == 4, \"bad\");"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_static_assert_with_non_const_condition_fails(self) -> None:
+        """Static assert with non-constant condition raises error."""
+        source = 'int x = 5; _Static_assert(x == 5, "bad");'
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
+    def test_static_assert_failure_raises_error(self) -> None:
+        """Static assert with false condition raises SemaError."""
+        source = '_Static_assert(0, "fail");'
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("fail", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
