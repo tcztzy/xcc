@@ -5,7 +5,7 @@
 
 typedef long ssize_t;
 typedef long off_t;
-typedef long time_t;
+/* time_t is defined in <time.h> */
 typedef int pid_t;
 typedef unsigned long dev_t;
 typedef unsigned long ino_t;
