@@ -50,6 +50,12 @@ def register_type_spec(analyzer: object, type_spec: TypeSpec) -> None:
             raise SemaError(self._invalid_record_member_type_message("function"))
         if self._is_invalid_incomplete_record_object_type(member_spec):
             raise SemaError(self._invalid_record_member_type_message("incomplete"))
+        # Anonymous enums inside structs define their members at file scope.
+        # Use the scoped-enum tracking to prevent duplicate definitions when
+        # the same struct is registered multiple times (e.g. via typedef
+        # expansion that re-visits the record type).
+        if member_spec.name == "enum" and member_spec.enum_members:
+            self._define_scoped_enum_members(member_spec, self._file_scope)
         resolved_member_type = self._resolve_type(member_spec)
         bit_width: int | None = None
         if member.bit_width_expr is not None:

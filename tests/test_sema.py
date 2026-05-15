@@ -2983,6 +2983,26 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_anonymous_enum_in_struct_members_visible_at_file_scope(self) -> None:
+        source = (
+            "struct S { enum { A=0, B=1 } tag; int x; };"
+            "int val = A;"
+            "int main(){return 0;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_anonymous_enum_in_nested_struct_ok(self) -> None:
+        source = (
+            "struct Outer { struct Inner { enum { X=5 } e; } in; };"
+            "int val = X;"
+            "int main(){return 0;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_function_call_typemap(self) -> None:
         source = "int add(int a,int b){return a+b;} int main(){return add(1,2);}"
         unit = parse(list(lex(source)))
