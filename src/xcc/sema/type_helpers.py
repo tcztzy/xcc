@@ -209,6 +209,13 @@ def is_pointer_conversion_compatible(target_type: Type, value_type: Type) -> boo
 def is_assignment_compatible(target_type: Type, value_type: Type) -> bool:
     if target_type == value_type:
         return True
+    # Qualifier-only difference for non-pointer/non-array types is compatible
+    # (e.g. const struct S value assigned to struct S target).
+    # Pointer qualifier compatibility is handled by the pointee checks below.
+    if (not target_type.declarator_ops
+            and target_type.name == value_type.name
+            and target_type.declarator_ops == value_type.declarator_ops):
+        return True
     if is_arithmetic_type(target_type) and is_arithmetic_type(value_type):
         return True
     target_pointee = target_type.pointee()

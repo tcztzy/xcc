@@ -3997,6 +3997,14 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment value is not compatible with target type")
 
+    def test_assignment_function_pointer_to_void_pointer_ok_in_gnu_mode(self) -> None:
+        source = (
+            "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; vp=fp; return 0;}"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
     def test_assignment_void_pointer_to_function_pointer_error(self) -> None:
         source = (
             "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; fp=vp; return 0;}"

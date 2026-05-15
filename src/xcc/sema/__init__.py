@@ -322,6 +322,10 @@ class Analyzer:
             self._function_signatures[name] = FunctionSignature(
                 return_type=VOID_PTR, params=None, is_variadic=True
             )
+        for name in ("__builtin_va_start", "__builtin_va_end", "__builtin_va_copy"):
+            self._function_signatures[name] = FunctionSignature(
+                return_type=VOID, params=None, is_variadic=True
+            )
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]
@@ -856,7 +860,13 @@ class Analyzer:
         return is_complete_object_pointer_type(self, type_)
 
     def _is_assignment_compatible(self, target_type: Type, value_type: Type) -> bool:
-        return is_assignment_compatible(target_type, value_type)
+        if is_assignment_compatible(target_type, value_type):
+            return True
+        # In GNU mode, void* can hold function pointers (POSIX requires this).
+        if self._std == "gnu11" and is_void_pointer_type(target_type):
+            if value_type.pointee() is not None:
+                return True
+        return False
 
     def _is_pointer_conversion_compatible(self, target_type: Type, value_type: Type) -> bool:
         return is_pointer_conversion_compatible(target_type, value_type)

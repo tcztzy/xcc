@@ -15,12 +15,6 @@ def is_initializer_compatible(
         return True
     if analyzer._is_assignment_expr_compatible(target_type, init_expr, init_type, scope):  # type: ignore[attr-defined]
         return True
-    # Qualifier-only differences are acceptable for initialization
-    # (e.g. const struct S s = foo() where foo returns struct S).
-    if (not target_type.declarator_ops and not init_type.declarator_ops
-            and target_type.name == init_type.name
-            and target_type.qualifiers != init_type.qualifiers):
-        return True
     return False
 
 
