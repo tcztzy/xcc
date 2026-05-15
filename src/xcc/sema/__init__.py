@@ -327,6 +327,11 @@ class Analyzer:
             self._function_signatures[name] = FunctionSignature(
                 return_type=VOID, params=None, is_variadic=True
             )
+        # POSIX functions used by CPython that may not be in stubs
+        for name in ("clock_gettime", "sysconf"):
+            self._function_signatures[name] = FunctionSignature(
+                return_type=INT, params=None, is_variadic=True
+            )
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]

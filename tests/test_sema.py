@@ -2199,6 +2199,12 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_gnu_void_return_with_value_allowed(self) -> None:
+        source = "void g(void){} void f(void){return g();} int main(){return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
     def test_function_parameters(self) -> None:
         unit = parse(list(lex("int add(int a, int b){return a+b;}")))
         sema = analyze(unit)

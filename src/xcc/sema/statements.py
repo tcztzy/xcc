@@ -127,7 +127,9 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
                 raise SemaError("Non-void function must return a value")
             return
         if return_type is VOID:
-            raise SemaError("Void function should not return a value")
+            if getattr(a, "_std", "c11") != "gnu11":
+                raise SemaError("Void function should not return a value")
+            return
         value_type = a._decay_array_value(a._analyze_expr(stmt.value, scope))
         if not a._is_assignment_expr_compatible(
             return_type,
