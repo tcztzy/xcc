@@ -17,5 +17,7 @@ ssize_t write(int fd, const void *buf, size_t nbyte);
 int close(int fd);
 unsigned int sleep(unsigned int seconds);
 int isatty(int fd);
+int fileno(void *stream);
+long lseek(int fd, long offset, int whence);
 
 #endif

@@ -245,7 +245,7 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         if not self._is_assignable(expr.operand):
             raise SemaError("Assignment target is not assignable")
         operand_type = self._analyze_expr(expr.operand, scope)
-        if self._is_const_qualified(operand_type):
+        if self._is_const_qualified(operand_type) and self._std == "c11":
             raise SemaError("Assignment target is not assignable")
         if operand_type.is_array():
             raise SemaError("Assignment target is not assignable")
@@ -529,7 +529,7 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         if not self._is_assignable(expr.target):
             raise SemaError("Assignment target is not assignable")
         target_type = self._analyze_expr(expr.target, scope)
-        if self._is_const_qualified(target_type):
+        if self._is_const_qualified(target_type) and self._std == "c11":
             raise SemaError("Assignment target is not assignable")
         value_type = self._decay_array_value(self._analyze_expr(expr.value, scope))
         if target_type.is_array():
