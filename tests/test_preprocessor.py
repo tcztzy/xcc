@@ -4281,6 +4281,28 @@ class PreprocessorTests(unittest.TestCase):
             )
             self.assertIn("1", result.source)
 
+    def test_object_like_macro_chain_rescan(self) -> None:
+        """Object-like macro expanding to function-like macro name is re-scanned."""
+        result = preprocess_source(
+            "#define FOO(x) x+1\n#define BAR FOO\nBAR(3)\n",
+            filename="chain.c",
+        )
+        self.assertNotIn("BAR", result.source)
+        self.assertNotIn("FOO", result.source)
+        self.assertIn("3 + 1", result.source)
+
+    def test_function_like_macro_token_paste_rescan(self) -> None:
+        """Token-paste result that forms a function-like macro name is re-scanned."""
+        result = preprocess_source(
+            "#define PASTE(name) prefix_##name\n"
+            "#define prefix_add(x, y) ((x)+(y))\n"
+            "PASTE(add)(3,4)\n",
+            filename="paste.c",
+        )
+        self.assertNotIn("PASTE", result.source)
+        self.assertNotIn("prefix_add", result.source)
+        self.assertIn("( ( 3 ) + ( 4 ) )", result.source)
+
 
 if __name__ == "__main__":
     unittest.main()

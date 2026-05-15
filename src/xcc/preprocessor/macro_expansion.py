@@ -57,6 +57,28 @@ def _expand_macro_tokens(
                 dynamic_macro_resolver=dynamic_macro_resolver,
                 dynamic_macro_names=dynamic_macro_names,
             )
+            # Re-scan: a single-identifier replacement may name another macro
+            # that should be expanded together with the remaining input.
+            # Example: #define MI mi_assert  +  MI(expr) → mi_assert(expr).
+            if (
+                len(replacement) == 1
+                and replacement[0].kind == TokenKind.IDENT
+                and replacement[0].text in macros
+                and replacement[0].text not in next_disabled
+            ):
+                re_input = replacement + tokens[index + 1:]
+                expanded.extend(
+                    _expand_macro_tokens(
+                        re_input,
+                        macros,
+                        std,
+                        location,
+                        disabled=disabled,
+                        dynamic_macro_resolver=dynamic_macro_resolver,
+                        dynamic_macro_names=dynamic_macro_names,
+                    )
+                )
+                return expanded
             expanded.extend(replacement)
             index += 1
             continue
@@ -85,6 +107,25 @@ def _expand_macro_tokens(
             dynamic_macro_resolver=dynamic_macro_resolver,
             dynamic_macro_names=dynamic_macro_names,
         )
+        if (
+            replacement
+            and replacement[-1].kind == TokenKind.IDENT
+            and replacement[-1].text in macros
+            and replacement[-1].text not in next_disabled
+        ):
+            re_input = replacement + tokens[next_index:]
+            expanded.extend(
+                _expand_macro_tokens(
+                    re_input,
+                    macros,
+                    std,
+                    location,
+                    disabled=disabled,
+                    dynamic_macro_resolver=dynamic_macro_resolver,
+                    dynamic_macro_names=dynamic_macro_names,
+                )
+            )
+            return expanded
         expanded.extend(replacement)
         index = next_index
     return expanded

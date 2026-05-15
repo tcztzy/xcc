@@ -202,6 +202,22 @@ class Analyzer:
             "__atomic_signal_fence",
             "__atomic_is_lock_free",
             "__atomic_always_lock_free",
+            # C11 <stdatomic.h> macro names — recognised as builtins because the
+            # ## token-paste re-scan may leave these unexpanded when they are
+            # produced by wrapper macros (e.g. mimalloc's mi_atomic(name)).
+            "atomic_fetch_add_explicit",
+            "atomic_fetch_sub_explicit",
+            "atomic_fetch_and_explicit",
+            "atomic_fetch_or_explicit",
+            "atomic_fetch_xor_explicit",
+            "atomic_fetch_nand_explicit",
+            "atomic_load_explicit",
+            "atomic_store_explicit",
+            "atomic_exchange_explicit",
+            "atomic_compare_exchange_strong_explicit",
+            "atomic_compare_exchange_weak_explicit",
+            "atomic_thread_fence",
+            "atomic_signal_fence",
             # C11 atomic functions (used by <stdatomic.h> and clang's atomic builtins)
             "__c11_atomic_init",
             "__c11_atomic_load",
