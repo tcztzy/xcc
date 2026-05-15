@@ -6200,6 +6200,159 @@ class SemaTests(unittest.TestCase):
             analyze(unit, std="gnu11")
         self.assertIn("not integer constant", str(ctx.exception))
 
+    def test_eval_int_constant_sizeof_expr_without_type_in_map(self) -> None:
+        """_eval_int_constant_expr SizeofExpr without type in map returns None."""
+        from xcc.ast import Identifier, SizeofExpr
+        from xcc.sema.symbols import Scope
+
+        source = "int x;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+        # sizeof(x) where x's expression type wasn't registered in type_map
+        result = analyzer._eval_int_constant_expr(
+            SizeofExpr(expr=Identifier("x"), type_spec=None),
+            analyzer._file_scope,
+        )
+        self.assertIsNone(result)
+
+    def test_eval_int_constant_subscript_non_identifier_base(self) -> None:
+        """_eval_int_constant_expr SubscriptExpr base not Identifier returns None."""
+        from xcc.ast import Identifier, IntLiteral, SubscriptExpr
+        from xcc.sema.symbols import Scope
+
+        source = (
+            "const int arr[3] = {1, 2, 3};\n"
+            '_Static_assert(arr[0] == 1, "ok");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        analyzer = Analyzer(std="gnu11")
+        analyzer.analyze(unit)
+        # Subscript with another SubscriptExpr as base (not Identifier)
+        result = analyzer._eval_int_constant_expr(
+            SubscriptExpr(
+                base=SubscriptExpr(
+                    base=Identifier("arr"),
+                    index=IntLiteral("0"),
+                ),
+                index=IntLiteral("0"),
+            ),
+            analyzer._file_scope,
+        )
+        self.assertIsNone(result)
+
+    def test_lookup_member_in_init_non_record_type(self) -> None:
+        """_lookup_member_in_init with non-record type name returns None."""
+        from xcc.ast import InitItem, InitList, IntLiteral
+        from xcc.types import INT
+
+        source = "int x;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+
+        init_list = InitList(
+            items=(InitItem(designators=(), initializer=IntLiteral("5")),)
+        )
+        result = sema_constants._lookup_member_in_init(
+            analyzer,
+            init_list,
+            INT,
+            "a",
+            analyzer._file_scope,
+        )
+        self.assertIsNone(result)
+
+    def test_lookup_member_in_init_no_members(self) -> None:
+        """_lookup_member_in_init where _record_members returns None."""
+        from xcc.ast import InitItem, InitList, IntLiteral
+
+        # Forward-declared struct is a record name with no members
+        source = "struct S;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+
+        struct_type = analyzer._resolve_type(unit.declarations[0].type_spec)
+        init_list = InitList(
+            items=(InitItem(designators=(), initializer=IntLiteral("5")),)
+        )
+        result = sema_constants._lookup_member_in_init(
+            analyzer,
+            init_list,
+            struct_type,
+            "a",
+            analyzer._file_scope,
+        )
+        self.assertIsNone(result)
+
+    def test_lookup_member_in_init_designated_item(self) -> None:
+        """_lookup_member_in_init with designated item returns None."""
+        from xcc.ast import InitItem, InitList, IntLiteral
+
+        source = (
+            "struct S { int a; int b; };\n"
+            "const struct S s = {5, 10};\n"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        analyzer = Analyzer(std="gnu11")
+        analyzer.analyze(unit)
+
+        init_list = InitList(
+            items=(
+                InitItem(
+                    designators=(("[", IntLiteral("0")),),
+                    initializer=IntLiteral("5"),
+                ),
+            )
+        )
+        result = sema_constants._lookup_member_in_init(
+            analyzer,
+            init_list,
+            analyzer._resolve_type(unit.declarations[0].type_spec),
+            "a",
+            analyzer._file_scope,
+        )
+        self.assertIsNone(result)
+
+    def test_qualifier_only_mismatch_is_initializer_compatible(self) -> None:
+        """is_initializer_compatible returns True for qualifier-only diff."""
+        from xcc.ast import IntLiteral
+        from xcc.types import INT, Type
+        from xcc.sema.symbols import Scope
+
+        source = "int x;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+
+        const_int = Type("int", qualifiers=("const",))
+        result = sema_initializers.is_initializer_compatible(
+            analyzer,
+            const_int,  # target: const int
+            IntLiteral("5"),  # init expression
+            INT,  # init type: int (non-const)
+            analyzer._file_scope,
+        )
+        self.assertTrue(result)
+
+    def test_analyze_initializer_empty_record_members(self) -> None:
+        """analyze_initializer with record type having no members."""
+        from xcc.ast import IntLiteral
+
+        source = "struct S;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+
+        struct_type = analyzer._resolve_type(unit.declarations[0].type_spec)
+        sema_initializers.analyze_initializer(
+            analyzer,
+            struct_type,
+            IntLiteral("5"),
+            analyzer._file_scope,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
