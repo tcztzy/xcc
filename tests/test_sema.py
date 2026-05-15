@@ -6180,6 +6180,26 @@ class SemaTests(unittest.TestCase):
             analyze(unit, std="gnu11")
         self.assertIn("not integer constant", str(ctx.exception))
 
+    def test_sizeof_expr_global_array_size_vla_error(self) -> None:
+        """sizeof(expr) as global array size without type in map — VLA error."""
+        source = "int x; int arr[sizeof(x)];"
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("Variable length array", str(ctx.exception))
+
+    def test_subscript_on_non_identifier_base_static_assert(self) -> None:
+        """SubscriptExpr base not an Identifier can't be constant-evaluated."""
+        source = (
+            "const int arr[3] = {1, 2, 3};\n"
+            "int *p = (int *)arr;\n"
+            '_Static_assert(p[0] == 1, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
