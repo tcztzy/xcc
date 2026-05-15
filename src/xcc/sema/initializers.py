@@ -43,24 +43,20 @@ def analyze_initializer(
         if element_type is not None:
             analyzer._analyze_initializer(element_type, initializer, scope)  # type: ignore[attr-defined]
             return
-    # In GNU mode, allow implicit pointer↔integer and cross-pointer
-    # initializer conversions (GCC accepts these with a warning).
+    # In GNU mode, allow pointer↔integer and cross-pointer initializer
+    # conversions (GCC -fpermissive).  At least one side must be a pointer.
     if getattr(analyzer, "_std", "c11") == "gnu11":
-        # A type is a pointer if the first declarator op is "ptr" or its
-        # pointee is non-None.
-        t_is_ptr = (
-            (target_type.declarator_ops and target_type.declarator_ops[0][0] == "ptr")
-            or target_type.pointee() is not None
-        )
-        i_is_ptr = (
-            (init_type.declarator_ops and init_type.declarator_ops[0][0] == "ptr")
-            or init_type.pointee() is not None
-        )
-        # Allow any cross-pointer or pointer↔integer initializer
-        # (GCC -fpermissive / -Wno-incompatible-pointer-types).
-        if t_is_ptr or i_is_ptr:
+        if _either_is_pointer(target_type, init_type):
             return
     raise SemaError("Initializer type mismatch")
+
+
+def _either_is_pointer(t: Type, i: Type) -> bool:
+    """True if either type's first declarator op is 'ptr'."""
+    return (
+        (t.declarator_ops and t.declarator_ops[0][0] == "ptr")
+        or (i.declarator_ops and i.declarator_ops[0][0] == "ptr")
+    )
 
 
 def analyze_initializer_list(

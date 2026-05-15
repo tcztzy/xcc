@@ -3449,6 +3449,22 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="gnu11")
         self.assertIn("main", sema.functions)
 
+    def test_gnu_array_with_pointer_init_allowed(self) -> None:
+        # Array target with incompatible scalar init recurses to elements,
+        # exercising i_is_ptr when t_is_ptr is False.
+        source = "int main(){char *p = 0; int arr[5] = p; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
+    def test_gnu_non_pointer_struct_init_still_rejected(self) -> None:
+        # Incompatible non-pointer types still fail even in gnu11
+        source = "int main(){struct A { int x; } a = {1}; struct B { int y; } b = a; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("Initializer type mismatch", str(ctx.exception))
+
     def test_file_scope_char_array_string_initializer_ok(self) -> None:
         unit = parse(list(lex('char s[4]="abc"; int main(){return s[0];}')))
         sema = analyze(unit)
