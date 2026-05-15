@@ -191,6 +191,22 @@ class Parser:
                 return None
             type_spec = typedefs.get(name)
             if type_spec is not None:
+                # Return a copy without enum members — they were already
+                # registered when the typedef was defined and must not be
+                # re-registered when the typedef is referenced.
+                if type_spec.enum_members:
+                    return TypeSpec(
+                        type_spec.name,
+                        declarator_ops=type_spec.declarator_ops,
+                        qualifiers=type_spec.qualifiers,
+                        is_atomic=type_spec.is_atomic,
+                        atomic_target=type_spec.atomic_target,
+                        enum_tag=type_spec.enum_tag,
+                        record_tag=type_spec.record_tag,
+                        record_members=type_spec.record_members,
+                        has_record_body=type_spec.has_record_body,
+                        typeof_expr=type_spec.typeof_expr,
+                    )
                 return type_spec
         return None
 

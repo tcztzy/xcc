@@ -74,7 +74,9 @@ def analyze_file_scope_decl(analyzer: object, declaration: Stmt) -> None:
             raise SemaError(a._invalid_object_type_message("file-scope", "atomic"))
         if a._is_invalid_void_object_type(declaration.type_spec):
             raise SemaError(a._invalid_object_type_message("file-scope", "void"))
-        if a._is_invalid_incomplete_record_object_type(declaration.type_spec):
+        if declaration.storage_class != "extern" and a._is_invalid_incomplete_record_object_type(
+            declaration.type_spec
+        ):
             raise SemaError(a._invalid_object_type_message("file-scope", "incomplete"))
         if a._is_file_scope_vla_type_spec(declaration.type_spec):
             raise SemaError("Variable length array not allowed at file scope")

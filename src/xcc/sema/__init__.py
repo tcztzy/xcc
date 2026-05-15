@@ -243,6 +243,33 @@ class Analyzer:
         for name in _ATOMIC_BUILTINS:
             self._function_signatures[name] = _atomic_sig
 
+        # Math builtins used by macOS SDK and CPython
+        _MATH_BUILTINS = (
+            "__builtin_fabs",
+            "__builtin_fabsf",
+            "__builtin_fabsl",
+            "__builtin_inf",
+            "__builtin_inff",
+            "__builtin_infl",
+            "__builtin_bswap32",
+            "__builtin_bswap64",
+            "__builtin_nan",
+            "__builtin_nanf",
+            "__builtin_nanl",
+            "__builtin_huge_val",
+            "__builtin_huge_valf",
+            "__builtin_huge_vall",
+            "__builtin_isinf",
+            "__builtin_isnan",
+            "__builtin_isfinite",
+            "__builtin_copysign",
+            "__builtin_copysignf",
+            "__builtin_copysignl",
+        )
+        _math_sig = FunctionSignature(return_type=DOUBLE, params=None, is_variadic=True)
+        for name in _MATH_BUILTINS:
+            self._function_signatures[name] = _math_sig
+
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]
         for external in externals:
