@@ -288,6 +288,7 @@ class Analyzer:
 
         # Integer-returning builtins
         _INTEGER_BUILTINS = (
+            "__builtin_bswap16",
             "__builtin_bswap32",
             "__builtin_bswap64",
             # GCC count-leading/trailing-zeros and bit-scan builtins

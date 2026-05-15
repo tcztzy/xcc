@@ -165,6 +165,9 @@ def analyze_record_initializer_list(
     all_members = analyzer._record_members(target_type.name)  # type: ignore[attr-defined]
     members = None if all_members is None else tuple(m for m in all_members if m.name is not None)
     if members is None or not members:
+        # In GNU mode, empty/anonymous struct init is silently accepted.
+        if getattr(analyzer, "_std", "c11") == "gnu11":
+            return
         raise SemaError("Initializer type mismatch")
     is_union = target_type.name.startswith("union ")
     next_member = 0
@@ -196,6 +199,9 @@ def analyze_record_initializer_list(
             continue
         if next_member >= len(members):
             if analyzer._excess_init_ok:  # type: ignore[attr-defined]
+                continue
+            # In GNU mode, excess initializer elements are silently ignored.
+            if getattr(analyzer, "_std", "c11") == "gnu11":
                 continue
             raise SemaError("Initializer type mismatch")
         analyzer._analyze_initializer(members[next_member].type_, item.initializer, scope)  # type: ignore[attr-defined]

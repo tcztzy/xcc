@@ -3465,6 +3465,20 @@ class SemaTests(unittest.TestCase):
             analyze(unit, std="gnu11")
         self.assertIn("Initializer type mismatch", str(ctx.exception))
 
+    def test_gnu_excess_struct_initializers_ignored(self) -> None:
+        # In GNU mode, extra initializer elements are silently ignored
+        source = "int main(){struct S { int x; } s = {1, 2, 3}; return s.x;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
+    def test_gnu_anonymous_struct_init_accepted(self) -> None:
+        # In GNU mode, anonymous struct with no named members is OK
+        source = "int main(){struct { int : 4; } s = {0}; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
     def test_file_scope_char_array_string_initializer_ok(self) -> None:
         unit = parse(list(lex('char s[4]="abc"; int main(){return s[0];}')))
         sema = analyze(unit)
