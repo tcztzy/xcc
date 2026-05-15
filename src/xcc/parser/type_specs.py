@@ -359,6 +359,10 @@ def parse_enum_spec(
         ident = p._advance()
         assert isinstance(ident.lexeme, str)
         enum_tag = ident.lexeme
+    # C23 enum : underlying_type (or Clang/C++ extension)
+    if p._check_punct(":"):
+        p._advance()
+        p._parse_type_spec()
     enum_members: tuple[tuple[str, Expr | None], ...] = ()
     if p._check_punct("{"):
         enum_members = p._parse_enum_members()
@@ -422,6 +426,9 @@ def parse_record_members(parser: object) -> tuple[RecordMemberDecl, ...]:
     p._expect_punct("{")
     members: list[RecordMemberDecl] = []
     while not p._check_punct("}"):
+        if p._check_keyword("_Static_assert") or p._is_static_assert_ident():
+            p._parse_static_assert_decl()
+            continue
         members.extend(p._parse_record_member_declaration())
     p._expect_punct("}")
     return tuple(members)
@@ -454,12 +461,14 @@ def parse_record_member_declaration(parser: object) -> list[RecordMemberDecl]:
     while True:
         name, declarator_ops = p._parse_declarator(
             allow_abstract=True,
+            allow_vla=True,
             allow_flexible_array=True,
         )
         bit_width_expr: Expr | None = None
         if p._check_punct(":"):
             p._advance()
             bit_width_expr = p._parse_conditional()
+        p._skip_decl_attributes()
         if name is None and bit_width_expr is None:
             raise p._expected_identifier_error()
         member_type = p._build_declarator_type(base_type, declarator_ops)
