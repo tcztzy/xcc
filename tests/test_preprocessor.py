@@ -1021,6 +1021,18 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("* /", result.source)
         self.assertIn(" * A\n", result.source)
 
+    def test_define_body_block_comment_keeps_tail_blanked(self) -> None:
+        """When a #define body opens a block comment, the closing */ on a
+        non-directive line is blanked because the matching /* was removed with
+        the directive."""
+        result = preprocess_source(
+            "#define FOO 0x04 /* comment\n                         tail */\n",
+            filename="define_comment.c",
+        )
+        self.assertNotIn("tail */", result.source)
+        self.assertNotIn("tail * /", result.source)
+        self.assertNotIn("/* comment", result.source)
+
     def test_block_comment_sigil_inside_string_does_not_disable_directives(self) -> None:
         result = preprocess_source(
             'const char *s="\\"/*";\n#define A 2\nint x=A;\n',
@@ -2266,6 +2278,119 @@ class PreprocessorTests(unittest.TestCase):
                     f"at {b_header.resolve()}:1:1"
                 ),
             )
+
+    def test_circular_include_guarded_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a_header = root / "a.h"
+            b_header = root / "b.h"
+            a_header.write_text(
+                "#ifndef A_H\n#define A_H\n#include \"b.h\"\n#endif\n",
+                encoding="utf-8",
+            )
+            b_header.write_text(
+                "#ifndef B_H\n#define B_H\n#include \"a.h\"\n#endif\n",
+                encoding="utf-8",
+            )
+            source = '#include "a.h"\n'
+            result = preprocess_source(source, filename=str(root / "main.c"))
+            self.assertNotIn("Circular include", result.source)
+
+    def test_circular_include_guard_defined_elsewhere_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a_header = root / "a.h"
+            b_header = root / "b.h"
+            a_header.write_text(
+                "#ifndef A_H\n#define A_H\n#include \"b.h\"\n#endif\n",
+                encoding="utf-8",
+            )
+            b_header.write_text(
+                "#ifndef B_H\n#define B_H\n#include \"a.h\"\n#endif\n",
+                encoding="utf-8",
+            )
+            source = '#define A_H\n#include "a.h"\n'
+            result = preprocess_source(source, filename=str(root / "main.c"))
+            self.assertNotIn("Circular include", result.source)
+
+    def test_detect_include_guard_standard_pattern(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        guard = _detect_include_guard("#ifndef FOO_H\n#define FOO_H\n")
+        self.assertEqual(guard, "FOO_H")
+
+    def test_detect_include_guard_if_not_defined(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        guard = _detect_include_guard("#if !defined(FOO_H)\n#define FOO_H\n")
+        self.assertEqual(guard, "FOO_H")
+
+    def test_detect_include_guard_with_leading_comment(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        guard = _detect_include_guard("/* comment */\n#ifndef FOO_H\n#define FOO_H\n")
+        self.assertEqual(guard, "FOO_H")
+
+    def test_detect_include_guard_mismatch_returns_none(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        guard = _detect_include_guard("#ifndef FOO_H\n#define BAR_H\n")
+        self.assertIsNone(guard)
+
+    def test_detect_include_guard_no_define_returns_none(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        guard = _detect_include_guard("#ifndef FOO_H\nint x;\n")
+        self.assertIsNone(guard)
+
+    def test_detect_include_guard_no_guard_returns_none(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        guard = _detect_include_guard("int x;\n")
+        self.assertIsNone(guard)
+
+    def test_detect_include_guard_leading_blank_lines(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        guard = _detect_include_guard("\n\n\n#ifndef FOO_H\n#define FOO_H\n")
+        self.assertEqual(guard, "FOO_H")
+
+    def test_detect_include_guard_with_block_comment_same_line(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        source = "/* header guard */\n#ifndef FOO_H /* guard */\n#define FOO_H\n"
+        guard = _detect_include_guard(source)
+        self.assertEqual(guard, "FOO_H")
+
+    def test_detect_include_guard_block_comment_spanning_lines(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        source = "/* start\n   continued */\n#ifndef FOO_H\n#define FOO_H\n"
+        guard = _detect_include_guard(source)
+        self.assertEqual(guard, "FOO_H")
+
+    def test_detect_include_guard_ifndef_no_matching_define(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        guard = _detect_include_guard("#ifndef FOO_H\n/* no define */\n")
+        self.assertIsNone(guard)
+
+    def test_detect_include_guard_ifndef_only_no_newline(self) -> None:
+        from xcc.preprocessor import _detect_include_guard
+        guard = _detect_include_guard("#ifndef FOO_H\n")
+        self.assertIsNone(guard)
+
+    def test_skip_guarded_include_oserror_returns_false(self) -> None:
+        from xcc.preprocessor import _Preprocessor
+        from xcc.options import FrontendOptions
+        preprocessor = _Preprocessor(FrontendOptions())
+        result = preprocessor._skip_guarded_include(
+            Path("/nonexistent/path.h"), "/nonexistent/path.h"
+        )
+        self.assertFalse(result)
+
+    def test_guarded_circular_include_via_imacro(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a_header = root / "a.h"
+            a_header.write_text(
+                "#ifndef A_H\n#define A_H\n#include \"a.h\"\n#endif\n",
+                encoding="utf-8",
+            )
+            source = '#include "a.h"\n'
+            # Self-include via guard is OK
+            result = preprocess_source(source, filename=str(root / "main.c"))
+            self.assertNotIn("Circular include", result.source)
 
     def test_include_read_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

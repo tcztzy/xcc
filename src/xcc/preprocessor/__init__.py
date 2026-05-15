@@ -100,6 +100,59 @@ _strip_gnu_asm_extensions = _text._strip_gnu_asm_extensions
 _IDENT_RE = re.compile(r"[A-Za-z_]\w*")
 _DEFINED_PAREN_RE = re.compile(r"\bdefined\s*\(\s*([A-Za-z_]\w*)\s*\)")
 _DEFINED_BARE_RE = re.compile(r"\bdefined\s+([A-Za-z_]\w*)")
+_IFNDEF_RE = re.compile(r"#\s*ifndef\s+([A-Za-z_]\w*)")
+_IF_NOT_DEFINED_RE = re.compile(r"#\s*if\s+!\s*defined\s*\(\s*([A-Za-z_]\w*)\s*\)")
+_DEFINE_RE = re.compile(r"#\s*define\s+([A-Za-z_]\w*)")
+
+
+def _detect_include_guard(source: str) -> str | None:
+    """Detect #ifndef / #define include guard from the start of a source file.
+
+    Returns the guard macro name, or None if no guard is detected."""
+    lines = source.splitlines()
+    guard_name: str | None = None
+    comment_open = False
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        # Skip block comment lines
+        while True:
+            if comment_open:
+                end_idx = line.find("*/")
+                if end_idx != -1:
+                    line = line[end_idx + 2:]
+                    comment_open = False
+                else:
+                    line = ""
+                    break
+            start_idx = line.find("/*")
+            if start_idx != -1:
+                end_idx = line.find("*/", start_idx + 2)
+                if end_idx != -1:
+                    line = line[:start_idx] + line[end_idx + 2:]
+                else:
+                    line = line[:start_idx]
+                    comment_open = True
+            else:
+                break
+        line = line.strip()
+        if not line or line.startswith("//"):
+            continue
+        if guard_name is None:
+            # Expect: #ifndef GUARD or #if !defined(GUARD)
+            m = _IFNDEF_RE.match(line) or _IF_NOT_DEFINED_RE.match(line)
+            if m:
+                guard_name = m.group(1)
+            else:
+                return None
+        else:
+            # Expect: #define GUARD (same name)
+            m = _DEFINE_RE.match(line)
+            if m and m.group(1) == guard_name:
+                return guard_name
+            return None
+    return None
 
 _PP_UNKNOWN_DIRECTIVE = "XCC-PP-0101"
 _PP_INCLUDE_NOT_FOUND = "XCC-PP-0102"
@@ -660,6 +713,18 @@ class _Preprocessor:
         macro_name = self._require_macro_name(body, location)
         self._macros.pop(macro_name, None)
 
+    def _skip_guarded_include(self, include_path: Path, include_path_text: str) -> bool:
+        """Check if a circular include should be skipped because the file's
+        include guard is already defined."""
+        try:
+            source = include_path.read_text(encoding="utf-8")
+        except OSError:
+            return False
+        guard = _detect_include_guard(source)
+        if guard is not None and guard in self._macros:
+            return True
+        return False
+
     def _handle_include(
         self,
         body: str,
@@ -700,6 +765,8 @@ class _Preprocessor:
             return _ProcessedText("", ())
         if include_path_text in include_stack:
             if is_import:
+                return _ProcessedText("", ())
+            if self._skip_guarded_include(include_path, include_path_text):
                 return _ProcessedText("", ())
             raise PreprocessorError(
                 (

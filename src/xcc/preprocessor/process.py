@@ -37,6 +37,7 @@ def process_text(
     logical_cursor = _LogicalCursor(filename, include_level=max(len(include_stack) - 1, 0))
     stack: list[_ConditionalFrame] = []
     in_block_comment = False
+    comment_from_directive = False
     line_index = 0
     while line_index < len(lines):
         line = lines[line_index]
@@ -84,20 +85,26 @@ def process_text(
                             all_lines.append(next_line)
                 out.append(expanded, location)
                 for i in range(1, len(all_lines)):
-                    in_block_comment = _scan_block_comment_state(all_lines[i - 1], in_block_comment)
+                    in_block_comment, comment_from_directive = _update_comment_state(
+                        in_block_comment, comment_from_directive, line=all_lines[i - 1]
+                    )
                     logical_cursor.advance()
                     line_index += 1
                     out.append(_blank_line(all_lines[i]), logical_cursor.current())
                 logical_cursor.advance()
-                in_block_comment = _scan_block_comment_state(all_lines[-1], in_block_comment)
+                in_block_comment, comment_from_directive = _update_comment_state(
+                    in_block_comment, comment_from_directive, line=all_lines[-1]
+                )
                 line_index += 1
                 continue
-            if _is_active(stack):
+            if _is_active(stack) and not (in_block_comment and comment_from_directive):
                 out.append(line, location)
             else:
                 out.append(_blank_line(line), location)
             logical_cursor.advance()
-            in_block_comment = _scan_block_comment_state(line, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, line=line
+            )
             line_index += 1
             continue
         directive_lines = [line]
@@ -124,27 +131,35 @@ def process_text(
         if conditional_result is not None:
             _blank_directive_lines(out, directive_cursor, directive_lines)
             logical_cursor.advance(len(directive_lines))
-            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, directive_lines=directive_lines
+            )
             line_index += 1
             continue
         if not _is_active(stack):
             _blank_directive_lines(out, directive_cursor, directive_lines)
             logical_cursor.advance(len(directive_lines))
-            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, directive_lines=directive_lines
+            )
             line_index += 1
             continue
         if name == "define":
             self._handle_define(body)
             _blank_directive_lines(out, directive_cursor, directive_lines)
             logical_cursor.advance(len(directive_lines))
-            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, directive_lines=directive_lines
+            )
             line_index += 1
             continue
         if name == "undef":
             self._handle_undef(body, directive_cursor.first_location())
             _blank_directive_lines(out, directive_cursor, directive_lines)
             logical_cursor.advance(len(directive_lines))
-            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, directive_lines=directive_lines
+            )
             line_index += 1
             continue
         if name in {"include", "include_next", "import"}:
@@ -160,7 +175,9 @@ def process_text(
             for directive_index, chunk in enumerate(directive_lines[1:], start=1):
                 out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
             logical_cursor.advance(len(directive_lines))
-            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, directive_lines=directive_lines
+            )
             line_index += 1
             continue
         if name == "error":
@@ -175,7 +192,9 @@ def process_text(
         if name == "warning":
             _blank_directive_lines(out, directive_cursor, directive_lines)
             logical_cursor.advance(len(directive_lines))
-            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, directive_lines=directive_lines
+            )
             line_index += 1
             continue
         if name == "line":
@@ -184,7 +203,9 @@ def process_text(
             )
             _blank_directive_lines(out, directive_cursor, directive_lines)
             logical_cursor.rebase(line_value, filename_value)
-            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, directive_lines=directive_lines
+            )
             line_index += 1
             continue
         if name == "embed":
@@ -197,7 +218,9 @@ def process_text(
             for directive_index, chunk in enumerate(directive_lines[1:], start=1):
                 out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
             logical_cursor.advance(len(directive_lines))
-            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, directive_lines=directive_lines
+            )
             line_index += 1
             continue
         if name == "pragma":
@@ -208,7 +231,9 @@ def process_text(
                 _validate_pragma(stripped_body, directive_cursor.first_location())
             _blank_directive_lines(out, directive_cursor, directive_lines)
             logical_cursor.advance(len(directive_lines))
-            in_block_comment = _scan_directive_comments(directive_lines, in_block_comment)
+            in_block_comment, comment_from_directive = _update_comment_state(
+                in_block_comment, comment_from_directive, directive_lines=directive_lines
+            )
             line_index += 1
             continue
         if self._options.std == "c11":
@@ -244,7 +269,35 @@ def _blank_directive_lines(
         out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
 
 
-def _scan_directive_comments(directive_lines: list[str], in_block_comment: bool) -> bool:
+def _scan_directive_comments(directive_lines: list[str], in_block_comment: bool) -> tuple[bool, bool]:
+    prev = in_block_comment
     for chunk in directive_lines:
         in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
-    return in_block_comment
+    return in_block_comment, (not prev and in_block_comment)
+
+
+def _update_comment_state(
+    in_block_comment: bool,
+    comment_from_directive: bool,
+    *,
+    directive_lines: list[str] | None = None,
+    line: str | None = None,
+) -> tuple[bool, bool]:
+    """Update in_block_comment and comment_from_directive after scanning a line.
+
+    When a directive opens a block comment, comment_from_directive is set so
+    subsequent non-directive lines (the comment tail) are blanked.  When the
+    comment closes, comment_from_directive is cleared.
+    """
+    if directive_lines is not None:
+        new_state, opened = _scan_directive_comments(directive_lines, in_block_comment)
+        # in_block_comment is always False at directive entry (line 43),
+        # so opened == new_state — either True (comment opened) or False.
+        if opened:
+            return new_state, True
+        return new_state, False
+    assert line is not None
+    new_state = _scan_block_comment_state(line, in_block_comment)
+    if not new_state:
+        return new_state, False
+    return new_state, comment_from_directive
