@@ -7,6 +7,7 @@ from .macros import _Macro, _render_macro_tokens
 
 _DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$")
 _ASM_PREFIX_RE = re.compile(r"^\s*(?:__asm__|__asm|asm)\b")
+_ASM_STMT_RE = re.compile(r"^\s*asm\b")
 _ASM_LABEL_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\s*\([^;\n]*\)")
 
 
@@ -124,14 +125,16 @@ def _strip_gnu_asm_extensions(source: str) -> str:
             if ";" in line:
                 in_asm_statement = False
             continue
-        # Check for asm statements first (line starts with asm keyword).
-        # Label stripping happens afterward so that declarations with
-        # __asm("name") attributes keep their trailing semicolon.
-        if _ASM_PREFIX_RE.match(line):
+        # Bare 'asm' at line start: standalone asm statement.
+        if _ASM_STMT_RE.match(line):
             stripped_lines.append(_blank_line(line))
             in_asm_statement = ";" not in line
             continue
+        # __asm__ or __asm labels/attributes (strip just the asm part).
         stripped = _ASM_LABEL_RE.sub("", line)
+        # If __asm appeared on its own line with just a ';' left, keep
+        # the ';' as a null statement (it was the end of a multi-line
+        # declaration like size_t wcsftime(...) __asm("_wcsftime");).
         stripped_lines.append(stripped)
     return "".join(stripped_lines)
 
