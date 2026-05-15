@@ -3428,6 +3428,27 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
 
+    def test_gnu_cross_pointer_init_allowed(self) -> None:
+        # char* = int* is rejected in c11 but allowed in gnu11
+        source = "int *p = 0; char *q = p; int main(){return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
+    def test_gnu_non_null_integer_to_pointer_init_allowed(self) -> None:
+        # void* = 1 (non-zero integer) is rejected in c11 but allowed in gnu11
+        source = "void *p = 1; int main(){return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
+    def test_gnu_pointer_to_integer_init_allowed(self) -> None:
+        # char = char* (pointer in integer) OK only in gnu11
+        source = "int main(){char *p = 0; char c = p; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
     def test_file_scope_char_array_string_initializer_ok(self) -> None:
         unit = parse(list(lex('char s[4]="abc"; int main(){return s[0];}')))
         sema = analyze(unit)

@@ -43,6 +43,23 @@ def analyze_initializer(
         if element_type is not None:
             analyzer._analyze_initializer(element_type, initializer, scope)  # type: ignore[attr-defined]
             return
+    # In GNU mode, allow implicit pointer↔integer and cross-pointer
+    # initializer conversions (GCC accepts these with a warning).
+    if getattr(analyzer, "_std", "c11") == "gnu11":
+        # A type is a pointer if the first declarator op is "ptr" or its
+        # pointee is non-None.
+        t_is_ptr = (
+            (target_type.declarator_ops and target_type.declarator_ops[0][0] == "ptr")
+            or target_type.pointee() is not None
+        )
+        i_is_ptr = (
+            (init_type.declarator_ops and init_type.declarator_ops[0][0] == "ptr")
+            or init_type.pointee() is not None
+        )
+        # Allow any cross-pointer or pointer↔integer initializer
+        # (GCC -fpermissive / -Wno-incompatible-pointer-types).
+        if t_is_ptr or i_is_ptr:
+            return
     raise SemaError("Initializer type mismatch")
 
 

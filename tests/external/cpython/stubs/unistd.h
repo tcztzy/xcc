@@ -20,4 +20,8 @@ int isatty(int fd);
 int fileno(void *stream);
 long lseek(int fd, long offset, int whence);
 
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
 #endif
