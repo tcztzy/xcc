@@ -5012,6 +5012,17 @@ class ParserTests(unittest.TestCase):
             )
         self.assertIn("Expected member name after '.'", ctx.exception.message)
 
+    def test_builtin_types_compatible_p(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "int f(void) { return __builtin_types_compatible_p(int, long); }"
+                )
+            ),
+            std="gnu11",
+        )
+        self.assertEqual(unit.functions[0].name, "f")
+
     # --- K&R (old-style) function definition tests ---
 
     def test_knr_function_definition(self) -> None:

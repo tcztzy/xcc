@@ -363,6 +363,12 @@ class BuiltinOffsetofExpr(Expr):
 
 
 @dataclass(frozen=True)
+class BuiltinTypesCompatExpr(Expr):
+    type1: TypeSpec
+    type2: TypeSpec
+
+
+@dataclass(frozen=True)
 class NullStmt(Stmt):
     pass
 

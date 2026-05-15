@@ -5818,6 +5818,12 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
+    def test_builtin_types_compatible_p_returns_int(self) -> None:
+        source = "int f(void) { return __builtin_types_compatible_p(int, int); }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
     def test_builtin_expect_accepted_in_gnu11(self) -> None:
         source = "int f(int x) { if (__builtin_expect(x == 0, 0)) return -1; return x; }"
         unit = parse(list(lex(source)), std="gnu11")

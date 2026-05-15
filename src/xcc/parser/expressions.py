@@ -8,6 +8,7 @@ from xcc.ast import (
     AssignExpr,
     BinaryExpr,
     BuiltinOffsetofExpr,
+    BuiltinTypesCompatExpr,
     CallExpr,
     CastExpr,
     CharLiteral,
@@ -357,6 +358,8 @@ def parse_primary(parser: object) -> Expr:
         return parser._parse_string_literal()  # type: ignore[attr-defined]
     if token.kind == TokenKind.IDENT and token.lexeme == "__builtin_offsetof":
         return parser._parse_builtin_offsetof()  # type: ignore[attr-defined]
+    if token.kind == TokenKind.IDENT and token.lexeme == "__builtin_types_compatible_p":
+        return parser._parse_builtin_types_compatible_p()  # type: ignore[attr-defined]
     if token.kind == TokenKind.IDENT:
         parser._advance()  # type: ignore[attr-defined]
         assert isinstance(token.lexeme, str)
@@ -440,6 +443,16 @@ def parse_builtin_offsetof(parser: object) -> BuiltinOffsetofExpr:
         parser._advance()  # type: ignore[attr-defined]
     parser._expect_punct(")")  # type: ignore[attr-defined]
     return BuiltinOffsetofExpr(type_spec=type_spec, member=".".join(parts))
+
+
+def parse_builtin_types_compatible_p(parser: object) -> BuiltinTypesCompatExpr:
+    parser._advance()  # type: ignore[attr-defined]
+    parser._expect_punct("(")  # type: ignore[attr-defined]
+    type1 = parser._parse_type_name()  # type: ignore[attr-defined]
+    parser._expect_punct(",")  # type: ignore[attr-defined]
+    type2 = parser._parse_type_name()  # type: ignore[attr-defined]
+    parser._expect_punct(")")  # type: ignore[attr-defined]
+    return BuiltinTypesCompatExpr(type1=type1, type2=type2)
 
 
 def parse_generic_expr(parser: object) -> GenericExpr:

@@ -4,6 +4,7 @@ from xcc.ast import (
     AlignofExpr,
     ArrayDecl,
     BuiltinOffsetofExpr,
+    BuiltinTypesCompatExpr,
     CaseStmt,
     CastExpr,
     CompoundLiteralExpr,
@@ -1062,6 +1063,9 @@ class Parser:
 
     def _parse_builtin_offsetof(self) -> BuiltinOffsetofExpr:
         return _expressions.parse_builtin_offsetof(self)
+
+    def _parse_builtin_types_compatible_p(self) -> BuiltinTypesCompatExpr:
+        return _expressions.parse_builtin_types_compatible_p(self)
 
     def _parse_generic_expr(self) -> GenericExpr:
         return _expressions.parse_generic_expr(self)
