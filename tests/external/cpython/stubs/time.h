@@ -18,11 +18,12 @@ struct tm {
     int tm_isdst;
 };
 
-struct timespec {
-    time_t tv_sec;
-    long tv_nsec;
-};
+/* struct timespec is defined in <sys/types.h> */
 
 time_t time(time_t *tloc);
+int clock_gettime(int clk_id, struct timespec *tp);
+
+#define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 1
 
 #endif

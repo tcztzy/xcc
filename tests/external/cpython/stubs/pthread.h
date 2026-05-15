@@ -26,4 +26,9 @@ int pthread_key_delete(pthread_key_t key);
 void *pthread_getspecific(pthread_key_t key);
 int pthread_setspecific(pthread_key_t key, const void *value);
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
+int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
+                           const struct timespec *abstime);
+int pthread_cond_timedwait_relative_np(pthread_cond_t *cond,
+                                       pthread_mutex_t *mutex,
+                                       const struct timespec *abstime);
 #endif

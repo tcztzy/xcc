@@ -14,4 +14,9 @@ typedef unsigned int uid_t;
 typedef unsigned int gid_t;
 typedef int clockid_t;
 
+struct timespec {
+    time_t tv_sec;
+    long tv_nsec;
+};
+
 #endif
