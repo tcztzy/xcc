@@ -300,9 +300,9 @@ def parse_array_declarator(
             raise ParserError("Array parameter with 'static' requires a size", size_token)
         if allow_parameter_arrays:
             return ArrayDecl(None, tuple(qualifiers), False)
-        if allow_vla:
-            return ArrayDecl(None)
         if allow_flexible_array:
+            return ArrayDecl(None)
+        if allow_vla:
             return ArrayDecl(None)
         raise ParserError("Array size is required in this context", size_token)
     if isinstance(size_expr, IntLiteral):

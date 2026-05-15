@@ -636,6 +636,12 @@ def skip_type_qualifiers(parser: object, *, allow_atomic: bool = False) -> bool:
         if p._current().kind == TokenKind.IDENT and p._current().lexeme in (
             _NULLABLE_QUALIFIERS | _IGNORED_IDENT_TYPE_QUALIFIERS
         ):
+            # Contextual keywords like constexpr: treat as identifier if
+            # followed by ;, ,, or =, matching consume_type_qualifiers.
+            if p._current().lexeme == "constexpr":
+                nxt = p._peek()
+                if nxt.kind == TokenKind.PUNCTUATOR and nxt.lexeme in {";", ",", "="}:
+                    break
             found = True
             p._advance()
             continue

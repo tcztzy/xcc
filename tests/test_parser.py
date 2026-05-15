@@ -5307,6 +5307,22 @@ class ParserTests(unittest.TestCase):
         )
         self.assertEqual(unit.declarations[0].name, "x")
 
+    def test_constexpr_as_identifier_with_semicolon(self) -> None:
+        """constexpr followed by ; is treated as identifier, not qualifier."""
+        unit = parse(
+            list(lex("int constexpr;")),
+            std="c11",
+        )
+        self.assertEqual(unit.declarations[0].name, "constexpr")
+
+    def test_constexpr_as_identifier_with_equals(self) -> None:
+        """constexpr followed by = is treated as identifier with init."""
+        unit = parse(
+            list(lex("int constexpr = 5;")),
+            std="c11",
+        )
+        self.assertEqual(unit.declarations[0].name, "constexpr")
+
     def test_enum_with_underlying_type(self) -> None:
         """Enum with colon-specified underlying type (C23 / Clang extension)."""
         unit = parse(

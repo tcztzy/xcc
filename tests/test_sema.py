@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
 import xcc.sema.constants as sema_constants
@@ -50,6 +52,7 @@ from xcc.ast import (
     UnaryExpr,
     UpdateExpr,
 )
+from xcc.frontend import FrontendOptions, compile_source
 from xcc.lexer import lex
 from xcc.parser import parse
 from xcc.sema import (
@@ -5909,6 +5912,13 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
+    def test_generic_builtin_allows_return_type_mismatch(self) -> None:
+        """Generic builtin allows mismatched return type."""
+        source = "char *f(void) { return __builtin_bswap32(42); }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
     def test_init_list_stored_as_init_expr(self) -> None:
         """InitList expression is stored on the VarSymbol for later reference."""
         source = "int arr[] = {1, 2, 3};"
@@ -5966,6 +5976,152 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
         self.assertIn("fail", str(ctx.exception))
+
+    def test_const_array_subscript_as_vla_size(self) -> None:
+        """Const array subscript without const folding becomes VLA."""
+        source = (
+            "const int arr[3] = {10, 20, 30};\n"
+            "void f(void) {\n"
+            "    int x[arr[1]];\n"
+            "    (void)x;\n"
+            "}\n"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_static_assert_designated_init_subscript_returns_none(self) -> None:
+        """Static assert with designated init subscript can't evaluate."""
+        source = (
+            "const int arr[3] = {[0] = 1};\n"
+            '_Static_assert(arr[0] == 1, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
+    def test_static_assert_non_const_struct_member(self) -> None:
+        """Static assert with non-const struct member access fails."""
+        source = (
+            "struct S { int a; };\n"
+            "struct S s = {5};\n"
+            '_Static_assert(s.a == 5, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
+    def test_static_assert_extern_const_no_init(self) -> None:
+        """Static assert with extern const (no const value) fails."""
+        source = 'extern const int x; _Static_assert(x == 5, "bad");'
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
+    def test_static_assert_subscript_non_const_index(self) -> None:
+        """Static assert with non-constant index fails."""
+        source = (
+            "int idx = 0;\n"
+            "const int arr[] = {1, 2, 3};\n"
+            '_Static_assert(arr[idx] == 1, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
+    def test_static_assert_nested_init_list_subscript(self) -> None:
+        """Static assert with nested init list subscript can't evaluate."""
+        source = (
+            "const int arr[2][2] = {{1, 2}, {3, 4}};\n"
+            '_Static_assert(arr[0][0] == 1, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
+    def test_return_value_type_mismatch_non_builtin(self) -> None:
+        """Return value incompatible with function return type raises error."""
+        source = "char *f(void) { return 5; }"
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not compatible", str(ctx.exception))
+
+    def test_const_var_as_vla_size_no_folding(self) -> None:
+        """Const var used as array size without const folding flag."""
+        source = (
+            "const int n = 10;\n"
+            "void f(void) {\n"
+            "    int x[n];\n"
+            "    (void)x;\n"
+            "}\n"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_static_assert_non_const_struct_member_fails(self) -> None:
+        """Static assert with non-const struct member access fails."""
+        source = (
+            "struct S { int a; };\n"
+            "struct S s = {5};\n"
+            '_Static_assert(s.a == 5, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
+    def test_static_assert_subscript_non_const_base_fails(self) -> None:
+        """Static assert subscript on non-const array base can't evaluate."""
+        source = (
+            "int arr[3] = {1, 2, 3};\n"
+            '_Static_assert(arr[0] == 1, "bad");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not integer constant", str(ctx.exception))
+
+    def test_embed_produces_excess_init_tolerance_for_array(self) -> None:
+        """#embed with excess elements tolerated for array initializer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01\x02\x03\x04\x05")
+            source = (
+                "int arr[3] = {\n"
+                '#embed "data.bin"\n'
+                "};\n"
+            )
+            result = compile_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertIsNotNone(result)
+
+    def test_embed_produces_excess_init_tolerance_for_struct(self) -> None:
+        """#embed with excess elements tolerated for struct initializer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"\x01\x02\x03\x04\x05")
+            source = (
+                "struct S { int a; int b; };\n"
+                "struct S s = {\n"
+                '#embed "data.bin"\n'
+                "};\n"
+            )
+            result = compile_source(
+                source,
+                filename=str(root / "test.c"),
+                options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
+            )
+            self.assertIsNotNone(result)
 
 
 if __name__ == "__main__":
