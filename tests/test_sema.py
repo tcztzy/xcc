@@ -6457,6 +6457,196 @@ class SemaTests(unittest.TestCase):
         )
         self.assertIsNone(result)
 
+    def test_subscript_non_identifier_base_with_folding(self) -> None:
+        """SubscriptExpr base not Identifier returns None (branch 177→189)."""
+        from xcc.ast import Identifier, IntLiteral, MemberExpr, SubscriptExpr
+
+        source = "int x;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+        analyzer._allow_const_var_folding = True
+        try:
+            result = analyzer._eval_int_constant_expr(
+                SubscriptExpr(
+                    base=MemberExpr(
+                        base=Identifier("x"), member="a", through_pointer=False
+                    ),
+                    index=IntLiteral("0"),
+                ),
+                analyzer._file_scope,
+            )
+            self.assertIsNone(result)
+        finally:
+            analyzer._allow_const_var_folding = False
+
+    def test_subscript_nested_init_list_item_returns_none(self) -> None:
+        """Subscript into array where init item is itself InitList → None."""
+        from xcc.ast import Identifier, InitItem, InitList, IntLiteral, SubscriptExpr
+        from xcc.sema.symbols import VarSymbol
+        from xcc.types import INT
+
+        source = "int x;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+        nested_list = InitList(
+            items=(
+                InitItem(
+                    designators=(),
+                    initializer=InitList(
+                        items=(InitItem(designators=(), initializer=IntLiteral("1")),)
+                    ),
+                ),
+            )
+        )
+        analyzer._file_scope.define(
+            VarSymbol(name="arr2d", type_=INT, _init_expr=nested_list)
+        )
+        analyzer._allow_const_var_folding = True
+        try:
+            result = analyzer._eval_int_constant_expr(
+                SubscriptExpr(
+                    base=Identifier("arr2d"),
+                    index=IntLiteral("0"),
+                ),
+                analyzer._file_scope,
+            )
+            self.assertIsNone(result)
+        finally:
+            analyzer._allow_const_var_folding = False
+
+    def test_member_expr_base_evaluates_to_scalar(self) -> None:
+        """MemberExpr where base _eval_int_constant_expr returns scalar."""
+        from xcc.ast import Identifier, IntLiteral, MemberExpr
+
+        source = (
+            "struct S { int a; };\n"
+            "const struct S s = {42};\n"
+            '_Static_assert(s.a == 42, "ok");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        analyzer = Analyzer(std="gnu11")
+        analyzer.analyze(unit)
+        analyzer._allow_const_var_folding = True
+        try:
+            result = analyzer._eval_int_constant_expr(
+                MemberExpr(
+                    base=Identifier("s"), member="a", through_pointer=False
+                ),
+                analyzer._file_scope,
+            )
+            self.assertEqual(result, 42)
+        finally:
+            analyzer._allow_const_var_folding = False
+
+    def test_member_expr_base_scalar_returns_base_val(self) -> None:
+        """_eval_member_expr returns base_val when base evaluates to scalar."""
+        from xcc.ast import Identifier, IntLiteral, MemberExpr
+
+        source = "const int x = 5;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+        analyzer._allow_const_var_folding = True
+        try:
+            result = analyzer._eval_int_constant_expr(
+                MemberExpr(
+                    base=Identifier("x"), member="a", through_pointer=False
+                ),
+                analyzer._file_scope,
+            )
+            # base evaluates to 5 (scalar), returned directly
+            self.assertEqual(result, 5)
+        finally:
+            analyzer._allow_const_var_folding = False
+
+    def test_const_struct_init_from_non_const_function(self) -> None:
+        """Qualifier-only mismatch: const struct from non-const function return."""
+        source = (
+            "struct S { int a; };\n"
+            "struct S get_s(void);\n"
+            "const struct S cs = get_s();\n"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
+    def test_subscript_index_out_of_range_skips_to_next_check(self) -> None:
+        """Subscript with index >= len(init_list.items) → branch 181→189."""
+        from xcc.ast import Identifier, IntLiteral, SubscriptExpr
+
+        source = (
+            "const int arr[3] = {1, 2, 3};\n"
+            '_Static_assert(arr[0] == 1, "ok");'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        analyzer = Analyzer(std="gnu11")
+        analyzer.analyze(unit)
+        analyzer._allow_const_var_folding = True
+        try:
+            # arr[99] where arr has only 3 items → index out of range
+            result = analyzer._eval_int_constant_expr(
+                SubscriptExpr(
+                    base=Identifier("arr"),
+                    index=IntLiteral("99"),
+                ),
+                analyzer._file_scope,
+            )
+            self.assertIsNone(result)
+        finally:
+            analyzer._allow_const_var_folding = False
+
+    def test_member_expr_non_const_base_init_expr_not_init_list(self) -> None:
+        """MemberExpr base is non-const Identifier, _init_expr not InitList."""
+        from xcc.ast import Identifier, IntLiteral, MemberExpr
+        from xcc.sema.symbols import VarSymbol
+        from xcc.types import INT
+
+        source = "int x;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+        # Manually define symbol with _init_expr = IntLiteral (not InitList)
+        analyzer._file_scope.define(
+            VarSymbol(name="y", type_=INT, _init_expr=IntLiteral("10"))
+        )
+        analyzer._allow_const_var_folding = True
+        try:
+            result = analyzer._eval_int_constant_expr(
+                MemberExpr(
+                    base=Identifier("y"), member="a", through_pointer=False
+                ),
+                analyzer._file_scope,
+            )
+            self.assertIsNone(result)
+        finally:
+            analyzer._allow_const_var_folding = False
+
+    def test_array_element_type_none_raises_mismatch(self) -> None:
+        """Dead branch 49->52: element_type() returns None for array type."""
+        from unittest.mock import patch
+
+        from xcc.ast import IntLiteral
+        from xcc.types import INT, Type
+
+        source = "int x;"
+        unit = parse(list(lex(source)), std="c11")
+        analyzer = Analyzer(std="c11")
+        analyzer.analyze(unit)
+
+        arr_type = Type("int", declarator_ops=(("arr", 10),))
+        self.assertTrue(arr_type.is_array())
+
+        with patch.object(Type, "element_type", return_value=None):
+            with self.assertRaises(SemaError):
+                sema_initializers.analyze_initializer(
+                    analyzer,
+                    arr_type,
+                    IntLiteral("5"),
+                    analyzer._file_scope,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
