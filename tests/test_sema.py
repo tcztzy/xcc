@@ -4046,6 +4046,20 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="gnu11")
         self.assertIn("main", sema.functions)
 
+    def test_gnu_cross_pointer_assignment_allowed(self) -> None:
+        source = "int main(){int *p = 0; char *q; q = p; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
+    def test_gnu_non_pointer_assignment_still_rejected(self) -> None:
+        # Non-pointer types are still rejected even in gnu11
+        source = "int main(){int x; struct S { int a; } s; s = x; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertIn("not compatible", str(ctx.exception))
+
     def test_assignment_void_pointer_to_function_pointer_error(self) -> None:
         source = (
             "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; fp=vp; return 0;}"

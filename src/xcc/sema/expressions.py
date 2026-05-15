@@ -542,7 +542,21 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
                 value_type,
                 scope,
             ):
-                raise SemaError("Assignment value is not compatible with target type")
+                # In GNU mode, allow pointer↔integer and cross-pointer
+                # assignments (matching initializer behavior).
+                if self._std == "gnu11":
+                    t_ptr = (target_type.declarator_ops
+                             and target_type.declarator_ops[0][0] == "ptr")
+                    v_ptr = (value_type.declarator_ops
+                             and value_type.declarator_ops[0][0] == "ptr")
+                    if not (t_ptr or v_ptr):
+                        raise SemaError(
+                            "Assignment value is not compatible with target type"
+                        )
+                else:
+                    raise SemaError(
+                        "Assignment value is not compatible with target type"
+                    )
             self._type_map.set(expr, target_type)
             return target_type
         if expr.op in {"*=", "/="}:
