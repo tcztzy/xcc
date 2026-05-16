@@ -271,6 +271,20 @@ class PreprocessorTests(unittest.TestCase):
         with self.assertRaises(PreprocessorError):
             preprocess_source(source, filename="main.c")
 
+    def test_token_paste_multi_token_result_gnu11(self) -> None:
+        """,##__VA_ARGS__ with non-empty var arg produces multi-token paste result."""
+        source = "#define FOO(x, ...) bar(x, ##__VA_ARGS__)\nFOO(1, 2)\n"
+        result = preprocess_source(
+            source, filename="main.c", options=FrontendOptions(std="gnu11")
+        )
+        self.assertIn("bar ( 1 , 2 )", result.source)
+
+    def test_token_paste_multi_token_non_gnu_raises(self) -> None:
+        """Token paste producing multiple tokens raises in non-GNU mode."""
+        source = "#define FOO(x, ...) bar(x, ##__VA_ARGS__)\nFOO(1, 2)\n"
+        with self.assertRaises(PreprocessorError):
+            preprocess_source(source, filename="main.c")
+
     def test_malformed_function_like_define_is_ignored(self) -> None:
         source = "#define BAD(x\nBAD(1)\n"
         result = preprocess_source(source, filename="main.c")

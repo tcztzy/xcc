@@ -16,5 +16,7 @@ char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);
 char *strstr(const char *haystack, const char *needle);
 char *strerror(int errnum);
+void *memchr(const void *s, int c, size_t n);
+char *strtok(char *str, const char *delim);
 
 #endif

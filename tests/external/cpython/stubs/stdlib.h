@@ -26,6 +26,8 @@ size_t mbstowcs(wchar_t *dest, const char *src, size_t n);
 size_t wcstombs(char *dest, const wchar_t *src, size_t n);
 size_t mbrtowc(wchar_t *pwc, const char *s, size_t n, void *ps);
 long atol(const char *nptr);
+int atoi(const char *nptr);
+long long strtoll(const char *nptr, char **endptr, int base);
 
 char *getenv(const char *name);
 int setenv(const char *name, const char *value, int overwrite);

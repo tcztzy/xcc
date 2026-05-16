@@ -40,5 +40,10 @@ int fseek(FILE *stream, long offset, int whence);
 void rewind(FILE *stream);
 int getc(FILE *stream);
 FILE *fdopen(int fd, const char *mode);
+void clearerr(FILE *stream);
+void flockfile(FILE *stream);
+void funlockfile(FILE *stream);
+int getc_unlocked(FILE *stream);
+int ungetc(int c, FILE *stream);
 
 #endif

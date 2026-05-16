@@ -20,6 +20,18 @@ double modf(double x, double *iptr);
 int isinf(double x);
 int isnan(double x);
 int isfinite(double x);
+double log1p(double x);
+double hypot(double x, double y);
+double copysign(double x, double y);
+double acosh(double x);
+double asinh(double x);
+double atanh(double x);
+double erf(double x);
+double erfc(double x);
+double expm1(double x);
+double log2(double x);
+double cbrt(double x);
+double atan2(double y, double x);
 
 #define M_PI 3.14159265358979323846
 #define INFINITY __builtin_inff()

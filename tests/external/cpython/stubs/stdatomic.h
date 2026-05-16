@@ -4,6 +4,15 @@
 typedef enum { memory_order_relaxed = 0, memory_order_consume = 1, memory_order_acquire = 2,
                memory_order_release = 3, memory_order_acq_rel = 4, memory_order_seq_cst = 5 } memory_order;
 
+typedef int atomic_int;
+typedef unsigned int atomic_uint;
+typedef long atomic_long;
+typedef unsigned long atomic_ulong;
+typedef long long atomic_llong;
+typedef unsigned long long atomic_ullong;
+typedef unsigned long atomic_uintptr_t;
+typedef long atomic_intptr_t;
+
 #define ATOMIC_BOOL_LOCK_FREE 2
 #define ATOMIC_CHAR_LOCK_FREE 2
 #define ATOMIC_SHORT_LOCK_FREE 2
