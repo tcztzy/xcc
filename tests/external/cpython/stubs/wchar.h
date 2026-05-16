@@ -13,5 +13,6 @@ int wcscmp(const wchar_t *s1, const wchar_t *s2);
 wchar_t *wcschr(const wchar_t *s, wchar_t c);
 wchar_t *wcsrchr(const wchar_t *s, wchar_t c);
 int wcsncmp(const wchar_t *s1, const wchar_t *s2, size_t n);
+int wmemcmp(const wchar_t *s1, const wchar_t *s2, size_t n);
 
 #endif

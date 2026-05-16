@@ -13,6 +13,8 @@ extern int errno;
 #define ENOEXEC 8
 #define EBADF 9
 #define ECHILD 10
+#define EALREADY 37
+#define EINPROGRESS 36
 #define EAGAIN 11
 #define ENOMEM 12
 #define EACCES 13

@@ -18,5 +18,6 @@ char *strstr(const char *haystack, const char *needle);
 char *strerror(int errnum);
 void *memchr(const void *s, int c, size_t n);
 char *strtok(char *str, const char *delim);
+size_t strcspn(const char *s, const char *reject);
 
 #endif
