@@ -5025,6 +5025,13 @@ class ParserTests(unittest.TestCase):
         )
         self.assertEqual(unit.functions[0].name, "f")
 
+    def test_builtin_va_arg(self) -> None:
+        unit = parse(
+            list(lex("void f(void) { unsigned char *p = __builtin_va_arg(p, unsigned char *); }")),
+            std="gnu11",
+        )
+        self.assertEqual(unit.functions[0].name, "f")
+
     # --- K&R (old-style) function definition tests ---
 
     def test_knr_function_definition(self) -> None:

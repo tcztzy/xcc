@@ -5932,6 +5932,12 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
+    def test_builtin_va_arg_accepted_in_gnu11(self) -> None:
+        source = "void f(void) { unsigned char *q; unsigned char *p = __builtin_va_arg(q, unsigned char *); }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIsNotNone(sema)
+
     def test_builtin_expect_accepted_in_gnu11(self) -> None:
         source = "int f(int x) { if (__builtin_expect(x == 0, 0)) return -1; return x; }"
         unit = parse(list(lex(source)), std="gnu11")

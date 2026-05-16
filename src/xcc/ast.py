@@ -369,6 +369,12 @@ class BuiltinTypesCompatExpr(Expr):
 
 
 @dataclass(frozen=True)
+class BuiltinVaArgExpr(Expr):
+    ap: Expr
+    type_spec: TypeSpec
+
+
+@dataclass(frozen=True)
 class NullStmt(Stmt):
     pass
 

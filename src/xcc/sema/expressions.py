@@ -6,6 +6,7 @@ from xcc.ast import (
     BinaryExpr,
     BuiltinOffsetofExpr,
     BuiltinTypesCompatExpr,
+    BuiltinVaArgExpr,
     CallExpr,
     CastExpr,
     CharLiteral,
@@ -159,6 +160,12 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         self._resolve_type(expr.type2)
         self._type_map.set(expr, INT)
         return INT
+    if isinstance(expr, BuiltinVaArgExpr):
+        self._register_type_spec(expr.type_spec)
+        _ = self._analyze_expr(expr.ap, scope)
+        result_type = self._resolve_type(expr.type_spec)
+        self._type_map.set(expr, result_type)
+        return result_type
     if isinstance(expr, CastExpr):
         self._register_type_spec(expr.type_spec)
         target_type = self._resolve_type(expr.type_spec)

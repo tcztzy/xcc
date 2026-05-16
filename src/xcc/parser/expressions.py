@@ -9,6 +9,7 @@ from xcc.ast import (
     BinaryExpr,
     BuiltinOffsetofExpr,
     BuiltinTypesCompatExpr,
+    BuiltinVaArgExpr,
     CallExpr,
     CastExpr,
     CharLiteral,
@@ -275,9 +276,20 @@ def parse_postfix(parser: object) -> Expr:
     while True:
         if parser._check_punct("("):  # type: ignore[attr-defined]
             parser._advance()  # type: ignore[attr-defined]
-            args = parser._parse_arguments()  # type: ignore[attr-defined]
-            parser._expect_punct(")")  # type: ignore[attr-defined]
-            expr = CallExpr(expr, args)
+            # __builtin_va_arg(ap, type) takes a type name as 2nd argument
+            if (
+                isinstance(expr, Identifier)
+                and expr.name == "__builtin_va_arg"
+            ):
+                ap = parser._parse_assignment()  # type: ignore[attr-defined]
+                parser._expect_punct(",")  # type: ignore[attr-defined]
+                type_spec = parser._parse_type_name()  # type: ignore[attr-defined]
+                parser._expect_punct(")")  # type: ignore[attr-defined]
+                expr = BuiltinVaArgExpr(ap=ap, type_spec=type_spec)
+            else:
+                args = parser._parse_arguments()  # type: ignore[attr-defined]
+                parser._expect_punct(")")  # type: ignore[attr-defined]
+                expr = CallExpr(expr, args)
             continue
         if parser._check_punct("["):  # type: ignore[attr-defined]
             parser._advance()  # type: ignore[attr-defined]
