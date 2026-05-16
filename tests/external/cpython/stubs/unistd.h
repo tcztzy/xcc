@@ -46,5 +46,8 @@ ssize_t readlink(const char *path, char *buf, size_t bufsiz);
 #define O_CLOEXEC 0x1000000
 
 char *realpath(const char *path, char *resolved_path);
+char *getcwd(char *buf, size_t size);
+int dup(int oldfd);
+int dup2(int oldfd, int newfd);
 
 #endif

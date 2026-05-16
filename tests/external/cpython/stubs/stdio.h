@@ -39,5 +39,6 @@ long ftell(FILE *stream);
 int fseek(FILE *stream, long offset, int whence);
 void rewind(FILE *stream);
 int getc(FILE *stream);
+FILE *fdopen(int fd, const char *mode);
 
 #endif
