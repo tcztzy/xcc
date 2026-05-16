@@ -40,4 +40,5 @@ int pthread_attr_setscope(pthread_attr_t *attr, int scope);
 #define PTHREAD_SCOPE_PROCESS 1
 int pthread_detach(unsigned long thread);
 unsigned long pthread_self(void);
+void pthread_exit(void *retval);
 #endif
