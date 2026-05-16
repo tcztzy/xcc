@@ -22,6 +22,9 @@ struct tm {
 
 time_t time(time_t *tloc);
 int clock_gettime(int clk_id, struct timespec *tp);
+int clock_getres(int clk_id, struct timespec *tp);
+struct tm *localtime_r(const time_t *timep, struct tm *result);
+struct tm *gmtime_r(const time_t *timep, struct tm *result);
 
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1

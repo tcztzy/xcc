@@ -33,4 +33,11 @@ int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
 int pthread_cond_timedwait_relative_np(pthread_cond_t *cond,
                                        pthread_mutex_t *mutex,
                                        const struct timespec *abstime);
+int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
+int pthread_getname_np(unsigned long thread, char *name, size_t len);
+int pthread_attr_setscope(pthread_attr_t *attr, int scope);
+#define PTHREAD_SCOPE_SYSTEM 0
+#define PTHREAD_SCOPE_PROCESS 1
+int pthread_detach(unsigned long thread);
+unsigned long pthread_self(void);
 #endif
