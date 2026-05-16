@@ -121,7 +121,7 @@ def resolve_type(analyzer: object, type_spec: TypeSpec) -> Type:
         return CHAR
     if type_spec.name == "unsigned char" and is_unqualified_scalar:
         return UCHAR
-    if type_spec.name == "_Bool" and is_unqualified_scalar:
+    if type_spec.name in ("_Bool", "bool") and is_unqualified_scalar:
         return BOOL
     if type_spec.name == "short" and is_unqualified_scalar:
         return SHORT

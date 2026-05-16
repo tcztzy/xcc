@@ -19,6 +19,7 @@ class VarSymbol:
     alignment: int | None = None
     is_extern: bool = False
     constant_value: int | None = None
+    has_init: bool = False
     # For arrays: the InitList expression, used to evaluate const subscripts.
     _init_expr: object | None = None
 
@@ -87,6 +88,19 @@ class Scope:
                 and isinstance(symbol, VarSymbol)
                 and existing.is_extern
                 and existing.type_ == symbol.type_
+            ):
+                self._symbols[symbol.name] = symbol
+                return
+            # C11 6.9.2: Tentative definition followed by definition with
+            # initializer is valid. The first is replaced by the second.
+            if (
+                isinstance(existing, VarSymbol)
+                and isinstance(symbol, VarSymbol)
+                and not existing.is_extern
+                and not symbol.is_extern
+                and existing.type_ == symbol.type_
+                and not existing.has_init
+                and symbol.has_init
             ):
                 self._symbols[symbol.name] = symbol
                 return

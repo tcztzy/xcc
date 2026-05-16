@@ -35,6 +35,8 @@ ssize_t readlink(const char *path, char *buf, size_t bufsiz);
 /* fcntl / open constants */
 #define F_GETFD 1
 #define F_SETFD 2
+#define F_GETFL 3
+#define F_SETFL 4
 #define FD_CLOEXEC 1
 #define O_APPEND 0x0008
 #define O_CREAT 0x0200
@@ -44,6 +46,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsiz);
 #define O_RDWR 2
 #define O_NOFOLLOW 0x0100
 #define O_CLOEXEC 0x1000000
+#define O_NONBLOCK 0x0004
 
 char *realpath(const char *path, char *resolved_path);
 char *getcwd(char *buf, size_t size);

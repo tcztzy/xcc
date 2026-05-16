@@ -19,6 +19,7 @@ TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 _NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned", "constexpr"}
 _GNU_EXTENSION_TYPES = {
+    "bool",
     "_Float16",
     "_Float32",
     "_Float64",

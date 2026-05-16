@@ -3520,6 +3520,12 @@ class SemaTests(unittest.TestCase):
             "Invalid object type for file-scope object declaration: incomplete",
         )
 
+    def test_tentative_definition_replaced_by_initialized_definition(self) -> None:
+        # C11 6.9.2: tentative definition followed by definition with init
+        unit = parse(list(lex("int g; int g = 42; int main(){return g;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_duplicate_file_scope_typedef_declaration(self) -> None:
         unit = parse(list(lex("typedef int T; typedef int T; int main(){return 0;}")))
         with self.assertRaises(SemaError) as ctx:

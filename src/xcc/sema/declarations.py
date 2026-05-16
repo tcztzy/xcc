@@ -98,6 +98,8 @@ def analyze_file_scope_decl(analyzer: object, declaration: Stmt) -> None:
             declaration.alignment if declaration.alignment is not None else var_alignment,
             is_extern=declaration.storage_class == "extern",
         )
+        if declaration.init is not None:
+            symbol.has_init = True
         a._file_scope.define(symbol)
         if declaration.init is not None:
             if declaration.storage_class == "extern":
