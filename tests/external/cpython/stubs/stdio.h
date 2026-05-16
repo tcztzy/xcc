@@ -11,6 +11,7 @@ extern FILE *stdout;
 extern FILE *stderr;
 
 #define EOF (-1)
+#define BUFSIZ 8192
 
 int fprintf(FILE *stream, const char *format, ...);
 int printf(const char *format, ...);

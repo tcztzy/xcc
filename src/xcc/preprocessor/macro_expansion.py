@@ -329,12 +329,11 @@ def _paste_token_pair(
             return []
         return [left]
     pasted = _tokenize_macro_text(left_text + right_text)
-    if pasted and len(pasted) != 1:
+    if pasted and len(pasted) != 1 and std == "gnu11":
         # In GNU mode, allow paste to produce multiple tokens (e.g. , ## rest
         # for the GNU ##__VA_ARGS__ extension where , pasted with a non-empty
         # var arg produces two tokens).
-        if std == "gnu11":
-            return pasted
+        return pasted
     if not pasted or len(pasted) != 1:
         raise PreprocessorError(
             "Invalid token paste result",
