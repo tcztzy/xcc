@@ -67,6 +67,14 @@ def _parse_macro_parameters(text: str) -> tuple[list[str], bool] | None:
 def _tokenize_macro_replacement(text: str) -> list[_MacroToken]:
     if not text:
         return []
+    # Strip unclosed block comment from replacement text.  If a #define
+    # body opens a block comment without closing it (the closing */ is on
+    # a subsequent non-directive line that gets blanked), the lexer raises
+    # Unterminated block comment and falls back to raw text, which produces
+    # a spurious /* in macro expansions.  Remove the trailing /*... here.
+    comment_idx = text.find("/*")
+    if comment_idx != -1 and "*/" not in text[comment_idx + 2:]:
+        text = text[:comment_idx].rstrip()
     tokens = _tokenize_macro_text(text)
     if tokens is None:
         return [_MacroToken(TokenKind.IDENT, text)]

@@ -12,6 +12,7 @@ double cos(double x);
 double tan(double x);
 double floor(double x);
 double ceil(double x);
+double round(double x);
 double fmod(double x, double y);
 double frexp(double x, int *exp);
 double ldexp(double x, int exp);
