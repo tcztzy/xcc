@@ -19,9 +19,32 @@ unsigned int sleep(unsigned int seconds);
 int isatty(int fd);
 int fileno(void *stream);
 long lseek(int fd, long offset, int whence);
+int access(const char *pathname, int mode);
+int pause(void);
+int getpid(void);
+ssize_t readlink(const char *path, char *buf, size_t bufsiz);
 
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
+#define R_OK 4
+#define W_OK 2
+#define X_OK 1
+#define F_OK 0
+
+/* fcntl / open constants */
+#define F_GETFD 1
+#define F_SETFD 2
+#define FD_CLOEXEC 1
+#define O_APPEND 0x0008
+#define O_CREAT 0x0200
+#define O_TRUNC 0x0400
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR 2
+#define O_NOFOLLOW 0x0100
+#define O_CLOEXEC 0x1000000
+
+char *realpath(const char *path, char *resolved_path);
 
 #endif

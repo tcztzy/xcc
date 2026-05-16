@@ -38,5 +38,6 @@ int ferror(FILE *stream);
 long ftell(FILE *stream);
 int fseek(FILE *stream, long offset, int whence);
 void rewind(FILE *stream);
+int getc(FILE *stream);
 
 #endif

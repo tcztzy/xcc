@@ -328,7 +328,7 @@ class Analyzer:
                 return_type=VOID, params=None, is_variadic=True
             )
         # POSIX functions used by CPython that may not be in stubs
-        for name in ("clock_gettime", "sysconf"):
+        for name in ("clock_gettime", "sysconf", "fcntl", "sigaction"):
             self._function_signatures[name] = FunctionSignature(
                 return_type=INT, params=None, is_variadic=True
             )
@@ -868,10 +868,17 @@ class Analyzer:
     def _is_assignment_compatible(self, target_type: Type, value_type: Type) -> bool:
         if is_assignment_compatible(target_type, value_type):
             return True
+        if self._std != "gnu11":
+            return False
         # In GNU mode, void* can hold function pointers (POSIX requires this).
-        if self._std == "gnu11" and is_void_pointer_type(target_type):
-            if value_type.pointee() is not None:
-                return True
+        if is_void_pointer_type(target_type) and value_type.pointee() is not None:
+            return True
+        # In GNU mode, allow cross-pointer assignment (e.g. char* to wchar_t*),
+        # matching GCC -fpermissive behavior used by CPython.
+        t_ptr = target_type.declarator_ops and target_type.declarator_ops[0][0] == "ptr"
+        v_ptr = value_type.declarator_ops and value_type.declarator_ops[0][0] == "ptr"
+        if t_ptr and v_ptr:
+            return True
         return False
 
     def _is_pointer_conversion_compatible(self, target_type: Type, value_type: Type) -> bool:

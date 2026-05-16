@@ -21,4 +21,14 @@ struct sigaction {
 void (*signal(int sig, void (*func)(int)))(int);
 int raise(int sig);
 
+#define SIG_ERR ((void (*)(int))-1)
+#define SIG_DFL ((void (*)(int))0)
+#define SIG_IGN ((void (*)(int))1)
+
+int sigemptyset(sigset_t *set);
+int sigfillset(sigset_t *set);
+
+#define SA_ONSTACK 0x0001
+#define SA_RESTART 0x0002
+
 #endif

@@ -4096,6 +4096,13 @@ class SemaTests(unittest.TestCase):
             analyze(unit, std="gnu11")
         self.assertIn("not compatible", str(ctx.exception))
 
+    def test_gnu_pointer_to_integer_assignment_allowed(self) -> None:
+        # char = char* (pointer value stored in integer) OK in gnu11
+        source = "int main(){char *p = 0; char c; c = p; return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
     def test_assignment_void_pointer_to_function_pointer_error(self) -> None:
         source = (
             "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; fp=vp; return 0;}"
