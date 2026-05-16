@@ -271,6 +271,18 @@ class PreprocessorTests(unittest.TestCase):
         with self.assertRaises(PreprocessorError):
             preprocess_source(source, filename="main.c")
 
+    def test_cross_reference_function_like_blocks_entire_invocation(self) -> None:
+        """A(x)→B(x)→A: when A is blocked at B's level, skip entire A(args)."""
+        source = """
+#define A(x) B(x)
+#define B(x) A(x+1)
+A(0)
+"""
+        result = preprocess_source(source, filename="main.c")
+        # A(0) → B(0) → A(0+1).  At B's level, A is in ancestor → entire
+        # A(0+1) invocation is skipped, preserving it as raw tokens.
+        self.assertIn("A", result.source)
+
     def test_token_paste_multi_token_result_gnu11(self) -> None:
         """,##__VA_ARGS__ with non-empty var arg produces multi-token paste result."""
         source = "#define FOO(x, ...) bar(x, ##__VA_ARGS__)\nFOO(1, 2)\n"

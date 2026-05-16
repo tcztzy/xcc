@@ -25,7 +25,20 @@ def _expand_macro_tokens(
     disabled: frozenset[str] = frozenset(),
     dynamic_macro_resolver: Callable[[str, _SourceLocation], _MacroToken] | None = None,
     dynamic_macro_names: frozenset[str] = frozenset(),
+    *,
+    ancestor_disabled: frozenset[str] | None = None,
+    self_disabled: str | None = None,
+    base_ancestor_disabled: frozenset[str] | None = None,
 ) -> list[_MacroToken]:
+    if ancestor_disabled is None:
+        ancestor_disabled = disabled
+    # base_ancestor_disabled is the ancestor set WITHOUT the current
+    # self-disabled macro. It is used for _expand_function_like_macro
+    # (argument expansion) so that the self-disabled macro from the
+    # parent level does not suppress legitimate re-expansion of the
+    # same macro name in sub-macros' arguments.
+    if base_ancestor_disabled is None:
+        base_ancestor_disabled = ancestor_disabled
     expanded: list[_MacroToken] = []
     index = 0
     while index < len(tokens):
@@ -42,18 +55,39 @@ def _expand_macro_tokens(
             index += 1
             continue
         macro = macros.get(token.text)
-        if macro is None or macro.name in disabled:
+        # A macro is skipped if: it's in the permanent ancestor set, OR
+        # it's the macro whose replacement is currently being rescanned
+        # (self-disable to prevent re-expansion of the same macro in its
+        # own replacement text).
+        if macro is None or macro.name in ancestor_disabled or macro.name == self_disabled:
             expanded.append(token)
             index += 1
+            # If the blocked macro is in the ancestor set (cross-reference,
+            # not self-reference), skip the entire invocation; argument
+            # tokens may also be blocked ancestors.  _parse_macro_invocation
+            # should always find a valid arg list here since the rescan
+            # processes replacement text where macros appear as name(...).
+            if macro is not None and macro.parameters is not None and macro.name in ancestor_disabled:
+                parsed = _parse_macro_invocation(tokens, index, location)
+                if parsed is not None:  # pragma: no branch — always matched in rescan
+                    _, next_index = parsed
+                    expanded.extend(tokens[index:next_index])
+                    index = next_index
             continue
-        next_disabled = frozenset((*disabled, macro.name))
+        next_disabled = frozenset((*ancestor_disabled, macro.name))
         if macro.parameters is None:
+            _rescan_ancestor: frozenset[str] = frozenset()
+            if self_disabled is not None:
+                _rescan_ancestor = frozenset((self_disabled,))
             replacement = _expand_macro_tokens(
                 list(macro.replacement),
                 macros,
                 std,
                 location,
                 disabled=next_disabled,
+                ancestor_disabled=_rescan_ancestor,
+                base_ancestor_disabled=ancestor_disabled,
+                self_disabled=macro.name,
                 dynamic_macro_resolver=dynamic_macro_resolver,
                 dynamic_macro_names=dynamic_macro_names,
             )
@@ -64,7 +98,8 @@ def _expand_macro_tokens(
                 len(replacement) == 1
                 and replacement[0].kind == TokenKind.IDENT
                 and replacement[0].text in macros
-                and replacement[0].text not in next_disabled
+                and replacement[0].text not in ancestor_disabled
+                and replacement[0].text != macro.name
             ):
                 re_input = replacement + tokens[index + 1:]
                 expanded.extend(
@@ -74,6 +109,9 @@ def _expand_macro_tokens(
                         std,
                         location,
                         disabled=disabled,
+                        ancestor_disabled=ancestor_disabled,
+                        base_ancestor_disabled=base_ancestor_disabled,
+                        self_disabled=self_disabled,
                         dynamic_macro_resolver=dynamic_macro_resolver,
                         dynamic_macro_names=dynamic_macro_names,
                     )
@@ -88,22 +126,36 @@ def _expand_macro_tokens(
             index += 1
             continue
         args, next_index = parsed
+        # Use ancestor_disabled for argument expansion: the current
+        # macro's self-disable (in next_disabled) should not suppress
+        # macro expansion in arguments to sub-macros found during the
+        # rescan of the current macro's replacement text.
         replacement = _expand_function_like_macro(
             macro,
             args,
             macros,
             std=std,
             location=location,
-            disabled=disabled,
+            disabled=frozenset(),
             dynamic_macro_resolver=dynamic_macro_resolver,
             dynamic_macro_names=dynamic_macro_names,
         )
+        # ancestor_disabled for the rescan: only the immediate parent
+        # (self_disabled) is tracked.  This blocks direct A→B→A
+        # cross-references while allowing deeper re-expansion through
+        # argument chains as in CPython's _PyObject_CAST pattern.
+        _rescan_ancestor: frozenset[str] = frozenset()
+        if self_disabled is not None:
+            _rescan_ancestor = frozenset((self_disabled,))
         replacement = _expand_macro_tokens(
             replacement,
             macros,
             std,
             location,
             disabled=next_disabled,
+            ancestor_disabled=_rescan_ancestor,
+            base_ancestor_disabled=base_ancestor_disabled,
+            self_disabled=macro.name,
             dynamic_macro_resolver=dynamic_macro_resolver,
             dynamic_macro_names=dynamic_macro_names,
         )
@@ -111,7 +163,8 @@ def _expand_macro_tokens(
             replacement
             and replacement[-1].kind == TokenKind.IDENT
             and replacement[-1].text in macros
-            and replacement[-1].text not in next_disabled
+            and replacement[-1].text not in ancestor_disabled
+            and replacement[-1].text != macro.name
         ):
             re_input = replacement + tokens[next_index:]
             expanded.extend(
@@ -121,6 +174,9 @@ def _expand_macro_tokens(
                     std,
                     location,
                     disabled=disabled,
+                    ancestor_disabled=ancestor_disabled,
+                    base_ancestor_disabled=base_ancestor_disabled,
+                    self_disabled=self_disabled,
                     dynamic_macro_resolver=dynamic_macro_resolver,
                     dynamic_macro_names=dynamic_macro_names,
                 )
@@ -208,6 +264,8 @@ def _expand_function_like_macro(
             std,
             location,
             disabled=disabled,
+            ancestor_disabled=disabled,
+            base_ancestor_disabled=disabled,
             dynamic_macro_resolver=dynamic_macro_resolver,
             dynamic_macro_names=dynamic_macro_names,
         )
@@ -226,6 +284,8 @@ def _expand_function_like_macro(
                     std,
                     location,
                     disabled=disabled,
+                    ancestor_disabled=disabled,
+                    base_ancestor_disabled=disabled,
                     dynamic_macro_resolver=dynamic_macro_resolver,
                     dynamic_macro_names=dynamic_macro_names,
                 )
