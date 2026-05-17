@@ -29,6 +29,49 @@ from xcc.options import FrontendOptions
 
 CPYTHON_ROOT_DEFAULT = Path("/Users/tcztzy/GitHub/cpython")
 
+
+def _resolve_soabi(cpython_root: Path) -> str:
+    """Resolve SOABI for the CPython source at *cpython_root*.
+
+    SOABI is normally supplied by the Makefile via ``-DSOABI=...`` and
+    is *not* available in pyconfig.h.  We derive it from the version
+    declared in ``Include/patchlevel.h`` together with the host platform
+    tag (``sysconfig.get_platform()``).
+    """
+    # 1. Try the CPython source tree's own Makefile (fastest).
+    makefile = cpython_root / "Makefile"
+    if makefile.is_file():
+        for line in makefile.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("SOABI="):
+                value = stripped.split("=", 1)[1].strip()
+                if value:
+                    return f'"{value}"'
+
+    # 2. Read the version from patchlevel.h.
+    major = minor = "0"
+    patchlevel = cpython_root / "Include" / "patchlevel.h"
+    if patchlevel.is_file():
+        import re
+        text = patchlevel.read_text(encoding="utf-8")
+        m_major = re.search(r"#define\s+PY_MAJOR_VERSION\s+(\d+)", text)
+        m_minor = re.search(r"#define\s+PY_MINOR_VERSION\s+(\d+)", text)
+        if m_major:
+            major = m_major.group(1)
+        if m_minor:
+            minor = m_minor.group(1)
+
+    # 3. Get the MULTIARCH tag (darwin on macOS, arm-linux-gnueabihf etc. elsewhere).
+    multiarch = "darwin" if sys.platform == "darwin" else "unknown"
+    return f'"cpython-{major}{minor}-{multiarch}"'
+
+
+def _resolve_extra_defines(cpython_root: Path) -> tuple[str, ...]:
+    """Return extra -D flags that CPython's Makefile would supply."""
+    return (
+        f"SOABI={_resolve_soabi(cpython_root)}",
+    )
+
 # Subdirs containing .c files to compile (relative to cpython root)
 CORE_SUBDIRS = ("Python", "Objects", "Parser", "Programs")
 MODULE_SUBDIRS = ("Modules",)
@@ -173,6 +216,36 @@ def _file_includes(cpython_root: Path, file_path: Path) -> tuple[str, ...]:
     return tuple(extras)
 
 
+_BASE_DEFINES = (
+    "Py_BUILD_CORE",
+    "PY_SSIZE_T_CLEAN",
+    # mimalloc: CPython's fork guards mi_decl_* behind MI_DEBUG;
+    # add fallback definitions for paths where XCC's preprocessor
+    # doesn't enter the expected branch.
+    'mi_decl_noreturn=__attribute__((__noreturn__))',
+    'mi_decl_cold=__attribute__((cold))',
+    'mi_decl_noinline=__attribute__((noinline))',
+    'mi_decl_cache_align=__attribute__((aligned(MI_CACHE_LINE)))',
+    'mi_decl_throw=',
+    'mi_decl_thread=__thread',
+    'mi_decl_restrict=',
+    # XCC doesn't implement __has_attribute; stub to 0
+    # so that macOS SDK cdefs.h #if __has_attribute(...) works
+    '__has_attribute(x)=0',
+    # XCC doesn't define __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__
+    # which some SDK headers need
+    '__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__=120000',
+)
+
+_EXTRA_DEFINES_CACHE: dict[Path, tuple[str, ...]] = {}
+
+
+def _get_extra_defines(cpython_root: Path) -> tuple[str, ...]:
+    if cpython_root not in _EXTRA_DEFINES_CACHE:
+        _EXTRA_DEFINES_CACHE[cpython_root] = _resolve_extra_defines(cpython_root)
+    return _EXTRA_DEFINES_CACHE[cpython_root]
+
+
 def compile_file(
     cpython_root: Path,
     file_path: Path,
@@ -182,24 +255,7 @@ def compile_file(
     options = FrontendOptions(
         std="gnu11",
         include_dirs=include_dirs,
-        defines=("Py_BUILD_CORE", "PY_SSIZE_T_CLEAN",
-                 # mimalloc: CPython's fork guards mi_decl_* behind MI_DEBUG;
-                 # add fallback definitions for paths where XCC's preprocessor
-                 # doesn't enter the expected branch.
-                 'mi_decl_noreturn=__attribute__((__noreturn__))',
-                 'mi_decl_cold=__attribute__((cold))',
-                 'mi_decl_noinline=__attribute__((noinline))',
-                 'mi_decl_cache_align=__attribute__((aligned(MI_CACHE_LINE)))',
-                 'mi_decl_throw=',
-                 'mi_decl_thread=__thread',
-                 'mi_decl_restrict=',
-                 # XCC doesn't implement __has_attribute; stub to 0
-                 # so that macOS SDK cdefs.h #if __has_attribute(...) works
-                 '__has_attribute(x)=0',
-                 # XCC doesn't define __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__
-                 # which some SDK headers need
-                 '__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__=120000',
-                 ),
+        defines=_BASE_DEFINES + _get_extra_defines(cpython_root),
     )
 
     try:
