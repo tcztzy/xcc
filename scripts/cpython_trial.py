@@ -116,6 +116,8 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Python/sysmodule_win.c": "Windows-only",
     "Modules/posixmodule_win.c": "Windows-only",
     "Modules/timemodule_win.c": "Windows-only",
+    "Modules/_winapi.c": "Windows-only (needs windows.h)",
+    "Modules/overlapped.c": "Windows-only (needs winsock2.h)",
     # Generated files not available at compile time
     "Python/deepfreeze.c": "requires generated frozen modules header",
     "Python/frozen.c": "requires generated frozen modules header",
@@ -165,6 +167,39 @@ EXPECTED_SKIPS: dict[str, str] = {
 }
 
 
+_THIRD_PARTY_INCLUDE_CACHE: dict[Path, tuple[str, ...]] = {}
+
+
+def _resolve_third_party_includes(cpython_root: Path) -> tuple[str, ...]:
+    """Read third-party -I paths from CPython's configured Makefile.
+
+    CPython's ``./configure`` discovers library locations via pkg-config
+    and records them in the generated Makefile.  We read those rather
+    than re-running discovery ourselves — XCC is a compiler, not a build
+    system.
+    """
+    if cpython_root in _THIRD_PARTY_INCLUDE_CACHE:
+        return _THIRD_PARTY_INCLUDE_CACHE[cpython_root]
+
+    dirs: list[str] = []
+    makefile = cpython_root / "Makefile"
+    if makefile.is_file():
+        import re as _re
+        text = makefile.read_text(encoding="utf-8")
+        for var in ("CONFIGURE_CFLAGS", "BASECFLAGS", "CFLAGS", "CPPFLAGS"):
+            m = _re.search(rf"^{var}\s*=\s*(.+)$", text, _re.MULTILINE)
+            if m:
+                for token in m.group(1).split():
+                    if token.startswith("-I"):
+                        d = token[2:]
+                        if d and Path(d).is_dir() and d not in dirs:
+                            dirs.append(d)
+
+    result = tuple(dirs)
+    _THIRD_PARTY_INCLUDE_CACHE[cpython_root] = result
+    return result
+
+
 def _base_include_dirs(cpython_root: Path) -> tuple[str, ...]:
     return (
         str(cpython_root),                       # for pyconfig.h
@@ -204,6 +239,13 @@ def _gather_files(
     return files
 
 
+# Per-directory extra defines (e.g. for module-specific build flags)
+_DIRECTORY_DEFINES: dict[str, tuple[str, ...]] = {
+    "Modules/_testcapi": ("PYTESTCAPI_NEED_INTERNAL_API=1",),
+    "Modules/_ctypes": ("USING_MALLOC_CLOSURE_DOT_C=1",),
+}
+
+
 def _file_includes(cpython_root: Path, file_path: Path) -> tuple[str, ...]:
     """Extra include dirs for a specific file's parent directory."""
     rel_parent = file_path.relative_to(cpython_root).parent.as_posix()
@@ -214,6 +256,15 @@ def _file_includes(cpython_root: Path, file_path: Path) -> tuple[str, ...]:
                 extras.append(str(cpython_root / d))
             break
     return tuple(extras)
+
+
+def _file_defines(cpython_root: Path, file_path: Path) -> tuple[str, ...]:
+    """Extra -D defines for a specific file's parent directory."""
+    rel_parent = file_path.relative_to(cpython_root).parent.as_posix()
+    for prefix, defines in _DIRECTORY_DEFINES.items():
+        if rel_parent == prefix or rel_parent.startswith(prefix + "/"):
+            return defines
+    return ()
 
 
 _BASE_DEFINES = (
@@ -251,11 +302,15 @@ def compile_file(
     file_path: Path,
 ) -> tuple[bool, str, str, int | None, int | None]:
     """Compile a single CPython .c file. Returns (ok, stage, message, line, col)."""
-    include_dirs = _base_include_dirs(cpython_root) + _file_includes(cpython_root, file_path)
+    include_dirs = (
+        _base_include_dirs(cpython_root)
+        + _resolve_third_party_includes(cpython_root)
+        + _file_includes(cpython_root, file_path)
+    )
     options = FrontendOptions(
         std="gnu11",
         include_dirs=include_dirs,
-        defines=_BASE_DEFINES + _get_extra_defines(cpython_root),
+        defines=_BASE_DEFINES + _get_extra_defines(cpython_root) + _file_defines(cpython_root, file_path),
     )
 
     try:

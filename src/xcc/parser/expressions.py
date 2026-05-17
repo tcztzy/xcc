@@ -266,11 +266,13 @@ def is_parenthesized_type_name_start(parser: object) -> bool:
 
 
 def parse_postfix(parser: object) -> Expr:
-    if (
-        parser._is_parenthesized_type_name_start()  # type: ignore[attr-defined]
-        and parser._looks_like_compound_literal()  # type: ignore[attr-defined]
-    ):
-        expr = parser._parse_compound_literal_expr()  # type: ignore[attr-defined]
+    if parser._is_parenthesized_type_name_start():  # type: ignore[attr-defined]
+        if parser._looks_like_compound_literal():  # type: ignore[attr-defined]
+            expr = parser._parse_compound_literal_expr()  # type: ignore[attr-defined]
+        else:
+            # Parenthesized type name that isn't a compound literal
+            # is a cast expression, e.g. ``(struct sockaddr *)ptr``.
+            expr = parser._parse_cast_expr()  # type: ignore[attr-defined]
     else:
         expr = parser._parse_primary()  # type: ignore[attr-defined]
     while True:

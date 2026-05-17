@@ -270,6 +270,15 @@ class Analyzer:
         for name in _MATH_BUILTINS:
             self._function_signatures[name] = _math_sig
 
+        # Void-returning builtins with generic params
+        _VOID_BUILTINS = (
+            "__builtin_bzero",
+            "__builtin___bzero",
+        )
+        _void_sig = FunctionSignature(return_type=VOID, params=None, is_variadic=True)
+        for name in _VOID_BUILTINS:
+            self._function_signatures[name] = _void_sig
+
         # Integer-returning builtins
         _INTEGER_BUILTINS = (
             "__builtin_flt_rounds",

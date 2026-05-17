@@ -95,10 +95,14 @@ def is_compatible_nonvoid_object_pointer_pair(
         return False
     if left_pointee.name == VOID.name or right_pointee.name == VOID.name:
         return getattr(analyzer, "_std", "c11") == "gnu11"
+    # Function pointer comparison is a GNU extension (accepted in gnu11 mode).
+    gnu = getattr(analyzer, "_std", "c11") == "gnu11"
     if left_pointee.declarator_ops and left_pointee.declarator_ops[0][0] == "fn":
-        return False
+        if not gnu:
+            return False
     if right_pointee.declarator_ops and right_pointee.declarator_ops[0][0] == "fn":
-        return False
+        if not gnu:
+            return False
     if analyzer._has_nested_pointer_qualifier_mismatch(left_pointee, right_pointee):  # type: ignore[attr-defined]
         return False
     return analyzer._is_compatible_pointee_type(left_pointee, right_pointee)  # type: ignore[attr-defined]

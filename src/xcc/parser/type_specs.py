@@ -554,6 +554,18 @@ def consume_decl_specifiers(parser: object) -> DeclSpecInfo:
             if alignment is None or current_alignment > alignment:
                 alignment = current_alignment
             continue
+        # _Alignas can appear after type qualifiers
+        # (e.g. ``static const _Alignas(16) char x``).  Peek past
+        # qualifiers: if _Alignas follows, skip them and loop again;
+        # otherwise leave them for _parse_type_spec to consume.
+        if lexeme in TYPE_QUALIFIER_KEYWORDS or (
+            lexeme == "_Atomic" and not p._check_punct("(")
+        ):
+            saved_index = p._index
+            skip_type_qualifiers(p)
+            if p._current().kind == TokenKind.KEYWORD and p._current().lexeme == "_Alignas":
+                continue
+            p._index = saved_index
         break
     return DeclSpecInfo(
         is_typedef=storage_class == "typedef",
