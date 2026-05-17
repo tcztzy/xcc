@@ -17,3 +17,7 @@ tests/external/clang/generated/
 site/
 docs/_sources/
 .DS_Store
+*.o
+*.so
+*.dylib
+*.dll

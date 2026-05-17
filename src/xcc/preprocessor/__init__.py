@@ -170,9 +170,7 @@ _PREDEFINED_MACROS = (
     "__STDC_MB_MIGHT_NEQ_WC__=1",
     "__STDC_UTF_16__=1",
     "__STDC_UTF_32__=1",
-    "__STDC_NO_ATOMICS__=1",
     "__STDC_NO_COMPLEX__=1",
-    "__STDC_NO_THREADS__=1",
     "__STDC_NO_VLA__=1",
     "__STDC_EMBED_NOT_FOUND__=0",
     "__STDC_EMBED_FOUND__=1",
@@ -391,6 +389,7 @@ _PREDEFINED_DYNAMIC_MACROS = frozenset(
 _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__", "__TIMESTAMP__"})
 _STRICT_MODE_PREDEFINED_MACROS = ("__STRICT_ANSI__=1",)
 _GNU_MODE_PREDEFINED_MACROS = (
+    "__has_attribute(x)=0",  # Not implemented; stub to 0 for SDK header compatibility
     "__GNUC__=4",
     "__GNUC_MINOR__=8",
     "__GNUC_PATCHLEVEL__=1",

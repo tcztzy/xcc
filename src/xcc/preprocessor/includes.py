@@ -55,6 +55,15 @@ def _parse_header_name_operand(
     expand_macro_text: Callable[[str, _SourceLocation], str],
     invalid_directive_code: str,
 ) -> tuple[str, bool]:
+    # Strip trailing // comments and whitespace so that
+    #   #include <errno.h> // comment
+    # is handled the same as
+    #   #include <errno.h>
+    line_comment = operand.find("//")
+    if line_comment != -1:
+        operand = operand[:line_comment]
+    operand = operand.strip()
+
     direct = _INCLUDE_RE.match(operand)
     if direct is not None:
         quoted_name = direct.group("quote")

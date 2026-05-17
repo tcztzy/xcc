@@ -159,8 +159,6 @@ class ClangSuiteTests(unittest.TestCase):
                     self.assertIsInstance(case[SKIP_REASON_KEY], str)
                     self.assertNotEqual(case[SKIP_REASON_KEY], "")
 
-    _STUBS_DIR = str(ROOT / "tests/external/clang/stubs")
-
     def _compile_options(self, fixture: Path | None = None) -> FrontendOptions:
         embed_dirs: tuple[str, ...] = ()
         if fixture is not None:
@@ -168,8 +166,6 @@ class ClangSuiteTests(unittest.TestCase):
             if inputs_dir.is_dir():
                 embed_dirs = (str(inputs_dir),)
         return FrontendOptions(
-            no_standard_includes=True,
-            system_include_dirs=(self._STUBS_DIR,),
             embed_dirs=embed_dirs,
         )
 

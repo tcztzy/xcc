@@ -108,7 +108,12 @@ class Scope:
         self._symbols[symbol.name] = symbol
 
     def define_typedef(self, name: str, type_: Type) -> None:
-        if name in self._symbols or name in self._typedefs:
+        if name in self._symbols:
+            raise SemaError(f"Duplicate declaration: {name}")
+        existing = self._typedefs.get(name)
+        if existing is not None:
+            if existing == type_:
+                return
             raise SemaError(f"Duplicate declaration: {name}")
         self._typedefs[name] = type_
 

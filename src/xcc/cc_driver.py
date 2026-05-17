@@ -253,7 +253,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
         native_unsupported_flags.append(arg)
 
     options = FrontendOptions(
-        std=std,
+        std="gnu11",  # Always use gnu11 frontend mode for system-header compatibility
         hosted=hosted,
         include_dirs=tuple(include_dirs),
         quote_include_dirs=tuple(quote_include_dirs),
@@ -405,6 +405,9 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
     try:
         results = _compile_frontend_inputs(config, stdin=stdin)
     except FrontendError as error:
+        if config.backend == "clang":
+            print(f"xcc: warning: {error}", file=sys.stderr)
+            return _run_clang(config.clang_argv)
         print(error, file=sys.stderr)
         return 1
     except ValueError as error:

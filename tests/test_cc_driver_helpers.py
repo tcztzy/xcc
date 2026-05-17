@@ -111,7 +111,9 @@ class CcDriverHelperTests(unittest.TestCase):
             ["-E", "-S", "-c", "-x", "none", "-std", "c11", "note.c"]
         )
         self.assertEqual(config.action, "delegate")
-        self.assertEqual(config.frontend_options.std, "c11")
+        # Frontend always uses gnu11 for system-header compatibility;
+        # -std=c11 is preserved in clang_argv for the backend.
+        self.assertEqual(config.frontend_options.std, "gnu11")
 
         config = cc_driver._parse_driver_config(["-xnone", "note.txt"])
         self.assertEqual(config.non_c_inputs, ("note.txt",))

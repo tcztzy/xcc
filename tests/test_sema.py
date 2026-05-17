@@ -3527,7 +3527,13 @@ class SemaTests(unittest.TestCase):
         self.assertIn("main", sema.functions)
 
     def test_duplicate_file_scope_typedef_declaration(self) -> None:
+        # Identical typedefs are allowed (C11 6.7.7p3)
         unit = parse(list(lex("typedef int T; typedef int T; int main(){return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_conflicting_file_scope_typedef_declaration(self) -> None:
+        unit = parse(list(lex("typedef int T; typedef float T; int main(){return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: T")
@@ -4696,7 +4702,13 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "Duplicate declaration: T")
 
     def test_duplicate_typedef_declaration(self) -> None:
+        # Identical typedefs are allowed (C11 6.7.7p3)
         unit = parse(list(lex("int main(){typedef int T; typedef int T; return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_conflicting_typedef_declaration(self) -> None:
+        unit = parse(list(lex("int main(){typedef int T; typedef float T; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: T")

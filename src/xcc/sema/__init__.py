@@ -204,22 +204,6 @@ class Analyzer:
             "__atomic_signal_fence",
             "__atomic_is_lock_free",
             "__atomic_always_lock_free",
-            # C11 <stdatomic.h> macro names — recognised as builtins because the
-            # ## token-paste re-scan may leave these unexpanded when they are
-            # produced by wrapper macros (e.g. mimalloc's mi_atomic(name)).
-            "atomic_fetch_add_explicit",
-            "atomic_fetch_sub_explicit",
-            "atomic_fetch_and_explicit",
-            "atomic_fetch_or_explicit",
-            "atomic_fetch_xor_explicit",
-            "atomic_fetch_nand_explicit",
-            "atomic_load_explicit",
-            "atomic_store_explicit",
-            "atomic_exchange_explicit",
-            "atomic_compare_exchange_strong_explicit",
-            "atomic_compare_exchange_weak_explicit",
-            "atomic_thread_fence",
-            "atomic_signal_fence",
             # C11 atomic functions (used by <stdatomic.h> and clang's atomic builtins)
             "__c11_atomic_init",
             "__c11_atomic_load",
@@ -288,6 +272,7 @@ class Analyzer:
 
         # Integer-returning builtins
         _INTEGER_BUILTINS = (
+            "__builtin_flt_rounds",
             "__builtin_bswap16",
             "__builtin_bswap32",
             "__builtin_bswap64",
@@ -327,11 +312,12 @@ class Analyzer:
             self._function_signatures[name] = FunctionSignature(
                 return_type=VOID, params=None, is_variadic=True
             )
-        # POSIX functions used by CPython that may not be in stubs
-        for name in ("clock_gettime", "sysconf", "fcntl", "sigaction"):
-            self._function_signatures[name] = FunctionSignature(
-                return_type=INT, params=None, is_variadic=True
-            )
+        # assert() fallback: when the macro from <assert.h> is not expanded
+        # (e.g. inside macro bodies or due to __has_attribute not being
+        # supported in some #if paths), treat assert as a variadic void fn.
+        self._function_signatures["assert"] = FunctionSignature(
+            return_type=VOID, params=None, is_variadic=True
+        )
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
         externals = unit.externals or [*unit.declarations, *unit.functions]

@@ -946,7 +946,7 @@ class _NativeCodeGenerator:
         )
 
     def _check_function_contract(self, func: FunctionDef) -> None:
-        if func.storage_class is not None:
+        if func.storage_class not in {None, "extern"}:
             raise native_backend_error(
                 self._result.filename,
                 f"Unsupported native codegen function storage: {func.name}",

@@ -331,8 +331,6 @@ def _evaluate_case(data: bytes, *, fixture_path: str, std: str, host_machine: st
             filename=str(ROOT / fixture_path),
             options=FrontendOptions(
                 std=std,
-                no_standard_includes=True,
-                system_include_dirs=(str(ROOT / "tests/external/clang/stubs"),),
                 host_machine=host_machine,
             ),
         )

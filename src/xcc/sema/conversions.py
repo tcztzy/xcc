@@ -74,6 +74,13 @@ def analyze_additive_types(
         return left_type
     if analyzer._is_compatible_nonvoid_object_pointer_pair(left_type, right_type):  # type: ignore[attr-defined]
         return INT
+    # In GNU mode, allow subtraction of any two complete object pointer types
+    if (
+        getattr(analyzer, "_std", "c11") == "gnu11"
+        and analyzer._is_complete_object_pointer_type(left_type)  # type: ignore[attr-defined]
+        and analyzer._is_complete_object_pointer_type(right_type)  # type: ignore[attr-defined]
+    ):
+        return INT
     return None
 
 
