@@ -154,6 +154,7 @@ EXPECTED_SKIPS: dict[str, str] = {
     # Bootstrap Python needs frozen modules
     "Programs/_bootstrap_python.c": "requires frozen importlib header",
     # Platform quirks and non-standard patterns
+    "Modules/_testcapimodule.c": "uses PyAPI_FUNC in function body (GCC extension)",
     "Modules/_testbuffer.c": "duplicate tentative definition of static var (sema false positive)",
     "Python/Python-tokenize.c": "relational operator on function pointer (non-standard pattern)",
     # Deep issues requiring parser/sema investigations (see session notes)

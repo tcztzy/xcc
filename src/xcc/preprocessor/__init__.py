@@ -394,6 +394,7 @@ _GNU_MODE_PREDEFINED_MACROS = (
     "__GNUC_MINOR__=8",
     "__GNUC_PATCHLEVEL__=1",
     "__GNUC_STDC_INLINE__=1",
+    "__APPLE_CC__=6000",  # Identify as Apple GCC-compatible for TargetConditionals.h
     '__VERSION__="xcc gnu11"',
     '__func__="<unknown>"',
 )
