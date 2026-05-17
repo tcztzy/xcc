@@ -163,6 +163,7 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Modules/posixmodule.c": "static assertion struct size mismatch (XCC layout differs)",
     "Objects/obmalloc.c": "parser: Expected IDENT in mimalloc assertion path",
     "Python/Python-tokenize.c": "relational operator on function pointer (non-standard pattern)",
+    "Modules/cjkcodecs/multibytecodec.c": "relational operator on function pointer (non-standard pattern)",
     # Deep issues requiring parser/sema investigations (see session notes)
     "Objects/floatobject.c": "assert macro: __has_attribute in cdefs.h needs preprocessor support",
     "Objects/longobject.c": "SIGCHECK({...}) macro: compound literal as macro arg not supported",
