@@ -165,18 +165,15 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Python/Python-tokenize.c": "relational operator on function pointer (non-standard pattern)",
     # Deep issues requiring parser/sema investigations (see session notes)
     "Objects/floatobject.c": "assert macro: __has_attribute in cdefs.h needs preprocessor support",
-    "Objects/obmalloc.c": "assert macro: same cdefs.h / _assert.h root cause as floatobject",
     "Objects/longobject.c": "SIGCHECK({...}) macro: compound literal as macro arg not supported",
     "Python/ceval.c": "TIER1_TO_TIER2 macro: next_instr parse cascade in declaration context",
     "Python/ast_preprocess.c": "member access on non-record pointer in ast_opt pattern",
-    "Python/fileutils.c": "incomplete record member: struct stat forward-decl issue",
     "Python/initconfig.c": "conditional type mismatch in config value assignment",
     "Parser/pegen.c": "subtraction on incompatible pointer types in parser generator",
     "Objects/moduleobject.c": "initializer type mismatch for module def struct",
     "Objects/mimalloc/heap.c": "undeclared _PyMem_mi_page_maybe_free (CPython internal)",
     "Objects/mimalloc/options.c": "argument type mismatch in mimalloc options parsing",
     "Objects/mimalloc/segment.c": "equality operator on incompatible segment pointer types",
-    "Objects/typeobject.c": "variable length array at file scope in type struct init",
 }
 
 
