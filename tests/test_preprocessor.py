@@ -1658,6 +1658,16 @@ A(0)
             result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int y;\n")
 
+    def test_include_line_comment_slash_slash_stripped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "inc.h").write_text("int z;\n", encoding="utf-8")
+            source_path = root / "main.c"
+            source_path.write_text('#include "inc.h" // trailing comment\n')
+            source = source_path.read_text(encoding="utf-8")
+            result = preprocess_source(source, filename=str(source_path))
+        self.assertEqual(result.source, "int z;\n")
+
     def test_include_from_system_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

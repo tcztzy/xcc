@@ -127,6 +127,27 @@ class CcDriverTests(unittest.TestCase):
         run.assert_not_called()
         native_run.assert_not_called()
 
+    def test_cc_driver_clang_backend_falls_back_on_frontend_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "bad.c"
+            source.write_text("int main(void){return;}\n", encoding="utf-8")
+            obj = root / "bad.o"
+
+            def fake_run(argv: tuple[str, ...]) -> int:
+                self.assertEqual(tuple(argv), ("-c", str(source), "-o", str(obj)))
+                return 0
+
+            with patch("xcc.cc_driver._run_clang", side_effect=fake_run) as run:
+                code, stdout, stderr = self._run_main(
+                    ["--backend=clang", "-c", str(source), "-o", str(obj)]
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertIn("xcc: warning:", stderr)
+        run.assert_called_once()
+
     def test_cc_driver_delegate_action_falls_back_with_note(self) -> None:
         def fake_run(argv: tuple[str, ...]) -> int:
             self.assertEqual(tuple(argv), ("-E", "-x", "c", "-", "-o", "out.i"))

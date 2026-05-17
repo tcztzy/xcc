@@ -3471,6 +3471,21 @@ class SemaTests(unittest.TestCase):
             analyze(unit, std="gnu11")
         self.assertIn("Initializer type mismatch", str(ctx.exception))
 
+    def test_gnu_pointer_subtraction_incompatible_complete_types(self) -> None:
+        source = (
+            "struct A { int x; };\n"
+            "struct B { int y; };\n"
+            "int main(void) {\n"
+            "    struct A *a = 0;\n"
+            "    struct B *b = 0;\n"
+            "    int diff = a - b;\n"
+            "    return diff;\n"
+            "}\n"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
     def test_gnu_excess_struct_initializers_ignored(self) -> None:
         # In GNU mode, extra initializer elements are silently ignored
         source = "int main(){struct S { int x; } s = {1, 2, 3}; return s.x;}"
@@ -4373,6 +4388,19 @@ class SemaTests(unittest.TestCase):
             str(ctx.exception),
             "Relational operator requires integer or compatible object pointer operands",
         )
+
+    def test_relational_function_pointer_allowed_in_gnu11(self) -> None:
+        source = (
+            "int f(void){return 0;}\n"
+            "int main(void) {\n"
+            "    int (*fp)(void) = f;\n"
+            "    int (*fp2)(void) = f;\n"
+            "    return fp < fp2;\n"
+            "}\n"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
 
     def test_relational_function_pointer_right_error(self) -> None:
         source = (

@@ -1339,6 +1339,14 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(stmt.name, "x")
         self.assertEqual(stmt.alignment, 4)
 
+    def test_const_alignas_declaration(self) -> None:
+        unit = parse(list(lex("int main(void){const _Alignas(16) int x; return x;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec.name, "int")
+        self.assertEqual(stmt.name, "x")
+        self.assertEqual(stmt.alignment, 16)
+
     def test_alignas_rejects_function_definition(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("_Alignas(16) int f(void){return 1;}")))
