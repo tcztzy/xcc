@@ -35,7 +35,7 @@ def analyze_initializer(
     # Only try this when the direct compatibility check fails.
     if analyzer._is_record_name(target_type.name) and not target_type.declarator_ops:  # type: ignore[attr-defined]
         members = analyzer._record_members(target_type.name)  # type: ignore[attr-defined]
-        if members and members[0].name is not None:
+        if members:
             analyzer._analyze_initializer(members[0].type_, initializer, scope)  # type: ignore[attr-defined]
             return
     if target_type.is_array():
