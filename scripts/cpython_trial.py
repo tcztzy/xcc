@@ -246,6 +246,7 @@ def _gather_files(
 _DIRECTORY_DEFINES: dict[str, tuple[str, ...]] = {
     "Modules/_testcapi": ("PYTESTCAPI_NEED_INTERNAL_API=1",),
     "Modules/_ctypes": ("USING_MALLOC_CLOSURE_DOT_C=1",),
+    "Modules/_hacl": ("__aarch64__=1",),  # ARM64 intrinsics path in libintvector.h
 }
 
 
