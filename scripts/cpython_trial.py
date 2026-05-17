@@ -144,14 +144,6 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Objects/mimalloc/prim/windows/prim.c": "included from prim/prim.c, not standalone",
     # mimalloc: prim/prim.c includes unix/prim.c which uses fputs without <stdio.h>
     "Objects/mimalloc/prim/prim.c": "mimalloc upstream: fputs used without <stdio.h>",
-    # HACL*: krml/internal/types.h not found via nested quote-include from headers
-    # (XCC preprocessor include resolution edge case for vendored include chains)
-    "Modules/_hacl/Hacl_HMAC.c": "krml/types.h nested include resolution (XCC preprocessor edge case)",
-    "Modules/_hacl/Hacl_Streaming_HMAC.c": "krml/types.h nested include resolution (XCC preprocessor edge case)",
-    "Modules/_hacl/Hacl_Hash_Blake2b.c": "krml/types.h nested include resolution (XCC preprocessor edge case)",
-    "Modules/_hacl/Hacl_Hash_Blake2s.c": "krml/types.h nested include resolution (XCC preprocessor edge case)",
-    "Modules/_hacl/Hacl_Hash_SHA1.c": "krml/types.h nested include resolution (XCC preprocessor edge case)",
-    "Modules/_hacl/Hacl_Hash_SHA2.c": "krml/types.h nested include resolution (XCC preprocessor edge case)",
     # HACL* SIMD files need x86 SSE/AVX intrinsics (emmintrin.h, smmintrin.h)
     "Modules/_hacl/Hacl_Hash_Blake2s_Simd128.c": "needs x86 SSE intrinsics (emmintrin.h)",
     "Modules/_hacl/Hacl_Hash_Blake2s_Simd128_universal2.c": "needs x86 SSE intrinsics (emmintrin.h)",
@@ -235,6 +227,8 @@ def _base_include_dirs(cpython_root: Path) -> tuple[str, ...]:
         str(cpython_root / "Include"),
         str(cpython_root / "Include" / "internal"),
         str(cpython_root / "Include" / "internal" / "mimalloc"),
+        # HACL* vendored headers needed by hash modules (sha1/2/3, md5, blake2, hmac)
+        str(cpython_root / "Modules" / "_hacl" / "include"),
     )
 
 
