@@ -1,6 +1,7 @@
 import ast
 import platform
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -371,8 +372,8 @@ _PREDEFINED_MACROS = (
     "__COUNTER__=0",
 )
 _HOST_ARCH_PREDEFINED_MACROS: dict[str, tuple[str, ...]] = {
-    "aarch64": ("__arm64__=1",),
-    "arm64": ("__arm64__=1",),
+    "aarch64": ("__arm64__=1", "__aarch64__=1"),
+    "arm64": ("__arm64__=1", "__aarch64__=1"),
     "amd64": ("__x86_64__=1",),
     "x86_64": ("__x86_64__=1",),
     "i386": ("__i386__=1",),
@@ -382,6 +383,13 @@ _HOST_ARCH_PREDEFINED_MACROS: dict[str, tuple[str, ...]] = {
 }
 _HOST_ARCH_DEFINE_STRINGS = tuple(
     define for defines in _HOST_ARCH_PREDEFINED_MACROS.values() for define in defines
+)
+_HOST_OS_PREDEFINED_MACROS: dict[str, tuple[str, ...]] = {
+    "darwin": ("__APPLE__=1", "__MACH__=1", "__APPLE_CC__=6000"),
+    "linux": ("__linux__=1", "__unix__=1"),
+}
+_HOST_OS_DEFINE_STRINGS = tuple(
+    define for defines in _HOST_OS_PREDEFINED_MACROS.values() for define in defines
 )
 _PREDEFINED_DYNAMIC_MACROS = frozenset(
     {"__FILE__", "__FILE_NAME__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"}
@@ -437,6 +445,7 @@ _PREDEFINED_MACRO_NAMES = frozenset(
         *_STRICT_MODE_PREDEFINED_MACROS,
         *_GNU_MODE_PREDEFINED_MACROS,
         *_HOST_ARCH_DEFINE_STRINGS,
+        *_HOST_OS_DEFINE_STRINGS,
     )
 ) | frozenset(_PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS | {"__STDC_HOSTED__"})
 
@@ -500,6 +509,10 @@ class _Preprocessor:
             self._macros[macro.name] = macro
         host_machine = self._options.host_machine or platform.machine()
         for define in _HOST_ARCH_PREDEFINED_MACROS.get(host_machine, ()):
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
+        host_os = sys.platform
+        for define in _HOST_OS_PREDEFINED_MACROS.get(host_os, ()):
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
         self._macros["__DATE__"] = _Macro(

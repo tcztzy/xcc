@@ -144,6 +144,9 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Objects/mimalloc/prim/windows/prim.c": "included from prim/prim.c, not standalone",
     # mimalloc: prim/prim.c includes unix/prim.c which uses fputs without <stdio.h>
     "Objects/mimalloc/prim/prim.c": "mimalloc upstream: fputs used without <stdio.h>",
+    # HACL* SIMD files need x86 SSE/AVX intrinsics (emmintrin.h, smmintrin.h)
+    "Modules/_hacl/Hacl_Hash_Blake2s_Simd128.c": "needs x86 SSE intrinsics (emmintrin.h)",
+    "Modules/_hacl/Hacl_Hash_Blake2b_Simd256.c": "needs x86 AVX intrinsics (smmintrin.h)",
     # Magic / JIT bytecodes are generated files
     "Python/bytecodes.c": "requires optimizer.h (generated)",
     # Bootstrap Python needs frozen modules
