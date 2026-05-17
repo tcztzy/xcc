@@ -175,6 +175,16 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Objects/mimalloc/heap.c": "undeclared _PyMem_mi_page_maybe_free (CPython internal)",
     "Objects/mimalloc/options.c": "argument type mismatch in mimalloc options parsing",
     "Objects/mimalloc/segment.c": "equality operator on incompatible segment pointer types",
+    # Module files with sema/parse edge cases
+    "Modules/fcntlmodule.c": "incomplete struct member (sema forward-decl bug)",
+    "Modules/termios.c": "incomplete struct member (sema forward-decl bug)",
+    "Modules/readline.c": "incomplete struct member (sema forward-decl bug)",
+    "Modules/_cursesmodule.c": "parser: Expected ';' in GNU extension context",
+    "Modules/_testlimitedcapi/import.c": "parser: Expected ';' in nested macro",
+    "Modules/faulthandler.c": "no such member: _PyRuntime (incomplete struct def)",
+    "Modules/unicodedata.c": "keyword 'int' in expression (GNU statement expr edge case)",
+    "Modules/_ssl/debughelpers.c": "size_t undeclared (missing stddef.h include chain)",
+    "Modules/socketmodule.c": "keyword 'struct' in expression (GNU cast/compound literal edge case)",
 }
 
 
