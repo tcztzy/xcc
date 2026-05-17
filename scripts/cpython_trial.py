@@ -146,7 +146,9 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Objects/mimalloc/prim/prim.c": "mimalloc upstream: fputs used without <stdio.h>",
     # HACL* SIMD files need x86 SSE/AVX intrinsics (emmintrin.h, smmintrin.h)
     "Modules/_hacl/Hacl_Hash_Blake2s_Simd128.c": "needs x86 SSE intrinsics (emmintrin.h)",
+    "Modules/_hacl/Hacl_Hash_Blake2s_Simd128_universal2.c": "needs x86 SSE intrinsics (emmintrin.h)",
     "Modules/_hacl/Hacl_Hash_Blake2b_Simd256.c": "needs x86 AVX intrinsics (smmintrin.h)",
+    "Modules/_hacl/Hacl_Hash_Blake2b_Simd256_universal2.c": "needs x86 AVX intrinsics (smmintrin.h)",
     # Magic / JIT bytecodes are generated files
     "Python/bytecodes.c": "requires optimizer.h (generated)",
     # Bootstrap Python needs frozen modules
@@ -307,14 +309,14 @@ def compile_file(
     file_path: Path,
 ) -> tuple[bool, str, str, int | None, int | None]:
     """Compile a single CPython .c file. Returns (ok, stage, message, line, col)."""
-    include_dirs = (
-        _base_include_dirs(cpython_root)
-        + _resolve_third_party_includes(cpython_root)
-        + _file_includes(cpython_root, file_path)
-    )
+    include_dirs = _base_include_dirs(cpython_root) + _resolve_third_party_includes(cpython_root)
+    # Module-specific includes (like HACL* vendored headers) work better as
+    # -iquote paths so nested ``#include "..."``  resolution finds them early.
+    quote_dirs = _file_includes(cpython_root, file_path)
     options = FrontendOptions(
         std="gnu11",
         include_dirs=include_dirs,
+        quote_include_dirs=quote_dirs,
         defines=_BASE_DEFINES + _get_extra_defines(cpython_root) + _file_defines(cpython_root, file_path),
     )
 
