@@ -123,6 +123,12 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Python/frozen.c": "requires generated frozen modules header",
     "Programs/_freeze_module.c": "freeze tool, not a library TU",
     "Programs/_testembed.c": "test embed, not a library TU",
+    # Needs configure-time defines
+    "Modules/getpath.c": "needs PREFIX/EXEC_PREFIX/VERSION/VPATH/PLATLIBDIR from configure",
+    # Needs generated optimizer.h and codegen artifacts (next_instr etc.)
+    "Modules/_testinternalcapi.c": "needs optimizer.h (generated), uses next_instr from codegen",
+    "Modules/_testinternalcapi/testbytecodes.c": "needs optimizer.h (generated), uses next_instr",
+    "Modules/_testinternalcapi/interpreter.c": "uses next_instr (needs generated uop headers)",
     # Needs bytecode generator not available
     "Python/optimizer.c": "requires optimizer.h from bytecode generation",
     "Python/optimizer_analysis.c": "requires optimizer.h from bytecode generation",
