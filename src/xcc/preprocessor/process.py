@@ -19,6 +19,51 @@ _PP_INVALID_DIRECTIVE = "XCC-PP-0104"
 _PP_UNTERMINATED_MACRO = "XCC-PP-0202"
 
 
+def _strip_block_comments(text: str) -> str:
+    """Strip /* block comments */ and // line comments from text.
+
+    Returns text with comment content replaced by spaces so that
+    column offsets are preserved for diagnostics.  If a block comment
+    is still open at end-of-text the original text is returned
+    unchanged --- the closing ``*/`` is in a subsequent line that
+    hasn't been collected yet.
+    """
+    result: list[str] = []
+    in_block = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_block:
+            if ch == "*" and i + 1 < len(text) and text[i + 1] == "/":
+                in_block = False
+                result.append("  ")
+                i += 2
+                continue
+            result.append(" " if ch != "\n" else ch)
+            i += 1
+            continue
+        if ch == "/" and i + 1 < len(text):
+            nxt = text[i + 1]
+            if nxt == "/":
+                while i < len(text) and text[i] != "\n":
+                    result.append(" ")
+                    i += 1
+                if i < len(text):
+                    result.append(text[i])
+                    i += 1
+                continue
+            if nxt == "*":
+                in_block = True
+                result.append("  ")
+                i += 2
+                continue
+        result.append(ch)
+        i += 1
+    if in_block:
+        return text
+    return "".join(result)
+
+
 def process_text(
     preprocessor: object,
     source: str,
@@ -65,6 +110,8 @@ def process_text(
                         text_parts[-1] = text_parts[-1].rstrip()[:-1] + next_line
                         all_lines.append(next_line)
                     joined = "".join(text_parts)
+                    if len(all_lines) > 1:
+                        joined = _strip_block_comments(joined)
                     try:
                         expanded = self._expand_line(joined, location)
                     except PreprocessorError as exc:
@@ -74,7 +121,16 @@ def process_text(
                         if next_idx >= len(lines):
                             raise
                         next_line = lines[next_idx]
-                        inner_parsed = parse_directive(next_line)
+                        # Collect \ continuation lines for directives inside
+                        # macro bodies, matching the top-level directive handling.
+                        inner_lines = [next_line]
+                        while (
+                            inner_lines[-1].rstrip().endswith("\\")
+                            and next_idx + len(inner_lines) < len(lines)
+                        ):
+                            inner_lines.append(lines[next_idx + len(inner_lines)])
+                        inner_text = "".join(inner_lines).replace("\\\n", "")
+                        inner_parsed = parse_directive(inner_text)
                         if inner_parsed is not None:
                             inner_name, inner_body = inner_parsed
                             inner_loc = _SourceLocation(
@@ -91,7 +147,8 @@ def process_text(
                             )
                             if result is None:
                                 raise
-                            all_lines.append(next_line)
+                            for il in inner_lines:
+                                all_lines.append(il)
                         elif _is_active(inner_stack):
                             text_parts.append(next_line)
                             all_lines.append(next_line)

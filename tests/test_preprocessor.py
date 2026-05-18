@@ -4360,6 +4360,77 @@ A(0)
         self.assertIn('"hello world"', result.source)
         self.assertNotIn("\\\n", result.source)
 
+    def test_backslash_newline_splicing_strips_block_comment(self) -> None:
+        """Block comment spanning \ continuation lines is stripped."""
+        result = preprocess_source(
+            "int x = /* hello \\\n  world */ 42 ;\n",
+            filename="splice_bc.c",
+        )
+        self.assertNotIn("hello", result.source)
+        self.assertNotIn("world", result.source)
+        self.assertNotIn("/*", result.source)
+        self.assertNotIn("*/", result.source)
+        self.assertIn("int x =", result.source)
+        self.assertIn("42", result.source)
+
+    def test_backslash_newline_splicing_strips_line_comment(self) -> None:
+        """Line comment spanning \ continuation lines is stripped."""
+        result = preprocess_source(
+            "int x = 42 ; // hello \\\n  world\n",
+            filename="splice_lc.c",
+        )
+        self.assertNotIn("hello", result.source)
+        self.assertNotIn("world", result.source)
+        self.assertNotIn("//", result.source)
+        self.assertIn("int x = 42 ;", result.source)
+
+    def test_backslash_newline_splicing_with_division_operator(self) -> None:
+        """Division / in \ continuation is preserved (not confused with // comment)."""
+        result = preprocess_source(
+            "int x = a / b \\\n  + c ;\n",
+            filename="splice_div.c",
+        )
+        self.assertIn("int x = a / b", result.source)
+        self.assertIn("+ c ;", result.source)
+
+    def test_backslash_newline_splicing_line_comment_at_eof(self) -> None:
+        """Line comment in \ continuation at EOF without trailing newline."""
+        result = preprocess_source(
+            "int x = 1 ; \\\n  // eof comment",
+            filename="splice_eof.c",
+        )
+        self.assertNotIn("eof", result.source)
+        self.assertNotIn("comment", result.source)
+        self.assertNotIn("//", result.source)
+        self.assertIn("int x = 1 ;", result.source)
+
+    def test_backslash_in_block_comment_banner_preserved(self) -> None:
+        """Block comment banner with \ continuation, */ on later line.
+
+        The first line opens /* and has a trailing backslash.  The
+        continuation joins the next line but */ is on a third line,
+        so _strip_block_comments sees an unclosed comment and leaves
+        the text intact.
+        """
+        result = preprocess_source(
+            "/* banner *\\\n  continued\n  */\nint x = 1 ;\n",
+            filename="banner.c",
+        )
+        self.assertIn("int x = 1 ;", result.source)
+
+    def test_unterminated_macro_with_inner_directive_has_continuation(self) -> None:
+        """Unterminated macro where next line is #if with \ continuation."""
+        result = preprocess_source(
+            "#define M(x) x\n"
+            "M(42\n"
+            "#if 1 \\\n"
+            "  && 1\n"
+            "#endif\n"
+            ")\n",
+            filename="inner_dir.c",
+        )
+        self.assertNotIn("M(", result.source)
+
 
 if __name__ == "__main__":
     unittest.main()
