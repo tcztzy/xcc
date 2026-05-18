@@ -53,7 +53,7 @@ def analyze_initializer(
 
 def _either_is_pointer(t: Type, i: Type) -> bool:
     """True if either type's first declarator op is 'ptr'."""
-    return (
+    return bool(
         (t.declarator_ops and t.declarator_ops[0][0] == "ptr")
         or (i.declarator_ops and i.declarator_ops[0][0] == "ptr")
     )

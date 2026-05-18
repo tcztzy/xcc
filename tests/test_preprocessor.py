@@ -4404,6 +4404,27 @@ A(0)
         self.assertNotIn("//", result.source)
         self.assertIn("int x = 1 ;", result.source)
 
+    def test_strip_gnu_asm_strips_enum_decl(self) -> None:
+        """__enum_decl(name, type, {) is translated to enum name {."""
+        result = _strip_gnu_asm_extensions(
+            "__enum_decl(foo, int, {\n} ) ;\n"
+        )
+        self.assertNotIn("__enum_decl", result)
+        self.assertIn("enum foo {", result)
+
+    def test_strip_gnu_asm_strips_enum_class_decl(self) -> None:
+        """__enum_class_decl is also translated."""
+        result = _strip_gnu_asm_extensions(
+            "__enum_class_decl(bar, unsigned, {\n} ) ;\n"
+        )
+        self.assertNotIn("__enum_class_decl", result)
+        self.assertIn("enum bar {", result)
+
+    def test_strip_gnu_asm_closing_paren_semicolon(self) -> None:
+        """} ) ; (closing of __enum_decl) is translated to };."""
+        result = _strip_gnu_asm_extensions("} ) ;\n")
+        self.assertIn("};", result)
+
     def test_backslash_in_block_comment_banner_preserved(self) -> None:
         """Block comment banner with \ continuation, */ on later line.
 

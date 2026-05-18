@@ -166,10 +166,10 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
         if isinstance(symbol, EnumConstSymbol):
             return symbol.value
         if isinstance(symbol, VarSymbol) and symbol.constant_value is not None:
-            if getattr(analyzer, "_allow_const_var_folding", False):  # type: ignore[attr-defined]
+            if getattr(analyzer, "_allow_const_var_folding", False):
                 return symbol.constant_value
     if isinstance(expr, SubscriptExpr):
-        if not getattr(analyzer, "_allow_const_var_folding", False):  # type: ignore[attr-defined]
+        if not getattr(analyzer, "_allow_const_var_folding", False):
             return None
         index = analyzer._eval_int_constant_expr(expr.index, scope)  # type: ignore[attr-defined]
         if index is None:
@@ -187,7 +187,7 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
                         return None
                     return analyzer._eval_int_constant_expr(init_val, scope)  # type: ignore[attr-defined]
     if isinstance(expr, MemberExpr):
-        if not getattr(analyzer, "_allow_const_var_folding", False):  # type: ignore[attr-defined]
+        if not getattr(analyzer, "_allow_const_var_folding", False):
             return None
         return _eval_member_expr(analyzer, expr, scope)
     return None
