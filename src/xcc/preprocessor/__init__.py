@@ -121,7 +121,7 @@ def _detect_include_guard(source: str) -> str | None:
             if comment_open:
                 end_idx = line.find("*/")
                 if end_idx != -1:
-                    line = line[end_idx + 2:]
+                    line = line[end_idx + 2 :]
                     comment_open = False
                 else:
                     line = ""
@@ -130,7 +130,7 @@ def _detect_include_guard(source: str) -> str | None:
             if start_idx != -1:
                 end_idx = line.find("*/", start_idx + 2)
                 if end_idx != -1:
-                    line = line[:start_idx] + line[end_idx + 2:]
+                    line = line[:start_idx] + line[end_idx + 2 :]
                 else:
                     line = line[:start_idx]
                     comment_open = True
@@ -153,6 +153,7 @@ def _detect_include_guard(source: str) -> str | None:
                 return guard_name
             return None
     return None
+
 
 _PP_UNKNOWN_DIRECTIVE = "XCC-PP-0101"
 _PP_INCLUDE_NOT_FOUND = "XCC-PP-0102"
@@ -723,9 +724,7 @@ class _Preprocessor:
         except OSError:
             return False
         guard = _detect_include_guard(source)
-        if guard is not None and guard in self._macros:
-            return True
-        return False
+        return bool(guard is not None and guard in self._macros)
 
     def _handle_include(
         self,
@@ -917,9 +916,7 @@ class _Preprocessor:
 
         return _ProcessedText(result_text, ())
 
-    def _eval_embed_int_param(
-        self, raw: str, param_name: str, location: _SourceLocation
-    ) -> int:
+    def _eval_embed_int_param(self, raw: str, param_name: str, location: _SourceLocation) -> int:
         expanded = self._expand_macro_text(raw, location)
         try:
             py_expr = _translate_expr_to_python(expanded)

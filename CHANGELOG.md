@@ -2,6 +2,8 @@
 
 ## Current
 
+- CPython trial runner defaults to parallel translation-unit compilation with `--jobs auto`,
+  while preserving deterministic report order and supporting `--jobs 1` for serial runs.
 - Preprocessor supports `#import` directive with include-once semantics (silently skips already-imported or currently-importing files).
 - Parser recognizes `__fp16` as a GNU extension floating-point type (alias for `_Float16`).
 - Driver mode validates with XCC before native or `clang` backend selection.

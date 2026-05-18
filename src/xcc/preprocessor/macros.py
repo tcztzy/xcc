@@ -73,7 +73,7 @@ def _tokenize_macro_replacement(text: str) -> list[_MacroToken]:
     # Unterminated block comment and falls back to raw text, which produces
     # a spurious /* in macro expansions.  Remove the trailing /*... here.
     comment_idx = text.find("/*")
-    if comment_idx != -1 and "*/" not in text[comment_idx + 2:]:
+    if comment_idx != -1 and "*/" not in text[comment_idx + 2 :]:
         text = text[:comment_idx].rstrip()
     tokens = _tokenize_macro_text(text)
     if tokens is None:

@@ -322,19 +322,21 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
             self._type_map.set(expr, result_type)
             return result_type
         if expr.op in {"<", "<=", ">", ">="}:
-            if (
-                self._usual_arithmetic_conversion(left_type, right_type) is None
-            ) and not self._is_pointer_relational_compatible(left_type, right_type):
-                # In GNU mode, any two pointer types (regardless of depth or
-                # pointee compatibility) are accepted for relational comparison.
-                if not (
+            # In GNU mode, any two pointer types (regardless of depth or
+            # pointee compatibility) are accepted for relational comparison.
+            relational_types_compatible = (
+                self._usual_arithmetic_conversion(left_type, right_type) is not None
+                or self._is_pointer_relational_compatible(left_type, right_type)
+                or (
                     getattr(self, "_std", "c11") == "gnu11"
                     and left_type.pointee() is not None
                     and right_type.pointee() is not None
-                ):
-                    raise SemaError(
-                        "Relational operator requires integer or compatible object pointer operands"
-                    )
+                )
+            )
+            if not relational_types_compatible:
+                raise SemaError(
+                    "Relational operator requires integer or compatible object pointer operands"
+                )
         elif expr.op in {"==", "!="}:
             if not self._is_scalar_type(left_type):
                 raise SemaError("Equality left operand must be scalar")
@@ -559,18 +561,12 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
                 # In GNU mode, allow pointer↔integer and cross-pointer
                 # assignments (matching initializer behavior).
                 if self._std == "gnu11":
-                    t_ptr = (target_type.declarator_ops
-                             and target_type.declarator_ops[0][0] == "ptr")
-                    v_ptr = (value_type.declarator_ops
-                             and value_type.declarator_ops[0][0] == "ptr")
+                    t_ptr = target_type.declarator_ops and target_type.declarator_ops[0][0] == "ptr"
+                    v_ptr = value_type.declarator_ops and value_type.declarator_ops[0][0] == "ptr"
                     if not (t_ptr or v_ptr):
-                        raise SemaError(
-                            "Assignment value is not compatible with target type"
-                        )
+                        raise SemaError("Assignment value is not compatible with target type")
                 else:
-                    raise SemaError(
-                        "Assignment value is not compatible with target type"
-                    )
+                    raise SemaError("Assignment value is not compatible with target type")
             self._type_map.set(expr, target_type)
             return target_type
         if expr.op in {"*=", "/="}:

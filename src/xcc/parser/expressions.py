@@ -276,10 +276,7 @@ def parse_postfix(parser: object) -> Expr:
         if parser._check_punct("("):  # type: ignore[attr-defined]
             parser._advance()  # type: ignore[attr-defined]
             # __builtin_va_arg(ap, type) takes a type name as 2nd argument
-            if (
-                isinstance(expr, Identifier)
-                and expr.name == "__builtin_va_arg"
-            ):
+            if isinstance(expr, Identifier) and expr.name == "__builtin_va_arg":
                 ap = parser._parse_assignment()  # type: ignore[attr-defined]
                 parser._expect_punct(",")  # type: ignore[attr-defined]
                 type_spec = parser._parse_type_name()  # type: ignore[attr-defined]

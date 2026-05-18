@@ -31,8 +31,6 @@ from xcc.types import (
     Type,
 )
 
-VOID_PTR = Type("void", pointer_depth=1)
-
 from . import type_resolution as _type_resolution
 from .calls import check_call_arguments
 from .constants import (
@@ -119,6 +117,7 @@ from .type_helpers import (
     usual_arithmetic_conversion,
 )
 
+VOID_PTR = Type("void", pointer_depth=1)
 _MAX_ARRAY_OBJECT_BYTES = (1 << 31) - 1
 StdMode = Literal["c11", "gnu11"]
 _FLOAT_COMPARE_BUILTINS = (
@@ -271,9 +270,7 @@ class Analyzer:
             self._function_signatures[name] = _math_sig
 
         # Integer-returning builtins with generic params (used as predicates)
-        _PREDICATE_BUILTINS = (
-            "__builtin_constant_p",
-        )
+        _PREDICATE_BUILTINS = ("__builtin_constant_p",)
         _predicate_sig = FunctionSignature(return_type=INT, params=None, is_variadic=True)
         for name in _PREDICATE_BUILTINS:
             self._function_signatures[name] = _predicate_sig
@@ -880,9 +877,7 @@ class Analyzer:
         # matching GCC -fpermissive behavior used by CPython.
         t_ptr = target_type.declarator_ops and target_type.declarator_ops[0][0] == "ptr"
         v_ptr = value_type.declarator_ops and value_type.declarator_ops[0][0] == "ptr"
-        if t_ptr and v_ptr:
-            return True
-        return False
+        return bool(t_ptr and v_ptr)
 
     def _is_pointer_conversion_compatible(self, target_type: Type, value_type: Type) -> bool:
         return is_pointer_conversion_compatible(target_type, value_type)
@@ -1155,10 +1150,9 @@ class Analyzer:
     def _is_const_qualified(self, type_: Type) -> bool:
         return is_const_qualified(type_)
 
-    def _infer_array_size_from_init(
-        self, initializer: Expr | InitList
-    ) -> int | None:
+    def _infer_array_size_from_init(self, initializer: Expr | InitList) -> int | None:
         from xcc.ast import InitList as _InitList
+
         if isinstance(initializer, _InitList):
             return len(initializer.items)
         return None
@@ -1167,6 +1161,7 @@ class Analyzer:
         self, initializer: Expr | InitList, scope: Scope
     ) -> int | None:
         from xcc.ast import InitList as _InitList
+
         if isinstance(initializer, _InitList):
             if len(initializer.items) != 1:
                 return None
@@ -1204,5 +1199,10 @@ class Analyzer:
         return type_.decay_parameter_type()
 
 
-def analyze(unit: TranslationUnit, *, std: StdMode = "c11", excess_init_ok: bool = False) -> SemaUnit:
+def analyze(
+    unit: TranslationUnit,
+    *,
+    std: StdMode = "c11",
+    excess_init_ok: bool = False,
+) -> SemaUnit:
     return Analyzer(std=std, excess_init_ok=excess_init_ok).analyze(unit)

@@ -165,9 +165,12 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
         symbol = scope.lookup(expr.name)
         if isinstance(symbol, EnumConstSymbol):
             return symbol.value
-        if isinstance(symbol, VarSymbol) and symbol.constant_value is not None:
-            if getattr(analyzer, "_allow_const_var_folding", False):
-                return symbol.constant_value
+        if (
+            isinstance(symbol, VarSymbol)
+            and symbol.constant_value is not None
+            and getattr(analyzer, "_allow_const_var_folding", False)
+        ):
+            return symbol.constant_value
     if isinstance(expr, SubscriptExpr):
         if not getattr(analyzer, "_allow_const_var_folding", False):
             return None
@@ -229,12 +232,11 @@ def _lookup_member_in_init(
     if members is None:
         return None
     for idx, m in enumerate(members):
-        if m.name == member_name:
-            if idx < len(init_list.items):
-                item = init_list.items[idx]
-                if item.designators:
-                    return None
-                return analyzer._eval_int_constant_expr(item.initializer, scope)  # type: ignore[attr-defined]
+        if m.name == member_name and idx < len(init_list.items):
+            item = init_list.items[idx]
+            if item.designators:
+                return None
+            return analyzer._eval_int_constant_expr(item.initializer, scope)  # type: ignore[attr-defined]
     return None
 
 

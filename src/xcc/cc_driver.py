@@ -110,7 +110,6 @@ def _parse_backend(arg: str) -> BackendMode:
 
 
 def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
-    std: StdMode = "gnu11"
     hosted = True
     include_dirs: list[str] = []
     quote_include_dirs: list[str] = []

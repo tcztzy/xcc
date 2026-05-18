@@ -110,6 +110,7 @@ def analyze_file_scope_decl(analyzer: object, declaration: Stmt) -> None:
                     declaration.init, a._file_scope
                 )
                 from xcc.ast import InitList as _InitList
+
                 if isinstance(declaration.init, _InitList):
                     symbol._init_expr = declaration.init
             if var_type.is_array() and var_type.declarator_ops[0][1] < 0:

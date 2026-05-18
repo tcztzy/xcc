@@ -8,9 +8,7 @@ from .macros import _Macro, _render_macro_tokens
 _DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$")
 _ASM_PREFIX_RE = re.compile(r"^\s*(?:__asm__|__asm|asm)\b")
 _ASM_STMT_RE = re.compile(r"^\s*asm\b")
-_ASM_LABEL_RE = re.compile(
-    r"(?<!\w)(?:__asm__|__asm|asm)\b[^;]*\)"
-)
+_ASM_LABEL_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\b[^;]*\)")
 _ENUM_DECL_RE = re.compile(
     r"(?<!\w)__(?:enum|enum_class)_decl\s*\(\s*([A-Za-z_]\w*)\s*,[^,]*,\s*\{"
 )
@@ -125,7 +123,6 @@ def _strip_gnu_asm_extensions(source: str) -> str:
         return source
     stripped_lines: list[str] = []
     in_asm_statement = False
-    in_enum_decl = False
     for line in lines:
         if in_asm_statement:
             stripped_lines.append(_blank_line(line))

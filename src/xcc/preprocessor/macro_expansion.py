@@ -67,7 +67,11 @@ def _expand_macro_tokens(
             # tokens may also be blocked ancestors.  _parse_macro_invocation
             # should always find a valid arg list here since the rescan
             # processes replacement text where macros appear as name(...).
-            if macro is not None and macro.parameters is not None and macro.name in ancestor_disabled:
+            if (
+                macro is not None
+                and macro.parameters is not None
+                and macro.name in ancestor_disabled
+            ):
                 parsed = _parse_macro_invocation(tokens, index, location)
                 if parsed is not None:  # pragma: no branch — always matched in rescan
                     _, next_index = parsed
@@ -101,7 +105,7 @@ def _expand_macro_tokens(
                 and replacement[0].text not in ancestor_disabled
                 and replacement[0].text != macro.name
             ):
-                re_input = replacement + tokens[index + 1:]
+                re_input = replacement + tokens[index + 1 :]
                 expanded.extend(
                     _expand_macro_tokens(
                         re_input,

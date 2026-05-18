@@ -131,17 +131,16 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
                 raise SemaError("Void function should not return a value")
             return
         value_type = a._decay_array_value(a._analyze_expr(stmt.value, scope))
+        # Allow type mismatch for generic-return builtins (params=None
+        # means the builtin's return type is a placeholder that should
+        # match whatever the calling function expects).
         if not a._is_assignment_expr_compatible(
             return_type,
             stmt.value,
             value_type,
             scope,
-        ):
-            # Allow type mismatch for generic-return builtins (params=None
-            # means the builtin's return type is a placeholder that should
-            # match whatever the calling function expects).
-            if not _is_call_to_generic_builtin(a, stmt.value):
-                raise SemaError("Return value is not compatible with function return type")
+        ) and not _is_call_to_generic_builtin(a, stmt.value):
+            raise SemaError("Return value is not compatible with function return type")
         return
     if isinstance(stmt, ForStmt):
         inner_scope = Scope(scope)

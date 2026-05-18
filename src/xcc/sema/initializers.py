@@ -13,9 +13,12 @@ def is_initializer_compatible(
 ) -> bool:
     if analyzer._is_char_array_string_initializer(target_type, init_expr):  # type: ignore[attr-defined]
         return True
-    if analyzer._is_assignment_expr_compatible(target_type, init_expr, init_type, scope):  # type: ignore[attr-defined]
-        return True
-    return False
+    return analyzer._is_assignment_expr_compatible(  # type: ignore[attr-defined]
+        target_type,
+        init_expr,
+        init_type,
+        scope,
+    )
 
 
 def analyze_initializer(
@@ -45,9 +48,8 @@ def analyze_initializer(
             return
     # In GNU mode, allow pointer↔integer and cross-pointer initializer
     # conversions (GCC -fpermissive).  At least one side must be a pointer.
-    if getattr(analyzer, "_std", "c11") == "gnu11":
-        if _either_is_pointer(target_type, init_type):
-            return
+    if getattr(analyzer, "_std", "c11") == "gnu11" and _either_is_pointer(target_type, init_type):
+        return
     raise SemaError("Initializer type mismatch")
 
 

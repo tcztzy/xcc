@@ -124,10 +124,9 @@ def process_text(
                         # Collect \ continuation lines for directives inside
                         # macro bodies, matching the top-level directive handling.
                         inner_lines = [next_line]
-                        while (
-                            inner_lines[-1].rstrip().endswith("\\")
-                            and next_idx + len(inner_lines) < len(lines)
-                        ):
+                        while inner_lines[-1].rstrip().endswith("\\") and next_idx + len(
+                            inner_lines
+                        ) < len(lines):
                             inner_lines.append(lines[next_idx + len(inner_lines)])
                         inner_text = "".join(inner_lines).replace("\\\n", "")
                         inner_parsed = parse_directive(inner_text)
@@ -340,7 +339,10 @@ def _blank_directive_lines(
         out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
 
 
-def _scan_directive_comments(directive_lines: list[str], in_block_comment: bool) -> tuple[bool, bool]:
+def _scan_directive_comments(
+    directive_lines: list[str],
+    in_block_comment: bool,
+) -> tuple[bool, bool]:
     prev = in_block_comment
     for chunk in directive_lines:
         in_block_comment = _scan_block_comment_state(chunk, in_block_comment)

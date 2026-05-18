@@ -5,3 +5,4 @@
 - Compare against permissively licensed Clang fixtures.
 - Treat ABI/layout bugs as high severity.
 - Add a reproducer before changing behavior.
+- Parallelize long frontend trial sweeps per translation unit, but keep reports ordered.

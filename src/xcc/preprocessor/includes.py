@@ -13,9 +13,7 @@ _INCLUDE_RE = re.compile(r"^(?:\"(?P<quote>[^\"\n]+)\"|<(?P<angle>[^>\n]+)>)$")
 _EMBED_FILENAME_RE = re.compile(
     r'^\s*(?:"(?P<quote>[^\"\n]+)"|<(?P<angle>[^>\n]+)>)\s*(?P<tail>.*)$'
 )
-_EMBED_PARAM_RE = re.compile(
-    r'\s*(?P<name>[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*\('
-)
+_EMBED_PARAM_RE = re.compile(r"\s*(?P<name>[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*\(")
 
 
 def _env_path_list(name: str) -> tuple[str, ...]:
@@ -159,7 +157,7 @@ def _parse_embed_body(body: str) -> tuple[str, bool, dict[str, str]]:
     """
     m = _EMBED_FILENAME_RE.match(body)
     if m is None:
-        raise ValueError("expected \"FILENAME\" or <FILENAME>")
+        raise ValueError('expected "FILENAME" or <FILENAME>')
     quoted = m.group("quote")
     if quoted is not None:
         filename = quoted
@@ -177,7 +175,7 @@ def _parse_embed_body(body: str) -> tuple[str, bool, dict[str, str]]:
             token = tail.strip().split(None, 1)[0]
             raise ValueError(f"unknown embed preprocessor parameter '{token}'")
         param_name = pm.group("name")
-        tail = tail[pm.end():]
+        tail = tail[pm.end() :]
         # Find matching close paren for the argument list
         depth = 1
         close_idx = 0
@@ -191,13 +189,12 @@ def _parse_embed_body(body: str) -> tuple[str, bool, dict[str, str]]:
                     break
             close_idx += 1
         if depth != 0:
-            raise ValueError(f"expected ')'")
+            raise ValueError("expected ')'")
         raw_args = tail[:close_idx].strip()
-        tail = tail[close_idx + 1:]
+        tail = tail[close_idx + 1 :]
         if param_name in params:
             raise ValueError(
-                f"cannot specify parameter '{param_name}' twice "
-                f"in the same '#embed' directive"
+                f"cannot specify parameter '{param_name}' twice in the same '#embed' directive"
             )
         params[param_name] = raw_args
     return filename, is_angled, params

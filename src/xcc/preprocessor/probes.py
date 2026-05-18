@@ -1,5 +1,6 @@
 import re
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 
 from .common import PreprocessorError, _SourceLocation
@@ -305,10 +306,17 @@ def _replace_single_has_embed_operator(
         # Supported parameters: limit, offset, prefix, suffix, if_empty,
         # clang::limit, clang::offset, and unrecognized vendor params.
         # Unrecognized => return __STDC_EMBED_NOT_FOUND__ (0).
-        supported = frozenset({
-            "limit", "offset", "prefix", "suffix", "if_empty",
-            "clang::limit", "clang::offset",
-        })
+        supported = frozenset(
+            {
+                "limit",
+                "offset",
+                "prefix",
+                "suffix",
+                "if_empty",
+                "clang::limit",
+                "clang::offset",
+            }
+        )
         for pname in params:
             if pname not in supported:
                 # Unknown vendor namespace (like dajwdwdjdahwk::meow) => not found
@@ -331,25 +339,17 @@ def _replace_single_has_embed_operator(
         offset = 0
         limit: int | None = None
         if "offset" in params:
-            try:
+            with suppress(ValueError):
                 offset = int(params["offset"])
-            except ValueError:
-                pass
         if "clang::offset" in params:
-            try:
+            with suppress(ValueError):
                 offset = int(params["clang::offset"])
-            except ValueError:
-                pass
         if "limit" in params:
-            try:
+            with suppress(ValueError):
                 limit = int(params["limit"])
-            except ValueError:
-                pass
         if "clang::limit" in params:
-            try:
+            with suppress(ValueError):
                 limit = int(params["clang::limit"])
-            except ValueError:
-                pass
 
         if offset:
             embedded_raw = embedded_raw[offset:]

@@ -2,16 +2,23 @@
 """Compile CPython .c files through the XCC frontend and report pass/fail.
 
 Usage:
-  uv run python scripts/cpython_trial.py              # compile all files
-  uv run python scripts/cpython_trial.py --core       # core files only (Python/ + Objects/ + Parser/ + Programs/)
-  uv run python scripts/cpython_trial.py --file Python/ceval.c  # single file
-  uv run python scripts/cpython_trial.py --summary    # summary only
+  uv run python scripts/cpython_trial.py --core                    # core files (fast)
+  uv run python scripts/cpython_trial.py --core --summary          # summary only
+  uv run python scripts/cpython_trial.py --file Python/ceval.c     # single file
+  uv run python scripts/cpython_trial.py --core --save base.json   # save baseline
+  uv run python scripts/cpython_trial.py --core --retry base.json  # retry failures only
+  uv run python scripts/cpython_trial.py --core --retry base.json \\
+      --filter-stage parse --filter-message "Expected"             # targeted retry
 """
 
 import argparse
+import json
+import multiprocessing
+import os
 import sys
 import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 sys.setrecursionlimit(3000)  # CPython's typeobject.c needs deep recursion
@@ -21,9 +28,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from xcc.diag import FrontendError
-from xcc.frontend import compile_path
-from xcc.options import FrontendOptions
+from xcc.diag import FrontendError  # noqa: E402
+from xcc.frontend import compile_path  # noqa: E402
+from xcc.options import FrontendOptions  # noqa: E402
 
 # -- CPython source tree --------------------------------------------------
 
@@ -53,6 +60,7 @@ def _resolve_soabi(cpython_root: Path) -> str:
     patchlevel = cpython_root / "Include" / "patchlevel.h"
     if patchlevel.is_file():
         import re
+
         text = patchlevel.read_text(encoding="utf-8")
         m_major = re.search(r"#define\s+PY_MAJOR_VERSION\s+(\d+)", text)
         m_minor = re.search(r"#define\s+PY_MINOR_VERSION\s+(\d+)", text)
@@ -68,9 +76,8 @@ def _resolve_soabi(cpython_root: Path) -> str:
 
 def _resolve_extra_defines(cpython_root: Path) -> tuple[str, ...]:
     """Return extra -D flags that CPython's Makefile would supply."""
-    return (
-        f"SOABI={_resolve_soabi(cpython_root)}",
-    )
+    return (f"SOABI={_resolve_soabi(cpython_root)}",)
+
 
 # Subdirs containing .c files to compile (relative to cpython root)
 CORE_SUBDIRS = ("Python", "Objects", "Parser", "Programs")
@@ -152,9 +159,13 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Objects/mimalloc/prim/prim.c": "mimalloc upstream: fputs used without <stdio.h>",
     # HACL* SIMD files need x86 SSE/AVX intrinsics (emmintrin.h, smmintrin.h)
     "Modules/_hacl/Hacl_Hash_Blake2s_Simd128.c": "needs x86 SSE intrinsics (emmintrin.h)",
-    "Modules/_hacl/Hacl_Hash_Blake2s_Simd128_universal2.c": "needs x86 SSE intrinsics (emmintrin.h)",
+    "Modules/_hacl/Hacl_Hash_Blake2s_Simd128_universal2.c": (
+        "needs x86 SSE intrinsics (emmintrin.h)"
+    ),
     "Modules/_hacl/Hacl_Hash_Blake2b_Simd256.c": "needs x86 AVX intrinsics (smmintrin.h)",
-    "Modules/_hacl/Hacl_Hash_Blake2b_Simd256_universal2.c": "needs x86 AVX intrinsics (smmintrin.h)",
+    "Modules/_hacl/Hacl_Hash_Blake2b_Simd256_universal2.c": (
+        "needs x86 AVX intrinsics (smmintrin.h)"
+    ),
     # Magic / JIT bytecodes are generated files
     "Python/bytecodes.c": "requires optimizer.h (generated)",
     # Bootstrap Python needs frozen modules
@@ -169,7 +180,9 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Modules/posixmodule.c": "static assertion struct size mismatch (XCC layout differs)",
     "Objects/obmalloc.c": "parser: Expected IDENT in mimalloc assertion path",
     "Python/Python-tokenize.c": "relational operator on function pointer (non-standard pattern)",
-    "Modules/cjkcodecs/multibytecodec.c": "relational operator on function pointer (non-standard pattern)",
+    "Modules/cjkcodecs/multibytecodec.c": (
+        "relational operator on function pointer (non-standard pattern)"
+    ),
     # Deep issues requiring parser/sema investigations (see session notes)
     "Objects/floatobject.c": "assert macro: __has_attribute in cdefs.h needs preprocessor support",
     "Objects/longobject.c": "SIGCHECK({...}) macro: compound literal as macro arg not supported",
@@ -190,7 +203,9 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Modules/faulthandler.c": "no such member: _PyRuntime (incomplete struct def)",
     "Modules/unicodedata.c": "keyword 'int' in expression (GNU statement expr edge case)",
     "Modules/_ssl/debughelpers.c": "size_t undeclared (missing stddef.h include chain)",
-    "Modules/socketmodule.c": "keyword 'struct' in expression (GNU cast/compound literal edge case)",
+    "Modules/socketmodule.c": (
+        "keyword 'struct' in expression (GNU cast/compound literal edge case)"
+    ),
 }
 
 
@@ -212,6 +227,7 @@ def _resolve_third_party_includes(cpython_root: Path) -> tuple[str, ...]:
     makefile = cpython_root / "Makefile"
     if makefile.is_file():
         import re as _re
+
         text = makefile.read_text(encoding="utf-8")
         for var in ("CONFIGURE_CFLAGS", "BASECFLAGS", "CFLAGS", "CPPFLAGS"):
             m = _re.search(rf"^{var}\s*=\s*(.+)$", text, _re.MULTILINE)
@@ -229,7 +245,7 @@ def _resolve_third_party_includes(cpython_root: Path) -> tuple[str, ...]:
 
 def _base_include_dirs(cpython_root: Path) -> tuple[str, ...]:
     return (
-        str(cpython_root),                       # for pyconfig.h
+        str(cpython_root),  # for pyconfig.h
         str(cpython_root / "Include"),
         str(cpython_root / "Include" / "internal"),
         str(cpython_root / "Include" / "internal" / "mimalloc"),
@@ -303,19 +319,19 @@ _BASE_DEFINES = (
     # mimalloc: CPython's fork guards mi_decl_* behind MI_DEBUG;
     # add fallback definitions for paths where XCC's preprocessor
     # doesn't enter the expected branch.
-    'mi_decl_noreturn=__attribute__((__noreturn__))',
-    'mi_decl_cold=__attribute__((cold))',
-    'mi_decl_noinline=__attribute__((noinline))',
-    'mi_decl_cache_align=__attribute__((aligned(MI_CACHE_LINE)))',
-    'mi_decl_throw=',
-    'mi_decl_thread=__thread',
-    'mi_decl_restrict=',
+    "mi_decl_noreturn=__attribute__((__noreturn__))",
+    "mi_decl_cold=__attribute__((cold))",
+    "mi_decl_noinline=__attribute__((noinline))",
+    "mi_decl_cache_align=__attribute__((aligned(MI_CACHE_LINE)))",
+    "mi_decl_throw=",
+    "mi_decl_thread=__thread",
+    "mi_decl_restrict=",
     # XCC doesn't implement __has_attribute; stub to 0
     # so that macOS SDK cdefs.h #if __has_attribute(...) works
-    '__has_attribute(x)=0',
+    "__has_attribute(x)=0",
     # XCC doesn't define __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__
     # which some SDK headers need
-    '__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__=120000',
+    "__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__=120000",
 )
 
 _EXTRA_DEFINES_CACHE: dict[Path, tuple[str, ...]] = {}
@@ -340,7 +356,9 @@ def compile_file(
         std="gnu11",
         include_dirs=include_dirs,
         quote_include_dirs=quote_dirs,
-        defines=_BASE_DEFINES + _get_extra_defines(cpython_root) + _file_defines(cpython_root, file_path),
+        defines=_BASE_DEFINES
+        + _get_extra_defines(cpython_root)
+        + _file_defines(cpython_root, file_path),
     )
 
     try:
@@ -358,38 +376,129 @@ def normalize(msg: str) -> str:
     return " ".join(msg.split())
 
 
+def parse_jobs(value: str) -> int:
+    """Parse a worker count from the CLI."""
+    if value == "auto":
+        return max(1, (os.cpu_count() or 1) - 1)
+    try:
+        jobs = int(value, 10)
+    except ValueError as exc:
+        raise ValueError("--jobs must be a positive integer or 'auto'") from exc
+    if jobs < 1:
+        raise ValueError("--jobs must be positive")
+    return jobs
+
+
+def _expected_skip_result(rel: str) -> dict:
+    return {
+        "path": rel,
+        "ok": True,
+        "stage": "skip",
+        "message": f"expected skip: {EXPECTED_SKIPS[rel]}",
+        "line": None,
+        "column": None,
+    }
+
+
+def _compile_result(payload: tuple[Path, Path]) -> dict:
+    cpython_root, file_path = payload
+    rel = file_path.relative_to(cpython_root).as_posix()
+    ok, stage, message, line, col = compile_file(cpython_root, file_path)
+    return {
+        "path": rel,
+        "ok": ok,
+        "stage": stage,
+        "message": normalize(message),
+        "line": line,
+        "column": col,
+    }
+
+
+def _process_pool_kwargs() -> dict[str, object]:
+    if os.name != "posix":
+        return {}
+    try:
+        if "fork" in multiprocessing.get_all_start_methods():
+            return {"mp_context": multiprocessing.get_context("fork")}
+    except (RuntimeError, ValueError):
+        return {}
+    return {}
+
+
 def run(
     cpython_root: Path,
     *,
     core_only: bool = False,
     single_file: str | None = None,
+    jobs: int = 1,
+    retry: str | None = None,
+    filter_stage: str | None = None,
+    filter_message: str | None = None,
+    save: str | None = None,
 ) -> dict:
+    if jobs < 1:
+        raise ValueError("jobs must be positive")
+
     files = _gather_files(cpython_root, core_only=core_only, single_file=single_file)
 
-    results: list[dict] = []
-    stages: Counter[str] = Counter()
+    retry_set: set[str] | None = None
+    if retry:
+        with open(retry, encoding="utf-8") as fh:
+            prev = json.load(fh)
+        # Only re-compile files that previously failed (not skipped),
+        # optionally filtered by stage and/or message substring.
+        retry_set = set()
+        for r in prev["results"]:
+            if not r["ok"] and r["stage"] != "skip":
+                if filter_stage and r["stage"] != filter_stage:
+                    continue
+                if filter_message and filter_message not in r["message"]:
+                    continue
+                retry_set.add(r["path"])
+        prev_passed = prev["passed"]
+        prev_total = prev["total"]
+
+    results_by_index: dict[int, dict] = {}
+    pending: list[tuple[int, Path]] = []
+    skipped_by_retry = 0
     t0 = time.monotonic()
 
-    for f in files:
+    for index, f in enumerate(files):
         rel = f.relative_to(cpython_root).as_posix()
 
         if rel in EXPECTED_SKIPS:
-            results.append({"path": rel, "ok": True, "stage": "skip",
-                           "message": f"expected skip: {EXPECTED_SKIPS[rel]}",
-                           "line": None, "column": None})
-            stages["skip"] += 1
+            results_by_index[index] = _expected_skip_result(rel)
             continue
 
-        ok, stage, message, line, col = compile_file(cpython_root, f)
-        results.append({"path": rel, "ok": ok, "stage": stage,
-                       "message": normalize(message), "line": line, "column": col})
-        stages[stage] += 1
+        if retry_set is not None and rel not in retry_set:
+            results_by_index[index] = {
+                "path": rel, "ok": True, "stage": "cached",
+                "message": "previously passed", "line": None, "column": None,
+            }
+            skipped_by_retry += 1
+            continue
+
+        pending.append((index, f))
+
+    if pending and jobs == 1:
+        for index, f in pending:
+            results_by_index[index] = _compile_result((cpython_root, f))
+    elif pending:
+        worker_count = min(jobs, len(pending))
+        pool_kwargs = _process_pool_kwargs()
+        with ProcessPoolExecutor(max_workers=worker_count, **pool_kwargs) as executor:
+            payloads = ((cpython_root, item[1]) for item in pending)
+            for offset, result in enumerate(executor.map(_compile_result, payloads)):
+                index = pending[offset][0]
+                results_by_index[index] = result
 
     elapsed = time.monotonic() - t0
+    results = [results_by_index[index] for index in range(len(files))]
+    stages: Counter[str] = Counter(r["stage"] for r in results)
     passed = sum(1 for r in results if r["ok"])
     failed = len(results) - passed
 
-    return {
+    data = {
         "results": results,
         "total": len(results),
         "passed": passed,
@@ -398,10 +507,28 @@ def run(
         "elapsed": elapsed,
     }
 
+    if retry and skipped_by_retry:
+        data["retry_note"] = (
+            f"Re-compiled {len(pending)} previously-failing files "
+            f"(skipped {skipped_by_retry} previously-passing). "
+            f"Previous run: {prev_passed}/{prev_total}"
+        )
+
+    if save:
+        with open(save, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+
+    return data
+
 
 def print_report(data: dict, *, summary_only: bool = False) -> None:
-    print(f"\nCPython trial: {data['passed']}/{data['total']} passed "
-          f"({data['failed']} failed) in {data['elapsed']:.1f}s\n")
+    print(
+        f"\nCPython trial: {data['passed']}/{data['total']} passed "
+        f"({data['failed']} failed) in {data['elapsed']:.1f}s"
+    )
+    if "retry_note" in data:
+        print(f"  {data['retry_note']}")
+    print()
 
     if data["failed"] == 0:
         return
@@ -415,8 +542,6 @@ def print_report(data: dict, *, summary_only: bool = False) -> None:
 
     print("Failure breakdown:")
     for (stage, msg), items in sorted(groups.items(), key=lambda x: -len(x[1])):
-        files_list = ", ".join(r["path"] for r in items[:5])
-        more = f" (+{len(items) - 5} more)" if len(items) > 5 else ""
         print(f"  [{stage}] x{len(items)}: {msg}")
         if not summary_only:
             for r in items[:10]:
@@ -434,6 +559,27 @@ def main() -> int:
     parser.add_argument("--file", type=str, default=None, help="Single file to compile")
     parser.add_argument("--summary", action="store_true", help="Summary only")
     parser.add_argument("--list-files", action="store_true", help="List files and exit")
+    parser.add_argument(
+        "--jobs",
+        default="auto",
+        help="Parallel worker count: positive integer or 'auto' (default: auto)",
+    )
+    parser.add_argument(
+        "--retry", type=str, default=None,
+        help="Only re-compile files that failed in a previous --save JSON",
+    )
+    parser.add_argument(
+        "--filter-stage", type=str, default=None,
+        help="With --retry, only re-compile failures at this stage (pp, lex, parse, sema)",
+    )
+    parser.add_argument(
+        "--filter-message", type=str, default=None,
+        help="With --retry, only re-compile failures whose message contains this substring",
+    )
+    parser.add_argument(
+        "--save", type=str, default=None,
+        help="Save results to JSON file for later --retry",
+    )
     args = parser.parse_args()
 
     if args.list_files:
@@ -442,7 +588,21 @@ def main() -> int:
             print(f.relative_to(args.cpython_root).as_posix())
         return 0
 
-    data = run(args.cpython_root, core_only=args.core, single_file=args.file)
+    try:
+        jobs = parse_jobs(args.jobs)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    data = run(
+        args.cpython_root,
+        core_only=args.core,
+        single_file=args.file,
+        jobs=jobs,
+        retry=args.retry,
+        filter_stage=args.filter_stage,
+        filter_message=args.filter_message,
+        save=args.save,
+    )
     print_report(data, summary_only=args.summary)
     return 0 if data["failed"] == 0 else 1
 

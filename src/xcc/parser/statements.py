@@ -268,7 +268,11 @@ def is_label_start(parser: object) -> bool:
 def _is_static_assert_keyword(parser: object) -> bool:
     """Check for _Static_assert or C23 static_assert (contextual keyword)."""
     tok = parser._current()  # type: ignore[attr-defined]
-    if tok.kind == TokenKind.IDENT and isinstance(tok.lexeme, str) and tok.lexeme == "static_assert":
+    if (
+        tok.kind == TokenKind.IDENT
+        and isinstance(tok.lexeme, str)
+        and tok.lexeme == "static_assert"
+    ):
         return True
     return parser._check_keyword("_Static_assert")  # type: ignore[attr-defined]
 
@@ -290,6 +294,7 @@ def parse_static_assert_decl(parser: object) -> StaticAssertDecl:
     else:
         # C23: single-argument form with no message
         from xcc.ast import StringLiteral
+
         message = StringLiteral('""')
     parser._expect_punct(")")  # type: ignore[attr-defined]
     parser._expect_punct(";")  # type: ignore[attr-defined]
