@@ -325,9 +325,16 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
             if (
                 self._usual_arithmetic_conversion(left_type, right_type) is None
             ) and not self._is_pointer_relational_compatible(left_type, right_type):
-                raise SemaError(
-                    "Relational operator requires integer or compatible object pointer operands"
-                )
+                # In GNU mode, any two pointer types (regardless of depth or
+                # pointee compatibility) are accepted for relational comparison.
+                if not (
+                    getattr(self, "_std", "c11") == "gnu11"
+                    and left_type.pointee() is not None
+                    and right_type.pointee() is not None
+                ):
+                    raise SemaError(
+                        "Relational operator requires integer or compatible object pointer operands"
+                    )
         elif expr.op in {"==", "!="}:
             if not self._is_scalar_type(left_type):
                 raise SemaError("Equality left operand must be scalar")

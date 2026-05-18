@@ -321,6 +321,16 @@ def resolve_member_type(
             or record_type.declarator_ops
             or not self._is_record_name(record_type.name)
         ):
+            # In GNU mode, allow -> on a non-pointer record type by
+            # treating it as . (dot) access.  This handles type-system
+            # edge cases where a typedef-to-pointer is resolved as the
+            # underlying record type.
+            if (
+                getattr(self, "_std", "c11") == "gnu11"
+                and not base_type.declarator_ops
+                and self._is_record_name(base_type.name)
+            ):
+                return self._lookup_record_member(base_type, member_name)
             raise SemaError("Member access on non-record pointer")
         return self._lookup_record_member(record_type, member_name)
     if base_type.declarator_ops or not self._is_record_name(base_type.name):

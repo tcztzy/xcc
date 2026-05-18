@@ -6811,6 +6811,25 @@ class SemaTests(unittest.TestCase):
                     analyzer._file_scope,
                 )
 
+    def test_gnu_conditional_incompatible_pointers_yields_void_ptr(self) -> None:
+        """GNU mode: cond ? int* : char* yields void*."""
+        source = "int main(void) { int x; void *p; p = 1 ? (int*)&x : (char*)&x; return 0; }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
 
+    def test_gnu_relational_different_pointer_depths(self) -> None:
+        """GNU mode: char** >= char* is accepted."""
+        source = "int main(void) { char *p = 0; char **pp = &p; return pp >= p; }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
+    def test_gnu_arrow_on_non_pointer_record(self) -> None:
+        """GNU mode: -> on struct (not pointer) treated like . access."""
+        source = "struct S { int x; }; int main(void) { struct S s; s->x = 1; return s.x; }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
 if __name__ == "__main__":
     unittest.main()

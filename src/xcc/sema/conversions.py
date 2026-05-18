@@ -175,5 +175,9 @@ def conditional_pointer_result(
                 declarator_ops=else_type.declarator_ops,
                 qualifiers=analyzer._merged_qualifiers(then_pointee, else_pointee),  # type: ignore[attr-defined]
             )
+        # In GNU mode, any two incompatible pointer types in a
+        # conditional expression yield void* (GCC -fpermissive).
+        if getattr(analyzer, "_std", "c11") == "gnu11":
+            return Type(VOID.name, declarator_ops=(("ptr", 0),))
         return None
     return None
