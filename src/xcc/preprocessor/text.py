@@ -14,6 +14,7 @@ _ASM_LABEL_RE = re.compile(
 _ENUM_DECL_RE = re.compile(
     r"(?<!\w)__(?:enum|enum_class)_decl\s*\(\s*([A-Za-z_]\w*)\s*,[^,]*,\s*\{"
 )
+_ENUM_DECL_CLOSE_RE = re.compile(r"^\s*\}\s*\)\s*;\s*$")
 
 
 def _macro_table_line(macro: _Macro) -> str:
@@ -142,6 +143,8 @@ def _strip_gnu_asm_extensions(source: str) -> str:
         m = _ENUM_DECL_RE.search(stripped)
         if m:
             stripped = _ENUM_DECL_RE.sub(f"enum {m.group(1)} {{", stripped)
+        # Translate } ); (closing of __enum_decl) -> };
+        stripped = _ENUM_DECL_CLOSE_RE.sub(r"};", stripped)
         # If __asm appeared on its own line with just a ';' left, keep
         # the ';' as a null statement (it was the end of a multi-line
         # declaration like size_t wcsftime(...) __asm("_wcsftime");).
