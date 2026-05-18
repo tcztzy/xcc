@@ -8,7 +8,9 @@ from .macros import _Macro, _render_macro_tokens
 _DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$")
 _ASM_PREFIX_RE = re.compile(r"^\s*(?:__asm__|__asm|asm)\b")
 _ASM_STMT_RE = re.compile(r"^\s*asm\b")
-_ASM_LABEL_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\s*\([^;\n]*\)")
+_ASM_LABEL_RE = re.compile(
+    r"(?<!\w)(?:__asm__|__asm|asm)\b[^;]*\)"
+)
 
 
 def _macro_table_line(macro: _Macro) -> str:
