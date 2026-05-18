@@ -186,11 +186,11 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
             continue
         if arg == "-std":
             std_value, index = _take_value(argv, index, "-std")
-            std = _parse_std(std_value)
+            _parse_std(std_value)
             clang_argv.extend((arg, std_value))
             continue
         if arg.startswith("-std="):
-            std = _parse_std(arg.split("=", 1)[1])
+            _parse_std(arg.split("=", 1)[1])
             clang_argv.append(arg)
             continue
         if arg == "-fhosted":
