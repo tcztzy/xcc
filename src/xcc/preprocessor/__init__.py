@@ -371,8 +371,8 @@ _PREDEFINED_MACROS = (
     "__COUNTER__=0",
 )
 _HOST_ARCH_PREDEFINED_MACROS: dict[str, tuple[str, ...]] = {
-    "aarch64": ("__arm64__=1",),
-    "arm64": ("__arm64__=1",),
+    "aarch64": ("__arm64__=1", "__aarch64__=1", "__AARCH64EL__=1"),
+    "arm64": ("__arm64__=1", "__aarch64__=1", "__AARCH64EL__=1"),
     "amd64": ("__x86_64__=1",),
     "x86_64": ("__x86_64__=1",),
     "i386": ("__i386__=1",),
