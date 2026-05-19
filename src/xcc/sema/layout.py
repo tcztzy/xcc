@@ -1,5 +1,11 @@
 from xcc.types import Type
 
+
+def _align_to(value: int, alignment: int) -> int:
+    """Round *value* up to the nearest multiple of *alignment*."""
+    return ((value + alignment - 1) // alignment) * alignment
+
+
 POINTER_SIZE = 8
 BASE_TYPE_SIZES = {
     "_Bool": 1,
@@ -72,15 +78,48 @@ def sizeof_object_base_type(
     if members is None:
         return None
     if type_.name.startswith("struct "):
+        # Determine effective pack alignment for this record.
+        pack = analyzer._record_pack.get(type_.name)  # type: ignore[attr-defined]
         total = 0
+        bit_unit_offset = 0
+        bit_unit_size = 0
+        max_align = 1
         for member in members:
-            member_limit = None if limit is None else limit - total
-            member_size = analyzer._sizeof_type(member.type_, member_limit)  # type: ignore[attr-defined]
+            member_size = analyzer._sizeof_type(member.type_, None)  # type: ignore[attr-defined]
             if member_size is None:
                 return None
-            total += member_size
-            if limit is not None and total > limit:
-                return limit + 1
+            member_align = analyzer._alignof_type(member.type_) or member_size  # type: ignore[attr-defined]
+            # Apply #pragma pack: clamp alignment to pack value.
+            if pack is not None and pack < member_align:
+                member_align = pack
+            if member_align > max_align:
+                max_align = member_align
+            if member.bit_width is not None:
+                # Bitfield: pack into current storage unit if it fits.
+                if bit_unit_size == 0 or bit_unit_offset + member.bit_width > member_size * 8:
+                    # Start a new storage unit.
+                    bit_unit_offset = 0
+                    bit_unit_size = member_size
+                    # Align the storage unit.
+                    aligned = _align_to(total, member_align)
+                    if aligned > total:
+                        total = aligned
+                    total += member_size
+                bit_unit_offset += member.bit_width
+            else:
+                bit_unit_offset = 0
+                bit_unit_size = 0
+                # Align and add regular member.
+                aligned = _align_to(total, member_align)
+                if aligned > total:
+                    total = aligned
+                if limit is not None and total + member_size > limit:
+                    return limit + 1
+                total += member_size
+        # Trailing padding to align the struct.
+        total = _align_to(total, max_align)
+        if limit is not None and total > limit:
+            return limit + 1
         return total
     largest = 0
     for member in members:

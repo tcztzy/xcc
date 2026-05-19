@@ -452,6 +452,7 @@ class PreprocessResult:
     include_trace: tuple[str, ...]
     macro_table: tuple[str, ...]
     embed_used: bool
+    pack_changes: tuple[tuple[str, int, int | None], ...] = ()
 
 
 def preprocess_source(
@@ -474,6 +475,7 @@ def preprocess_source(
         tuple(processor.include_trace),
         tuple(_macro_table_line(macro) for _, macro in sorted(processor.macro_table.items())),
         processor._embed_used,
+        processor.pack_changes,
     )
 
 
@@ -520,6 +522,8 @@ class _Preprocessor:
         )
         self.include_trace: list[str] = []
         self._pragma_once_files: set[str] = set()
+        self._pack_stack: list[int] = []  # stack for #pragma pack(push/pop)
+        self._pack_changes: list[tuple[str, int, int | None]] = []  # (filename, line, alignment)
         for define in options.defines:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
@@ -1331,6 +1335,42 @@ class _Preprocessor:
 
     def _find_matching_has_include_close(self, expr: str, open_paren: int) -> int:
         return _probes._find_matching_has_include_close(expr, open_paren)
+
+    def _handle_pack_pragma(
+        self, body: str, location: _SourceLocation | None = None
+    ) -> None:
+        """Handle #pragma pack(push, N) and #pragma pack(pop)."""
+        body = body.strip()
+        if body.startswith("pack("):
+            body = body[5:]  # strip "pack("
+            if body.endswith(")"):
+                body = body[:-1]
+            body = body.strip()
+            if body.startswith("push"):
+                rest = body[4:].strip()
+                if rest.startswith(","):
+                    rest = rest[1:].strip()
+                try:
+                    alignment = int(rest) if rest else 8
+                except ValueError:
+                    alignment = 8
+                self._pack_stack.append(alignment)
+                if location is not None:
+                    self._pack_changes.append(
+                        (location.filename, location.line, alignment)
+                    )
+            elif body == "pop":
+                if self._pack_stack:
+                    self._pack_stack.pop()
+                    new_align = self._pack_stack[-1] if self._pack_stack else None
+                    if location is not None:
+                        self._pack_changes.append(
+                            (location.filename, location.line, new_align)
+                        )
+
+    @property
+    def pack_changes(self) -> tuple[tuple[str, int, int | None], ...]:
+        return tuple(self._pack_changes)
 
     def _parse_line_directive(
         self,

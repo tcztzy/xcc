@@ -317,6 +317,11 @@ def process_text(
             stripped_body = body.strip()
             if stripped_body == "once":
                 self._pragma_once_files.add(source_id)
+            elif stripped_body.startswith("pack("):
+                self._handle_pack_pragma(
+                    stripped_body,
+                    directive_cursor.first_location(),
+                )
             else:
                 _validate_pragma(stripped_body, directive_cursor.first_location())
             _blank_directive_lines(out, directive_cursor, directive_lines)

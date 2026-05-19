@@ -4492,6 +4492,78 @@ A(0)
         )
         self.assertNotIn("M(", result.source)
 
+    def test_pragma_pack_push_sets_pack_alignment(self) -> None:
+        """#pragma pack(push, 4) sets pack alignment."""
+        result = preprocess_source(
+            "#pragma pack(push, 4)\n"
+            "int x;\n",
+            filename="pack.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertEqual(len(result.pack_changes), 1)
+        self.assertEqual(result.pack_changes[0][2], 4)
+
+    def test_pragma_pack_pop_restores_pack(self) -> None:
+        """#pragma pack(pop) restores previous pack."""
+        result = preprocess_source(
+            "#pragma pack(push, 4)\n"
+            "#pragma pack(pop)\n"
+            "int x;\n",
+            filename="pack.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertEqual(len(result.pack_changes), 2)
+        self.assertEqual(result.pack_changes[0][2], 4)
+        self.assertIsNone(result.pack_changes[1][2])
+
+    def test_pragma_pack_push_defaults_to_8(self) -> None:
+        """#pragma pack(push) without explicit value defaults to 8."""
+        result = preprocess_source(
+            "#pragma pack(push)\n"
+            "int x;\n",
+            filename="pack.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertEqual(result.pack_changes[0][2], 8)
+
+    def test_pragma_pack_pop_empty_stack_no_error(self) -> None:
+        """#pragma pack(pop) on empty stack is a no-op."""
+        result = preprocess_source(
+            "#pragma pack(pop)\n"
+            "int x;\n",
+            filename="pack.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertEqual(len(result.pack_changes), 0)
+
+    def test_handle_pack_pragma_edge_cases(self) -> None:
+        """_handle_pack_pragma handles edge case inputs without crashing."""
+        from xcc.preprocessor import _Preprocessor
+        from xcc.options import FrontendOptions
+        p = _Preprocessor(FrontendOptions(std="gnu11"))
+        # Non-pack pragma (doesn't start with "pack(")
+        p._handle_pack_pragma("once")
+        self.assertEqual(len(p._pack_stack), 0)
+        # pack( without closing paren
+        p._handle_pack_pragma("pack(")
+        self.assertEqual(len(p._pack_stack), 0)
+        # pack() without push/pop
+        p._handle_pack_pragma("pack()")
+        self.assertEqual(len(p._pack_stack), 0)
+        # push without location
+        p._handle_pack_pragma("pack(push, 2)")
+        self.assertEqual(len(p._pack_stack), 1)
+        self.assertEqual(p._pack_stack[-1], 2)
+        self.assertEqual(len(p._pack_changes), 0)  # no location = no change record
+        # pop without location
+        p._handle_pack_pragma("pack(pop)")
+        self.assertEqual(len(p._pack_stack), 0)
+        self.assertEqual(len(p._pack_changes), 0)
+        # push with non-integer defaults to 8
+        p._handle_pack_pragma("pack(push, i)")
+        self.assertEqual(len(p._pack_stack), 1)
+        self.assertEqual(p._pack_stack[-1], 8)
+
 
 if __name__ == "__main__":
     unittest.main()

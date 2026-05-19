@@ -109,6 +109,11 @@ def register_type_spec(analyzer: object, type_spec: TypeSpec) -> None:
             raise SemaError(f"Duplicate definition: {key}")
         return
     self._record_definitions[key] = tuple(member_types)
+    # Record #pragma pack: since source_line is not tracked on TypeSpec,
+    # use a global heuristic: if any pack changes were recorded during
+    # preprocessing, apply the effective pack (usually 4 from Mach headers).
+    pack = self._effective_global_pack
+    self._record_pack[key] = pack
 
 
 def resolve_type(analyzer: object, type_spec: TypeSpec) -> Type:

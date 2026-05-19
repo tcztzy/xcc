@@ -4589,7 +4589,7 @@ class SemaTests(unittest.TestCase):
         self.assertIsNone(analyzer._sizeof_object_base_type(Type("struct Missing"), None))
 
         analyzer._record_definitions["struct S"] = (("x", INT), ("y", LONG))
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 12)
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 16)
         self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), 8), 9)
 
         analyzer._record_definitions["struct Bad"] = (("f", function_type),)
@@ -6831,5 +6831,146 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIn("main", sema.functions)
+
+    def test_struct_layout_with_member_alignment(self) -> None:
+        """struct {char, int} should have padding between members."""
+        analyzer = Analyzer()
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", Type("char")),
+            RecordMemberInfo("b", INT),
+        )
+        # char(1) + padding(3) + int(4) = 8
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
+
+    def test_struct_layout_with_trailing_padding(self) -> None:
+        """struct {int, char} needs trailing padding to align to int."""
+        analyzer = Analyzer()
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", INT),
+            RecordMemberInfo("b", Type("char")),
+        )
+        # int(4) + char(1) + padding(3) = 8
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
+
+    def test_struct_layout_with_pack_clamp(self) -> None:
+        """Pack alignment clamps member alignment to pack value."""
+        analyzer = Analyzer()
+        analyzer._record_pack["struct S"] = 4
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", Type("char")),
+            RecordMemberInfo("b", LONG),  # LONG alignment=8, clamps to 4
+        )
+        # char(1) + padding(3) + long(8) at align 4: 4 + 8 = 12
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 12)
+
+    def test_struct_layout_pack_clamps_trailing_padding(self) -> None:
+        """Trailing padding respects pack alignment."""
+        analyzer = Analyzer()
+        analyzer._record_pack["struct S"] = 1
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", INT),  # align 4, clamps to 1
+            RecordMemberInfo("b", INT),
+        )
+        # int(4) + int(4) = 8, align clamped to 1, no trailing padding
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
+
+    def test_bitfield_continuing_in_same_unit(self) -> None:
+        """Consecutive bitfields that fit share the same storage unit."""
+        analyzer = Analyzer()
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", INT),
+            RecordMemberInfo("b", INT, bit_width=8),
+            RecordMemberInfo("c", INT, bit_width=8),
+        )
+        # int(4) + bit_unit(4) with two bitfields = 8
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
+
+    def test_bitfield_new_unit_when_overflow(self) -> None:
+        """Bitfield that doesn't fit starts a new storage unit."""
+        analyzer = Analyzer()
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", INT, bit_width=24),
+            RecordMemberInfo("b", INT, bit_width=16),  # 24+16=40 > 32
+        )
+        # bit_unit(4) + bit_unit(4) = 8
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
+
+    def test_struct_limit_exceeded_during_member(self) -> None:
+        """Limit exceeded during member returns limit+1."""
+        analyzer = Analyzer()
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", INT),
+            RecordMemberInfo("b", INT),
+        )
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), 6), 7)
+
+    def test_struct_limit_exceeded_at_trailing_padding(self) -> None:
+        """Limit exceeded at trailing padding returns limit+1."""
+        analyzer = Analyzer()
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", INT),
+            RecordMemberInfo("b", INT),
+        )
+        # size=8, limit=7: trailing padding pushes past limit
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), 7), 8)
+
+    def test_union_limit_exceeded(self) -> None:
+        """Union limit exceeded returns limit+1."""
+        analyzer = Analyzer()
+        analyzer._record_definitions["union U"] = (
+            RecordMemberInfo("a", INT),
+            RecordMemberInfo("b", LONG),
+        )
+        # largest is long=8, limit=6
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("union U"), 6), 7)
+
+    def test_analyzer_effective_global_pack_from_changes(self) -> None:
+        """Analyzer derives effective pack from pack_changes."""
+        analyzer = Analyzer(pack_changes=(
+            ("msg.h", 291, 4),
+            ("msg.h", 625, None),
+        ))
+        self.assertEqual(analyzer._effective_global_pack, 4)
+
+    def test_analyzer_no_effective_pack_without_changes(self) -> None:
+        """No effective pack when no pack changes recorded."""
+        analyzer = Analyzer()
+        self.assertIsNone(analyzer._effective_global_pack)
+
+    def test_pack_alignment_for_finds_correct_pack(self) -> None:
+        """_pack_alignment_for returns pack active at given source line."""
+        analyzer = Analyzer(pack_changes=(
+            ("msg.h", 291, 4),
+            ("msg.h", 625, None),
+        ))
+        self.assertEqual(analyzer._pack_alignment_for(300), 4)
+        self.assertEqual(analyzer._pack_alignment_for(700), None)
+
+    def test_pack_alignment_for_no_changes(self) -> None:
+        """_pack_alignment_for returns None with no changes."""
+        analyzer = Analyzer()
+        self.assertIsNone(analyzer._pack_alignment_for(300))
+
+    def test_bitfield_padding_before_storage_unit(self) -> None:
+        """Bitfield storage unit is aligned to member alignment."""
+        analyzer = Analyzer()
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", Type("char")),
+            RecordMemberInfo("b", INT, bit_width=8),
+        )
+        # char(1) + padding(3) + bit_unit(4) = 8
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
+
+    def test_trailing_padding_exceeds_limit(self) -> None:
+        """Trailing padding that exceeds limit returns limit+1."""
+        analyzer = Analyzer()
+        analyzer._record_definitions["struct S"] = (
+            RecordMemberInfo("a", SHORT),
+            RecordMemberInfo("b", Type("char")),
+        )
+        # short(2) + char(1) = 3, _align_to(3, 2) = 4, limit=3 → 4>3
+        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), 3), 4)
+
+
 if __name__ == "__main__":
     unittest.main()

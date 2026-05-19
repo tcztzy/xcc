@@ -131,9 +131,22 @@ _FLOAT_COMPARE_BUILTINS = (
 
 
 class Analyzer:
-    def __init__(self, *, std: StdMode = "c11", excess_init_ok: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        std: StdMode = "c11",
+        excess_init_ok: bool = False,
+        pack_changes: tuple[tuple[str, int, int | None], ...] = (),
+    ) -> None:
         self._std = std
         self._excess_init_ok = excess_init_ok
+        self._pack_changes = pack_changes
+        # Derive effective global pack from pack changes (for Mach headers).
+        _pack = None
+        for _fn, _ln, _p in pack_changes:
+            if _p is not None:
+                _pack = _p
+        self._effective_global_pack: int | None = _pack
         self._functions: dict[str, FunctionSymbol] = {}
         self._type_map = TypeMap()
         self._function_signatures: dict[str, FunctionSignature] = {}
@@ -143,6 +156,7 @@ class Analyzer:
         self._overload_expr_ids: dict[int, str] = {}
         self._defined_functions: set[str] = set()
         self._record_definitions: dict[str, tuple[RecordMemberInfo, ...]] = {}
+        self._record_pack: dict[str, int | None] = {}
         self._record_member_lookup_cache: dict[
             str,
             tuple[tuple[RecordMemberInfo, ...], dict[str, tuple[Type, int]]],
@@ -978,6 +992,16 @@ class Analyzer:
     def _alignof_type(self, type_: Type) -> int | None:
         return alignof_type(self, type_)
 
+    def _pack_alignment_for(self, source_line: int) -> int | None:
+        """Return the #pragma pack alignment active at *source_line*."""
+        pack = None
+        for _filename, line, alignment in self._pack_changes:
+            if line <= source_line:
+                pack = alignment
+            else:
+                break
+        return pack
+
     def _sizeof_object_base_type(self, type_: Type, limit: int | None) -> int | None:
         return sizeof_object_base_type(self, type_, limit)
 
@@ -1204,5 +1228,8 @@ def analyze(
     *,
     std: StdMode = "c11",
     excess_init_ok: bool = False,
+    pack_changes: tuple[tuple[str, int, int | None], ...] = (),
 ) -> SemaUnit:
-    return Analyzer(std=std, excess_init_ok=excess_init_ok).analyze(unit)
+    return Analyzer(
+        std=std, excess_init_ok=excess_init_ok, pack_changes=pack_changes
+    ).analyze(unit)

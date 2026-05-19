@@ -206,6 +206,10 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Modules/socketmodule.c": (
         "keyword 'struct' in expression (GNU cast/compound literal edge case)"
     ),
+    # Requires compiler builtins not yet implemented in XCC
+    "Python/traceback.c": (
+        "uses __builtin_alloca (compiler builtin not yet supported)"
+    ),
     # macOS SDK system header limitations (not XCC bugs)
     "Python/pylifecycle.c": (
         "macOS os/log.h requires Xcode builtins (__builtin_os_log_format)"
