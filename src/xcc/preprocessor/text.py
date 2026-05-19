@@ -123,6 +123,7 @@ def _strip_gnu_asm_extensions(source: str) -> str:
         return source
     stripped_lines: list[str] = []
     in_asm_statement = False
+    in_enum_decl = False
     for line in lines:
         if in_asm_statement:
             stripped_lines.append(_blank_line(line))
@@ -140,8 +141,13 @@ def _strip_gnu_asm_extensions(source: str) -> str:
         m = _ENUM_DECL_RE.search(stripped)
         if m:
             stripped = _ENUM_DECL_RE.sub(f"enum {m.group(1)} {{", stripped)
+            in_enum_decl = True
         # Translate } ); (closing of __enum_decl) -> };
-        stripped = _ENUM_DECL_CLOSE_RE.sub(r"};", stripped)
+        if in_enum_decl:
+            closed = _ENUM_DECL_CLOSE_RE.sub(r"};", stripped)
+            if closed != stripped:
+                stripped = closed
+                in_enum_decl = False
         # If __asm appeared on its own line with just a ';' left, keep
         # the ';' as a null statement (it was the end of a multi-line
         # declaration like size_t wcsftime(...) __asm("_wcsftime");).

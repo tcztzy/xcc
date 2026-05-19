@@ -5385,6 +5385,22 @@ class ParserTests(unittest.TestCase):
         )
         self.assertEqual(unit.declarations[0].name, "x")
 
+    def test_multi_line_compound_literal_in_return(self) -> None:
+        """Multi-line compound literal after multi-line function signature."""
+        unit = parse(list(lex(
+            "typedef struct { int x; } Foo;\n"
+            "static inline Foo\n"
+            "mk(void)\n"
+            "{\n"
+            "    return ((Foo){\n"
+            "        .x = 0\n"
+            "    });\n"
+            "}\n"
+        )))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, ReturnStmt)
+        self.assertIsInstance(stmt.value, CompoundLiteralExpr)
+
 
 if __name__ == "__main__":
     unittest.main()

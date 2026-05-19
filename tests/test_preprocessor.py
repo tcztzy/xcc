@@ -4422,8 +4422,17 @@ A(0)
 
     def test_strip_gnu_asm_closing_paren_semicolon(self) -> None:
         """} ) ; (closing of __enum_decl) is translated to };."""
-        result = _strip_gnu_asm_extensions("} ) ;\n")
+        result = _strip_gnu_asm_extensions(
+            "__enum_decl(foo, int, {\n"
+            "} ) ;\n"
+        )
         self.assertIn("};", result)
+
+    def test_strip_gnu_asm_closing_not_replaced_without_opening(self) -> None:
+        """} ) ; without preceding __enum_decl is left unchanged."""
+        result = _strip_gnu_asm_extensions("} ) ;\n")
+        self.assertIn("} ) ;", result)
+        self.assertNotIn("};", result)
 
     def test_backslash_in_block_comment_banner_preserved(self) -> None:
         """Block comment banner with \ continuation, */ on later line.
