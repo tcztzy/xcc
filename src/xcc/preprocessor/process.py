@@ -27,12 +27,27 @@ def _strip_block_comments(text: str) -> str:
     is still open at end-of-text the original text is returned
     unchanged --- the closing ``*/`` is in a subsequent line that
     hasn't been collected yet.
+
+    String literals and character constants are tracked so that
+    ``//`` and ``/*`` inside them are not treated as comment starts.
     """
     result: list[str] = []
     in_block = False
+    in_string: str | None = None
     i = 0
     while i < len(text):
         ch = text[i]
+        if in_string is not None:
+            if ch == "\\" and i + 1 < len(text):
+                result.append(ch)
+                result.append(text[i + 1])
+                i += 2
+                continue
+            if ch == in_string:
+                in_string = None
+            result.append(ch)
+            i += 1
+            continue
         if in_block:
             if ch == "*" and i + 1 < len(text) and text[i + 1] == "/":
                 in_block = False
@@ -40,6 +55,11 @@ def _strip_block_comments(text: str) -> str:
                 i += 2
                 continue
             result.append(" " if ch != "\n" else ch)
+            i += 1
+            continue
+        if ch in {'"', "'"}:
+            in_string = ch
+            result.append(ch)
             i += 1
             continue
         if ch == "/" and i + 1 < len(text):

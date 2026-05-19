@@ -5401,6 +5401,16 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, ReturnStmt)
         self.assertIsInstance(stmt.value, CompoundLiteralExpr)
 
+    def test_typedef_sized_array(self) -> None:
+        """typedef with fixed-size array bound."""
+        unit = parse(list(lex("typedef int arr_t[10];")))
+        self.assertEqual(unit.declarations[0].name, "arr_t")
+
+    def test_typedef_incomplete_array(self) -> None:
+        """typedef with empty array bound (incomplete type)."""
+        unit = parse(list(lex("typedef int arr_t[];")))
+        self.assertEqual(unit.declarations[0].name, "arr_t")
+
 
 if __name__ == "__main__":
     unittest.main()

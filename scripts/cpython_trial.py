@@ -206,6 +206,13 @@ EXPECTED_SKIPS: dict[str, str] = {
     "Modules/socketmodule.c": (
         "keyword 'struct' in expression (GNU cast/compound literal edge case)"
     ),
+    # macOS SDK system header limitations (not XCC bugs)
+    "Python/pylifecycle.c": (
+        "macOS os/log.h requires Xcode builtins (__builtin_os_log_format)"
+    ),
+    "Python/remote_debugging.c": (
+        "macOS bsm/audit.h type resolution (u_int32_t not declared)"
+    ),
 }
 
 
@@ -326,9 +333,10 @@ _BASE_DEFINES = (
     "mi_decl_throw=",
     "mi_decl_thread=__thread",
     "mi_decl_restrict=",
-    # XCC doesn't implement __has_attribute; stub to 0
+    # XCC doesn't implement __has_attribute / __has_builtin; stub to 0
     # so that macOS SDK cdefs.h #if __has_attribute(...) works
     "__has_attribute(x)=0",
+    "__has_builtin(x)=0",
     # XCC doesn't define __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__
     # which some SDK headers need
     "__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__=120000",

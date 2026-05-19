@@ -122,9 +122,12 @@ def parse_atomic_type_name_direct_declarator(
             continue
         if p._check_punct("["):
             p._advance()
-            size_token = p._current()
-            size_expr = p._parse_assignment()
-            size = p._parse_array_size_expr(size_expr, size_token)
+            if p._check_punct("]"):
+                size = -1  # incomplete array (no bound expression)
+            else:
+                size_token = p._current()
+                size_expr = p._parse_assignment()
+                size = p._parse_array_size_expr(size_expr, size_token)
             p._expect_punct("]")
             declarator_ops = declarator_ops + (("arr", size),)
             continue

@@ -4404,6 +4404,37 @@ A(0)
         self.assertNotIn("//", result.source)
         self.assertIn("int x = 1 ;", result.source)
 
+    def test_comments_inside_string_literals_are_preserved(self) -> None:
+        """// and /* inside string literals are not treated as comments."""
+        result = preprocess_source(
+            '#define M(x) x\n'
+            'M("test // not a comment /* nor this */ string")\n',
+            filename="str_comment.c",
+        )
+        self.assertIn("test // not a comment /* nor this */ string", result.source)
+
+    def test_slashes_in_string_literal_across_macro_lines(self) -> None:
+        """//= inside string in multi-line macro arg is preserved."""
+        result = preprocess_source(
+            '#define D(x) if (debug) { x; }\n'
+            'D(fprintf(stderr, "%s",\n'
+            '           "\'//=\'"));\n',
+            filename="slash_macro.c",
+        )
+        self.assertIn("'//='", result.source)
+
+    def test_escape_sequence_in_string_across_macro_lines(self) -> None:
+        """Escape sequences inside strings are preserved in multi-line macros."""
+        result = preprocess_source(
+            '#define M(x) x\n'
+            'M("hello\\" \\\n'
+            '  world");\n',
+            filename="esc_macro.c",
+        )
+        # The \\" escape sequence inside the string is preserved
+        self.assertIn("hello", result.source)
+        self.assertIn("world", result.source)
+
     def test_strip_gnu_asm_strips_enum_decl(self) -> None:
         """__enum_decl(name, type, {) is translated to enum name {."""
         result = _strip_gnu_asm_extensions(
