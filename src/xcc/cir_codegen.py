@@ -456,6 +456,12 @@ class _CIRCodeGen:
         elif isinstance(stmt, DeclGroupStmt):
             for decl in stmt.declarations:
                 self._emit_stmt(decl)
+        elif isinstance(stmt, SwitchStmt):
+            self._emit_switch(stmt)
+        elif isinstance(stmt, CaseStmt):
+            self._emit_case(stmt)
+        elif isinstance(stmt, DefaultStmt):
+            self._emit_default(stmt)
         elif isinstance(stmt, (TypedefDecl, StaticAssertDecl)):
             pass
         else:
@@ -583,15 +589,14 @@ class _CIRCodeGen:
         self._emit_label(end_lbl)
 
     def _emit_break(self) -> None:
-        if not self._loop_stack and not self._switch_end_labels:
+        if self._switch_end_labels:
+            self._term("cir.break")
+            return
+        if not self._loop_stack:
             raise cir_backend_error(
                 self._result.filename,
                 "break not within loop or switch",
             )
-        if self._switch_end_labels:
-            end_lbl, _ = self._switch_end_labels[-1]
-            self._term(f"cir.br ^{end_lbl}")
-            return
         self._term(f"cir.br ^{self._loop_stack[-1].break_label}")
 
     def _emit_continue(self) -> None:
@@ -601,6 +606,49 @@ class _CIRCodeGen:
                 "continue not within loop",
             )
         self._term(f"cir.br ^{self._loop_stack[-1].continue_label}")
+
+    def _emit_switch(self, stmt: SwitchStmt) -> None:
+        cond = self._emit_expr(stmt.condition)
+        self._switch_end_labels.append(("switch_end", None))
+        self._emit(f"cir.switch ({cond.ref} : {cond.cir_type}) {{")
+        self._emit_stmt(stmt.body)
+        if not self._block_done:
+            self._term("cir.yield")
+        self._emit("}")
+        self._switch_end_labels.pop()
+        self._block_done = False
+
+    def _emit_case(self, stmt: CaseStmt) -> None:
+        val = self._eval_case_val(stmt.value)
+        cond_type = _cir_type(INT)  # case values are always int
+        self._emit(f"cir.case (equal, [#cir.int<{val}> : {cond_type}]) {{")
+        if stmt.body is not None:
+            self._emit_stmt(stmt.body)
+        if not self._block_done:
+            self._term("cir.yield")
+        self._emit("}")
+        self._block_done = False
+
+    def _emit_default(self, stmt: DefaultStmt) -> None:
+        self._emit("cir.case (default, []) {")
+        if stmt.body is not None:
+            self._emit_stmt(stmt.body)
+        if not self._block_done:
+            self._term("cir.yield")
+        self._emit("}")
+        self._block_done = False
+
+    def _eval_case_val(self, expr: Expr) -> int:
+        if isinstance(expr, IntLiteral):
+            return int(expr.value)
+        if isinstance(expr, CharLiteral):
+            return ord(expr.value)
+        if isinstance(expr, UnaryExpr) and expr.op == "-":
+            return -self._eval_case_val(expr.operand)
+        raise cir_backend_error(
+            self._result.filename,
+            "Expected integer constant for case label",
+        )
 
     # ── expression emission ──────────────────────────────────
 

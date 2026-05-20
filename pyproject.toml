@@ -1,12 +1,10 @@
 [project]
 name = "xcc"
 version = "0.2.0a1"
-description = "Python C11 compiler with deterministic diagnostics and zero runtime dependencies."
+description = "Python C11 compiler targeting ClangIR MLIR."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "llvmlite",
-]
+dependencies = []
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 
