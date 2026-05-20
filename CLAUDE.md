@@ -10,7 +10,7 @@ source.c → [preprocessor] → [lexer] → [parser] → [sema] → [llvm_codege
          → llc -filetype=obj → .o → clang → executable
 ```
 
-- `src/xcc/llvm_codegen.py` — LLVM IR emission from AST + TypeMap
+- `src/xcc/codegen.py` — LLVM IR emission via libLLVM-C ctypes
 - `src/xcc/cc_driver.py` — CC-style driver, invokes llc/clang for obj/link
 - All frontend modules (preprocessor, lexer, parser, sema) unchanged
 
