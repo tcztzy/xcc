@@ -565,7 +565,7 @@ class _LLVMGen:
                 # Filter out void params
                 real_params = [pt for pt in params if pt.name != "void" or pt.declarator_ops]
                 n = len(real_params)
-                param_types = (ctypes.c_void_p * n)() if n > 0 else None
+                param_types = (ctypes.c_void_p * n)()
                 for i, pt in enumerate(real_params):
                     param_types[i] = self._base_type(pt.name)
                 result = c.FunctionType(result, param_types, n, is_var)
@@ -694,7 +694,7 @@ class _LLVMGen:
             )
         ]
         n = len(real_params)
-        param_ts = (ctypes.c_void_p * n)() if n > 0 else None
+        param_ts = (ctypes.c_void_p * n)()
         for i, lt in enumerate(real_params):
             param_ts[i] = lt
         fn_t = c.FunctionType(ret_t, param_ts, n, False)
@@ -723,7 +723,7 @@ class _LLVMGen:
             )
         ]
         n = len(real_params)
-        param_ts = (ctypes.c_void_p * n)() if n > 0 else None
+        param_ts = (ctypes.c_void_p * n)()
         for i, lt in enumerate(real_params):
             param_ts[i] = lt
         fn_t = c.FunctionType(ret_t, param_ts, n, False)
@@ -747,6 +747,7 @@ class _LLVMGen:
             self._locals[-1][param.name] = alloca
 
         # Pre-collect allocas
+        assert func.body is not None
         allocas = self._collect_allocas(func.body)
         for vname, vtype in allocas:
             if vname in self._locals[-1]:
@@ -829,6 +830,8 @@ class _LLVMGen:
         addr = self._lookup_local(stmt.name)
         if addr is None:
             return
+        if isinstance(stmt.init, InitList):
+            return  # aggregate init not yet supported in decls
         val = self._emit_expr(stmt.init)
         _c().BuildStore(self._builder, val, addr)
 
@@ -858,6 +861,7 @@ class _LLVMGen:
         if else_bb:
             c.PositionBuilderAtEnd(self._builder, else_bb)
             self._term = False
+            assert stmt.else_body is not None
             self._emit_stmt(stmt.else_body)
             if not self._term:
                 c.BuildBr(self._builder, merge_bb)
@@ -909,7 +913,10 @@ class _LLVMGen:
         c = _c()
         fn = self._func
         if stmt.init:
-            self._emit_stmt(stmt.init)
+            if isinstance(stmt.init, (DeclStmt, DeclGroupStmt, ExprStmt)):
+                self._emit_stmt(stmt.init)
+            else:
+                self._emit_expr(stmt.init)  # type: ignore
 
         cond_bb = c.AppendBasicBlock(fn, b"for.cond")
         body_bb = c.AppendBasicBlock(fn, b"for.body")
@@ -1503,6 +1510,8 @@ class _LLVMGen:
         tmp = c.BuildAlloca(self._builder, lt, b"compound.lit")
         if isinstance(expr.initializer, InitList):
             for item in expr.initializer.items:
+                if isinstance(item.initializer, InitList):
+                    continue  # nested init not yet supported
                 val = self._emit_expr(item.initializer)
                 c.BuildStore(self._builder, val, tmp)
         else:
@@ -1527,7 +1536,7 @@ class _LLVMGen:
         return c.BuildICmp(self._builder, 33, val, c.ConstInt(t, 0, False), name)
 
     def _resolve_type(self, ts: TypeSpec) -> Type:
-        return Type(ts.name, declarator_ops=ts.declarator_ops, qualifiers=ts.qualifiers)
+        return Type(ts.name, declarator_ops=ts.declarator_ops, qualifiers=ts.qualifiers)  # type: ignore
 
     def _collect_allocas(self, stmt: Stmt) -> list[tuple[str, Type]]:
         result: list[tuple[str, Type]] = []
@@ -1562,9 +1571,10 @@ class _LLVMGen:
     def _walk_allocas_expr(
         self, expr: Expr, result: list[tuple[str, Type]], seen: set[str]
     ) -> None:
-        self._walk_allocas(expr.body, result, seen)
+        if isinstance(expr, StatementExpr):
+            self._walk_allocas(expr.body, result, seen)
 
-    def _eval_init(self, init: Expr, var_type: Type) -> int | None:
+    def _eval_init(self, init: Expr | InitList, var_type: Type) -> int | None:
         c = _c()
         lt = self._type_to_llvm(var_type)
         if isinstance(init, IntLiteral):

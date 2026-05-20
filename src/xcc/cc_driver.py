@@ -104,7 +104,7 @@ def _parse_std(arg: str) -> str:
 
 def _parse_backend(arg: str) -> BackendMode:
     if arg in {"auto", "xcc", "clang"}:
-        return arg  # type: ignore[return-value]
+        return arg  # type: ignore
     raise ValueError(f"Unsupported backend: {arg}")
 
 

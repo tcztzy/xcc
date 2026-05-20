@@ -12,18 +12,18 @@ license-files = ["LICENSE"]
 xcc = "xcc:main"
 
 [build-system]
-requires = ["uv_build>=0.9.26,<0.10.0"]
+requires = ["uv_build>=0.11.15"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "coverage>=7.13.3",
+    "coverage>=7.14.0",
     "mkdocs>=1.6.1",
-    "ruff>=0.15.0",
-    "tox>=4.34.1",
+    "ruff>=0.15.13",
+    "tox>=4.54.0",
 
-    "tox-uv>=1.29.0",
-    "ty>=0.0.15",
+    "tox-uv>=1.35.2",
+    "ty>=0.0.38",
 ]
 
 [tool.ruff]
@@ -64,7 +64,7 @@ show_missing = true
 fail_under = 0
 
 [tool.tox]
-requires = ["tox>=4.34.1", "tox-uv>=1.29.0"]
+requires = ["tox>=4.54.0", "tox-uv>=1.29.0"]
 env_list = ["py311", "py312", "py313", "py313t", "py314", "py314t", "pypy311", "lint", "type"]
 skip_missing_interpreters = true
 

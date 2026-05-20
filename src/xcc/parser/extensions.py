@@ -14,8 +14,8 @@ _EXTENSION_MARKER = "__extension__"
 
 
 def _skip_extension_markers(parser: object) -> None:
-    while parser._check_keyword(_EXTENSION_MARKER):  # type: ignore[attr-defined]
-        parser._advance()  # type: ignore[attr-defined]
+    while parser._check_keyword(_EXTENSION_MARKER):  # type: ignore
+        parser._advance()  # type: ignore
 
 
 def _consume_overloadable_decl_attributes(parser: object) -> bool:
@@ -44,11 +44,11 @@ def _consume_decl_attributes(parser: object) -> tuple[bool, bool]:
     while True:
         gnu_found, gnu_has_overloadable = _consume_gnu_attributes(
             parser,
-            parser._make_error,  # type: ignore[attr-defined]
+            parser._make_error,  # type: ignore
         )
         ms_found = _skip_ms_declspecs(
             parser,
-            parser._make_error,  # type: ignore[attr-defined]
+            parser._make_error,  # type: ignore
         )
         found = found or gnu_found or ms_found
         has_overloadable = has_overloadable or gnu_has_overloadable
@@ -64,12 +64,12 @@ def _consume_gnu_attributes(
     found = False
     has_overloadable = False
     while _is_gnu_attribute_start(parser):
-        start = parser._advance()  # type: ignore[attr-defined]
-        parser._expect_punct("(")  # type: ignore[attr-defined]
-        parser._expect_punct("(")  # type: ignore[attr-defined]
+        start = parser._advance()  # type: ignore
+        parser._expect_punct("(")  # type: ignore
+        parser._expect_punct("(")  # type: ignore
         depth = 2
         while depth > 0:
-            token = parser._current()  # type: ignore[attr-defined]
+            token = parser._current()  # type: ignore
             if token.kind == TokenKind.EOF:
                 raise make_error("Expected ')'", start)
             if token.kind == TokenKind.IDENT and token.lexeme == "overloadable":
@@ -79,17 +79,17 @@ def _consume_gnu_attributes(
                     depth += 1
                 elif token.lexeme == ")":
                     depth -= 1
-            parser._advance()  # type: ignore[attr-defined]
+            parser._advance()  # type: ignore
         found = True
     return found, has_overloadable
 
 
 def _is_gnu_attribute_start(parser: object) -> bool:
-    token = parser._current()  # type: ignore[attr-defined]
+    token = parser._current()  # type: ignore
     if token.kind != TokenKind.IDENT or token.lexeme != "__attribute__":
         return False
-    first = parser._peek(1)  # type: ignore[attr-defined]
-    second = parser._peek(2)  # type: ignore[attr-defined]
+    first = parser._peek(1)  # type: ignore
+    second = parser._peek(2)  # type: ignore
     return (
         first.kind == TokenKind.PUNCTUATOR
         and first.lexeme == "("
@@ -104,11 +104,11 @@ def _skip_ms_declspecs(
 ) -> bool:
     found = False
     while _is_ms_declspec_start(parser):
-        start = parser._advance()  # type: ignore[attr-defined]
-        parser._expect_punct("(")  # type: ignore[attr-defined]
+        start = parser._advance()  # type: ignore
+        parser._expect_punct("(")  # type: ignore
         depth = 1
         while depth > 0:
-            token = parser._current()  # type: ignore[attr-defined]
+            token = parser._current()  # type: ignore
             if token.kind == TokenKind.EOF:
                 raise make_error("Expected ')'", start)
             if token.kind == TokenKind.PUNCTUATOR:
@@ -116,27 +116,27 @@ def _skip_ms_declspecs(
                     depth += 1
                 elif token.lexeme == ")":
                     depth -= 1
-            parser._advance()  # type: ignore[attr-defined]
+            parser._advance()  # type: ignore
         found = True
     return found
 
 
 def _is_ms_declspec_start(parser: object) -> bool:
-    token = parser._current()  # type: ignore[attr-defined]
+    token = parser._current()  # type: ignore
     return (
         token.kind == TokenKind.IDENT
         and token.lexeme == _MS_DECLSPEC_KEYWORD
-        and parser._peek_punct("(")  # type: ignore[attr-defined]
+        and parser._peek_punct("(")  # type: ignore
     )
 
 
 def _skip_calling_convention_identifiers(parser: object) -> bool:
     found = False
     while (
-        parser._current().kind == TokenKind.IDENT  # type: ignore[attr-defined]
-        and parser._current().lexeme in _MS_CALLING_CONVENTION_IDENTIFIERS  # type: ignore[attr-defined]
+        parser._current().kind == TokenKind.IDENT  # type: ignore
+        and parser._current().lexeme in _MS_CALLING_CONVENTION_IDENTIFIERS  # type: ignore
     ):
-        parser._advance()  # type: ignore[attr-defined]
+        parser._advance()  # type: ignore
         found = True
     return found
 
@@ -145,19 +145,19 @@ def _skip_calling_convention_identifiers_if(
     parser: object,
     predicate: Callable[[Token], bool],
 ) -> bool:
-    token = parser._current()  # type: ignore[attr-defined]
+    token = parser._current()  # type: ignore
     if token.kind != TokenKind.IDENT or token.lexeme not in _MS_CALLING_CONVENTION_IDENTIFIERS:
         return False
     offset = 0
     while True:
-        token = parser._peek(offset) if offset else parser._current()  # type: ignore[attr-defined]
+        token = parser._peek(offset) if offset else parser._current()  # type: ignore
         if token.kind != TokenKind.IDENT or token.lexeme not in _MS_CALLING_CONVENTION_IDENTIFIERS:
             break
         offset += 1
     if not predicate(token):
         return False
     for _ in range(offset):
-        parser._advance()  # type: ignore[attr-defined]
+        parser._advance()  # type: ignore
     return True
 
 
@@ -183,13 +183,13 @@ def _skip_type_name_attributes(parser: object, *, allow_gnu_attributes: bool) ->
     while True:
         skipped = _skip_ms_declspecs(
             parser,
-            parser._make_error,  # type: ignore[attr-defined]
+            parser._make_error,  # type: ignore
         )
         if allow_gnu_attributes:
             skipped = (
                 _skip_gnu_attributes(
                     parser,
-                    parser._make_error,  # type: ignore[attr-defined]
+                    parser._make_error,  # type: ignore
                 )
                 or skipped
             )
@@ -202,17 +202,17 @@ def _skip_asm_label(
     parser: object,
     make_error: Callable[[str, Token], Exception] | None = None,
 ) -> bool:
-    make_error = parser._make_error if make_error is None else make_error  # type: ignore[attr-defined]
-    token = parser._current()  # type: ignore[attr-defined]
+    make_error = parser._make_error if make_error is None else make_error  # type: ignore
+    token = parser._current()  # type: ignore
     if token.kind != TokenKind.IDENT or token.lexeme not in ("__asm__", "__asm", "asm"):
         return False
-    start = parser._advance()  # type: ignore[attr-defined]
-    if not parser._check_punct("("):  # type: ignore[attr-defined]
+    start = parser._advance()  # type: ignore
+    if not parser._check_punct("("):  # type: ignore
         return True
-    parser._advance()  # type: ignore[attr-defined]
+    parser._advance()  # type: ignore
     depth = 1
     while depth > 0:
-        tok = parser._current()  # type: ignore[attr-defined]
+        tok = parser._current()  # type: ignore
         if tok.kind == TokenKind.EOF:
             raise make_error("Expected ')'", start)
         if tok.kind == TokenKind.PUNCTUATOR:
@@ -220,5 +220,5 @@ def _skip_asm_label(
                 depth += 1
             elif tok.lexeme == ")":
                 depth -= 1
-        parser._advance()  # type: ignore[attr-defined]
+        parser._advance()  # type: ignore
     return True

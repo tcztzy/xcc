@@ -90,7 +90,7 @@ def check_printf_format(
             arg_index += 1
         if arg_index >= len(variadic_args):  # pragma: no cover
             break
-        arg_type = analyzer._type_map.require(variadic_args[arg_index])  # type: ignore[attr-defined]
+        arg_type = analyzer._type_map.require(variadic_args[arg_index])  # type: ignore
         _check_format_spec(spec, arg_type, arg_index + 1)
         arg_index += 1
 

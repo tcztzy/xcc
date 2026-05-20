@@ -26,9 +26,9 @@ def check_call_arguments(
             )
         raise SemaError(f"Argument count mismatch (expected {expected}, got {got}){suffix}")
     for index, arg in enumerate(args[: len(parameter_types)]):
-        arg_type = analyzer._type_map.require(arg)  # type: ignore[attr-defined]
-        value_arg_type = analyzer._decay_array_value(arg_type)  # type: ignore[attr-defined]
-        if not analyzer._is_assignment_expr_compatible(  # type: ignore[attr-defined]
+        arg_type = analyzer._type_map.require(arg)  # type: ignore
+        value_arg_type = analyzer._decay_array_value(arg_type)  # type: ignore
+        if not analyzer._is_assignment_expr_compatible(  # type: ignore
             parameter_types[index],
             arg,
             value_arg_type,

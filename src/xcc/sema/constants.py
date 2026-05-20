@@ -97,7 +97,7 @@ def parse_int_literal(analyzer: object, lexeme: str | int) -> tuple[int, Type] |
     if candidates is None:
         return None
     for candidate_type in candidates:
-        if analyzer._fits_integer_literal_value(value, candidate_type):  # type: ignore[attr-defined]
+        if analyzer._fits_integer_literal_value(value, candidate_type):  # type: ignore
             return value, candidate_type
     return None
 
@@ -112,12 +112,12 @@ def fits_integer_literal_value(value: int, type_: Type) -> bool:
 
 def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | None:
     if isinstance(expr, IntLiteral):
-        parsed = analyzer._parse_int_literal(expr.value)  # type: ignore[attr-defined]
+        parsed = analyzer._parse_int_literal(expr.value)  # type: ignore
         return None if parsed is None else parsed[0]
     if isinstance(expr, CharLiteral):
-        return analyzer._char_const_value(expr.value)  # type: ignore[attr-defined]
+        return analyzer._char_const_value(expr.value)  # type: ignore
     if isinstance(expr, UnaryExpr) and expr.op in {"+", "-", "!", "~"}:
-        operand_value = analyzer._eval_int_constant_expr(expr.operand, scope)  # type: ignore[attr-defined]
+        operand_value = analyzer._eval_int_constant_expr(expr.operand, scope)  # type: ignore
         if operand_value is None:
             return None
         if expr.op == "+":
@@ -130,33 +130,33 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
     if isinstance(expr, BinaryExpr):
         return _eval_binary_int_constant_expr(analyzer, expr, scope)
     if isinstance(expr, ConditionalExpr):
-        condition_value = analyzer._eval_int_constant_expr(expr.condition, scope)  # type: ignore[attr-defined]
+        condition_value = analyzer._eval_int_constant_expr(expr.condition, scope)  # type: ignore
         if condition_value is None:
             return None
         branch = expr.then_expr if condition_value else expr.else_expr
-        return analyzer._eval_int_constant_expr(branch, scope)  # type: ignore[attr-defined]
+        return analyzer._eval_int_constant_expr(branch, scope)  # type: ignore
     if isinstance(expr, CastExpr):
-        if not analyzer._is_integer_type(analyzer._resolve_type(expr.type_spec)):  # type: ignore[attr-defined]
+        if not analyzer._is_integer_type(analyzer._resolve_type(expr.type_spec)):  # type: ignore
             return None
-        return analyzer._eval_int_constant_expr(expr.expr, scope)  # type: ignore[attr-defined]
+        return analyzer._eval_int_constant_expr(expr.expr, scope)  # type: ignore
     if isinstance(expr, SizeofExpr):
         if expr.type_spec is not None:
-            analyzer._register_type_spec(expr.type_spec)  # type: ignore[attr-defined]
-            if analyzer._is_invalid_sizeof_type_spec(expr.type_spec):  # type: ignore[attr-defined]
+            analyzer._register_type_spec(expr.type_spec)  # type: ignore
+            if analyzer._is_invalid_sizeof_type_spec(expr.type_spec):  # type: ignore
                 return None
-            return analyzer._sizeof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore[attr-defined]
+            return analyzer._sizeof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore
         if expr.expr is not None:
-            operand_type = analyzer._type_map.get(expr.expr)  # type: ignore[attr-defined]
+            operand_type = analyzer._type_map.get(expr.expr)  # type: ignore
             if operand_type is not None:
-                return analyzer._sizeof_type(operand_type)  # type: ignore[attr-defined]
+                return analyzer._sizeof_type(operand_type)  # type: ignore
         return None
     if isinstance(expr, AlignofExpr):
         if expr.type_spec is None:
             return None
-        analyzer._register_type_spec(expr.type_spec)  # type: ignore[attr-defined]
-        if analyzer._is_invalid_alignof_type_spec(expr.type_spec):  # type: ignore[attr-defined]
+        analyzer._register_type_spec(expr.type_spec)  # type: ignore
+        if analyzer._is_invalid_alignof_type_spec(expr.type_spec):  # type: ignore
             return None
-        return analyzer._alignof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore[attr-defined]
+        return analyzer._alignof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore
     if isinstance(expr, BuiltinOffsetofExpr):
         return None
     if isinstance(expr, GenericExpr):
@@ -174,7 +174,7 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
     if isinstance(expr, SubscriptExpr):
         if not getattr(analyzer, "_allow_const_var_folding", False):
             return None
-        index = analyzer._eval_int_constant_expr(expr.index, scope)  # type: ignore[attr-defined]
+        index = analyzer._eval_int_constant_expr(expr.index, scope)  # type: ignore
         if index is None:
             return None
         if isinstance(expr.base, Identifier):
@@ -188,7 +188,7 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
                     init_val = item.initializer
                     if isinstance(init_val, InitList):
                         return None
-                    return analyzer._eval_int_constant_expr(init_val, scope)  # type: ignore[attr-defined]
+                    return analyzer._eval_int_constant_expr(init_val, scope)  # type: ignore
     if isinstance(expr, MemberExpr):
         if not getattr(analyzer, "_allow_const_var_folding", False):
             return None
@@ -199,7 +199,7 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
 def _eval_member_expr(analyzer: object, expr: "MemberExpr", scope: Scope) -> int | None:
     """Evaluate a member access expression in a const context."""
     # Evaluate the base expression first
-    base_val = analyzer._eval_int_constant_expr(expr.base, scope)  # type: ignore[attr-defined]
+    base_val = analyzer._eval_int_constant_expr(expr.base, scope)  # type: ignore
     if base_val is not None:
         # If base is a scalar, the member access resolves to that scalar
         # (scalar initializes struct's first member recursively).
@@ -226,9 +226,9 @@ def _lookup_member_in_init(
     scope: Scope,
 ) -> int | None:
     """Find a member's initializer value in an InitList."""
-    if not analyzer._is_record_name(base_type.name):  # type: ignore[attr-defined]
+    if not analyzer._is_record_name(base_type.name):  # type: ignore
         return None
-    members = analyzer._record_members(base_type.name)  # type: ignore[attr-defined]
+    members = analyzer._record_members(base_type.name)  # type: ignore
     if members is None:
         return None
     for idx, m in enumerate(members):
@@ -236,7 +236,7 @@ def _lookup_member_in_init(
             item = init_list.items[idx]
             if item.designators:
                 return None
-            return analyzer._eval_int_constant_expr(item.initializer, scope)  # type: ignore[attr-defined]
+            return analyzer._eval_int_constant_expr(item.initializer, scope)  # type: ignore
     return None
 
 
@@ -245,24 +245,24 @@ def _eval_binary_int_constant_expr(
     expr: BinaryExpr,
     scope: Scope,
 ) -> int | None:
-    left_value = analyzer._eval_int_constant_expr(expr.left, scope)  # type: ignore[attr-defined]
+    left_value = analyzer._eval_int_constant_expr(expr.left, scope)  # type: ignore
     if left_value is None:
         return None
     if expr.op == "&&":
         if not left_value:
             return 0
-        right_value = analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore[attr-defined]
+        right_value = analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore
         if right_value is None:
             return None
         return 1 if right_value else 0
     if expr.op == "||":
         if left_value:
             return 1
-        right_value = analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore[attr-defined]
+        right_value = analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore
         if right_value is None:
             return None
         return 1 if right_value else 0
-    right_value = analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore[attr-defined]
+    right_value = analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore
     if right_value is None:
         return None
     if expr.op == "+":
@@ -315,29 +315,29 @@ def _eval_generic_int_constant_expr(
 ) -> int | None:
     selected_expr: Expr | None = None
     default_expr: Expr | None = None
-    control_type = analyzer._type_map.get(expr.control)  # type: ignore[attr-defined]
+    control_type = analyzer._type_map.get(expr.control)  # type: ignore
     if control_type is None:
-        control_type = analyzer._analyze_expr(expr.control, scope)  # type: ignore[attr-defined]
-    control_type = analyzer._decay_array_value(control_type)  # type: ignore[attr-defined]
+        control_type = analyzer._analyze_expr(expr.control, scope)  # type: ignore
+    control_type = analyzer._decay_array_value(control_type)  # type: ignore
     for assoc_type_spec, assoc_expr in expr.associations:
         if assoc_type_spec is None:
             default_expr = assoc_expr
             continue
-        analyzer._register_type_spec(assoc_type_spec)  # type: ignore[attr-defined]
-        if analyzer._resolve_type(assoc_type_spec) == control_type:  # type: ignore[attr-defined]
+        analyzer._register_type_spec(assoc_type_spec)  # type: ignore
+        if analyzer._resolve_type(assoc_type_spec) == control_type:  # type: ignore
             selected_expr = assoc_expr
     if selected_expr is None:
         selected_expr = default_expr
     if selected_expr is None:
         return None
-    return analyzer._eval_int_constant_expr(selected_expr, scope)  # type: ignore[attr-defined]
+    return analyzer._eval_int_constant_expr(selected_expr, scope)  # type: ignore
 
 
 def char_const_value(analyzer: object, lexeme: str) -> int | None:
-    body = analyzer._char_literal_body(lexeme)  # type: ignore[attr-defined]
+    body = analyzer._char_literal_body(lexeme)  # type: ignore
     if body is None:
         return None
-    units = analyzer._decode_escaped_units(body)  # type: ignore[attr-defined]
+    units = analyzer._decode_escaped_units(body)  # type: ignore
     if len(units) != 1:
         return None
     return units[0]
@@ -353,8 +353,8 @@ def char_literal_body(lexeme: str) -> str | None:
 
 
 def string_literal_required_length(analyzer: object, lexeme: str) -> int | None:
-    body = analyzer._string_literal_body(lexeme)  # type: ignore[attr-defined]
-    return None if body is None else len(analyzer._decode_escaped_units(body)) + 1  # type: ignore[attr-defined]
+    body = analyzer._string_literal_body(lexeme)  # type: ignore
+    return None if body is None else len(analyzer._decode_escaped_units(body)) + 1  # type: ignore
 
 
 def string_literal_body(lexeme: str) -> str | None:

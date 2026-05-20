@@ -33,7 +33,7 @@ def normalize_record_members(
     members: tuple[RecordMemberInfo, ...] | tuple[tuple[str | None, Type], ...],
 ) -> tuple[RecordMemberInfo, ...]:
     if all(isinstance(member, RecordMemberInfo) for member in members):
-        return members  # type: ignore[return-value]
+        return members  # type: ignore
     normalized: list[RecordMemberInfo] = []
     for member in members:
         if isinstance(member, RecordMemberInfo):

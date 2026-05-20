@@ -35,7 +35,7 @@ def _is_call_to_generic_builtin(analyzer: object, expr: Expr) -> bool:
     """Check if expr is a call to a builtin with params=None (generic return)."""
     if not isinstance(expr, CallExpr) or not isinstance(expr.callee, Identifier):
         return False
-    sig = analyzer._function_signatures.get(expr.callee.name)  # type: ignore[attr-defined]
+    sig = analyzer._function_signatures.get(expr.callee.name)  # type: ignore
     return sig is not None and sig.params is None
 
 
