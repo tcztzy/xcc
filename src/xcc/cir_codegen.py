@@ -39,6 +39,7 @@ from xcc.ast import (
     ReturnStmt,
     SizeofExpr,
     StaticAssertDecl,
+    StatementExpr,
     Stmt,
     StringLiteral,
     SubscriptExpr,
@@ -420,6 +421,12 @@ class _CIRCodeGen:
                 self._walk_allocas(body, result, seen)
         elif isinstance(stmt, SwitchStmt):
             self._walk_allocas(stmt.body, result, seen)
+        elif isinstance(stmt, ExprStmt):
+            self._walk_allocas_expr(stmt.expr, result, seen)
+
+    def _walk_allocas_expr(self, expr: Expr, result: list[tuple[str, Type]], seen: set[str]) -> None:
+        if isinstance(expr, StatementExpr):
+            self._walk_allocas(expr.body, result, seen)
 
     # ── statement emission ───────────────────────────────────
 
@@ -628,10 +635,14 @@ class _CIRCodeGen:
             return self._ternary(expr)
         if isinstance(expr, CommaExpr):
             return self._comma(expr)
+        if isinstance(expr, StatementExpr):
+            return self._stmt_expr(expr)
         if isinstance(expr, SizeofExpr):
             return self._size_align(expr, "sizeof")
         if isinstance(expr, AlignofExpr):
             return self._size_align(expr, "alignof")
+        if isinstance(expr, CompoundLiteralExpr):
+            return self._compound_literal(expr)
         raise cir_backend_error(
             self._result.filename,
             f"Unsupported expression: {type(expr).__name__}",
@@ -1207,6 +1218,79 @@ class _CIRCodeGen:
     def _comma(self, expr: CommaExpr) -> _V:
         self._emit_expr(expr.left)
         return self._emit_expr(expr.right)
+
+    # ── statement expression (GNU) ───────────────────────────
+
+    def _stmt_expr(self, expr: StatementExpr) -> _V:
+        """Emit GNU statement expression ({ stmt; stmt; expr; })."""
+        # Push scope for locals declared inside this expression
+        self._locals.append({})
+        # Emit allocas for locals declared in the statement expr body
+        allocas = self._collect_allocas(expr.body)
+        for vname, vtype in allocas:
+            if vname in self._locals[-1]:
+                continue
+            cir_ptype = _cir_type(vtype)
+            cir_ptr = _cir_ptr_type(vtype)
+            alloca = self._new_v(cir_ptr)
+            self._emit(
+                f"{alloca.ref} = cir.alloca {cir_ptype}, "
+                f"{cir_ptr}, [\"{vname}\", init]"
+            )
+            self._locals[-1][vname] = alloca
+
+        stmts = expr.body.statements
+        if not stmts:
+            self._locals.pop()
+            v = self._new_v("!s32i")
+            self._emit(f"{v.ref} = cir.const #cir.int<0> : !s32i")
+            return v
+        for s in stmts[:-1]:
+            self._emit_stmt(s)
+        last = stmts[-1]
+        if isinstance(last, ExprStmt):
+            result = self._emit_expr(last.expr)
+        else:
+            self._emit_stmt(last)
+            result = self._new_v("!s32i")
+            self._emit(f"{result.ref} = cir.const #cir.int<0> : !s32i")
+        self._locals.pop()
+        return result
+
+    # ── compound literal ─────────────────────────────────────
+
+    def _compound_literal(self, expr: CompoundLiteralExpr) -> _V:
+        """Emit compound literal (Type){init}."""
+        result_type = self._type_map.require(expr)
+        cir_type = _cir_type(result_type)
+        ptr_type = _cir_ptr_type(result_type)
+        tmp = self._new_v(ptr_type)
+        self._emit(f"{tmp.ref} = cir.alloca {cir_type}, {ptr_type}, [\"compound.literal\"]")
+        if isinstance(expr.initializer, InitList):
+            self._emit_init_list(tmp, result_type, expr.initializer)
+        else:
+            val = self._emit_expr(expr.initializer)
+            self._emit(
+                f"cir.store {val.ref}, {tmp.ref} : {cir_type}, {ptr_type}"
+            )
+        # Return the pointer (compound literals decay to pointer in C)
+        return tmp
+
+    def _emit_init_list(self, dest: _V, dest_type: Type, init_list: InitList) -> None:
+        cir_type = _cir_type(dest_type)
+        for i, item in enumerate(init_list.items):
+            val = self._emit_expr(item.initializer)
+            if item.designators:
+                # For now, skip designated initializers — emit field-by-field store
+                # Get member pointer for the designator and store to it
+                raise cir_backend_error(
+                    self._result.filename,
+                    "Designated initializers not yet supported",
+                )
+            # Non-designated: scalar init
+            self._emit(
+                f"cir.store {val.ref}, {dest.ref} : {cir_type}, {cir_type}"
+            )
 
     # ── sizeof / alignof ─────────────────────────────────────
 
