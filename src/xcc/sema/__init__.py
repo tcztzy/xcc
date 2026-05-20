@@ -1230,6 +1230,4 @@ def analyze(
     excess_init_ok: bool = False,
     pack_changes: tuple[tuple[str, int, int | None], ...] = (),
 ) -> SemaUnit:
-    return Analyzer(
-        std=std, excess_init_ok=excess_init_ok, pack_changes=pack_changes
-    ).analyze(unit)
+    return Analyzer(std=std, excess_init_ok=excess_init_ok, pack_changes=pack_changes).analyze(unit)

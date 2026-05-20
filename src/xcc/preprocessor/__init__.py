@@ -1336,9 +1336,7 @@ class _Preprocessor:
     def _find_matching_has_include_close(self, expr: str, open_paren: int) -> int:
         return _probes._find_matching_has_include_close(expr, open_paren)
 
-    def _handle_pack_pragma(
-        self, body: str, location: _SourceLocation | None = None
-    ) -> None:
+    def _handle_pack_pragma(self, body: str, location: _SourceLocation | None = None) -> None:
         """Handle #pragma pack(push, N) and #pragma pack(pop)."""
         body = body.strip()
         if body.startswith("pack("):
@@ -1356,17 +1354,13 @@ class _Preprocessor:
                     alignment = 8
                 self._pack_stack.append(alignment)
                 if location is not None:
-                    self._pack_changes.append(
-                        (location.filename, location.line, alignment)
-                    )
+                    self._pack_changes.append((location.filename, location.line, alignment))
             elif body == "pop":
                 if self._pack_stack:
                     self._pack_stack.pop()
                     new_align = self._pack_stack[-1] if self._pack_stack else None
                     if location is not None:
-                        self._pack_changes.append(
-                            (location.filename, location.line, new_align)
-                        )
+                        self._pack_changes.append((location.filename, location.line, new_align))
 
     @property
     def pack_changes(self) -> tuple[tuple[str, int, int | None], ...]:

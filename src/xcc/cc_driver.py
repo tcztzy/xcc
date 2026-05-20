@@ -92,7 +92,7 @@ def _take_joined_or_value(
     if arg == opt:
         return _take_value(argv, index, opt)
     if arg.startswith(opt) and arg != opt:
-        return arg[len(opt):], index
+        return arg[len(opt) :], index
     return None
 
 
@@ -353,16 +353,22 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                     ll_path.write_text(ir, encoding="utf-8")
                     obj_path = Path(tmp) / "input.o"
                     llc_cmd = [
-                        "/opt/homebrew/opt/llvm/bin/llc", "-filetype=obj",
-                        str(ll_path), "-o", str(obj_path),
+                        "/opt/homebrew/opt/llvm/bin/llc",
+                        "-filetype=obj",
+                        str(ll_path),
+                        "-o",
+                        str(obj_path),
                     ]
                     r = subprocess.run(llc_cmd, check=False, capture_output=True, text=True)
                     if r.returncode != 0:
                         raise CodegenError(
-                            Diagnostic("codegen", result.filename,
-                                       f"llc failed: {r.stderr.strip()}"))
+                            Diagnostic(
+                                "codegen", result.filename, f"llc failed: {r.stderr.strip()}"
+                            )
+                        )
                     if config.action == "compile":
                         import shutil
+
                         shutil.copy(str(obj_path), str(output))
                         continue
                     link_cmd = ["clang", str(obj_path), "-o", str(output)]

@@ -9,7 +9,6 @@ LLVM IR text. Driver pipes through llc for .o files.
 
 import ctypes
 import ctypes.util
-import struct
 from dataclasses import dataclass
 
 from xcc.ast import (
@@ -57,8 +56,8 @@ from xcc.ast import (
 )
 from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendResult
-from xcc.sema.symbols import FunctionSymbol, RecordMemberInfo, VarSymbol
-from xcc.types import INT, LONG, Type
+from xcc.sema.symbols import FunctionSymbol, VarSymbol
+from xcc.types import INT, Type
 
 _CG_UNSUPPORTED = "XCC-CG-0005"
 
@@ -118,21 +117,14 @@ class _LLVMC:
         return fn
 
     def bind_all(self):
-        l = self._lib
         # Context / Module
         self.ContextCreate = self._bind("LLVMContextCreate", _c_void_p)
         self.ModuleCreateWithName = self._bind(
             "LLVMModuleCreateWithName", _LLVMModuleRef, _c_char_p
         )
-        self.SetTarget = self._bind(
-            "LLVMSetTarget", None, _LLVMModuleRef, _c_char_p
-        )
-        self.PrintModuleToString = self._bind(
-            "LLVMPrintModuleToString", _c_char_p, _LLVMModuleRef
-        )
-        self.DisposeModule = self._bind(
-            "LLVMDisposeModule", None, _LLVMModuleRef
-        )
+        self.SetTarget = self._bind("LLVMSetTarget", None, _LLVMModuleRef, _c_char_p)
+        self.PrintModuleToString = self._bind("LLVMPrintModuleToString", _c_char_p, _LLVMModuleRef)
+        self.DisposeModule = self._bind("LLVMDisposeModule", None, _LLVMModuleRef)
 
         # Types
         self.VoidType = self._bind("LLVMVoidType", _LLVMTypeRef)
@@ -143,49 +135,51 @@ class _LLVMC:
         self.Int64Type = self._bind("LLVMInt64Type", _LLVMTypeRef)
         self.FloatType = self._bind("LLVMFloatType", _LLVMTypeRef)
         self.DoubleType = self._bind("LLVMDoubleType", _LLVMTypeRef)
-        self.PointerType = self._bind(
-            "LLVMPointerType", _LLVMTypeRef, _LLVMTypeRef, _c_uint
-        )
+        self.PointerType = self._bind("LLVMPointerType", _LLVMTypeRef, _LLVMTypeRef, _c_uint)
         self.FunctionType = self._bind(
-            "LLVMFunctionType", _LLVMTypeRef, _LLVMTypeRef,
-            ctypes.POINTER(_LLVMTypeRef), _c_uint, _c_bool,
+            "LLVMFunctionType",
+            _LLVMTypeRef,
+            _LLVMTypeRef,
+            ctypes.POINTER(_LLVMTypeRef),
+            _c_uint,
+            _c_bool,
         )
-        self.ArrayType = self._bind(
-            "LLVMArrayType2", _LLVMTypeRef, _LLVMTypeRef, _c_uint
-        )
+        self.ArrayType = self._bind("LLVMArrayType2", _LLVMTypeRef, _LLVMTypeRef, _c_uint)
         self.StructType = self._bind(
-            "LLVMStructType", _LLVMTypeRef,
-            ctypes.POINTER(_LLVMTypeRef), _c_uint, _c_bool,
+            "LLVMStructType",
+            _LLVMTypeRef,
+            ctypes.POINTER(_LLVMTypeRef),
+            _c_uint,
+            _c_bool,
         )
         self.StructSetBody = self._bind(
-            "LLVMStructSetBody", None, _LLVMTypeRef,
-            ctypes.POINTER(_LLVMTypeRef), _c_uint, _c_bool,
+            "LLVMStructSetBody",
+            None,
+            _LLVMTypeRef,
+            ctypes.POINTER(_LLVMTypeRef),
+            _c_uint,
+            _c_bool,
         )
 
         # Values / Constants
         self.ConstInt = self._bind(
             "LLVMConstInt", _LLVMValueRef, _LLVMTypeRef, ctypes.c_ulonglong, _c_bool
         )
-        self.ConstReal = self._bind(
-            "LLVMConstReal", _LLVMValueRef, _LLVMTypeRef, ctypes.c_double
-        )
-        self.ConstString = self._bind(
-            "LLVMConstString", _LLVMValueRef, _c_char_p, _c_uint, _c_bool
-        )
+        self.ConstReal = self._bind("LLVMConstReal", _LLVMValueRef, _LLVMTypeRef, ctypes.c_double)
+        self.ConstString = self._bind("LLVMConstString", _LLVMValueRef, _c_char_p, _c_uint, _c_bool)
         self.ConstNull = self._bind("LLVMConstNull", _LLVMValueRef, _LLVMTypeRef)
         self.ConstArray = self._bind(
-            "LLVMConstArray2", _LLVMValueRef, _LLVMTypeRef,
-            ctypes.POINTER(_LLVMValueRef), _c_size_t,
+            "LLVMConstArray2",
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            ctypes.POINTER(_LLVMValueRef),
+            _c_size_t,
         )
         self.AddGlobal = self._bind(
             "LLVMAddGlobal", _LLVMValueRef, _LLVMModuleRef, _LLVMTypeRef, _c_char_p
         )
-        self.SetInitializer = self._bind(
-            "LLVMSetInitializer", None, _LLVMValueRef, _LLVMValueRef
-        )
-        self.SetLinkage = self._bind(
-            "LLVMSetLinkage", None, _LLVMValueRef, _c_uint
-        )
+        self.SetInitializer = self._bind("LLVMSetInitializer", None, _LLVMValueRef, _LLVMValueRef)
+        self.SetLinkage = self._bind("LLVMSetLinkage", None, _LLVMValueRef, _c_uint)
         self.GetNamedGlobal = self._bind(
             "LLVMGetNamedGlobal", _LLVMValueRef, _LLVMModuleRef, _c_char_p
         )
@@ -197,18 +191,14 @@ class _LLVMC:
         self.AddFunction = self._bind(
             "LLVMAddFunction", _LLVMValueRef, _LLVMModuleRef, _c_char_p, _LLVMTypeRef
         )
-        self.GetParam = self._bind(
-            "LLVMGetParam", _LLVMValueRef, _LLVMValueRef, _c_uint
-        )
+        self.GetParam = self._bind("LLVMGetParam", _LLVMValueRef, _LLVMValueRef, _c_uint)
         self.AppendBasicBlock = self._bind(
             "LLVMAppendBasicBlock", _LLVMBasicBlockRef, _LLVMValueRef, _c_char_p
         )
         self.SetValueName2 = self._bind(
             "LLVMSetValueName2", None, _LLVMValueRef, _c_char_p, _c_size_t
         )
-        self.GetReturnType = self._bind(
-            "LLVMGetReturnType", _LLVMTypeRef, _LLVMTypeRef
-        )
+        self.GetReturnType = self._bind("LLVMGetReturnType", _LLVMTypeRef, _LLVMTypeRef)
 
         # Builder
         self.CreateBuilder = self._bind("LLVMCreateBuilder", _LLVMBuilderRef)
@@ -218,22 +208,24 @@ class _LLVMC:
         self.DisposeBuilder = self._bind("LLVMDisposeBuilder", None, _LLVMBuilderRef)
 
         # Terminators
-        self.BuildRetVoid = self._bind(
-            "LLVMBuildRetVoid", _LLVMValueRef, _LLVMBuilderRef
-        )
-        self.BuildRet = self._bind(
-            "LLVMBuildRet", _LLVMValueRef, _LLVMBuilderRef, _LLVMValueRef
-        )
-        self.BuildBr = self._bind(
-            "LLVMBuildBr", _LLVMValueRef, _LLVMBuilderRef, _LLVMBasicBlockRef
-        )
+        self.BuildRetVoid = self._bind("LLVMBuildRetVoid", _LLVMValueRef, _LLVMBuilderRef)
+        self.BuildRet = self._bind("LLVMBuildRet", _LLVMValueRef, _LLVMBuilderRef, _LLVMValueRef)
+        self.BuildBr = self._bind("LLVMBuildBr", _LLVMValueRef, _LLVMBuilderRef, _LLVMBasicBlockRef)
         self.BuildCondBr = self._bind(
-            "LLVMBuildCondBr", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMBasicBlockRef, _LLVMBasicBlockRef,
+            "LLVMBuildCondBr",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMBasicBlockRef,
+            _LLVMBasicBlockRef,
         )
         self.BuildSwitch = self._bind(
-            "LLVMBuildSwitch", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMBasicBlockRef, _c_uint,
+            "LLVMBuildSwitch",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMBasicBlockRef,
+            _c_uint,
         )
         self.AddCase = self._bind(
             "LLVMAddCase", None, _LLVMValueRef, _LLVMValueRef, _LLVMBasicBlockRef
@@ -241,134 +233,240 @@ class _LLVMC:
 
         # Arithmetic
         self.BuildAdd = self._bind(
-            "LLVMBuildAdd", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildAdd",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildSub = self._bind(
-            "LLVMBuildSub", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildSub",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildMul = self._bind(
-            "LLVMBuildMul", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildMul",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildSDiv = self._bind(
-            "LLVMBuildSDiv", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildSDiv",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildSRem = self._bind(
-            "LLVMBuildSRem", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildSRem",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildAnd = self._bind(
-            "LLVMBuildAnd", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildAnd",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildOr = self._bind(
-            "LLVMBuildOr", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildOr",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildXor = self._bind(
-            "LLVMBuildXor", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildXor",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildShl = self._bind(
-            "LLVMBuildShl", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildShl",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildAShr = self._bind(
-            "LLVMBuildAShr", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildAShr",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
 
         # Memory
         self.BuildAlloca = self._bind(
-            "LLVMBuildAlloca", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMTypeRef, _c_char_p,
+            "LLVMBuildAlloca",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.BuildLoad2 = self._bind(
-            "LLVMBuildLoad2", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMTypeRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildLoad2",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMTypeRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
         self.BuildStore = self._bind(
-            "LLVMBuildStore", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMValueRef,
+            "LLVMBuildStore",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMValueRef,
         )
 
         # GEP
         self.BuildGEP2 = self._bind(
-            "LLVMBuildGEP2", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMTypeRef, _LLVMValueRef,
-            ctypes.POINTER(_LLVMValueRef), _c_uint, _c_char_p,
+            "LLVMBuildGEP2",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMTypeRef,
+            _LLVMValueRef,
+            ctypes.POINTER(_LLVMValueRef),
+            _c_uint,
+            _c_char_p,
         )
 
         # Cast
         self.BuildSExt = self._bind(
-            "LLVMBuildSExt", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMTypeRef, _c_char_p,
+            "LLVMBuildSExt",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.BuildZExt = self._bind(
-            "LLVMBuildZExt", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMTypeRef, _c_char_p,
+            "LLVMBuildZExt",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.BuildTrunc = self._bind(
-            "LLVMBuildTrunc", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMTypeRef, _c_char_p,
+            "LLVMBuildTrunc",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.BuildIntToPtr = self._bind(
-            "LLVMBuildIntToPtr", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMTypeRef, _c_char_p,
+            "LLVMBuildIntToPtr",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.BuildPtrToInt = self._bind(
-            "LLVMBuildPtrToInt", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMTypeRef, _c_char_p,
+            "LLVMBuildPtrToInt",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.BuildFPCast = self._bind(
-            "LLVMBuildFPCast", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMTypeRef, _c_char_p,
+            "LLVMBuildFPCast",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.BuildSIToFP = self._bind(
-            "LLVMBuildSIToFP", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMTypeRef, _c_char_p,
+            "LLVMBuildSIToFP",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.BuildFPToSI = self._bind(
-            "LLVMBuildFPToSI", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMTypeRef, _c_char_p,
+            "LLVMBuildFPToSI",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.BuildBitCast = self._bind(
-            "LLVMBuildBitCast", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMValueRef, _LLVMTypeRef, _c_char_p,
+            "LLVMBuildBitCast",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMValueRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
 
         # Comparison
         self.BuildICmp = self._bind(
-            "LLVMBuildICmp", _LLVMValueRef, _LLVMBuilderRef,
-            _c_uint, _LLVMValueRef, _LLVMValueRef, _c_char_p,
+            "LLVMBuildICmp",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _c_uint,
+            _LLVMValueRef,
+            _LLVMValueRef,
+            _c_char_p,
         )
 
         # Calls
         self.BuildCall2 = self._bind(
-            "LLVMBuildCall2", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMTypeRef, _LLVMValueRef,
-            ctypes.POINTER(_LLVMValueRef), _c_uint, _c_char_p,
+            "LLVMBuildCall2",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMTypeRef,
+            _LLVMValueRef,
+            ctypes.POINTER(_LLVMValueRef),
+            _c_uint,
+            _c_char_p,
         )
         self.GetUndef = self._bind("LLVMGetUndef", _LLVMValueRef, _LLVMTypeRef)
 
         # PHI
         self.BuildPhi = self._bind(
-            "LLVMBuildPhi", _LLVMValueRef, _LLVMBuilderRef,
-            _LLVMTypeRef, _c_char_p,
+            "LLVMBuildPhi",
+            _LLVMValueRef,
+            _LLVMBuilderRef,
+            _LLVMTypeRef,
+            _c_char_p,
         )
         self.AddIncoming = self._bind(
-            "LLVMAddIncoming", None, _LLVMValueRef,
-            ctypes.POINTER(_LLVMValueRef), ctypes.POINTER(_LLVMBasicBlockRef), _c_uint,
+            "LLVMAddIncoming",
+            None,
+            _LLVMValueRef,
+            ctypes.POINTER(_LLVMValueRef),
+            ctypes.POINTER(_LLVMBasicBlockRef),
+            _c_uint,
         )
 
         # Misc
         self.TypeOf = self._bind("LLVMTypeOf", _LLVMTypeRef, _LLVMValueRef)
-        self.ConstPointerNull = self._bind(
-            "LLVMConstPointerNull", _LLVMValueRef, _LLVMTypeRef
-        )
+        self.ConstPointerNull = self._bind("LLVMConstPointerNull", _LLVMValueRef, _LLVMTypeRef)
         self.IsNull = self._bind("LLVMIsNull", _c_bool, _LLVMValueRef)
 
 
@@ -386,12 +484,21 @@ def _c():
 # ── code generator ──────────────────────────────────────────
 
 _BASE_SIZES = {
-    "int": 4, "unsigned int": 4,
-    "long": 8, "unsigned long": 8,
-    "long long": 8, "unsigned long long": 8,
-    "char": 1, "unsigned char": 1, "signed char": 1, "_Bool": 1,
-    "short": 2, "unsigned short": 2,
-    "float": 4, "double": 8, "long double": 16,
+    "int": 4,
+    "unsigned int": 4,
+    "long": 8,
+    "unsigned long": 8,
+    "long long": 8,
+    "unsigned long long": 8,
+    "char": 1,
+    "unsigned char": 1,
+    "signed char": 1,
+    "_Bool": 1,
+    "short": 2,
+    "unsigned short": 2,
+    "float": 4,
+    "double": 8,
+    "long double": 16,
     "void": 0,
 }
 
@@ -399,7 +506,7 @@ _BASE_SIZES = {
 @dataclass
 class _LoopCtx:
     continue_block: int  # _LLVMBasicBlockRef
-    break_block: int     # _LLVMBasicBlockRef
+    break_block: int  # _LLVMBasicBlockRef
 
 
 class _LLVMGen:
@@ -411,9 +518,7 @@ class _LLVMGen:
 
         c = _c()
         self._ctx = c.ContextCreate()
-        self._mod = c.ModuleCreateWithName(
-            result.filename.encode("utf-8")
-        )
+        self._mod = c.ModuleCreateWithName(result.filename.encode("utf-8"))
         c.SetTarget(self._mod, b"arm64-apple-macosx15.0.0")
         self._builder = c.CreateBuilder()
         self._str_constants: dict[str, int] = {}  # literal → _LLVMValueRef
@@ -427,8 +532,8 @@ class _LLVMGen:
         self._func_sym: FunctionSymbol | None = None
         self._locals: list[dict[str, int]] = []
         self._loop_stack: list[_LoopCtx] = []
-        self._switch_info: list[tuple[int, int, int | None]] = []  # (switch_inst, end_block, default_block)
-        self._term: bool = False  # current block has terminator?
+        # (switch_inst, end_block, default_block)
+        self._switch_info: list[tuple[int, int, int | None]] = []
 
     # ── helpers ──────────────────────────────────────────────
 
@@ -469,13 +574,20 @@ class _LLVMGen:
     def _base_type(self, name: str) -> int:
         c = _c()
         m = {
-            "int": c.Int32Type, "unsigned int": c.Int32Type,
-            "long": c.Int64Type, "unsigned long": c.Int64Type,
-            "long long": c.Int64Type, "unsigned long long": c.Int64Type,
-            "char": c.Int8Type, "unsigned char": c.Int8Type,
-            "signed char": c.Int8Type, "_Bool": c.Int1Type,
-            "short": c.Int16Type, "unsigned short": c.Int16Type,
-            "float": c.FloatType, "double": c.DoubleType,
+            "int": c.Int32Type,
+            "unsigned int": c.Int32Type,
+            "long": c.Int64Type,
+            "unsigned long": c.Int64Type,
+            "long long": c.Int64Type,
+            "unsigned long long": c.Int64Type,
+            "char": c.Int8Type,
+            "unsigned char": c.Int8Type,
+            "signed char": c.Int8Type,
+            "_Bool": c.Int1Type,
+            "short": c.Int16Type,
+            "unsigned short": c.Int16Type,
+            "float": c.FloatType,
+            "double": c.DoubleType,
             "long double": c.DoubleType,
             "void": c.VoidType,
         }
@@ -533,10 +645,8 @@ class _LLVMGen:
         return result
 
     def _emit_globals(self) -> None:
-        c = _c()
-        externals = self._unit.externals or [
-            *self._unit.declarations, *self._unit.functions
-        ]
+        _c()
+        externals = self._unit.externals or [*self._unit.declarations, *self._unit.functions]
         for ext in externals:
             if isinstance(ext, FunctionDef):
                 continue
@@ -575,10 +685,14 @@ class _LLVMGen:
         if func_sym is None:
             return
         ret_t = self._type_to_llvm(func_sym.return_type)
-        real_params = [self._type_to_llvm(self._resolve_type(p.type_spec))
-                        for p in func.params
-                        if not (self._resolve_type(p.type_spec).name == "void"
-                                and not self._resolve_type(p.type_spec).declarator_ops)]
+        real_params = [
+            self._type_to_llvm(self._resolve_type(p.type_spec))
+            for p in func.params
+            if not (
+                self._resolve_type(p.type_spec).name == "void"
+                and not self._resolve_type(p.type_spec).declarator_ops
+            )
+        ]
         n = len(real_params)
         param_ts = (ctypes.c_void_p * n)() if n > 0 else None
         for i, lt in enumerate(real_params):
@@ -600,10 +714,14 @@ class _LLVMGen:
         self._switch_info = []
 
         ret_t = self._type_to_llvm(func_sym.return_type)
-        real_params = [self._type_to_llvm(self._resolve_type(p.type_spec))
-                        for p in func.params
-                        if not (self._resolve_type(p.type_spec).name == "void"
-                                and not self._resolve_type(p.type_spec).declarator_ops)]
+        real_params = [
+            self._type_to_llvm(self._resolve_type(p.type_spec))
+            for p in func.params
+            if not (
+                self._resolve_type(p.type_spec).name == "void"
+                and not self._resolve_type(p.type_spec).declarator_ops
+            )
+        ]
         n = len(real_params)
         param_ts = (ctypes.c_void_p * n)() if n > 0 else None
         for i, lt in enumerate(real_params):
@@ -927,10 +1045,7 @@ class _LLVMGen:
         if val_type is None:
             val_type = INT
         lt = self._type_to_llvm(val_type)
-        if isinstance(expr, CharLiteral):
-            val = self._char_value(expr.value)
-        else:
-            val = int(expr.value)
+        val = self._char_value(expr.value) if isinstance(expr, CharLiteral) else int(expr.value)
         return c.ConstInt(lt, val, False)
 
     def _char_value(self, s: str) -> int:
@@ -958,7 +1073,7 @@ class _LLVMGen:
             body = self._decode_string(expr.value)
             data = body.encode() + b"\x00"
             lt = c.ArrayType(c.Int8Type(), len(data))
-            init = c.ConstString(data, len(data), True)  # don't re-add null, we already appended \x00
+            init = c.ConstString(data, len(data), True)
             gv = c.AddGlobal(self._mod, lt, b".str")
             c.SetInitializer(gv, init)
             c.SetLinkage(gv, 2)  # internal
@@ -1013,14 +1128,17 @@ class _LLVMGen:
         if op == "+":
             return operand
         if op == "-":
-            return c.BuildSub(self._builder, c.ConstInt(c.TypeOf(operand), 0, False), operand, b"neg")
-        if op == "~":
-            return c.BuildXor(self._builder, operand, c.ConstInt(c.TypeOf(operand), -1, True), b"not")
-        if op == "!":
+            zero = c.ConstInt(c.TypeOf(operand), 0, False)
+            return c.BuildSub(self._builder, zero, operand, b"neg")
+            m1 = c.ConstInt(c.TypeOf(operand), -1, True)
+            return c.BuildXor(self._builder, operand, m1, b"not")
             cond = self._to_bool(operand)
-            return c.BuildZExt(self._builder, c.BuildXor(
-                self._builder, cond, c.ConstInt(c.Int1Type(), 1, False), b"lnot"
-            ), c.Int32Type(), b"lnot.ext")
+            return c.BuildZExt(
+                self._builder,
+                c.BuildXor(self._builder, cond, c.ConstInt(c.Int1Type(), 1, False), b"lnot"),
+                c.Int32Type(),
+                b"lnot.ext",
+            )
         raise llvm_backend_error(self._result.filename, f"Unsupported unary: {op}")
 
     def _addrof(self, expr: UnaryExpr) -> int:
@@ -1063,12 +1181,22 @@ class _LLVMGen:
             return self._compare(op, left, right)
 
         result_type = self._type_map.require(expr)
-        lt = self._type_to_llvm(result_type)
+        self._type_to_llvm(result_type)
 
-        arith = {"+": c.BuildAdd, "-": c.BuildSub, "*": c.BuildMul,
-                  "/": c.BuildSDiv, "%": c.BuildSRem}
-        bit = {"&": c.BuildAnd, "|": c.BuildOr, "^": c.BuildXor,
-                "<<": c.BuildShl, ">>": c.BuildAShr}
+        arith = {
+            "+": c.BuildAdd,
+            "-": c.BuildSub,
+            "*": c.BuildMul,
+            "/": c.BuildSDiv,
+            "%": c.BuildSRem,
+        }
+        bit = {
+            "&": c.BuildAnd,
+            "|": c.BuildOr,
+            "^": c.BuildXor,
+            "<<": c.BuildShl,
+            ">>": c.BuildAShr,
+        }
 
         fn = arith.get(op) or bit.get(op)
         if fn is None:
@@ -1104,8 +1232,12 @@ class _LLVMGen:
 
         # Simpler approach: use PHI nodes
         short_bb = c.AppendBasicBlock(fn, b"log.short")
-        c.BuildCondBr(self._builder, lhs, rhs_bb if expr.op == "&&" else short_bb,
-                       short_bb if expr.op == "&&" else rhs_bb)
+        c.BuildCondBr(
+            self._builder,
+            lhs,
+            rhs_bb if expr.op == "&&" else short_bb,
+            short_bb if expr.op == "&&" else rhs_bb,
+        )
 
         short_val = 0 if expr.op == "&&" else 1
         c.PositionBuilderAtEnd(self._builder, short_bb)
@@ -1139,10 +1271,20 @@ class _LLVMGen:
         lt = self._type_to_llvm(target_type)
         old = c.BuildLoad2(self._builder, lt, addr, b"load.old")
 
-        arith = {"+=": c.BuildAdd, "-=": c.BuildSub, "*=": c.BuildMul,
-                  "/=": c.BuildSDiv, "%=": c.BuildSRem}
-        bit = {"&=": c.BuildAnd, "|=": c.BuildOr, "^=": c.BuildXor,
-                "<<=": c.BuildShl, ">>=": c.BuildAShr}
+        arith = {
+            "+=": c.BuildAdd,
+            "-=": c.BuildSub,
+            "*=": c.BuildMul,
+            "/=": c.BuildSDiv,
+            "%=": c.BuildSRem,
+        }
+        bit = {
+            "&=": c.BuildAnd,
+            "|=": c.BuildOr,
+            "^=": c.BuildXor,
+            "<<=": c.BuildShl,
+            ">>=": c.BuildAShr,
+        }
         fn = arith.get(expr.op) or bit.get(expr.op)
         if fn is None:
             raise llvm_backend_error(self._result.filename, f"Unsupported compound: {expr.op}")
@@ -1233,7 +1375,7 @@ class _LLVMGen:
             return op
 
         # Pointer ↔ int
-        from_kind = _c().TypeOf(from_t)  # not right, need LLVMGetTypeKind
+        _c().TypeOf(from_t)  # not right, need LLVMGetTypeKind
         # Simplified: try inttoptr/ptrtoint based on result
         if result_type.name == "__builtin_va_list":
             return c.BuildBitCast(self._builder, op, lt, b"cast")
@@ -1409,7 +1551,7 @@ class _LLVMGen:
             if stmt.else_body:
                 self._walk_allocas(stmt.else_body, result, seen)
         elif isinstance(stmt, (WhileStmt, DoWhileStmt, ForStmt)):
-            body = getattr(stmt, 'body', None)
+            body = getattr(stmt, "body", None)
             if body:
                 self._walk_allocas(body, result, seen)
         elif isinstance(stmt, SwitchStmt):
@@ -1417,9 +1559,10 @@ class _LLVMGen:
         elif isinstance(stmt, ExprStmt):
             self._walk_allocas_expr(stmt.expr, result, seen)
 
-    def _walk_allocas_expr(self, expr: Expr, result: list[tuple[str, Type]], seen: set[str]) -> None:
-        if isinstance(expr, StatementExpr):
-            self._walk_allocas(expr.body, result, seen)
+    def _walk_allocas_expr(
+        self, expr: Expr, result: list[tuple[str, Type]], seen: set[str]
+    ) -> None:
+        self._walk_allocas(expr.body, result, seen)
 
     def _eval_init(self, init: Expr, var_type: Type) -> int | None:
         c = _c()
@@ -1447,16 +1590,27 @@ class _LLVMGen:
         while i < len(s):
             if s[i] == "\\" and i + 1 < len(s):
                 ch = s[i + 1]
-                m = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", "\\": "\\", "\"": "\"",
-                      "'": "'", "a": "\a", "b": "\b", "f": "\f", "v": "\v"}
+                m = {
+                    "n": "\n",
+                    "t": "\t",
+                    "r": "\r",
+                    "0": "\0",
+                    "\\": "\\",
+                    '"': '"',
+                    "'": "'",
+                    "a": "\a",
+                    "b": "\b",
+                    "f": "\f",
+                    "v": "\v",
+                }
                 if ch in m:
                     result.append(m[ch])
                     i += 2
                 elif ch == "x":
-                    result.append(chr(int(s[i+2:i+4], 16)))
+                    result.append(chr(int(s[i + 2 : i + 4], 16)))
                     i += 4
                 elif ch == "u":
-                    result.append(chr(int(s[i+2:i+6], 16)))
+                    result.append(chr(int(s[i + 2 : i + 6], 16)))
                     i += 6
                 else:
                     result.append(ch)
