@@ -962,6 +962,26 @@ class _CIRCodeGen:
                 return val
             return self._compound_assign(op, ptr, val, target)
 
+        if isinstance(target, SubscriptExpr):
+            ptr = self._subscript_ptr(target)
+            if op == "=":
+                self._emit(
+                    f"cir.store {val.ref}, {ptr.ref} : "
+                    f"{val.cir_type}, {ptr.cir_type}"
+                )
+                return val
+            return self._compound_assign(op, ptr, val, target)
+
+        if isinstance(target, MemberExpr):
+            ptr = self._member_ptr(target)
+            if op == "=":
+                self._emit(
+                    f"cir.store {val.ref}, {ptr.ref} : "
+                    f"{val.cir_type}, {ptr.cir_type}"
+                )
+                return val
+            return self._compound_assign(op, ptr, val, target)
+
         raise cir_backend_error(
             self._result.filename,
             f"Unsupported assignment target: {type(target).__name__}",
