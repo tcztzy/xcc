@@ -332,13 +332,28 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         print(f"xcc: I/O error: {error}", file=sys.stderr)
         return 1
 
-    # ClangIR backend not yet implemented; always delegate to clang for now
-    if config.backend == "xcc":
-        print(
-            "xcc: ClangIR backend not yet implemented; falling back to clang",
-            file=sys.stderr,
-        )
-        return _run_clang(config.clang_argv)
+    # ClangIR backend
+    if config.backend == "xcc" or config.backend == "auto":
+        from xcc.cir_codegen import generate_cir
 
-    # auto / clang: frontend passed, delegate to clang
+        for result in results:
+            cir_text = generate_cir(result)
+            if config.action == "assembly":
+                output = config.output or "-"
+                if output == "-":
+                    sys.stdout.write(cir_text)
+                else:
+                    Path(output).write_text(cir_text, encoding="utf-8")
+                continue
+            # For compile/link: write .cir, shell out to cir-translate + llc
+            # For now: just print the CIR and fall back to clang
+            print(
+                f"xcc: CIR generated, but cir-translate not yet available. "
+                f"Falling back to clang.",
+                file=sys.stderr,
+            )
+            return _run_clang(config.clang_argv)
+        return 0
+
+    # clang: frontend passed, delegate to clang
     return _run_clang(config.clang_argv)
