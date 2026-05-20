@@ -72,6 +72,7 @@ class TypeMap:
 class SemaUnit:
     functions: dict[str, FunctionSymbol]
     type_map: TypeMap
+    record_definitions: dict[str, tuple[RecordMemberInfo, ...]]
 
 
 class Scope:

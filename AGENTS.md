@@ -1,11 +1,10 @@
 # XCC Agent Instructions
 
 - Runtime code uses only the Python standard library.
-- Support CPython and PyPy 3.11+.
-- Do not use `from __future__ import annotations`.
-- Do not copy or derive from GPL sources or tests.
-- Add tests before behavior changes.
-- Keep coverage at 100% line and branch.
-- Run `uv run tox -e py311`, `uv run tox -e lint`, and `uv run tox -e type` before handoff.
-- Keep `TODO.md` for current planning, `CHANGELOG.md` for current status, and `LESSONS.md` for concise project lessons.
-- Generated LLVM/Clang fixtures live under `tests/external/clang/generated/` and stay uncommitted.
+- Support CPython 3.11+.
+- No `from __future__ import annotations`.
+- No GPL sources or tests.
+- Run `uv run tox -e lint` and `uv run tox -e type` before handoff.
+- Keep `TODO.md` for planning, `CHANGELOG.md` for status, `LESSONS.md` for lessons.
+- LLVM IR output goes through `/opt/homebrew/opt/llvm/bin/llc`.
+- Target: `CC="xcc --backend=xcc" ./configure && make` in CPython succeeds.

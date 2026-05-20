@@ -1,27 +1,26 @@
-# XCC Claude Code Instructions
+# XCC — Python C11 Compiler
 
-Supplement to AGENTS.md. Project-specific conventions for Claude Code sessions.
+Target: produce a C compiler in Python that compiles CPython to a working
+binary via LLVM IR.
 
-## Clang Suite Test Policy
+## Pipeline
 
-### Platform-specific intrinsics
+```
+source.c → [preprocessor] → [lexer] → [parser] → [sema] → [llvm_codegen] → .ll
+         → llc -filetype=obj → .o → clang → executable
+```
 
-XCC targets the **host platform only** (currently macOS/ARM64). Platform-specific intrinsics
-headers for the host architecture (e.g., `arm_neon.h` on ARM64) are resolved through the
-host system include path. Headers for non-host architectures (RISC-V, LoongArch, x86 on ARM64)
-will not be found and tests including them should be skipped.
+- `src/xcc/llvm_codegen.py` — LLVM IR emission from AST + TypeMap
+- `src/xcc/cc_driver.py` — CC-style driver, invokes llc/clang for obj/link
+- All frontend modules (preprocessor, lexer, parser, sema) unchanged
 
-Reason format: `"platform-specific intrinsics header not available for <arch>"`
+## Build + test
 
-### Determining skip-worthy tests
+- `uv run python -m unittest discover -v` — run all tests
+- `uv run tox -e lint` — ruff check
+- `uv run tox -e type` — ty check
+- `llc --version` — LLVM 22.1.5 expected at /opt/homebrew/opt/llvm/bin/llc
 
-- Test includes `<riscv_*.h>`, `<lasx*.h>`, `<lsx*.h>` → skip (non-host arch)
-- Test validates header values against compiler builtins (`_Static_assert(FLT_RADIX == __FLT_RADIX__)`) → skip (needs matching compiler+header, not a language test)
-- Test needs `INTN_C` macros with exact integer promotion semantics → skip (requires compiler builtins `__INT8_C` etc.)
-- Test expects Clang-specific diagnostics (format warnings, analyzer checks) → skip
+## Target
 
-## Test Speed
-
-- clang_suite gate: `uv run tox -e clang_suite` (~22s target)
-- All other gates combined: ~12s
-- Before modifying the clang suite test infrastructure, verify with a full tox run
+`cd ~/GitHub/cpython && CC="xcc --backend=xcc" ./configure && make`

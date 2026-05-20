@@ -5,10 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
 
-from xcc.codegen import generate_native_assembly, native_backend_error
-from xcc.diag import CodegenError, Diagnostic
+from xcc.diag import Diagnostic
 from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
-from xcc.options import FrontendOptions, StdMode
+from xcc.options import FrontendOptions
 
 BackendMode = Literal["auto", "xcc", "clang"]
 DriverAction = Literal["link", "compile", "assembly", "delegate"]
@@ -93,13 +92,13 @@ def _take_joined_or_value(
     if arg == opt:
         return _take_value(argv, index, opt)
     if arg.startswith(opt) and arg != opt:
-        return arg[len(opt) :], index
+        return arg[len(opt):], index
     return None
 
 
-def _parse_std(arg: str) -> StdMode:
+def _parse_std(arg: str) -> str:
     if arg in {"c11", "gnu11"}:
-        return arg  # type: ignore[return-value]
+        return arg
     raise ValueError(f"Unsupported language standard: {arg}")
 
 
@@ -252,7 +251,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
         native_unsupported_flags.append(arg)
 
     options = FrontendOptions(
-        std="gnu11",  # Always use gnu11 frontend mode for system-header compatibility
+        std="gnu11",
         hosted=hosted,
         include_dirs=tuple(include_dirs),
         quote_include_dirs=tuple(quote_include_dirs),
@@ -307,90 +306,6 @@ def _compile_frontend_inputs(
     return results
 
 
-def _native_shape_error(config: DriverConfig, result: FrontendResult) -> CodegenError | None:
-    if config.action == "delegate":
-        return native_backend_error(
-            result.filename,
-            "Native backend does not support this driver action",
-            code="XCC-CG-0004",
-        )
-    if len(config.c_inputs) != 1:
-        return native_backend_error(
-            result.filename,
-            "Native backend currently supports exactly one C input",
-            code="XCC-CG-0004",
-        )
-    if config.non_c_inputs:
-        return native_backend_error(
-            result.filename,
-            "Native backend does not support additional non-C inputs",
-            code="XCC-CG-0004",
-        )
-    if config.native_unsupported_flags:
-        return native_backend_error(
-            result.filename,
-            f"Native backend does not support driver flag: {config.native_unsupported_flags[0]}",
-            code="XCC-CG-0004",
-        )
-    return None
-
-
-def _default_output(path: str, action: DriverAction) -> str:
-    if action == "link":
-        return "a.out"
-    if path == "-":
-        return "out.s" if action == "assembly" else "out.o"
-    suffix = ".s" if action == "assembly" else ".o"
-    return str(Path(path).with_suffix(suffix))
-
-
-def _run_native_backend(config: DriverConfig, result: FrontendResult) -> int:
-    shape_error = _native_shape_error(config, result)
-    if shape_error is not None:
-        raise shape_error
-    assembly = generate_native_assembly(result)
-    output = (
-        config.output
-        if config.output is not None
-        else _default_output(config.c_inputs[0], config.action)
-    )
-    if config.action == "assembly":
-        if output == "-":
-            sys.stdout.write(assembly)
-            return 0
-        Path(output).write_text(assembly, encoding="utf-8")
-        return 0
-    with tempfile.TemporaryDirectory() as tmp:
-        asm_path = Path(tmp) / "input.s"
-        asm_path.write_text(assembly, encoding="utf-8")
-        cmd = ["clang"]
-        if config.action == "compile":
-            cmd.extend(("-c", str(asm_path), "-o", output))
-        else:
-            cmd.extend((str(asm_path), "-o", output))
-        try:
-            completed = subprocess.run(tuple(cmd), check=False)
-        except OSError as error:
-            raise CodegenError(
-                Diagnostic(
-                    "codegen",
-                    result.filename,
-                    f"Failed to execute clang for native backend: {error}",
-                    code="XCC-CG-0002",
-                )
-            ) from error
-        if completed.returncode != 0:
-            raise CodegenError(
-                Diagnostic(
-                    "codegen",
-                    result.filename,
-                    f"Native backend tool invocation failed with exit code {completed.returncode}",
-                    code="XCC-CG-0002",
-                )
-            )
-    return 0
-
-
 def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> int:
     try:
         config = _parse_driver_config(argv)
@@ -401,14 +316,15 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
     if not config.c_inputs:
         return _run_clang(config.clang_argv)
 
+    # Always run frontend for validation
     try:
         results = _compile_frontend_inputs(config, stdin=stdin)
     except FrontendError as error:
-        if config.backend != "xcc":
-            print(f"xcc: falling back to clang: {error}", file=sys.stderr)
-            return _run_clang(config.clang_argv)
-        print(error, file=sys.stderr)
-        return 1
+        if config.backend == "xcc":
+            print(error, file=sys.stderr)
+            return 1
+        print(f"xcc: falling back to clang: {error}", file=sys.stderr)
+        return _run_clang(config.clang_argv)
     except ValueError as error:
         print(f"xcc: driver error: {error}", file=sys.stderr)
         return 1
@@ -416,24 +332,13 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         print(f"xcc: I/O error: {error}", file=sys.stderr)
         return 1
 
-    if config.backend == "clang":
-        return _run_clang(config.clang_argv)
-
+    # ClangIR backend not yet implemented; always delegate to clang for now
     if config.backend == "xcc":
-        try:
-            return _run_native_backend(config, results[0])
-        except CodegenError as error:
-            print(error, file=sys.stderr)
-            return 1
-
-    try:
-        return _run_native_backend(config, results[0])
-    except CodegenError as error:
-        if config.no_backend_fallback or error.diagnostic.code == "XCC-CG-0002":
-            print(error, file=sys.stderr)
-            return 1
         print(
-            f"xcc: falling back to clang backend: {error.diagnostic.message}",
+            "xcc: ClangIR backend not yet implemented; falling back to clang",
             file=sys.stderr,
         )
         return _run_clang(config.clang_argv)
+
+    # auto / clang: frontend passed, delegate to clang
+    return _run_clang(config.clang_argv)

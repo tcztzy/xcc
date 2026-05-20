@@ -127,7 +127,12 @@ def compile_source(
         )
         raise FrontendError(diagnostic) from error
     try:
-        sema = analyze(unit, std=normalized_options.std, excess_init_ok=pp_result.embed_used)
+        sema = analyze(
+            unit,
+            std=normalized_options.std,
+            excess_init_ok=pp_result.embed_used,
+            pack_changes=pp_result.pack_changes,
+        )
     except SemaError as error:
         raise FrontendError(
             Diagnostic("sema", filename, str(error), code=_SEMA_ERROR_CODE)
