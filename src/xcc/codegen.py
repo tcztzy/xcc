@@ -444,7 +444,8 @@ class _LLVMGen:
         result = self._base_type(base_name)
         for kind, value in t.declarator_ops:
             if kind == "ptr":
-                result = c.PointerType(result, 0)
+                # Use i8 as annotation to avoid illegal ptr(void) IR
+                result = c.PointerType(c.Int8Type(), 0)
             elif kind == "arr":
                 if isinstance(value, int):
                     result = c.ArrayType(result, value)
@@ -456,10 +457,13 @@ class _LLVMGen:
                 if isinstance(value, tuple):
                     params = value[0] if value[0] else ()
                     is_var = value[1]
-                param_types = (ctypes.c_void_p * len(params))()
-                for i, pt in enumerate(params):
+                # Filter out void params
+                real_params = [pt for pt in params if pt.name != "void" or pt.declarator_ops]
+                n = len(real_params)
+                param_types = (ctypes.c_void_p * n)() if n > 0 else None
+                for i, pt in enumerate(real_params):
                     param_types[i] = self._base_type(pt.name)
-                result = c.FunctionType(result, param_types, len(params), is_var)
+                result = c.FunctionType(result, param_types, n, is_var)
         return result
 
     def _base_type(self, name: str) -> int:
@@ -509,7 +513,7 @@ class _LLVMGen:
         )
 
     def _ptr_type(self, t: Type) -> int:
-        return _c().PointerType(self._type_to_llvm(t), 0)
+        return _c().PointerType(_c().Int8Type(), 0)
 
     def _type_size(self, t: Type) -> int:
         base = _BASE_SIZES.get(t.name, 4)
@@ -538,9 +542,10 @@ class _LLVMGen:
                 continue
             if isinstance(ext, DeclGroupStmt):
                 for decl in ext.declarations:
-                    self._emit_global_var(decl)
+                    if isinstance(decl, DeclStmt):
+                        self._emit_global_var(decl)
             elif isinstance(ext, DeclStmt):
-                self._emit_global_var(decl)
+                self._emit_global_var(ext)
 
     def _emit_global_var(self, decl: DeclStmt) -> None:
         c = _c()
@@ -570,11 +575,15 @@ class _LLVMGen:
         if func_sym is None:
             return
         ret_t = self._type_to_llvm(func_sym.return_type)
-        param_ts = (ctypes.c_void_p * len(func.params))()
-        for i, p in enumerate(func.params):
-            pt = self._resolve_type(p.type_spec)
-            param_ts[i] = self._type_to_llvm(pt)
-        fn_t = c.FunctionType(ret_t, param_ts, len(func.params), False)
+        real_params = [self._type_to_llvm(self._resolve_type(p.type_spec))
+                        for p in func.params
+                        if not (self._resolve_type(p.type_spec).name == "void"
+                                and not self._resolve_type(p.type_spec).declarator_ops)]
+        n = len(real_params)
+        param_ts = (ctypes.c_void_p * n)() if n > 0 else None
+        for i, lt in enumerate(real_params):
+            param_ts[i] = lt
+        fn_t = c.FunctionType(ret_t, param_ts, n, False)
         self._func_types[func.name] = fn_t  # save for later calls
         fn = c.AddFunction(self._mod, func.name.encode(), fn_t)
         if func.body is None:
@@ -591,11 +600,15 @@ class _LLVMGen:
         self._switch_info = []
 
         ret_t = self._type_to_llvm(func_sym.return_type)
-        param_ts = (ctypes.c_void_p * len(func.params))()
-        for i, p in enumerate(func.params):
-            pt = self._resolve_type(p.type_spec)
-            param_ts[i] = self._type_to_llvm(pt)
-        fn_t = c.FunctionType(ret_t, param_ts, len(func.params), False)
+        real_params = [self._type_to_llvm(self._resolve_type(p.type_spec))
+                        for p in func.params
+                        if not (self._resolve_type(p.type_spec).name == "void"
+                                and not self._resolve_type(p.type_spec).declarator_ops)]
+        n = len(real_params)
+        param_ts = (ctypes.c_void_p * n)() if n > 0 else None
+        for i, lt in enumerate(real_params):
+            param_ts[i] = lt
+        fn_t = c.FunctionType(ret_t, param_ts, n, False)
         # Reuse existing declaration if present
         fn = c.GetNamedFunction(self._mod, func.name.encode())
         if not fn:
@@ -915,10 +928,21 @@ class _LLVMGen:
             val_type = INT
         lt = self._type_to_llvm(val_type)
         if isinstance(expr, CharLiteral):
-            val = ord(expr.value)
+            val = self._char_value(expr.value)
         else:
             val = int(expr.value)
         return c.ConstInt(lt, val, False)
+
+    def _char_value(self, s: str) -> int:
+        """Decode a C char literal, including multi-char (GNU extension)."""
+        decoded = self._decode_string(s)
+        if len(decoded) == 1:
+            return ord(decoded)
+        # Multi-char: pack as little-endian int (GNU convention)
+        val = 0
+        for i, ch in enumerate(decoded):
+            val |= (ord(ch) & 0xFF) << (i * 8)
+        return val
 
     def _float_literal(self, expr: FloatLiteral) -> int:
         c = _c()
@@ -934,7 +958,7 @@ class _LLVMGen:
             body = self._decode_string(expr.value)
             data = body.encode() + b"\x00"
             lt = c.ArrayType(c.Int8Type(), len(data))
-            init = c.ConstString(data, len(data), False)
+            init = c.ConstString(data, len(data), True)  # don't re-add null, we already appended \x00
             gv = c.AddGlobal(self._mod, lt, b".str")
             c.SetInitializer(gv, init)
             c.SetLinkage(gv, 2)  # internal
@@ -1412,7 +1436,7 @@ class _LLVMGen:
         if isinstance(expr, IntLiteral):
             return int(expr.value)
         if isinstance(expr, CharLiteral):
-            return ord(expr.value)
+            return self._char_value(expr.value)
         if isinstance(expr, UnaryExpr) and expr.op == "-":
             return -self._eval_case_val(expr.operand)
         raise llvm_backend_error(self._result.filename, "Expected integer constant for case")

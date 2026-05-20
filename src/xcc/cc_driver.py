@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
 
-from xcc.diag import Diagnostic
+from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
 from xcc.options import FrontendOptions
 
@@ -334,41 +334,49 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
 
     # LLVM backend
     if config.backend == "xcc" or config.backend == "auto":
-        from xcc.codegen import generate_llvm_ir
+        try:
+            from xcc.codegen import generate_llvm_ir
 
-        for result in results:
-            ir = generate_llvm_ir(result)
-            if config.action == "assembly":
-                output = config.output or "-"
-                if output == "-":
-                    sys.stdout.write(ir)
-                else:
-                    Path(output).write_text(ir, encoding="utf-8")
-                continue
-            # compile / link
-            output = config.output or _default_output(config.c_inputs[0], config.action)
-            with tempfile.TemporaryDirectory() as tmp:
-                ll_path = Path(tmp) / "input.ll"
-                ll_path.write_text(ir, encoding="utf-8")
-                obj_path = Path(tmp) / "input.o"
-                llc_cmd = [
-                    "/opt/homebrew/opt/llvm/bin/llc", "-filetype=obj",
-                    str(ll_path), "-o", str(obj_path),
-                ]
-                r = subprocess.run(llc_cmd, check=False, capture_output=True, text=True)
-                if r.returncode != 0:
-                    print(f"xcc: llc failed: {r.stderr.strip()}", file=sys.stderr)
-                    return 1
-                if config.action == "compile":
-                    import shutil
-                    shutil.copy(str(obj_path), str(output))
+            for result in results:
+                ir = generate_llvm_ir(result)
+                if config.action == "assembly":
+                    output = config.output or "-"
+                    if output == "-":
+                        sys.stdout.write(ir)
+                    else:
+                        Path(output).write_text(ir, encoding="utf-8")
                     continue
-                link_cmd = ["clang", str(obj_path), "-o", str(output)]
-                r = subprocess.run(link_cmd, check=False)
-                if r.returncode != 0:
-                    print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
-                    return 1
-        return 0
+                # compile / link
+                output = config.output or _default_output(config.c_inputs[0], config.action)
+                with tempfile.TemporaryDirectory() as tmp:
+                    ll_path = Path(tmp) / "input.ll"
+                    ll_path.write_text(ir, encoding="utf-8")
+                    obj_path = Path(tmp) / "input.o"
+                    llc_cmd = [
+                        "/opt/homebrew/opt/llvm/bin/llc", "-filetype=obj",
+                        str(ll_path), "-o", str(obj_path),
+                    ]
+                    r = subprocess.run(llc_cmd, check=False, capture_output=True, text=True)
+                    if r.returncode != 0:
+                        raise CodegenError(
+                            Diagnostic("codegen", result.filename,
+                                       f"llc failed: {r.stderr.strip()}"))
+                    if config.action == "compile":
+                        import shutil
+                        shutil.copy(str(obj_path), str(output))
+                        continue
+                    link_cmd = ["clang", str(obj_path), "-o", str(output)]
+                    r = subprocess.run(link_cmd, check=False)
+                    if r.returncode != 0:
+                        print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
+                        return 1
+            return 0
+        except (CodegenError, Exception) as error:
+            if config.backend == "xcc":
+                print(f"xcc: {error}", file=sys.stderr)
+                return 1
+            print(f"xcc: falling back to clang: {error}", file=sys.stderr)
+            return _run_clang(config.clang_argv)
 
     # clang: frontend passed, delegate to clang
     return _run_clang(config.clang_argv)
