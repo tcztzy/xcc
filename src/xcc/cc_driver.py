@@ -332,28 +332,49 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         print(f"xcc: I/O error: {error}", file=sys.stderr)
         return 1
 
-    # ClangIR backend
+    # LLVM backend
     if config.backend == "xcc" or config.backend == "auto":
-        from xcc.cir_codegen import generate_cir
+        from xcc.codegen import generate_llvm_ir
 
         for result in results:
-            cir_text = generate_cir(result)
+            ir = generate_llvm_ir(result)
             if config.action == "assembly":
                 output = config.output or "-"
                 if output == "-":
-                    sys.stdout.write(cir_text)
+                    sys.stdout.write(ir)
                 else:
-                    Path(output).write_text(cir_text, encoding="utf-8")
+                    Path(output).write_text(ir, encoding="utf-8")
                 continue
-            # For compile/link: write .cir, shell out to cir-translate + llc
-            # For now: just print the CIR and fall back to clang
-            print(
-                f"xcc: CIR generated, but cir-translate not yet available. "
-                f"Falling back to clang.",
-                file=sys.stderr,
-            )
-            return _run_clang(config.clang_argv)
+            # compile / link
+            output = config.output or _default_output(config.c_inputs[0], config.action)
+            with tempfile.TemporaryDirectory() as tmp:
+                ll_path = Path(tmp) / "input.ll"
+                ll_path.write_text(ir, encoding="utf-8")
+                obj_path = Path(tmp) / "input.o"
+                llc_cmd = [
+                    "/opt/homebrew/opt/llvm/bin/llc", "-filetype=obj",
+                    str(ll_path), "-o", str(obj_path),
+                ]
+                r = subprocess.run(llc_cmd, check=False, capture_output=True, text=True)
+                if r.returncode != 0:
+                    print(f"xcc: llc failed: {r.stderr.strip()}", file=sys.stderr)
+                    return 1
+                if config.action == "compile":
+                    import shutil
+                    shutil.copy(str(obj_path), str(output))
+                    continue
+                link_cmd = ["clang", str(obj_path), "-o", str(output)]
+                r = subprocess.run(link_cmd, check=False)
+                if r.returncode != 0:
+                    print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
+                    return 1
         return 0
 
     # clang: frontend passed, delegate to clang
     return _run_clang(config.clang_argv)
+
+
+def _default_output(path: str, action: str) -> str:
+    if action == "link":
+        return "a.out"
+    return str(Path(path).with_suffix(".o"))
