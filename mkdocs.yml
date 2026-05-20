@@ -1,0 +1,8 @@
+site_name: XCC
+site_description: A C compiler in Python targeting CPython.
+docs_dir: docs
+theme:
+  name: mkdocs
+nav:
+  - Home: index.md
+  - Roadmap: roadmap.md
