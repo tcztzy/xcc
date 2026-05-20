@@ -404,8 +404,8 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
     try:
         results = _compile_frontend_inputs(config, stdin=stdin)
     except FrontendError as error:
-        if config.backend == "clang":
-            print(f"xcc: warning: {error}", file=sys.stderr)
+        if config.backend != "xcc":
+            print(f"xcc: falling back to clang: {error}", file=sys.stderr)
             return _run_clang(config.clang_argv)
         print(error, file=sys.stderr)
         return 1
