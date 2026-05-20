@@ -2,18 +2,11 @@
 
 ## Current
 
-- CPython trial runner defaults to parallel translation-unit compilation with `--jobs auto`,
-  while preserving deterministic report order and supporting `--jobs 1` for serial runs.
-- Preprocessor supports `#import` directive with include-once semantics (silently skips already-imported or currently-importing files).
-- Parser recognizes `__fp16` as a GNU extension floating-point type (alias for `_Float16`).
-- Driver mode validates with XCC before native or `clang` backend selection.
-- Native backend emits macOS `arm64` assembly for the implemented subset; assembly and linking still use `clang`.
-- Curated LLVM/Clang fixture metadata is pinned in `tests/external/clang/manifest.json`.
-- Clang fixture skip reasons are sanitized so local host paths do not enter the manifest.
-- Clang fixture materialization/checking scans the pinned tarball sequentially for faster setup.
-- Clang fixture baseline entries match the current frontend behavior and pass `clang_suite`.
-- Developer commands use `uv run`, and MkDocs is part of the locked dev toolchain.
-- Documentation is reduced to current state, active priorities, and roadmap.
-- `HARNESS.md` defines layered parallel LLVM/Clang reduction, worker slice rules, and anti-hardcoding quality gates.
-- Multi-agent helper scripts now exist for isolated worktrees (`scripts/agent_worktree.py`), queue claims (`scripts/harness_queue.py`), skip-frontier bucketing (`scripts/clang_frontier.py`), and stable supervisor dry-run/claim selection (`scripts/harness_supervisor.py`).
-- Harness queue claim/status churn now lives in ignored JSON state under `.worktrees/harness/tasks.json` so the supervisor root stays clean.
+- LLVM IR backend via libLLVM-C ctypes. Generates IR programmatically,
+  pipes through llc for .o files, clang for linking.
+- `--backend=auto` falls back to clang on codegen or frontend errors.
+- `--backend=xcc` uses native LLVM path exclusively.
+- Frontend passes 442/442 CPython files.
+- Deleted: ARM64 asm codegen, Clang suite, Docker infra, harness scripts,
+  Clang test fixtures, CPython stubs.
+- SemaUnit extended with `record_definitions` for codegen struct layout.
