@@ -16,7 +16,14 @@ TYPEOF_KEYWORDS = {
     "__typeof_unqual",
 }
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
-_NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
+_NULLABLE_QUALIFIERS = {
+    "_Nullable",
+    "_Nonnull",
+    "_Null_unspecified",
+    "__nullable",
+    "__nonnull",
+    "__null_unspecified",
+}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned", "constexpr"}
 _GNU_EXTENSION_TYPES = {
     "bool",
@@ -445,7 +452,8 @@ def parse_record_member_declaration(parser: object) -> list[RecordMemberDecl]:
             p._invalid_decl_specifier_message("record member", decl_specs),
             p._current(),
         )
-    base_type = p._parse_type_spec()
+    base_type = p._parse_type_spec(parse_pointer_depth=False)
+    p._skip_type_qualifiers()
     if p._check_punct(";"):
         if decl_specs.alignment is not None:
             raise ParserError(
@@ -510,7 +518,12 @@ def consume_decl_specifiers(parser: object) -> DeclSpecInfo:
     is_inline = False
     is_noreturn = False
     while True:
-        p._skip_decl_attributes()
+        attr_found, attr_alignment, attr_alignment_token = p._consume_decl_attribute_alignment()
+        if attr_found:
+            if attr_alignment is not None and (alignment is None or attr_alignment > alignment):
+                alignment = attr_alignment
+                alignment_token = attr_alignment_token
+            continue
         current = p._current()
         if current.kind == TokenKind.KEYWORD:
             lexeme = str(current.lexeme)
@@ -681,8 +694,17 @@ def is_function_object_type(type_spec: TypeSpec) -> bool:
 
 def define_enum_member_names(parser: object, type_spec: TypeSpec) -> None:
     p = cast(Any, parser)
-    for member_name, _ in type_spec.enum_members:
-        p._define_ordinary_name(member_name)
+    value = -1
+    for member_name, value_expr in type_spec.enum_members:
+        if value_expr is None:
+            value += 1
+        else:
+            evaluated = p._eval_array_size_expr(value_expr)
+            if evaluated is None:
+                p._define_ordinary_name(member_name)
+                continue
+            value = evaluated
+        p._define_ordinary_constant(member_name, value)
 
 
 def mark_atomic_type_spec(type_spec: TypeSpec) -> TypeSpec:

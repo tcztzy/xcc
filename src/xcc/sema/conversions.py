@@ -8,7 +8,7 @@ def is_complete_object_pointer_type(analyzer: object, type_: Type) -> bool:
     pointee = type_.pointee()
     if pointee is None:
         return False
-    if pointee.name == VOID.name:
+    if pointee.name == VOID.name and not pointee.declarator_ops:
         return False
     if pointee.declarator_ops and pointee.declarator_ops[0][0] == "fn":
         return False
@@ -49,6 +49,18 @@ def is_scalar_type(analyzer: object, type_: Type) -> bool:
     )
 
 
+def _is_pointer_arithmetic_type(analyzer: object, type_: Type) -> bool:
+    if analyzer._is_complete_object_pointer_type(type_):  # type: ignore
+        return True
+    pointee = type_.pointee()
+    return (
+        getattr(analyzer, "_std", "c11") == "gnu11"
+        and pointee is not None
+        and pointee.name == VOID.name
+        and not pointee.declarator_ops
+    )
+
+
 def analyze_additive_types(
     analyzer: object,
     left_type: Type,
@@ -59,16 +71,16 @@ def analyze_additive_types(
     if arithmetic_result is not None:
         return arithmetic_result
     if op == "+":
-        if analyzer._is_complete_object_pointer_type(left_type) and analyzer._is_integer_type(  # type: ignore
+        if _is_pointer_arithmetic_type(analyzer, left_type) and analyzer._is_integer_type(  # type: ignore
             right_type
         ):
             return left_type
-        if analyzer._is_complete_object_pointer_type(right_type) and analyzer._is_integer_type(  # type: ignore
+        if _is_pointer_arithmetic_type(analyzer, right_type) and analyzer._is_integer_type(  # type: ignore
             left_type
         ):
             return right_type
         return None
-    if analyzer._is_complete_object_pointer_type(left_type) and analyzer._is_integer_type(  # type: ignore
+    if _is_pointer_arithmetic_type(analyzer, left_type) and analyzer._is_integer_type(  # type: ignore
         right_type
     ):
         return left_type

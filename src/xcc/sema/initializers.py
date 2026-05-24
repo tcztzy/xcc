@@ -1,7 +1,7 @@
 from xcc.ast import DesignatorRange, Expr, InitList, StringLiteral
 from xcc.types import Type
 
-from .symbols import Scope, SemaError
+from .symbols import RecordMemberInfo, Scope, SemaError
 
 
 def is_initializer_compatible(
@@ -165,8 +165,9 @@ def analyze_record_initializer_list(
     scope: Scope,
 ) -> None:
     all_members = analyzer._record_members(target_type.name)  # type: ignore
-    members = None if all_members is None else tuple(m for m in all_members if m.name is not None)
-    if members is None or not members:
+    if all_members is None:
+        raise SemaError("Initializer type mismatch")
+    if not any(_record_member_takes_initializer(analyzer, member) for member in all_members):
         # In GNU mode, empty/anonymous struct init is silently accepted.
         if getattr(analyzer, "_std", "c11") == "gnu11":
             return
@@ -174,13 +175,14 @@ def analyze_record_initializer_list(
     is_union = target_type.name.startswith("union ")
     next_member = 0
     initialized_union = False
+    initialized_union_member: str | None = None
     for item in init.items:
         if item.designators:
-            if is_union and initialized_union:
-                raise SemaError("Initializer type mismatch")
             kind, value = item.designators[0]
             if kind != "member" or not isinstance(value, str):
                 raise SemaError("Record initializer designator must use member")
+            if is_union and initialized_union and initialized_union_member != value:
+                raise SemaError("Initializer type mismatch")
             member_type, member_index = analyzer._lookup_initializer_member(target_type, value)  # type: ignore
             analyzer._analyze_designated_initializer(  # type: ignore
                 member_type,
@@ -190,24 +192,61 @@ def analyze_record_initializer_list(
             )
             if is_union:
                 initialized_union = True
+                initialized_union_member = value
             else:
                 next_member = member_index + 1
             continue
         if is_union:
             if initialized_union:
                 raise SemaError("Initializer type mismatch")
-            analyzer._analyze_initializer(members[0].type_, item.initializer, scope)  # type: ignore
+            member_index = _next_initializable_record_member_index(
+                analyzer,
+                all_members,
+                0,
+            )
+            if member_index is None:
+                raise SemaError("Initializer type mismatch")
+            analyzer._analyze_initializer(  # type: ignore
+                all_members[member_index].type_,
+                item.initializer,
+                scope,
+            )
             initialized_union = True
             continue
-        if next_member >= len(members):
+        member_index = _next_initializable_record_member_index(
+            analyzer,
+            all_members,
+            next_member,
+        )
+        if member_index is None:
             if analyzer._excess_init_ok:  # type: ignore
                 continue
             # In GNU mode, excess initializer elements are silently ignored.
             if getattr(analyzer, "_std", "c11") == "gnu11":
                 continue
             raise SemaError("Initializer type mismatch")
-        analyzer._analyze_initializer(members[next_member].type_, item.initializer, scope)  # type: ignore
-        next_member += 1
+        analyzer._analyze_initializer(all_members[member_index].type_, item.initializer, scope)  # type: ignore
+        next_member = member_index + 1
+
+
+def _record_member_takes_initializer(
+    analyzer: object,
+    member: RecordMemberInfo,
+) -> bool:
+    return bool(
+        getattr(member, "name", None) is not None or analyzer._is_anonymous_record_member(member)  # type: ignore
+    )
+
+
+def _next_initializable_record_member_index(
+    analyzer: object,
+    members: tuple[RecordMemberInfo, ...],
+    start: int,
+) -> int | None:
+    for index in range(start, len(members)):
+        if _record_member_takes_initializer(analyzer, members[index]):
+            return index
+    return None
 
 
 def analyze_designated_initializer(
@@ -280,6 +319,8 @@ def is_char_array_string_initializer(
     init_expr: Expr,
 ) -> bool:
     if not target_type.is_array() or not isinstance(init_expr, StringLiteral):
+        return False
+    if init_expr.value.startswith(('L"', 'u"', 'U"')):
         return False
     elem = target_type.element_type()
     if elem is None or elem.name != "char" or elem.declarator_ops:

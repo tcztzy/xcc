@@ -10,6 +10,16 @@ _MS_CALLING_CONVENTION_IDENTIFIERS = {
     "__thiscall",
     "__vectorcall",
 }
+_AVAILABILITY_ATTRIBUTE_NAMES = {
+    "API_AVAILABLE",
+    "API_DEPRECATED",
+    "API_UNAVAILABLE",
+}
+_AVAILABILITY_ATTRIBUTE_SUFFIXES = (
+    "_API_AVAILABLE",
+    "_API_DEPRECATED",
+    "_API_UNAVAILABLE",
+)
 _EXTENSION_MARKER = "__extension__"
 
 
@@ -39,10 +49,29 @@ def _skip_decl_extensions(parser: object) -> None:
 
 
 def _consume_decl_attributes(parser: object) -> tuple[bool, bool]:
+    found, has_overloadable, _, _ = _consume_decl_attributes_with_alignment(parser)
+    return found, has_overloadable
+
+
+def _consume_decl_attribute_alignment(parser: object) -> tuple[bool, int | None, Token | None]:
+    found, _, alignment, alignment_token = _consume_decl_attributes_with_alignment(parser)
+    return found, alignment, alignment_token
+
+
+def _consume_decl_attributes_with_alignment(
+    parser: object,
+) -> tuple[bool, bool, int | None, Token | None]:
     found = False
     has_overloadable = False
+    alignment: int | None = None
+    alignment_token: Token | None = None
     while True:
-        gnu_found, gnu_has_overloadable = _consume_gnu_attributes(
+        (
+            gnu_found,
+            gnu_has_overloadable,
+            gnu_alignment,
+            gnu_alignment_token,
+        ) = _consume_gnu_attributes_with_alignment(
             parser,
             parser._make_error,  # type: ignore
         )
@@ -50,19 +79,39 @@ def _consume_decl_attributes(parser: object) -> tuple[bool, bool]:
             parser,
             parser._make_error,  # type: ignore
         )
-        found = found or gnu_found or ms_found
+        availability_found = _skip_availability_attributes(
+            parser,
+            parser._make_error,  # type: ignore
+        )
+        found = found or gnu_found or ms_found or availability_found
         has_overloadable = has_overloadable or gnu_has_overloadable
-        if not gnu_found and not ms_found:
+        if gnu_alignment is not None and (alignment is None or gnu_alignment > alignment):
+            alignment = gnu_alignment
+            alignment_token = gnu_alignment_token
+        if not gnu_found and not ms_found and not availability_found:
             break
-    return found, has_overloadable
+    return found, has_overloadable, alignment, alignment_token
 
 
 def _consume_gnu_attributes(
     parser: object,
     make_error: Callable[[str, Token], Exception],
 ) -> tuple[bool, bool]:
+    found, has_overloadable, _, _ = _consume_gnu_attributes_with_alignment(
+        parser,
+        make_error,
+    )
+    return found, has_overloadable
+
+
+def _consume_gnu_attributes_with_alignment(
+    parser: object,
+    make_error: Callable[[str, Token], Exception],
+) -> tuple[bool, bool, int | None, Token | None]:
     found = False
     has_overloadable = False
+    alignment: int | None = None
+    alignment_token: Token | None = None
     while _is_gnu_attribute_start(parser):
         start = parser._advance()  # type: ignore
         parser._expect_punct("(")  # type: ignore
@@ -74,6 +123,43 @@ def _consume_gnu_attributes(
                 raise make_error("Expected ')'", start)
             if token.kind == TokenKind.IDENT and token.lexeme == "overloadable":
                 has_overloadable = True
+            if (
+                depth == 2
+                and token.kind == TokenKind.IDENT
+                and token.lexeme in {"aligned", "__aligned__"}
+                and parser._peek_punct("(")  # type: ignore
+            ):
+                attr_token = token
+                parser._advance()  # type: ignore
+                parser._expect_punct("(")  # type: ignore
+                if parser._check_punct(")"):  # type: ignore
+                    parser._advance()  # type: ignore
+                    found = True
+                    continue
+                expr = parser._parse_conditional()  # type: ignore
+                parsed_alignment = parser._eval_array_size_expr(expr)  # type: ignore
+                if parsed_alignment is None:
+                    raise make_error(
+                        "Invalid alignment attribute: argument must be an "
+                        "integer constant expression",
+                        attr_token,
+                    )
+                if parsed_alignment <= 0:
+                    raise make_error(
+                        "Invalid alignment attribute: argument must be positive",
+                        attr_token,
+                    )
+                if (parsed_alignment & (parsed_alignment - 1)) != 0:
+                    raise make_error(
+                        "Invalid alignment attribute: argument must evaluate to a power of two",
+                        attr_token,
+                    )
+                if alignment is None or parsed_alignment > alignment:
+                    alignment = parsed_alignment
+                    alignment_token = attr_token
+                parser._expect_punct(")")  # type: ignore
+                found = True
+                continue
             if token.kind == TokenKind.PUNCTUATOR:
                 if token.lexeme == "(":
                     depth += 1
@@ -81,7 +167,7 @@ def _consume_gnu_attributes(
                     depth -= 1
             parser._advance()  # type: ignore
         found = True
-    return found, has_overloadable
+    return found, has_overloadable, alignment, alignment_token
 
 
 def _is_gnu_attribute_start(parser: object) -> bool:
@@ -126,6 +212,43 @@ def _is_ms_declspec_start(parser: object) -> bool:
     return (
         token.kind == TokenKind.IDENT
         and token.lexeme == _MS_DECLSPEC_KEYWORD
+        and parser._peek_punct("(")  # type: ignore
+    )
+
+
+def _skip_availability_attributes(
+    parser: object,
+    make_error: Callable[[str, Token], Exception],
+) -> bool:
+    found = False
+    while _is_availability_attribute_start(parser):
+        start = parser._advance()  # type: ignore
+        parser._expect_punct("(")  # type: ignore
+        depth = 1
+        while depth > 0:
+            token = parser._current()  # type: ignore
+            if token.kind == TokenKind.EOF:
+                raise make_error("Expected ')'", start)
+            if token.kind == TokenKind.PUNCTUATOR:
+                if token.lexeme == "(":
+                    depth += 1
+                elif token.lexeme == ")":
+                    depth -= 1
+            parser._advance()  # type: ignore
+        found = True
+    return found
+
+
+def _is_availability_attribute_start(parser: object) -> bool:
+    token = parser._current()  # type: ignore
+    if token.kind != TokenKind.IDENT or not isinstance(token.lexeme, str):
+        return False
+    name = token.lexeme
+    return (
+        (
+            name in _AVAILABILITY_ATTRIBUTE_NAMES
+            or any(name.endswith(suffix) for suffix in _AVAILABILITY_ATTRIBUTE_SUFFIXES)
+        )
         and parser._peek_punct("(")  # type: ignore
     )
 

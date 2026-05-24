@@ -97,7 +97,26 @@ def _take_joined_or_value(
 
 
 def _parse_std(arg: str) -> str:
-    if arg in {"c11", "gnu11"}:
+    accepted = {
+        "c90",
+        "c99",
+        "c11",
+        "c17",
+        "c23",
+        "c2x",
+        "gnu90",
+        "gnu99",
+        "gnu11",
+        "gnu17",
+        "gnu23",
+        "gnu2x",
+        "iso9899:1990",
+        "iso9899:1999",
+        "iso9899:2011",
+    }
+    if arg in accepted:
+        return arg
+    if arg.startswith("c") or arg.startswith("gnu"):
         return arg
     raise ValueError(f"Unsupported language standard: {arg}")
 
@@ -166,7 +185,11 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
                 action = "compile"
             clang_argv.append(arg)
             continue
-        if arg in {"--version", "-v", "-V"}:
+        if arg in {"--version", "-V"}:
+            # Handled in main() early; skip here.
+            clang_argv.append(arg)
+            continue
+        if arg == "-v":
             action = "delegate"
             clang_argv.append(arg)
             continue
@@ -285,6 +308,11 @@ def _run_clang(argv: tuple[str, ...] | list[str]) -> int:
     return completed.returncode
 
 
+def _fallback_to_clang(config: DriverConfig, reason: str) -> int:
+    print(f"xcc: falling back to clang backend: {reason}", file=sys.stderr)
+    return _run_clang(config.clang_argv)
+
+
 def _compile_frontend_inputs(
     config: DriverConfig,
     *,
@@ -306,7 +334,34 @@ def _compile_frontend_inputs(
     return results
 
 
+def _link_argv_with_objects(config: DriverConfig, objects: list[str]) -> list[str]:
+    replacements = iter(objects)
+    link_args: list[str] = []
+    c_inputs = list(config.c_inputs)
+    skip_next = False
+    for arg in config.clang_argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "-x":
+            skip_next = True
+            continue
+        if arg.startswith("-x") and arg != "-x":
+            continue
+        if c_inputs and arg == c_inputs[0]:
+            link_args.append(next(replacements))
+            c_inputs.pop(0)
+            continue
+        link_args.append(arg)
+    return ["clang", *link_args]
+
+
 def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> int:
+    if set(argv) & {"--version", "-V"}:
+        print("xcc 0.2.0a1", file=sys.stderr)
+        print("Target: arm64-apple-darwin", file=sys.stderr)
+        return 0
+
     try:
         config = _parse_driver_config(argv)
     except ValueError as error:
@@ -316,6 +371,10 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
     if not config.c_inputs:
         return _run_clang(config.clang_argv)
 
+    if config.backend == "auto" and config.native_unsupported_flags:
+        flags = " ".join(config.native_unsupported_flags)
+        return _fallback_to_clang(config, f"unsupported native flag(s): {flags}")
+
     # Always run frontend for validation
     try:
         results = _compile_frontend_inputs(config, stdin=stdin)
@@ -323,8 +382,7 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         if config.backend == "xcc":
             print(error, file=sys.stderr)
             return 1
-        print(f"xcc: falling back to clang: {error}", file=sys.stderr)
-        return _run_clang(config.clang_argv)
+        return _fallback_to_clang(config, str(error))
     except ValueError as error:
         print(f"xcc: driver error: {error}", file=sys.stderr)
         return 1
@@ -337,23 +395,26 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         try:
             from xcc.codegen import generate_llvm_ir
 
-            for result in results:
-                ir = generate_llvm_ir(result)
-                if config.action == "assembly":
-                    output = config.output or "-"
+            output = config.output or _default_output(config.c_inputs[0], config.action)
+            if config.action == "assembly":
+                for result in results:
+                    ir = generate_llvm_ir(result)
                     if output == "-":
                         sys.stdout.write(ir)
                     else:
                         Path(output).write_text(ir, encoding="utf-8")
-                    continue
-                # compile / link
-                output = config.output or _default_output(config.c_inputs[0], config.action)
-                with tempfile.TemporaryDirectory() as tmp:
-                    ll_path = Path(tmp) / "input.ll"
+                return 0
+
+            with tempfile.TemporaryDirectory() as tmp:
+                objects: list[str] = []
+                for index, result in enumerate(results):
+                    ir = generate_llvm_ir(result)
+                    ll_path = Path(tmp) / f"input{index}.ll"
                     ll_path.write_text(ir, encoding="utf-8")
-                    obj_path = Path(tmp) / "input.o"
+                    obj_path = Path(tmp) / f"input{index}.o"
                     llc_cmd = [
                         "/opt/homebrew/opt/llvm/bin/llc",
+                        "-O0",
                         "-filetype=obj",
                         str(ll_path),
                         "-o",
@@ -361,28 +422,29 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                     ]
                     r = subprocess.run(llc_cmd, check=False, capture_output=True, text=True)
                     if r.returncode != 0:
+                        stderr = (r.stderr or "").strip()
                         raise CodegenError(
-                            Diagnostic(
-                                "codegen", result.filename, f"llc failed: {r.stderr.strip()}"
-                            )
+                            Diagnostic("codegen", result.filename, f"llc failed: {stderr}")
                         )
                     if config.action == "compile":
                         import shutil
 
                         shutil.copy(str(obj_path), str(output))
                         continue
-                    link_cmd = ["clang", str(obj_path), "-o", str(output)]
-                    r = subprocess.run(link_cmd, check=False)
-                    if r.returncode != 0:
-                        print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
-                        return 1
+                    objects.append(str(obj_path))
+                if config.action == "compile":
+                    return 0
+                link_cmd = _link_argv_with_objects(config, objects)
+                r = subprocess.run(link_cmd, check=False)
+                if r.returncode != 0:
+                    print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
+                    return 1
             return 0
         except (CodegenError, Exception) as error:
             if config.backend == "xcc":
                 print(f"xcc: {error}", file=sys.stderr)
                 return 1
-            print(f"xcc: falling back to clang: {error}", file=sys.stderr)
-            return _run_clang(config.clang_argv)
+            return _fallback_to_clang(config, str(error))
 
     # clang: frontend passed, delegate to clang
     return _run_clang(config.clang_argv)

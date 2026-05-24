@@ -4,6 +4,7 @@ from xcc.ast import (
     BreakStmt,
     CallExpr,
     CaseStmt,
+    CommaExpr,
     CompoundStmt,
     ContinueStmt,
     DeclGroupStmt,
@@ -93,18 +94,27 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
                 )
             )
         a._ensure_array_size_limit(var_type)
-        scope.define(
-            VarSymbol(
-                stmt.name,
-                var_type,
-                stmt.alignment if stmt.alignment is not None else var_alignment,
-                is_extern=stmt.storage_class == "extern",
-            )
+        symbol = VarSymbol(
+            stmt.name,
+            var_type,
+            stmt.alignment if stmt.alignment is not None else var_alignment,
+            is_extern=stmt.storage_class == "extern",
         )
+        scope.define(symbol)
         if stmt.init is not None:
             if stmt.storage_class == "extern":
                 raise SemaError(a._extern_initializer_message("block-scope"))
             a._analyze_initializer(var_type, stmt.init, scope)
+            if var_type.is_array() and var_type.declarator_ops[0][1] < 0:
+                inferred = a._infer_array_size_from_init(stmt.init)
+                if inferred is not None:
+                    new_ops = (("arr", inferred),) + var_type.declarator_ops[1:]
+                    new_type = Type(
+                        var_type.name,
+                        declarator_ops=new_ops,
+                        qualifiers=var_type.qualifiers,
+                    )
+                    symbol.type_ = new_type
         return
     if isinstance(stmt, StaticAssertDecl):
         a._check_static_assert(stmt, scope)
@@ -169,6 +179,8 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
     if isinstance(stmt, CaseStmt):
         if not a._switch_stack:
             raise SemaError("case not in switch")
+        if isinstance(stmt.value, CommaExpr):
+            raise SemaError("case value is not integer constant")
         case_value = a._eval_int_constant_expr(stmt.value, scope)
         if case_value is None:
             raise SemaError("case value is not integer constant")

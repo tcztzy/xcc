@@ -97,6 +97,8 @@ def eval_array_size_expr(parser: object, expr: Expr) -> int | None:
     if isinstance(expr, IntLiteral):
         assert isinstance(expr.value, str)
         return _parse_int_literal_value(expr.value)
+    if isinstance(expr, Identifier):
+        return p._lookup_ordinary_constant(expr.name)
     if isinstance(expr, GenericExpr):
         return p._eval_array_size_generic_expr(expr)
     if isinstance(expr, CastExpr):

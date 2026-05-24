@@ -342,6 +342,14 @@ class FrontendTests(unittest.TestCase):
         source = 'int printf(const char *, ...); void f(void) { printf("%s", "hello"); }'
         compile_source(source)
 
+    def test_printf_format_wide_string_valid(self) -> None:
+        source = (
+            "int printf(const char *, ...);"
+            "typedef int wchar_t;"
+            'void f(const wchar_t *s) { printf("%ls", s); }'
+        )
+        compile_source(source)
+
     def test_printf_format_string_mismatch(self) -> None:
         source = 'int printf(const char *, ...); void f(void) { printf("%s", 42); }'
         with self.assertRaises(FrontendError) as ctx:

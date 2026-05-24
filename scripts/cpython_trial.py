@@ -97,210 +97,113 @@ MODULE_INCLUDES: dict[str, tuple[str, ...]] = {
 }
 
 # Files known to fail for expected reasons (platform-specific, etc.)
+# Files known to fail for expected reasons (platform-specific, etc.)
 EXPECTED_SKIPS: dict[str, str] = {
     # Platform-specific (not macOS/ARM64)
     "Modules/dynload_win.c": "Windows-only",
     "Modules/dynload_hpux.c": "HP-UX only",
     "Python/dynload_win.c": "Windows-only",
     "Python/dynload_hpux.c": "HP-UX only",
-    # Generated or special-purpose files
-    "Python/assemble.c": "not a standalone TU",
-    # Emptied-out / stub files
-    "Python/asm_trampoline.c": "not a standalone C file",
-    # mimalloc internal files (must be included from alloc.c / page.c)
-    "Objects/mimalloc/alloc-aligned.c": "mimalloc internal: include from alloc.c",
-    "Objects/mimalloc/alloc-posix.c": "mimalloc internal: include from alloc.c",
-    "Objects/mimalloc/alloc-override.c": "mimalloc internal: include from alloc.c",
-    "Objects/mimalloc/page-queue.c": "mimalloc internal: include from page.c",
-    "Objects/mimalloc/page.c": "mimalloc internal: include from page.c",
-    "Objects/mimalloc/static.c": "mimalloc internal",
-    # Emscripten / WASM-only
-    "Python/dynload_emscripten.c": "emscripten-only",
-    "Python/emscripten_signal.c": "emscripten-only",
-    # Platform stubs with no content
-    "Python/asm_trampoline_aarch64.c": "not a standalone C file",
-    # Windows-only / platform-specific
     "Python/sysmodule_win.c": "Windows-only",
     "Modules/posixmodule_win.c": "Windows-only",
     "Modules/timemodule_win.c": "Windows-only",
     "Modules/_winapi.c": "Windows-only (needs windows.h)",
     "Modules/overlapped.c": "Windows-only (needs winsock2.h)",
-    # Generated files not available at compile time
-    "Python/deepfreeze.c": "requires generated frozen modules header",
-    "Python/frozen.c": "requires generated frozen modules header",
-    "Programs/_freeze_module.c": "freeze tool, not a library TU",
-    "Programs/_testembed.c": "test embed, not a library TU",
-    # Needs configure-time defines
-    "Modules/getpath.c": "needs PREFIX/EXEC_PREFIX/VERSION/VPATH/PLATLIBDIR from configure",
-    # Needs generated optimizer.h and codegen artifacts (next_instr etc.)
-    "Modules/_testinternalcapi.c": "needs optimizer.h (generated), uses next_instr from codegen",
-    "Modules/_testinternalcapi/testbytecodes.c": "needs optimizer.h (generated), uses next_instr",
-    "Modules/_testinternalcapi/interpreter.c": "uses next_instr (needs generated uop headers)",
-    # Needs bytecode generator not available
-    "Python/optimizer.c": "requires optimizer.h from bytecode generation",
-    "Python/optimizer_analysis.c": "requires optimizer.h from bytecode generation",
-    "Python/optimizer_bytecodes.c": "requires optimizer.h from bytecode generation",
-    "Python/optimizer_symbols.c": "requires optimizer.h from bytecode generation",
-    # CPU-specific dispatch
-    "Python/ceval_aarch64.c": "requires pycore_uops.h from code generation",
-    # Emscripten / WASM-only (not macOS)
+
+    # Emscripten / WASM-only
+    "Python/dynload_emscripten.c": "emscripten-only",
+    "Python/emscripten_signal.c": "emscripten-only",
     "Python/emscripten_syscalls.c": "emscripten-only",
     "Python/emscripten_trampoline_inner.c": "emscripten-only",
-    # JIT / perf trampolines (platform-specific, need special support)
-    "Python/jit_unwind.c": "JIT unwind, host-arch-specific",
+
+    # Not standalone translation units
+    "Python/asm_trampoline.c": "not a standalone C file",
+    "Python/asm_trampoline_aarch64.c": "not a standalone C file",
+    "Python/ceval_aarch64.c": "requires pycore_uops.h from code generation",
+    "Programs/_testembed.c": "test embed, not a library TU",
+
+    # Generated dependencies not available at compile time
+    "Python/deepfreeze.c": "requires generated frozen modules header",
+    "Python/bytecodes.c": "requires optimizer.h (generated)",
+    "Python/ceval.c": "TIER1_TO_TIER2 macro: next_instr parse cascade in declaration context",
+    "Python/optimizer_bytecodes.c": "requires optimizer.h from bytecode generation",
+    "Modules/_testinternalcapi/testbytecodes.c": "needs optimizer.h (generated), uses next_instr",
+    "Modules/_testinternalcapi/interpreter.c": "uses next_instr (needs generated uop headers)",
+
+    # Needs configure-time defines
+    "Modules/getpath.c": "needs PREFIX/EXEC_PREFIX/VERSION/VPATH/PLATLIBDIR from configure",
+
+    # JIT / perf trampolines (Linux-specific)
     "Python/perf_jit_trampoline.c": "perf JIT trampoline, Linux-only",
     "Python/perf_trampoline.c": "perf trampoline, Linux-only",
-    # mimalloc: platform primitives included from prim.c, not standalone TUs
+    "Python/jit_unwind.c": "JIT unwind, host-arch-specific + parser edge case",
+
+    # mimalloc: files that are #included, not compiled standalone
+    "Objects/mimalloc/alloc-override.c": "mimalloc internal: include from alloc.c (has #error guard)",
+    "Objects/mimalloc/page-queue.c": "mimalloc internal: include from page.c (has #error guard)",
+    "Objects/mimalloc/page.c": "mimalloc internal: include from page.c (uses symbols from obmalloc.c)",
+    "Objects/mimalloc/static.c": "mimalloc internal: not a standalone TU",
+    "Objects/mimalloc/heap.c": "undeclared _PyMem_mi_page_maybe_free (defined in obmalloc.c, not standalone)",
+    "Objects/mimalloc/options.c": "argument type mismatch in mimalloc options parsing (CPython internal TU structure)",
+    "Objects/mimalloc/segment.c": "equality operator on incompatible segment pointer types (CPython internal)",
+
+    # mimalloc: platform primitives included from prim.c
     "Objects/mimalloc/prim/osx/prim.c": "included from prim/prim.c, not standalone",
     "Objects/mimalloc/prim/unix/prim.c": "included from prim/prim.c, not standalone",
     "Objects/mimalloc/prim/wasi/prim.c": "included from prim/prim.c, not standalone",
     "Objects/mimalloc/prim/windows/prim.c": "included from prim/prim.c, not standalone",
-    # mimalloc: prim/prim.c includes unix/prim.c which uses fputs without <stdio.h>
-    "Objects/mimalloc/prim/prim.c": "mimalloc upstream: fputs used without <stdio.h>",
-    # HACL* SIMD files need x86 SSE/AVX intrinsics (emmintrin.h, smmintrin.h)
+    "Objects/mimalloc/prim/prim.c": "mimalloc upstream: dispatch file, not standalone",
+
+    # x86 SIMD intrinsics (not available on ARM64)
     "Modules/_hacl/Hacl_Hash_Blake2s_Simd128.c": "needs x86 SSE intrinsics (emmintrin.h)",
-    "Modules/_hacl/Hacl_Hash_Blake2s_Simd128_universal2.c": (
-        "needs x86 SSE intrinsics (emmintrin.h)"
-    ),
+    "Modules/_hacl/Hacl_Hash_Blake2s_Simd128_universal2.c": "needs x86 SSE intrinsics (emmintrin.h)",
     "Modules/_hacl/Hacl_Hash_Blake2b_Simd256.c": "needs x86 AVX intrinsics (smmintrin.h)",
-    "Modules/_hacl/Hacl_Hash_Blake2b_Simd256_universal2.c": (
-        "needs x86 AVX intrinsics (smmintrin.h)"
-    ),
-    # Magic / JIT bytecodes are generated files
-    "Python/bytecodes.c": "requires optimizer.h (generated)",
-    # Bootstrap Python needs frozen modules
-    "Programs/_bootstrap_python.c": "requires frozen importlib header",
-    # Platform quirks and non-standard patterns
-    "Modules/_testcapimodule.c": "uses PyAPI_FUNC in function body (GCC extension)",
-    "Modules/_testbuffer.c": "duplicate tentative definition of static var (sema false positive)",
-    "Modules/pyexpat.c": "duplicate handler_info declaration (expat vendored code)",
-    "Modules/_threadmodule.c": "pthread_setname_np platform signature mismatch (macOS vs Linux)",
-    "Python/fileutils.c": "incomplete struct member (sema forward-decl bug)",
-    "Objects/typeobject.c": "VLA at file scope in type struct init (sema bug)",
-    "Modules/posixmodule.c": "static assertion struct size mismatch (XCC layout differs)",
+    "Modules/_hacl/Hacl_Hash_Blake2b_Simd256_universal2.c": "needs x86 AVX intrinsics (smmintrin.h)",
+
+    # Real XCC bugs — to be fixed
+    "Modules/_testcapimodule.c": "uses #error directive guarding Py_BUILD_CORE (preprocessor edge case)",
+    "Objects/typeobject.c": "VLA at file scope in type struct init causes recursion (sema bug)",
+    "Modules/posixmodule.c": "static assertion struct size mismatch (XCC layout differs) + parse edge case",
     "Objects/obmalloc.c": "parser: Expected IDENT in mimalloc assertion path",
-    "Python/Python-tokenize.c": "relational operator on function pointer (non-standard pattern)",
-    "Modules/cjkcodecs/multibytecodec.c": (
-        "relational operator on function pointer (non-standard pattern)"
-    ),
-    # Deep issues requiring parser/sema investigations (see session notes)
-    "Objects/floatobject.c": "assert macro: __has_attribute in cdefs.h needs preprocessor support",
-    "Objects/longobject.c": "SIGCHECK({...}) macro: compound literal as macro arg not supported",
-    "Python/ceval.c": "TIER1_TO_TIER2 macro: next_instr parse cascade in declaration context",
-    "Python/ast_preprocess.c": "member access on non-record pointer in ast_opt pattern",
-    "Python/initconfig.c": "conditional type mismatch in config value assignment",
-    "Parser/pegen.c": "subtraction on incompatible pointer types in parser generator",
-    "Objects/moduleobject.c": "initializer type mismatch for module def struct",
-    "Objects/mimalloc/heap.c": "undeclared _PyMem_mi_page_maybe_free (CPython internal)",
-    "Objects/mimalloc/options.c": "argument type mismatch in mimalloc options parsing",
-    "Objects/mimalloc/segment.c": "equality operator on incompatible segment pointer types",
-    # Module files with sema/parse edge cases
-    "Modules/fcntlmodule.c": "incomplete struct member (sema forward-decl bug)",
-    "Modules/termios.c": "incomplete struct member (sema forward-decl bug)",
-    "Modules/readline.c": "incomplete struct member (sema forward-decl bug)",
     "Modules/_cursesmodule.c": "parser: Expected ';' in GNU extension context",
-    "Modules/_testlimitedcapi/import.c": "parser: Expected ';' in nested macro",
+    "Modules/_testlimitedcapi/import.c": "parser: Expected ';' in nested macro (PyAPI_FUNC in block scope)",
     "Modules/faulthandler.c": "no such member: _PyRuntime (incomplete struct def)",
     "Modules/unicodedata.c": "keyword 'int' in expression (GNU statement expr edge case)",
     "Modules/_ssl/debughelpers.c": "size_t undeclared (missing stddef.h include chain)",
-    "Modules/socketmodule.c": (
-        "keyword 'struct' in expression (GNU cast/compound literal edge case)"
-    ),
-    # Requires compiler builtins not yet implemented in XCC
-    "Python/traceback.c": (
-        "uses __builtin_alloca (compiler builtin not yet supported)"
-    ),
-    # macOS SDK system header limitations (not XCC bugs)
-    "Python/pylifecycle.c": (
-        "macOS os/log.h requires Xcode builtins (__builtin_os_log_format)"
-    ),
-    "Python/remote_debugging.c": (
-        "macOS bsm/audit.h type resolution (u_int32_t not declared)"
-    ),
-    # Non-core module parser edge cases with third-party headers
-    "Modules/_ctypes/_ctypes.c": (
-        "ffi.h macro expansion edge case (Apple libffi)"
-    ),
-    "Modules/_ctypes/callbacks.c": (
-        "ffi.h macro expansion edge case (Apple libffi)"
-    ),
-    "Modules/_ctypes/callproc.c": (
-        "ffi.h macro expansion edge case (Apple libffi)"
-    ),
-    "Modules/_ctypes/cfield.c": (
-        "ffi.h macro expansion edge case (Apple libffi)"
-    ),
-    "Modules/_ctypes/malloc_closure.c": (
-        "ffi.h macro expansion edge case (Apple libffi)"
-    ),
-    "Modules/_ctypes/stgdict.c": (
-        "ffi.h macro expansion edge case (Apple libffi)"
-    ),
-    "Modules/_remote_debugging/asyncio.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/binary_io_reader.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/binary_io_writer.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/code_objects.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/frame_cache.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/frames.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/gc_stats.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/interpreters.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/module.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/object_reading.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/subprocess.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Modules/_remote_debugging/threads.c": (
-        "non-core module: zstd.h + parser edge case"
-    ),
-    "Python/pystrhex.c": (
-        "non-core: _Py_STRHASH_* macros + parser edge case"
-    ),
-    # Third-party library not installed
-    "Modules/_gdbmmodule.c": (
-        "gdbm development headers not installed"
-    ),
-    "Modules/_dbmmodule.c": (
-        "ndbm development headers not installed"
-    ),
-    # macOS system framework (XCC doesn't search framework paths)
-    "Modules/_scproxy.c": (
-        "macOS SystemConfiguration.framework header not in search path"
-    ),
-    # Tcl/Tk type resolution (non-core GUI module)
-    "Modules/_tkinter.c": (
-        "Tcl/Tk header: TCL_HASH_TYPE / X11/Xlib.h edge case"
-    ),
-    "Modules/tkappinit.c": (
-        "Tcl/Tk header: X11/Xlib.h not in search path"
-    ),
-    # SSL error reporting function (non-core)
-    "Modules/_ssl/cert.c": (
-        "_setSSLError not declared (needs -DWE_HAVE_OPENSSL_ECDH etc.)"
-    ),
-    # File-scope VLA (GCC extension not supported)
-    "Modules/getbuildinfo.c": (
-        "variable length array at file scope (GCC extension)"
-    ),
+    "Modules/getbuildinfo.c": "variable length array at file scope (constant expr evaluator limitation)",
+
+    # macOS SDK limitations (not XCC bugs)
+    "Python/pylifecycle.c": "macOS os/log.h requires Xcode builtins (__builtin_os_log_format)",
+    "Python/remote_debugging.c": "macOS bsm/audit.h type resolution (u_int32_t not declared) + parse edge case",
+
+    # Non-core modules: third-party header issues
+    "Modules/_ctypes/_ctypes.c": "ffi.h macro expansion edge case (Apple libffi)",
+    "Modules/_ctypes/callbacks.c": "ffi.h macro expansion edge case (Apple libffi)",
+    "Modules/_ctypes/callproc.c": "ffi.h macro expansion edge case (Apple libffi)",
+    "Modules/_ctypes/cfield.c": "ffi.h macro expansion edge case (Apple libffi)",
+    "Modules/_ctypes/malloc_closure.c": "ffi.h macro expansion edge case (Apple libffi)",
+    "Modules/_ctypes/stgdict.c": "ffi.h macro expansion edge case (Apple libffi)",
+    "Modules/_remote_debugging/asyncio.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/binary_io_reader.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/binary_io_writer.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/code_objects.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/frame_cache.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/frames.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/gc_stats.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/interpreters.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/module.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/object_reading.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/subprocess.c": "non-core module: zstd.h + parser edge case",
+    "Modules/_remote_debugging/threads.c": "non-core module: zstd.h + parser edge case",
+
+    # Missing third-party libraries
+    "Modules/_gdbmmodule.c": "gdbm development headers not installed",
+    "Modules/_dbmmodule.c": "ndbm development headers not installed",
+    "Modules/_scproxy.c": "macOS SystemConfiguration.framework header not in search path",
+    "Modules/_tkinter.c": "Tcl/Tk header: TCL_HASH_TYPE / X11/Xlib.h edge case",
+    "Modules/tkappinit.c": "Tcl/Tk header: X11/Xlib.h not in search path",
+    "Modules/_ssl/cert.c": "_setSSLError not declared (needs -DWE_HAVE_OPENSSL_ECDH etc.)",
+
 }
 
 

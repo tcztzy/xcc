@@ -1,6 +1,15 @@
 from typing import Any, cast
 
-from xcc.ast import ArrayDecl, TypeSpec
+from xcc.ast import (
+    ArrayDecl,
+    BinaryExpr,
+    CastExpr,
+    CharLiteral,
+    ConditionalExpr,
+    Expr,
+    TypeSpec,
+    UnaryExpr,
+)
 from xcc.types import (
     BOOL,
     CHAR,
@@ -106,7 +115,8 @@ def register_type_spec(analyzer: object, type_spec: TypeSpec) -> None:
     if key in self._record_definitions:
         existing = self._record_definitions[key]
         if existing != tuple(member_types):
-            raise SemaError(f"Duplicate definition: {key}")
+            display_key = key.split(" <scope:", 1)[0]
+            raise SemaError(f"Duplicate definition: {display_key}")
         return
     self._record_definitions[key] = tuple(member_types)
     # Record #pragma pack: since source_line is not tracked on TypeSpec,
@@ -247,11 +257,117 @@ def define_enum_members(analyzer: object, type_spec: TypeSpec, scope: Scope) -> 
     for name, expr in type_spec.enum_members:
         value = next_value
         if expr is not None:
-            value = self._eval_int_constant_expr(expr, scope)
+            value = _eval_enum_int_constant_expr(self, expr, scope)
             if value is None:
                 raise SemaError("Enumerator value is not integer constant")
         scope.define(EnumConstSymbol(name, value))
         next_value = value + 1
+
+
+def _eval_enum_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | None:
+    self = cast(Any, analyzer)
+    value = self._eval_int_constant_expr(expr, scope)
+    if value is not None:
+        return value
+    if isinstance(expr, CharLiteral):
+        return _enum_char_literal_value(self, expr.value)
+    if isinstance(expr, CastExpr):
+        if not self._is_integer_type(self._resolve_type(expr.type_spec)):
+            return None
+        return _eval_enum_int_constant_expr(self, expr.expr, scope)
+    if isinstance(expr, UnaryExpr) and expr.op in {"+", "-", "!", "~"}:
+        operand = _eval_enum_int_constant_expr(self, expr.operand, scope)
+        if operand is None:
+            return None
+        if expr.op == "+":
+            return operand
+        if expr.op == "-":
+            return -operand
+        if expr.op == "!":
+            return 0 if operand else 1
+        return ~operand
+    if isinstance(expr, ConditionalExpr):
+        condition = _eval_enum_int_constant_expr(self, expr.condition, scope)
+        if condition is None:
+            return None
+        return _eval_enum_int_constant_expr(
+            self,
+            expr.then_expr if condition else expr.else_expr,
+            scope,
+        )
+    if isinstance(expr, BinaryExpr):
+        return _eval_enum_binary_int_constant_expr(self, expr, scope)
+    return None
+
+
+def _eval_enum_binary_int_constant_expr(
+    analyzer: object,
+    expr: BinaryExpr,
+    scope: Scope,
+) -> int | None:
+    left = _eval_enum_int_constant_expr(analyzer, expr.left, scope)
+    if left is None:
+        return None
+    if expr.op == "&&":
+        if not left:
+            return 0
+        right = _eval_enum_int_constant_expr(analyzer, expr.right, scope)
+        return None if right is None else int(bool(right))
+    if expr.op == "||":
+        if left:
+            return 1
+        right = _eval_enum_int_constant_expr(analyzer, expr.right, scope)
+        return None if right is None else int(bool(right))
+    right = _eval_enum_int_constant_expr(analyzer, expr.right, scope)
+    if right is None:
+        return None
+    if expr.op == "+":
+        return left + right
+    if expr.op == "-":
+        return left - right
+    if expr.op == "*":
+        return left * right
+    if expr.op == "/":
+        return None if right == 0 else left // right
+    if expr.op == "%":
+        return None if right == 0 else left % right
+    if expr.op == "<<":
+        return None if right < 0 else left << right
+    if expr.op == ">>":
+        return None if right < 0 else left >> right
+    if expr.op == "<":
+        return int(left < right)
+    if expr.op == "<=":
+        return int(left <= right)
+    if expr.op == ">":
+        return int(left > right)
+    if expr.op == ">=":
+        return int(left >= right)
+    if expr.op == "==":
+        return int(left == right)
+    if expr.op == "!=":
+        return int(left != right)
+    if expr.op == "&":
+        return left & right
+    if expr.op == "^":
+        return left ^ right
+    if expr.op == "|":
+        return left | right
+    return None
+
+
+def _enum_char_literal_value(analyzer: object, lexeme: str) -> int | None:
+    self = cast(Any, analyzer)
+    body = self._char_literal_body(lexeme)
+    if body is None:
+        return None
+    units = self._decode_escaped_units(body)
+    if not units:
+        return None
+    value = 0
+    for unit in units:
+        value = (value << 8) | (unit & 0xFF)
+    return value
 
 
 def define_scoped_enum_members(analyzer: object, type_spec: TypeSpec, scope: Scope) -> None:
@@ -292,7 +408,7 @@ def is_invalid_incomplete_record_object_type(analyzer: object, type_spec: TypeSp
         return False
     if type_spec.record_tag is None:
         return True
-    key = self._record_key(type_spec.name, type_spec.record_tag)
+    key = self._record_type_name(type_spec)
     return key not in self._record_definitions
 
 

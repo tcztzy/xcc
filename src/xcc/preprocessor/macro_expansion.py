@@ -55,6 +55,16 @@ def _expand_macro_tokens(
             index += 1
             continue
         macro = macros.get(token.text)
+        if (
+            macro is not None
+            and macro.parameters is None
+            and index > 0
+            and tokens[index - 1].text in {".", "->"}
+            and any(repl.text == macro.name for repl in macro.replacement)
+        ):
+            expanded.append(token)
+            index += 1
+            continue
         # A macro is skipped if: it's in the permanent ancestor set, OR
         # it's the macro whose replacement is currently being rescanned
         # (self-disable to prevent re-expansion of the same macro in its

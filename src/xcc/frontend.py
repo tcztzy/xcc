@@ -62,7 +62,7 @@ def read_source(path: str, *, stdin: TextIO | None = None) -> tuple[str, str]:
         stream = sys.stdin if stdin is None else stdin
         return "<stdin>", stream.read()
     resolved = Path(path)
-    return str(resolved), resolved.read_text(encoding="utf-8")
+    return str(resolved), resolved.read_text(encoding="utf-8", errors="surrogateescape")
 
 
 def compile_source(

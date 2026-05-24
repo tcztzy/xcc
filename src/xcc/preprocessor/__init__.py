@@ -314,8 +314,7 @@ _PREDEFINED_MACROS = (
     "__ORDER_LITTLE_ENDIAN__=1234",
     "__ORDER_BIG_ENDIAN__=4321",
     "__BYTE_ORDER__=__ORDER_LITTLE_ENDIAN__",
-    "__LITTLE_ENDIAN__=__ORDER_LITTLE_ENDIAN__",
-    "__BIG_ENDIAN__=__ORDER_BIG_ENDIAN__",
+    "__LITTLE_ENDIAN__=1",
     "__FLOAT_WORD_ORDER__=__ORDER_LITTLE_ENDIAN__",
     "__SIZE_TYPE__=unsigned long",
     "__PTRDIFF_TYPE__=long",
@@ -724,7 +723,7 @@ class _Preprocessor:
         """Check if a circular include should be skipped because the file's
         include guard is already defined."""
         try:
-            source = include_path.read_text(encoding="utf-8")
+            source = include_path.read_text(encoding="utf-8", errors="surrogateescape")
         except OSError:
             return False
         guard = _detect_include_guard(source)
@@ -800,7 +799,10 @@ class _Preprocessor:
             )
         )
         try:
-            include_source = include_path.read_text(encoding="utf-8")
+            include_source = include_path.read_text(
+                encoding="utf-8",
+                errors="surrogateescape",
+            )
         except OSError as error:
             raise PreprocessorError(
                 f"Unable to read include: {include_name}: {error}",
@@ -982,7 +984,10 @@ class _Preprocessor:
                 code=_PP_INCLUDE_CYCLE,
             )
         try:
-            include_source = include_path.read_text(encoding="utf-8")
+            include_source = include_path.read_text(
+                encoding="utf-8",
+                errors="surrogateescape",
+            )
         except OSError as error:
             raise PreprocessorError(
                 f"Unable to read include: {include_name}: {error}",
@@ -1049,7 +1054,10 @@ class _Preprocessor:
                 code=_PP_INCLUDE_CYCLE,
             )
         try:
-            include_source = include_path.read_text(encoding="utf-8")
+            include_source = include_path.read_text(
+                encoding="utf-8",
+                errors="surrogateescape",
+            )
         except OSError as error:
             raise PreprocessorError(
                 f"Unable to read include: {include_name}: {error}",

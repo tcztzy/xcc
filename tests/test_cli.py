@@ -119,6 +119,91 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         run.assert_called_once_with(("clang", "-", "--unknown"), check=False)
 
+    def test_main_xcc_backend_passes_o0_to_llc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            obj = root / "ok.o"
+            src.write_text("int f(void){return 0;}", encoding="utf-8")
+
+            def fake_run(cmd, **kwargs):
+                if cmd[0] == "/opt/homebrew/opt/llvm/bin/llc":
+                    Path(cmd[-1]).write_bytes(b"obj")
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+                code, stdout, stderr = self._run_main(
+                    ["--backend=xcc", "-nostdinc", "-c", str(src), "-o", str(obj)]
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        llc_cmd = run.call_args_list[0].args[0]
+        self.assertIn("-O0", llc_cmd)
+        self.assertLess(llc_cmd.index("-O0"), llc_cmd.index("-filetype=obj"))
+
+    def test_main_xcc_backend_link_preserves_linker_args(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            exe = root / "ok"
+            src.write_text("int f(void){return 0;}", encoding="utf-8")
+
+            def fake_run(cmd, **kwargs):
+                if cmd[0] == "/opt/homebrew/opt/llvm/bin/llc":
+                    Path(cmd[-1]).write_bytes(b"obj")
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+                code, stdout, stderr = self._run_main(
+                    [
+                        "--backend=xcc",
+                        "-nostdinc",
+                        str(src),
+                        "-L/tmp/example",
+                        "-lmissing",
+                        "-framework",
+                        "CoreFoundation",
+                        "-o",
+                        str(exe),
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        link_cmd = run.call_args_list[1].args[0]
+        self.assertEqual(link_cmd[0], "clang")
+        self.assertNotIn(str(src), link_cmd)
+        self.assertIn("-L/tmp/example", link_cmd)
+        self.assertIn("-lmissing", link_cmd)
+        self.assertIn("-framework", link_cmd)
+        self.assertIn("CoreFoundation", link_cmd)
+        self.assertIn(str(exe), link_cmd)
+
+    def test_main_xcc_backend_link_drops_forced_source_language(self) -> None:
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "/opt/homebrew/opt/llvm/bin/llc":
+                Path(cmd[-1]).write_bytes(b"obj")
+            return subprocess.CompletedProcess(cmd, 0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "ok"
+            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+                code, stdout, stderr = self._run_main(
+                    ["--backend=xcc", "-nostdinc", "-x", "c", "-", "-o", str(exe)],
+                    stdin_text="int main(void){return 0;}",
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        link_cmd = run.call_args_list[1].args[0]
+        self.assertNotIn("-x", link_cmd)
+        self.assertNotIn("c", link_cmd)
+        self.assertNotIn("-", link_cmd)
+
     def test_main_frontend_unknown_option_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.c"

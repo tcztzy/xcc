@@ -100,7 +100,8 @@ def analyze_file_scope_decl(analyzer: object, declaration: Stmt) -> None:
         )
         if declaration.init is not None:
             symbol.has_init = True
-        a._file_scope.define(symbol)
+        a._file_scope.define_file_scope(symbol)
+        var_type = symbol.type_
         if declaration.init is not None:
             if declaration.storage_class == "extern":
                 raise SemaError(a._extern_initializer_message("file-scope"))
@@ -113,7 +114,8 @@ def analyze_file_scope_decl(analyzer: object, declaration: Stmt) -> None:
 
                 if isinstance(declaration.init, _InitList):
                     symbol._init_expr = declaration.init
-            if var_type.is_array() and var_type.declarator_ops[0][1] < 0:
+            array_bound = var_type.declarator_ops[0][1] if var_type.is_array() else None
+            if isinstance(array_bound, int) and array_bound < 0:
                 inferred = a._infer_array_size_from_init(declaration.init)
                 if inferred is not None:
                     new_ops = (("arr", inferred),) + var_type.declarator_ops[1:]

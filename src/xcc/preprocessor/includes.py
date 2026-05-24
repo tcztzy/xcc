@@ -146,7 +146,27 @@ def _resolve_include(
         candidate = root / include_name
         if candidate.is_file():
             return candidate.resolve(), searched_roots
+        framework_candidate = _framework_include_candidate(root, include_name)
+        if framework_candidate is not None:
+            return framework_candidate.resolve(), searched_roots
     return None, searched_roots
+
+
+def _framework_include_candidate(root: Path, include_name: str) -> Path | None:
+    parts = Path(include_name).parts
+    if len(parts) < 2:
+        return None
+    framework_name = parts[0]
+    relative_header = Path(*parts[1:])
+    framework_roots: list[Path] = []
+    if root.name == "include" and root.parent.name == "usr":
+        framework_roots.append(root.parent.parent / "System" / "Library" / "Frameworks")
+    framework_roots.append(root / "System" / "Library" / "Frameworks")
+    for framework_root in framework_roots:
+        candidate = framework_root / f"{framework_name}.framework" / "Headers" / relative_header
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _parse_embed_body(body: str) -> tuple[str, bool, dict[str, str]]:

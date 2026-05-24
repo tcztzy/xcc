@@ -128,6 +128,7 @@ class Parser:
         self._typedef_qualified_scopes: list[dict[str, bool]] = [{}]
         self._ordinary_name_scopes: list[set[str]] = [set()]
         self._ordinary_type_scopes: list[dict[str, TypeSpec]] = [{}]
+        self._ordinary_value_scopes: list[dict[str, int]] = [{}]
         self._capture_next_fn_params: bool = False
         self._function_def_info: tuple[list[Param], bool, bool] | None = None
 
@@ -149,12 +150,14 @@ class Parser:
         else:
             self._ordinary_name_scopes.append(set(names))
         self._ordinary_type_scopes.append({} if types is None else dict(types))
+        self._ordinary_value_scopes.append({})
 
     def _pop_scope(self) -> None:
         self._typedef_scopes.pop()
         self._typedef_qualified_scopes.pop()
         self._ordinary_name_scopes.pop()
         self._ordinary_type_scopes.pop()
+        self._ordinary_value_scopes.pop()
 
     def _define_typedef(
         self,
@@ -172,6 +175,20 @@ class Parser:
     def _define_ordinary_type(self, name: str, type_spec: TypeSpec) -> None:
         self._define_ordinary_name(name)
         self._ordinary_type_scopes[-1][name] = type_spec
+
+    def _define_ordinary_constant(self, name: str, value: int) -> None:
+        self._define_ordinary_name(name)
+        self._ordinary_value_scopes[-1][name] = value
+
+    def _lookup_ordinary_constant(self, name: str) -> int | None:
+        for values, ordinary_names in zip(
+            reversed(self._ordinary_value_scopes),
+            reversed(self._ordinary_name_scopes),
+            strict=True,
+        ):
+            if name in ordinary_names:
+                return values.get(name)
+        return None
 
     def _lookup_ordinary_type(self, name: str) -> TypeSpec | None:
         for types, ordinary_names in zip(
@@ -193,10 +210,12 @@ class Parser:
                 return None
             type_spec = typedefs.get(name)
             if type_spec is not None:
-                # Return a copy without enum members — they were already
+                # Return a copy without scoped definition bodies — they were
                 # registered when the typedef was defined and must not be
                 # re-registered when the typedef is referenced.
-                if type_spec.enum_members:
+                if type_spec.enum_members or (
+                    type_spec.record_tag is not None and type_spec.has_record_body
+                ):
                     return TypeSpec(
                         type_spec.name,
                         declarator_ops=type_spec.declarator_ops,
@@ -204,9 +223,10 @@ class Parser:
                         is_atomic=type_spec.is_atomic,
                         atomic_target=type_spec.atomic_target,
                         enum_tag=type_spec.enum_tag,
+                        enum_members=(),
                         record_tag=type_spec.record_tag,
-                        record_members=type_spec.record_members,
-                        has_record_body=type_spec.has_record_body,
+                        record_members=(),
+                        has_record_body=False,
                         typeof_expr=type_spec.typeof_expr,
                     )
                 return type_spec
@@ -665,9 +685,11 @@ class Parser:
                 self._current(),
             )
         base_is_qualified_typedef = False
+        base_typedef_type: TypeSpec | None = None
         current = self._current()
         if current.kind == TokenKind.IDENT and isinstance(current.lexeme, str):
             base_is_qualified_typedef = self._is_top_level_qualified_typedef(current.lexeme)
+            base_typedef_type = self._lookup_typedef(current.lexeme)
         base_has_leading_qualifier = (
             self._current().kind == TokenKind.KEYWORD
             and self._current().lexeme in TYPE_QUALIFIER_KEYWORDS
@@ -676,6 +698,7 @@ class Parser:
             and self._current().lexeme in _IGNORED_IDENT_TYPE_QUALIFIERS
         )
         base_type = self._parse_type_spec(parse_pointer_depth=not is_typedef)
+        self._skip_type_qualifiers()
         self._skip_decl_attributes()
         if self._check_punct(";"):
             self._reject_invalid_alignment_context(
@@ -703,14 +726,12 @@ class Parser:
         # that subsequent declarators in a comma-separated list start clean.
         if not is_typedef and base_type.declarator_ops:
             # All ops absorbed by parse_pointer_depth are trailing ptr ops.
-            trailing_ptrs = 0
-            for kind, _ in reversed(base_type.declarator_ops):
-                if kind == "ptr":
-                    trailing_ptrs += 1
-                else:
-                    break
-            if trailing_ptrs:
-                raw_declarator_ops = base_type.declarator_ops[:-trailing_ptrs]
+            if base_typedef_type is not None:
+                prefix_len = max(
+                    0,
+                    len(base_type.declarator_ops) - len(base_typedef_type.declarator_ops),
+                )
+                raw_declarator_ops = base_type.declarator_ops[prefix_len:]
                 raw_base_type = TypeSpec(
                     base_type.name,
                     declarator_ops=raw_declarator_ops,
@@ -724,7 +745,28 @@ class Parser:
                     typeof_expr=base_type.typeof_expr,
                 )
             else:
-                raw_base_type = base_type
+                trailing_ptrs = 0
+                for kind, _ in reversed(base_type.declarator_ops):
+                    if kind == "ptr":
+                        trailing_ptrs += 1
+                    else:
+                        break
+                if trailing_ptrs:
+                    raw_declarator_ops = base_type.declarator_ops[:-trailing_ptrs]
+                    raw_base_type = TypeSpec(
+                        base_type.name,
+                        declarator_ops=raw_declarator_ops,
+                        qualifiers=base_type.qualifiers,
+                        is_atomic=base_type.is_atomic,
+                        atomic_target=base_type.atomic_target,
+                        enum_tag=base_type.enum_tag,
+                        enum_members=base_type.enum_members,
+                        record_tag=base_type.record_tag,
+                        record_members=base_type.record_members,
+                        typeof_expr=base_type.typeof_expr,
+                    )
+                else:
+                    raw_base_type = base_type
         else:
             raw_base_type = base_type
         is_first_declarator = True
@@ -755,6 +797,7 @@ class Parser:
             else:
                 decl_type = self._build_declarator_type(raw_base_type, declarator_ops)
             if is_typedef:
+                self._skip_decl_extensions()
                 if self._check_punct("="):
                     raise ParserError("Typedef cannot have initializer", self._current())
                 is_top_level_qualified = self._is_top_level_qualified_type_name(
@@ -1159,6 +1202,9 @@ class Parser:
 
     def _consume_overloadable_decl_attributes(self) -> bool:
         return _extensions._consume_overloadable_decl_attributes(self)
+
+    def _consume_decl_attribute_alignment(self) -> tuple[bool, int | None, Token | None]:
+        return _extensions._consume_decl_attribute_alignment(self)
 
     def _skip_decl_attributes(self) -> bool:
         return _extensions._skip_decl_attributes(self)

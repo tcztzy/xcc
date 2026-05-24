@@ -5,7 +5,7 @@ from pathlib import Path
 from .common import PreprocessorError
 from .macros import _Macro, _render_macro_tokens
 
-_DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$")
+_DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$", re.DOTALL)
 _ASM_PREFIX_RE = re.compile(r"^\s*(?:__asm__|__asm|asm)\b")
 _ASM_STMT_RE = re.compile(r"^\s*asm\b")
 _ASM_LABEL_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\b[^;]*\)")
@@ -66,7 +66,10 @@ def _parse_directive(line: str) -> tuple[str, str] | None:
     match = _DIRECTIVE_RE.match(line)
     if match is None:
         return None
-    return match.group("name"), match.group("body")
+    body = match.group("body")
+    if body.endswith("\n"):
+        body = body[:-1]
+    return match.group("name"), body
 
 
 def _blank_line(line: str) -> str:

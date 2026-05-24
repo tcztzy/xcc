@@ -1,8 +1,110 @@
-site_name: XCC
-site_description: A C compiler in Python targeting CPython.
+site_name: XCC — Compiler Construction Guide
+site_description: C11 compiler in Python with LLVM IR backend. A practical guide to compiler construction.
 docs_dir: docs
 theme:
-  name: mkdocs
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.indexes
+    - toc.follow
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+  icon:
+    repo: fontawesome/brands/github
+
+repo_url: https://github.com/tcztzy/xcc
+repo_name: tcztzy/xcc
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: zh
+          name: 中文
+          build: true
+          nav_translations:
+            Home: 首页
+            Compiler Pipeline Overview: 编译器流水线总览
+            Frontend: 前端
+            Semantic Analysis: 语义分析
+            IR Landscape: IR 全景对比
+            Optimization: 优化
+            Backend & Code Generation: 后端与代码生成
+            Five Compilers Compared: 五编译器横向对比
+            XCC Architecture: XCC 架构详解
+            Learning Path: 学习路径
+            Roadmap: Roadmap
+            References: 参考资料
+            CPython Configure Gate (Design): CPython Configure Gate (设计)
+            CPython Configure Gate (Implementation): CPython Configure Gate (实施)
+            mold Manual: mold 手册
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+
 nav:
   - Home: index.md
+  - Compiler Pipeline Overview: pipeline-overview.md
+  - Frontend: frontend.md
+  - Semantic Analysis: semantic-analysis.md
+  - IR Landscape: ir-landscape.md
+  - Optimization: optimization.md
+  - Backend & Code Generation: backend.md
+  - Five Compilers Compared: compiler-comparison.md
+  - XCC Architecture: xcc-architecture.md
+  - Learning Path: learning-path.md
   - Roadmap: roadmap.md
+  - References:
+    - CPython Configure Gate (Design): plans/2026-02-27-cpython-configure-gate-design.md
+    - CPython Configure Gate (Implementation): plans/2026-02-27-cpython-configure-gate.md
+    - mold Manual: _sources/mold-manual.md

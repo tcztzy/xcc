@@ -741,6 +741,30 @@ class SemaTests(unittest.TestCase):
         self.assertIs(func_symbol.locals["x"].type_, INT)
         self.assertEqual(func_symbol.locals["x"].alignment, 4)
 
+    def test_static_assert_alignof_expression_uses_explicit_object_alignment(self) -> None:
+        source = (
+            "int main(void){"
+            "_Alignas(64) char buf[4];"
+            "_Static_assert(__alignof__(buf) >= 64, \"aligned\");"
+            "return 0;"
+            "}"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertIn("main", sema.functions)
+
+    def test_gnu_aligned_attribute_sets_object_alignment(self) -> None:
+        source = (
+            "int main(void){"
+            "__attribute__((aligned(64))) char buf[4];"
+            "_Static_assert(__alignof__(buf) >= 64, \"aligned\");"
+            "return 0;"
+            "}"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertEqual(sema.functions["main"].locals["buf"].alignment, 64)
+
     def test_alignas_rejects_weaker_alignment_than_type(self) -> None:
         unit = parse(list(lex("int main(void){_Alignas(1) int x=1; return x;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -1355,7 +1379,23 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex('int main(){"abc";return 0;}')))
         sema = analyze(unit)
         expr = _body(unit.functions[0]).statements[0].expr
-        self.assertEqual(sema.type_map.get(expr), Type("char", 1))
+        self.assertEqual(sema.type_map.get(expr), CHAR.array_of(4))
+
+    def test_sizeof_string_literal_includes_null_terminator(self) -> None:
+        source = (
+            '_Static_assert(sizeof("n_fields") == 9, "bad");\n'
+            'struct A { long len; char data[sizeof("n_fields")]; };'
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertEqual(sema.record_definitions["struct A"][1].type_, CHAR.array_of(9))
+
+    def test_wide_string_literal_typemap_and_sizeof(self) -> None:
+        source = '_Static_assert(sizeof(L"ab") == 12, "bad"); int main(){L"ab"; return 0;}'
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        expr = _body(unit.functions[0]).statements[0].expr
+        self.assertEqual(sema.type_map.get(expr), INT.array_of(3))
 
     def test_string_literal_assign_to_char_pointer(self) -> None:
         unit = parse(list(lex('int main(){char *s="abc";return 0;}')))
@@ -1469,6 +1509,24 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "case value is not integer constant")
 
+    def test_enum_multichar_literal_constant_ok(self) -> None:
+        unit = parse(list(lex("enum { TAG = 'subj' }; int main(void){return 0;}")))
+        sema = analyze(unit)
+        assert sema.file_scope is not None
+        symbol = sema.file_scope.lookup("TAG")
+        self.assertIsInstance(symbol, sema_symbols.EnumConstSymbol)
+        self.assertEqual(symbol.value, 0x7375626A)
+
+    def test_enum_multichar_literal_in_cast_binary_expr_ok(self) -> None:
+        source = (
+            "enum { TAG = (unsigned int)((((unsigned int)'ntlm' & 0xff000000U) >> 24) | "
+            "((((unsigned int)'ntlm') & 0x00ff0000U) >> 8)) };"
+            "int main(void){return 0;}"
+        )
+        sema = analyze(parse(list(lex(source))))
+        assert sema.file_scope is not None
+        self.assertIsInstance(sema.file_scope.lookup("TAG"), sema_symbols.EnumConstSymbol)
+
     def test_case_invalid_char_literal_constant_error(self) -> None:
         unit = TranslationUnit(
             [
@@ -1532,6 +1590,19 @@ class SemaTests(unittest.TestCase):
         assert expr is not None
         self.assertIsInstance(expr, ConditionalExpr)
         self.assertIs(sema.type_map.get(expr), DOUBLE)
+
+    def test_conditional_same_union_top_level_qualifier_typemap(self) -> None:
+        source = (
+            "union R { long bits; };\n"
+            "const union R nil = {0};\n"
+            "union R f(int c, union R value){ return c ? value : nil; }"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expr = _body(unit.functions[0]).statements[0].value
+        assert expr is not None
+        self.assertIsInstance(expr, ConditionalExpr)
+        self.assertEqual(sema.type_map.get(expr), Type("union R", qualifiers=("const",)))
 
     def test_conditional_pointer_same_type_typemap(self) -> None:
         source = "int main(){int x=1; int *p=&x; int *q=1 ? p : p; return q!=0;}"
@@ -2973,6 +3044,23 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_same_record_tag_can_be_defined_in_distinct_block_scopes(self) -> None:
+        source = (
+            "int f(void){union U { int i; } u; u.i=1; return u.i;}"
+            "int g(void){union U { long l; } u; u.l=2; return (int)u.l;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
+        self.assertIn("g", sema.functions)
+
+    def test_tagged_record_typedef_use_does_not_redefine_tag_in_block_scope(self) -> None:
+        source = "typedef struct S { int value; } S; S make(void){ S s; return s; }"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertEqual(sema.functions["make"].return_type, Type("struct S"))
+        self.assertEqual(sema.functions["make"].locals["s"].type_, Type("struct S"))
+
     def test_anonymous_struct_object_type(self) -> None:
         unit = parse(list(lex("int main(){struct { int x; } v; return 0;}")))
         sema = analyze(unit)
@@ -3086,6 +3174,14 @@ class SemaTests(unittest.TestCase):
         return_expr = _body(unit.functions[0]).statements[3].value
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
+
+    def test_record_member_pointer_declaration_list_typemap(self) -> None:
+        source = "struct token { const char *start, *end; }; int main(void){return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        expected = Type("char", 1, qualifiers=("const",))
+        self.assertEqual(sema.record_definitions["struct token"][0].type_, expected)
+        self.assertEqual(sema.record_definitions["struct token"][1].type_, expected)
 
     def test_relational_pointer_same_type_typemap(self) -> None:
         source = "int main(){int a[2]; int *p=&a[0]; int *q=&a[1]; return p<q;}"
@@ -3509,6 +3605,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex('int main(){char s[]="abc";return 0;}')))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
+        self.assertEqual(sema.functions["main"].locals["s"].type_, CHAR.array_of(4))
 
     def test_incomplete_const_char_array_string_initializer_ok(self) -> None:
         unit = parse(list(lex('const char s[]="hello"; int main(){return s[0];}')))
@@ -3521,7 +3618,14 @@ class SemaTests(unittest.TestCase):
         self.assertIn("main", sema.functions)
 
     def test_duplicate_file_scope_object_declaration(self) -> None:
+        # C11 6.9.2: multiple tentative definitions with same type merge silently.
         unit = parse(list(lex("int g; int g; int main(){return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_duplicate_file_scope_incompatible_types(self) -> None:
+        # Conflicting types at file scope: should error.
+        unit = parse(list(lex("int g; float g; int main(){return 0;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: g")
@@ -3779,6 +3883,18 @@ class SemaTests(unittest.TestCase):
         unit = parse(
             list(lex("int main(void){union U { int x; int y; } u = {.y = 2}; return u.y;}"))
         )
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_union_nested_designators_same_member_ok(self) -> None:
+        source = (
+            "int main(void){"
+            "union U { struct { int code; int arg; } op; int cache; } u = "
+            "{.op.code = 25, .op.arg = 0};"
+            "return u.op.code;"
+            "}"
+        )
+        unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
@@ -4337,6 +4453,20 @@ class SemaTests(unittest.TestCase):
             str(ctx.exception),
             "Addition operands must be arithmetic or pointer/integer",
         )
+
+    def test_additive_void_pointer_plus_integer_allowed_in_gnu11(self) -> None:
+        source = "void *f(void *p, unsigned long n) { return p + n; }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        return_expr = _body(unit.functions[0]).statements[0].value
+        self.assertEqual(sema.type_map.require(return_expr), VOID.pointer_to())
+
+    def test_additive_void_pointer_minus_integer_allowed_in_gnu11(self) -> None:
+        source = "void *f(void *p, unsigned long n) { return p - n; }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        return_expr = _body(unit.functions[0]).statements[0].value
+        self.assertEqual(sema.type_map.require(return_expr), VOID.pointer_to())
 
     def test_additive_function_pointer_plus_integer_error(self) -> None:
         source = "int f(void){return 0;} int main(){int (*fp)(void)=f; return fp+1==0;}"
@@ -4990,6 +5120,11 @@ class SemaTests(unittest.TestCase):
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Update operand must be integer or pointer")
+
+    def test_update_pointer_to_void_pointer_ok(self) -> None:
+        unit = parse(list(lex("int main(){void *items[2]; void **p=items; ++p; return 0;}")))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_update_function_pointer_error(self) -> None:
         source = "int f(void){return 0;} int main(){int (*fp)(void)=f; ++fp; return 0;}"
@@ -6003,6 +6138,18 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="c11")
         self.assertIsNotNone(sema)
 
+    def test_c11_atomic_load_returns_pointee_type(self) -> None:
+        source = "_Atomic(void*) slot; void use(void *); void f(void) { use(__c11_atomic_load(&slot, 2)); }"
+        unit = parse(list(lex(source)), std="gnu11")
+
+        sema = analyze(unit, std="gnu11")
+
+        outer_call = _body(unit.functions[1]).statements[0].expr
+        self.assertIsInstance(outer_call, CallExpr)
+        inner_call = outer_call.args[0]
+        self.assertIsInstance(inner_call, CallExpr)
+        self.assertEqual(sema.type_map.get(inner_call), Type("void", pointer_depth=1))
+
     def test_builtin_unreachable_accepted_in_gnu11(self) -> None:
         source = (
             "int f(int x) { switch(x) { case 0: return 0; default: __builtin_unreachable(); } }"
@@ -6344,13 +6491,34 @@ class SemaTests(unittest.TestCase):
             analyze(unit, std="gnu11")
         self.assertIn("not integer constant", str(ctx.exception))
 
-    def test_sizeof_expr_global_array_size_vla_error(self) -> None:
-        """sizeof(expr) as global array size without type in map — VLA error."""
+    def test_sizeof_expr_global_array_size_is_integer_constant(self) -> None:
+        """sizeof(expr) as global array size resolves operand type during sema."""
         source = "int x; int arr[sizeof(x)];"
         unit = parse(list(lex(source)), std="gnu11")
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit, std="gnu11")
-        self.assertIn("Variable length array", str(ctx.exception))
+        sema = analyze(unit, std="gnu11")
+        assert sema.file_scope is not None
+        arr = sema.file_scope.lookup("arr")
+        self.assertIsInstance(arr, VarSymbol)
+        assert isinstance(arr, VarSymbol)
+        self.assertEqual(arr.type_, INT.array_of(4))
+
+    def test_sizeof_inferred_array_length_file_scope_bound(self) -> None:
+        """Py_ARRAY_LENGTH-style sizeof(array) / sizeof(array[0]) file-scope bound."""
+        source = (
+            "struct slot { int value; };\n"
+            "static struct slot slotdefs[] = {{1}, {2}, {3}};\n"
+            "_Static_assert(!__builtin_types_compatible_p(typeof(slotdefs), "
+            'typeof(&slotdefs[0])), "array");\n'
+            "static unsigned char dups[sizeof(slotdefs) / sizeof(slotdefs[0]) "
+            "+ ((void)sizeof(struct { int dummy; }), 0)][1 + 10];"
+        )
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        assert sema.file_scope is not None
+        dups = sema.file_scope.lookup("dups")
+        self.assertIsInstance(dups, VarSymbol)
+        assert isinstance(dups, VarSymbol)
+        self.assertEqual(dups.type_, UCHAR.array_of(11).array_of(3))
 
     def test_subscript_on_non_identifier_base_static_assert(self) -> None:
         """SubscriptExpr base not an Identifier can't be constant-evaluated."""
@@ -6862,6 +7030,38 @@ class SemaTests(unittest.TestCase):
         )
         # char(1) + padding(3) + long(8) at align 4: 4 + 8 = 12
         self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 12)
+
+    def test_anonymous_union_member_uses_single_layout_slot(self) -> None:
+        source = """
+struct S {
+  unsigned short counter;
+  unsigned short type_version[2];
+  union {
+    unsigned short keys_version[2];
+    unsigned short dict_offset;
+  };
+  unsigned short descr[4];
+};
+union CodeUnit {
+  unsigned short cache;
+  struct {
+    unsigned char code;
+    unsigned char arg;
+  } op;
+};
+_Static_assert(sizeof(struct S) / sizeof(union CodeUnit) == 9, "bad");
+int f(struct S *s) { return s->dict_offset; }
+"""
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        layout_analyzer = Analyzer()
+        layout_analyzer._record_definitions.update(sema.record_definitions)
+
+        self.assertIn("f", sema.functions)
+        self.assertEqual(
+            layout_analyzer._sizeof_object_base_type(Type("struct S"), None),
+            18,
+        )
 
     def test_struct_layout_pack_clamps_trailing_padding(self) -> None:
         """Trailing padding respects pack alignment."""

@@ -198,7 +198,7 @@ def process_text(
             line_index += 1
             continue
         directive_lines = [line]
-        while directive_lines[-1].rstrip().endswith("\\") and line_index + 1 < len(lines):
+        while _directive_lines_continue(directive_lines) and line_index + 1 < len(lines):
             line_index += 1
             directive_lines.append(lines[line_index])
         directive_cursor = _DirectiveCursor(logical_cursor, len(directive_lines))
@@ -362,6 +362,15 @@ def _blank_directive_lines(
 ) -> None:
     for directive_index, chunk in enumerate(directive_lines):
         out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
+
+
+def _directive_lines_continue(directive_lines: list[str]) -> bool:
+    if directive_lines[-1].rstrip().endswith("\\"):
+        return True
+    in_block_comment = False
+    for chunk in directive_lines:
+        in_block_comment = _scan_block_comment_state(chunk, in_block_comment)
+    return in_block_comment
 
 
 def _scan_directive_comments(

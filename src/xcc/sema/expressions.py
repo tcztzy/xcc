@@ -28,10 +28,80 @@ from xcc.ast import (
     UnaryExpr,
     UpdateExpr,
 )
-from xcc.types import CHAR, INT, ULONG, VOID, Type
+from xcc.types import CHAR, INT, UINT, ULONG, USHORT, VOID, Type
 
 from .format_checking import check_printf_format
 from .symbols import EnumConstSymbol, Scope, SemaError
+
+_ATOMIC_VALUE_RETURN_BUILTINS = {
+    "__atomic_load_n",
+    "__atomic_fetch_add",
+    "__atomic_fetch_sub",
+    "__atomic_fetch_and",
+    "__atomic_fetch_or",
+    "__atomic_fetch_xor",
+    "__atomic_fetch_nand",
+    "__atomic_add_fetch",
+    "__atomic_sub_fetch",
+    "__atomic_and_fetch",
+    "__atomic_or_fetch",
+    "__atomic_xor_fetch",
+    "__atomic_nand_fetch",
+    "__atomic_exchange_n",
+    "__c11_atomic_load",
+    "__c11_atomic_exchange",
+    "__c11_atomic_fetch_add",
+    "__c11_atomic_fetch_sub",
+    "__c11_atomic_fetch_and",
+    "__c11_atomic_fetch_or",
+    "__c11_atomic_fetch_xor",
+    "__scoped_atomic_load",
+    "__scoped_atomic_fetch_add",
+    "__sync_fetch_and_add",
+    "__sync_fetch_and_sub",
+    "__sync_fetch_and_and",
+    "__sync_fetch_and_or",
+    "__sync_fetch_and_xor",
+    "__sync_add_and_fetch",
+    "__sync_sub_and_fetch",
+    "__sync_and_and_fetch",
+    "__sync_or_and_fetch",
+    "__sync_xor_and_fetch",
+    "__sync_val_compare_and_swap",
+    "__sync_lock_test_and_set",
+}
+
+_ATOMIC_VOID_RETURN_BUILTINS = {
+    "__atomic_load",
+    "__atomic_store",
+    "__atomic_store_n",
+    "__atomic_exchange",
+    "__atomic_thread_fence",
+    "__atomic_signal_fence",
+    "__c11_atomic_init",
+    "__c11_atomic_store",
+    "__c11_atomic_thread_fence",
+    "__c11_atomic_signal_fence",
+    "__scoped_atomic_store",
+    "__scoped_atomic_thread_fence",
+    "__sync_lock_release",
+    "__sync_synchronize",
+}
+
+
+def _atomic_builtin_return_type(
+    analyzer: Any,
+    name: str,
+    args: list[Expr],
+    fallback: Type,
+) -> Type:
+    if name in _ATOMIC_VOID_RETURN_BUILTINS:
+        return VOID
+    if name not in _ATOMIC_VALUE_RETURN_BUILTINS or not args:
+        return fallback
+    ptr_type = analyzer._type_map.get(args[0])
+    pointee = None if ptr_type is None else ptr_type.pointee()
+    return fallback if pointee is None else pointee
 
 
 def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
@@ -51,7 +121,18 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         self._type_map.set(expr, INT)
         return INT
     if isinstance(expr, StringLiteral):
-        string_type = CHAR.pointer_to()
+        length = self._string_literal_required_length(expr.value)
+        if length is None:
+            raise SemaError("Invalid string literal")
+        prefix = expr.value[: expr.value.find('"')]
+        if prefix == "L":
+            string_type = INT.array_of(length)
+        elif prefix == "u":
+            string_type = USHORT.array_of(length)
+        elif prefix == "U":
+            string_type = UINT.array_of(length)
+        else:
+            string_type = CHAR.array_of(length)
         self._type_map.set(expr, string_type)
         return string_type
     if isinstance(expr, Identifier):
@@ -380,6 +461,13 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         else_type = self._decay_array_value(self._analyze_expr(expr.else_expr, scope))
         if then_type == else_type:
             result_type = then_type
+        elif not then_type.declarator_ops and self._unqualified_type(
+            then_type
+        ) == self._unqualified_type(else_type):
+            result_type = Type(
+                then_type.name,
+                qualifiers=self._merged_qualifiers(then_type, else_type),
+            )
         else:
             arithmetic_result = self._usual_arithmetic_conversion(then_type, else_type)
             if arithmetic_result is not None:
@@ -613,12 +701,19 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
                         expr.args[1:],
                         scope,
                     )
-                self._type_map.set(expr, signature.return_type)
-                return signature.return_type
+                return_type = _atomic_builtin_return_type(
+                    self,
+                    expr.callee.name,
+                    expr.args,
+                    signature.return_type,
+                )
+                self._type_map.set(expr, return_type)
+                return return_type
             symbol = scope.lookup(expr.callee.name)
             if symbol is None:
                 raise SemaError(f"Undeclared function: {expr.callee.name}")
             callee_type = symbol.type_
+            self._type_map.set(expr.callee, callee_type)
         else:
             callee_type = self._analyze_expr(expr.callee, scope)
             overload_name = self._get_overload_expr_name(expr.callee)

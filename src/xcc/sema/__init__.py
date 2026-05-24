@@ -27,6 +27,9 @@ from xcc.types import (
     INT,
     LONG,
     LONGDOUBLE,
+    UINT,
+    ULLONG,
+    USHORT,
     VOID,
     Type,
 )
@@ -172,6 +175,8 @@ class Analyzer:
         self._current_scope: Scope | None = None
         self._anon_record_counter = 0
         self._anon_record_names: dict[tuple[str, tuple[RecordMemberDecl, ...]], str] = {}
+        self._scoped_record_counter = 0
+        self._record_type_names_by_spec_id: dict[int, str] = {}
         self._register_builtin_functions()
 
     def _register_builtin_functions(self) -> None:
@@ -259,29 +264,39 @@ class Analyzer:
             self._function_signatures[name] = _atomic_sig
 
         # Math builtins used by macOS SDK and CPython
-        _MATH_BUILTINS = (
-            "__builtin_fabs",
+        _FLOAT_MATH_BUILTINS = (
             "__builtin_fabsf",
-            "__builtin_fabsl",
-            "__builtin_inf",
             "__builtin_inff",
-            "__builtin_infl",
-            "__builtin_nan",
             "__builtin_nanf",
-            "__builtin_nanl",
-            "__builtin_huge_val",
             "__builtin_huge_valf",
-            "__builtin_huge_vall",
-            "__builtin_isinf",
-            "__builtin_isnan",
-            "__builtin_isfinite",
-            "__builtin_copysign",
             "__builtin_copysignf",
+        )
+        _DOUBLE_MATH_BUILTINS = (
+            "__builtin_fabs",
+            "__builtin_inf",
+            "__builtin_nan",
+            "__builtin_huge_val",
+            "__builtin_copysign",
+        )
+        _LONGDOUBLE_MATH_BUILTINS = (
+            "__builtin_fabsl",
+            "__builtin_infl",
+            "__builtin_nanl",
+            "__builtin_huge_vall",
             "__builtin_copysignl",
         )
-        _math_sig = FunctionSignature(return_type=DOUBLE, params=None, is_variadic=True)
-        for name in _MATH_BUILTINS:
-            self._function_signatures[name] = _math_sig
+        for name in _FLOAT_MATH_BUILTINS:
+            self._function_signatures[name] = FunctionSignature(
+                return_type=FLOAT, params=None, is_variadic=True
+            )
+        for name in _DOUBLE_MATH_BUILTINS:
+            self._function_signatures[name] = FunctionSignature(
+                return_type=DOUBLE, params=None, is_variadic=True
+            )
+        for name in _LONGDOUBLE_MATH_BUILTINS:
+            self._function_signatures[name] = FunctionSignature(
+                return_type=LONGDOUBLE, params=None, is_variadic=True
+            )
 
         # Integer-returning builtins with generic params (used as predicates)
         _PREDICATE_BUILTINS = ("__builtin_constant_p",)
@@ -298,12 +313,24 @@ class Analyzer:
         for name in _VOID_BUILTINS:
             self._function_signatures[name] = _void_sig
 
+        # void*-returning builtins with generic params
+        _VOIDP_BUILTINS = (
+            "__builtin_alloca",
+            "__builtin_alloca_with_align",
+            "__builtin_malloc",
+            "__builtin_calloc",
+        )
+        _voidp_sig = FunctionSignature(
+            return_type=VOID.pointer_to(),
+            params=None,
+            is_variadic=True,
+        )
+        for name in _VOIDP_BUILTINS:
+            self._function_signatures[name] = _voidp_sig
+
         # Integer-returning builtins
         _INTEGER_BUILTINS = (
             "__builtin_flt_rounds",
-            "__builtin_bswap16",
-            "__builtin_bswap32",
-            "__builtin_bswap64",
             # GCC count-leading/trailing-zeros and bit-scan builtins
             "__builtin_clz",
             "__builtin_clzl",
@@ -321,10 +348,22 @@ class Analyzer:
             "__builtin_umul_overflow",
             "__builtin_umull_overflow",
             "__builtin_umulll_overflow",
+            "__builtin_isinf",
+            "__builtin_isnan",
+            "__builtin_isfinite",
         )
         _int_sig = FunctionSignature(return_type=INT, params=None, is_variadic=True)
         for name in _INTEGER_BUILTINS:
             self._function_signatures[name] = _int_sig
+        self._function_signatures["__builtin_bswap16"] = FunctionSignature(
+            return_type=USHORT, params=None, is_variadic=True
+        )
+        self._function_signatures["__builtin_bswap32"] = FunctionSignature(
+            return_type=UINT, params=None, is_variadic=True
+        )
+        self._function_signatures["__builtin_bswap64"] = FunctionSignature(
+            return_type=ULLONG, params=None, is_variadic=True
+        )
         # __builtin_assume_aligned returns the same pointer type as its
         # first argument. Register it separately with a void* signature
         # so that void *p = __builtin_assume_aligned(q, N) type-checks.
@@ -357,7 +396,7 @@ class Analyzer:
         for external in externals:
             if isinstance(external, FunctionDef) and external.body is not None:
                 self._analyze_function(external)
-        return SemaUnit(self._functions, self._type_map, self._record_definitions)
+        return SemaUnit(self._functions, self._type_map, self._record_definitions, self._file_scope)
 
     def _register_function_external(self, func: FunctionDef) -> None:
         if func.storage_class not in {None, "static", "extern"}:
@@ -373,7 +412,12 @@ class Analyzer:
             raise SemaError(f"Conflicting declaration: {func.name}")
         if self._file_scope.lookup_typedef(func.name) is not None:
             raise SemaError(f"Conflicting declaration: {func.name}")
-        signature = self._signature_from(func)
+        previous_scope = self._current_scope
+        self._current_scope = self._file_scope
+        try:
+            signature = self._signature_from(func)
+        finally:
+            self._current_scope = previous_scope
         self._register_function_signature(
             func.name,
             signature,
@@ -527,7 +571,9 @@ class Analyzer:
         self._function_labels = set()
         self._pending_goto_labels = []
         previous_return_type = self._current_return_type
+        previous_scope = self._current_scope
         self._current_return_type = return_type
+        self._current_scope = scope
         try:
             self._define_params(func.params, scope)
             self._analyze_compound(func.body, scope, return_type)
@@ -537,6 +583,7 @@ class Analyzer:
             self._functions[func.name] = FunctionSymbol(func.name, return_type, scope.symbols)
         finally:
             self._current_return_type = previous_return_type
+            self._current_scope = previous_scope
 
     def _define_params(self, params: list[Param], scope: Scope) -> None:
         for param in params:
@@ -642,7 +689,12 @@ class Analyzer:
         )
 
     def _analyze_file_scope_decl(self, declaration: Stmt) -> None:
-        analyze_file_scope_decl(self, declaration)
+        previous_scope = self._current_scope
+        self._current_scope = self._file_scope
+        try:
+            analyze_file_scope_decl(self, declaration)
+        finally:
+            self._current_scope = previous_scope
 
     def _signature_from(self, func: FunctionDef) -> FunctionSignature:
         if not func.has_prototype:
@@ -676,12 +728,36 @@ class Analyzer:
         return record_key(kind, tag)
 
     def _record_type_name(self, type_spec: TypeSpec) -> str:
+        if type_spec.record_tag is not None:
+            cached = self._record_type_names_by_spec_id.get(id(type_spec))
+            if cached is not None:
+                return cached
+            scope = self._current_scope if self._current_scope is not None else self._file_scope
+            if type_spec.has_record_body:
+                name = scope.lookup_record_tag_current(type_spec.name, type_spec.record_tag)
+                if name is None:
+                    name = self._new_record_type_name(type_spec.name, type_spec.record_tag, scope)
+                    scope.define_record_tag(type_spec.name, type_spec.record_tag, name)
+            else:
+                name = scope.lookup_record_tag(type_spec.name, type_spec.record_tag)
+                if name is None:
+                    name = self._new_record_type_name(type_spec.name, type_spec.record_tag, scope)
+                    scope.define_record_tag(type_spec.name, type_spec.record_tag, name)
+            self._record_type_names_by_spec_id[id(type_spec)] = name
+            return name
         name, self._anon_record_counter = record_type_name(
             type_spec,
             self._anon_record_names,
             self._anon_record_counter,
         )
         return name
+
+    def _new_record_type_name(self, kind: str, tag: str, scope: Scope) -> str:
+        base_name = self._record_key(kind, tag)
+        if scope is self._file_scope:
+            return base_name
+        self._scoped_record_counter += 1
+        return f"{base_name} <scope:{self._scoped_record_counter}>"
 
     def _normalize_record_members(
         self,
@@ -1176,9 +1252,12 @@ class Analyzer:
 
     def _infer_array_size_from_init(self, initializer: Expr | InitList) -> int | None:
         from xcc.ast import InitList as _InitList
+        from xcc.ast import StringLiteral as _StringLiteral
 
         if isinstance(initializer, _InitList):
             return len(initializer.items)
+        if isinstance(initializer, _StringLiteral):
+            return self._string_literal_required_length(initializer.value)
         return None
 
     def _try_eval_scalar_initializer(

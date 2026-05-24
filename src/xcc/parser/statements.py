@@ -99,6 +99,12 @@ def is_declaration_start(parser: object) -> bool:
         is_decl = parser._is_declaration_start()  # type: ignore
         parser._index = saved_index  # type: ignore
         return is_decl
+    saved_index = parser._index  # type: ignore
+    if parser._skip_decl_attributes():  # type: ignore
+        is_decl = parser._is_declaration_start()  # type: ignore
+        parser._index = saved_index  # type: ignore
+        return is_decl
+    parser._index = saved_index  # type: ignore
     if any(
         parser._check_keyword(keyword)  # type: ignore
         for keyword in (

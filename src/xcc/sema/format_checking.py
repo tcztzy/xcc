@@ -116,6 +116,12 @@ def _check_format_spec(spec: _FormatSpec, arg_type: Type, arg_index: int) -> Non
         pointee = _pointee_or_element(arg_type)
         if pointee is None:  # pragma: no cover
             raise SemaError(_format_flag_msg(arg_index, str(arg_type), "pointer to char"))
+        if spec.length == "l":
+            if not is_integer_type(pointee):  # pragma: no cover
+                raise SemaError(
+                    _format_flag_msg(arg_index, str(arg_type), "pointer to wide character")
+                )
+            return
         if pointee.name not in {"char", "signed char", "unsigned char"}:  # pragma: no cover
             raise SemaError(_format_flag_msg(arg_index, str(arg_type), "pointer to char"))
     elif c == "p":

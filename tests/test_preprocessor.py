@@ -116,6 +116,24 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int ok", result.source)
         self.assertNotIn("int bad", result.source)
 
+    def test_little_endian_host_does_not_define_big_endian_macro(self) -> None:
+        source = (
+            "#ifdef __BIG_ENDIAN__\n"
+            "#define WORDS_BIGENDIAN 1\n"
+            "#endif\n"
+            "#ifdef WORDS_BIGENDIAN\n"
+            "int endian = 1;\n"
+            "#else\n"
+            "int endian = 0;\n"
+            "#endif\n"
+        )
+
+        result = preprocess_source(source, filename="endian.c")
+
+        self.assertNotIn("__BIG_ENDIAN__", result.macro_table)
+        self.assertNotIn("WORDS_BIGENDIAN=1", result.macro_table)
+        self.assertIn("int endian = 0;", result.source)
+
     def test_expand_line_without_macros_short_circuits(self) -> None:
         processor = _Preprocessor(FrontendOptions())
         processor._macros.clear()
@@ -136,6 +154,17 @@ class PreprocessorTests(unittest.TestCase):
         source = "#define ID(x) x\nint main(void){return ID((1 + 2));}\n"
         result = preprocess_source(source, filename="main.c")
         self.assertIn("return ( 1 + 2 )", result.source)
+
+    def test_self_referential_macro_argument_keeps_member_name(self) -> None:
+        source = (
+            "#define usable_arenas (state->mgmt.usable_arenas)\n"
+            "#define UNLIKELY(x) (x)\n"
+            "int f(void){return UNLIKELY(usable_arenas == 0);}\n"
+        )
+        result = preprocess_source(source, filename="main.c")
+
+        self.assertIn("state -> mgmt . usable_arenas", result.source)
+        self.assertNotIn("mgmt . (", result.source)
 
     def test_function_like_define_without_invocation_is_not_expanded(self) -> None:
         source = "#define ID(x) x\nint x = ID;\n"
@@ -1059,6 +1088,23 @@ A(0)
         self.assertNotIn("tail * /", result.source)
         self.assertNotIn("/* comment", result.source)
 
+    def test_define_continuation_survives_multiline_block_comment(self) -> None:
+        result = preprocess_source(
+            "#define M() do { \\\n"
+            "    if (x) { \\\n"
+            "        /* comment\n"
+            "           tail */ \\\n"
+            "        y = 1; \\\n"
+            "    } \\\n"
+            "} while (0)\n"
+            "void f(void) { M(); }\n",
+            filename="define_comment_continuation.c",
+        )
+        before_function, _, function_body = result.source.partition("void f")
+        self.assertNotIn("y = 1", before_function)
+        self.assertIn("y = 1", function_body)
+        self.assertNotIn("tail */", result.source)
+
     def test_block_comment_sigil_inside_string_does_not_disable_directives(self) -> None:
         result = preprocess_source(
             'const char *s="\\"/*";\n#define A 2\nint x=A;\n',
@@ -1677,6 +1723,28 @@ A(0)
             options = FrontendOptions(system_include_dirs=(str(include),))
             result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertEqual(result.source, "int z;\n")
+
+    def test_include_angle_resolves_macos_framework_header_from_sdk_usr_include(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            sdk = Path(tmp) / "MacOSX.sdk"
+            include = sdk / "usr" / "include"
+            framework_headers = (
+                sdk / "System" / "Library" / "Frameworks" / "Foo.framework" / "Headers"
+            )
+            include.mkdir(parents=True)
+            framework_headers.mkdir(parents=True)
+            (framework_headers / "Foo.h").write_text("int framework_header;\n", encoding="utf-8")
+            options = FrontendOptions(system_include_dirs=(str(include),))
+            result = preprocess_source("#include <Foo/Foo.h>\n", filename="main.c", options=options)
+        self.assertEqual(result.source, "int framework_header;\n")
+
+    def test_include_allows_non_utf8_bytes_in_header_comments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            include = Path(tmp)
+            (include / "legacy.h").write_bytes(b"// legacy \x92 byte\nint ok;\n")
+            options = FrontendOptions(include_dirs=(str(include),))
+            result = preprocess_source("#include <legacy.h>\n", filename="main.c", options=options)
+        self.assertIn("int ok;", result.source)
 
     def test_host_system_include_dirs_are_searched_for_angle_includes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2708,8 +2776,8 @@ A(0)
         self.assertIn("int c32z = 4 ;", result.source)
         self.assertIn("int ord = 1234 ;", result.source)
         self.assertIn("int bo = 1234 ;", result.source)
-        self.assertIn("int le = 1234 ;", result.source)
-        self.assertIn("int be = 4321 ;", result.source)
+        self.assertIn("int le = 1 ;", result.source)
+        self.assertIn("int be = __BIG_ENDIAN__;", result.source)
         self.assertIn("int fwo = 1234 ;", result.source)
         self.assertIn("int ww = 32 ;", result.source)
         self.assertIn("int wiw = 32 ;", result.source)

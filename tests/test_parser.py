@@ -1162,6 +1162,24 @@ class ParserTests(unittest.TestCase):
             ),
         )
 
+    def test_enum_member_allows_availability_attribute_before_value(self) -> None:
+        source = (
+            "int main(){"
+            "enum { VALUE DISPATCH_ENUM_API_AVAILABLE(macos(10.14), ios(12.0)) = 3 } x;"
+            "return VALUE;"
+            "}"
+        )
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec.enum_members, (("VALUE", IntLiteral("3")),))
+
+    def test_array_size_uses_prior_enum_constant_value(self) -> None:
+        unit = parse(list(lex("enum { SIZE = 64 }; typedef char Name[SIZE + 4];")))
+        typedef = unit.declarations[1]
+        self.assertIsInstance(typedef, TypedefDecl)
+        self.assertEqual(typedef.type_spec.array_lengths, (68,))
+
     def test_tagged_struct_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){struct Node { int value; }; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -1176,6 +1194,13 @@ class ParserTests(unittest.TestCase):
         )
         self.assertIsNone(stmt.name)
         self.assertIsNone(stmt.init)
+
+    def test_record_member_allows_nullability_after_typedef_type(self) -> None:
+        source = "typedef const void *CFTypeRef; struct S { CFTypeRef __nullable passphrase; };"
+        unit = parse(list(lex(source)))
+        stmt = unit.declarations[1]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec.record_members[0].name, "passphrase")
 
     def test_tagged_struct_forward_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){struct Node;return 0;}")))
@@ -1242,6 +1267,19 @@ class ParserTests(unittest.TestCase):
             ),
         )
 
+    def test_record_member_pointer_declaration_list_does_not_accumulate_stars(self) -> None:
+        unit = parse(list(lex("struct token { const char *start, *end; };")))
+        stmt = unit.declarations[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        expected = TypeSpec("char", 1, qualifiers=("const",))
+        self.assertEqual(
+            stmt.type_spec.record_members,
+            (
+                RecordMemberDecl(expected, "start"),
+                RecordMemberDecl(expected, "end"),
+            ),
+        )
+
     def test_flexible_array_member(self) -> None:
         unit = parse(list(lex("int main(){struct S { int n; int data[]; } s; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -1288,6 +1326,16 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("int"))
         self.assertEqual(stmt.name, "value")
+
+    def test_gnu_attribute_block_scope_function_declaration_is_ignored(self) -> None:
+        source = (
+            'int main(){__attribute__((visibility("default"))) '
+            "int helper(int); return 0;}"
+        )
+        unit = parse(list(lex(source)))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.name, "helper")
 
     def test_declspec_after_type_qualifier_is_ignored(self) -> None:
         unit = parse(list(lex("const __declspec(selectany) int x2 = 2;")))
@@ -2763,6 +2811,14 @@ class ParserTests(unittest.TestCase):
         declaration = unit.declarations[0]
         self.assertIsInstance(declaration, TypedefDecl)
         self.assertEqual(declaration.type_spec, TypeSpec("int", is_atomic=True))
+
+    def test_typedef_ignores_gnu_attribute_after_name(self) -> None:
+        unit = parse(
+            list(lex("typedef unsigned long long Flags __attribute__((aligned(8)));"))
+        )
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        self.assertEqual(declaration.type_spec, TypeSpec("unsigned long long"))
 
     def test_function_declaration_marks_overloadable_attribute_before_name(self) -> None:
         unit = parse(list(lex("int __attribute__((overloadable)) test(int);")))

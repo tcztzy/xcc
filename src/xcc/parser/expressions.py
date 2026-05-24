@@ -282,6 +282,16 @@ def parse_postfix(parser: object) -> Expr:
                 type_spec = parser._parse_type_name()  # type: ignore
                 parser._expect_punct(")")  # type: ignore
                 expr = BuiltinVaArgExpr(ap=ap, type_spec=type_spec)
+            elif isinstance(expr, Identifier) and expr.name in {
+                "_Py_CAST",
+                "_Py_STATIC_CAST",
+                "_Py_FUNC_CAST",
+            }:
+                type_spec = parser._parse_type_name()  # type: ignore
+                parser._expect_punct(",")  # type: ignore
+                value = parser._parse_assignment()  # type: ignore
+                parser._expect_punct(")")  # type: ignore
+                expr = CastExpr(type_spec, value)
             else:
                 args = parser._parse_arguments()  # type: ignore
                 parser._expect_punct(")")  # type: ignore

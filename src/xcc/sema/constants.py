@@ -2,8 +2,10 @@ from xcc.ast import (
     AlignofExpr,
     BinaryExpr,
     BuiltinOffsetofExpr,
+    BuiltinTypesCompatExpr,
     CastExpr,
     CharLiteral,
+    CommaExpr,
     ConditionalExpr,
     Expr,
     GenericExpr,
@@ -25,7 +27,7 @@ from xcc.types import (
     Type,
 )
 
-from .symbols import EnumConstSymbol, Scope, VarSymbol
+from .symbols import EnumConstSymbol, Scope, SemaError, VarSymbol
 from .type_helpers import SIGNED_INTEGER_TYPE_LIMITS, UNSIGNED_INTEGER_TYPE_LIMITS
 
 HEX_DIGITS = "0123456789abcdefABCDEF"
@@ -147,20 +149,48 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
             return analyzer._sizeof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore
         if expr.expr is not None:
             operand_type = analyzer._type_map.get(expr.expr)  # type: ignore
+            if operand_type is None:
+                try:
+                    operand_type = analyzer._analyze_expr(expr.expr, scope)  # type: ignore
+                except SemaError:
+                    return None
             if operand_type is not None:
                 return analyzer._sizeof_type(operand_type)  # type: ignore
         return None
     if isinstance(expr, AlignofExpr):
-        if expr.type_spec is None:
+        if expr.type_spec is not None:
+            analyzer._register_type_spec(expr.type_spec)  # type: ignore
+            if analyzer._is_invalid_alignof_type_spec(expr.type_spec):  # type: ignore
+                return None
+            return analyzer._alignof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore
+        if expr.expr is None:
             return None
-        analyzer._register_type_spec(expr.type_spec)  # type: ignore
-        if analyzer._is_invalid_alignof_type_spec(expr.type_spec):  # type: ignore
+        if isinstance(expr.expr, Identifier):
+            symbol = scope.lookup(expr.expr.name)
+            if isinstance(symbol, VarSymbol) and symbol.alignment is not None:
+                return symbol.alignment
+        operand_type = analyzer._type_map.get(expr.expr)  # type: ignore
+        if operand_type is None:
+            try:
+                operand_type = analyzer._analyze_expr(expr.expr, scope)  # type: ignore
+            except SemaError:
+                return None
+        if operand_type is None:
             return None
-        return analyzer._alignof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore
+        return analyzer._alignof_type(operand_type)  # type: ignore
     if isinstance(expr, BuiltinOffsetofExpr):
         return None
+    if isinstance(expr, BuiltinTypesCompatExpr):
+        analyzer._register_type_spec(expr.type1)  # type: ignore
+        analyzer._register_type_spec(expr.type2)  # type: ignore
+        type1 = analyzer._unqualified_type(analyzer._resolve_type(expr.type1))  # type: ignore
+        type2 = analyzer._unqualified_type(analyzer._resolve_type(expr.type2))  # type: ignore
+        return 1 if type1 == type2 else 0
     if isinstance(expr, GenericExpr):
         return _eval_generic_int_constant_expr(analyzer, expr, scope)
+    if isinstance(expr, CommaExpr):
+        analyzer._analyze_expr(expr.left, scope)  # type: ignore
+        return analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore
     if isinstance(expr, Identifier):
         symbol = scope.lookup(expr.name)
         if isinstance(symbol, EnumConstSymbol):
@@ -362,6 +392,13 @@ def string_literal_body(lexeme: str) -> str | None:
         return lexeme[1:-1]
     if lexeme.startswith('u8"') and lexeme.endswith('"'):
         return lexeme[3:-1]
+    if (
+        len(lexeme) >= 3
+        and lexeme[0] in {"u", "U", "L"}
+        and lexeme[1] == '"'
+        and lexeme.endswith('"')
+    ):
+        return lexeme[2:-1]
     return None
 
 

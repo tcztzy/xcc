@@ -21,3 +21,4 @@ docs/_sources/
 *.so
 *.dylib
 *.dll
+a.out
