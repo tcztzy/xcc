@@ -1,7 +1,8 @@
 # XCC
 
 C11 compiler written in Python. Zero runtime dependencies. Generates
-LLVM IR via libLLVM-C ctypes, pipes through llc + clang for machine code.
+LLVM IR via libLLVM-C ctypes, treats LLVM IR as the default target assembly
+language, and pipes through llc + clang for machine code.
 
 ## Pipeline
 
@@ -10,15 +11,14 @@ LLVM IR via libLLVM-C ctypes, pipes through llc + clang for machine code.
    → llc → .o → clang → executable
 ```
 
-- `--backend=xcc`: native LLVM path, no fallback
-- `--backend=auto` (default): try native path, fall back to clang on error
-- `--backend=clang`: frontend validation only, delegate to clang
+- `--target=llvm` (default): emit LLVM IR and lower objects through llc
+- `-S`: write target assembly; for `--target=llvm`, this is textual LLVM IR
+- `-c`: write an object file
 
 ## Status
 
-- Frontend: 442/442 CPython source files parse and analyze cleanly
-- Backend: compiles CPython. 10/442 files fall back to clang (float literal
-  edge cases, GNU asm); rest go through native LLVM path
+- Frontend: parses and analyzes real C translation units without CPython-specific paths
+- Target: LLVM object/link path is the default compiler path, with no clang fallback mode
 - Platform: macOS ARM64
 
 ## Commands

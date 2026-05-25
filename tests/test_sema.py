@@ -745,7 +745,7 @@ class SemaTests(unittest.TestCase):
         source = (
             "int main(void){"
             "_Alignas(64) char buf[4];"
-            "_Static_assert(__alignof__(buf) >= 64, \"aligned\");"
+            '_Static_assert(__alignof__(buf) >= 64, "aligned");'
             "return 0;"
             "}"
         )
@@ -757,7 +757,7 @@ class SemaTests(unittest.TestCase):
         source = (
             "int main(void){"
             "__attribute__((aligned(64))) char buf[4];"
-            "_Static_assert(__alignof__(buf) >= 64, \"aligned\");"
+            '_Static_assert(__alignof__(buf) >= 64, "aligned");'
             "return 0;"
             "}"
         )
@@ -3078,11 +3078,7 @@ class SemaTests(unittest.TestCase):
         self.assertIn("main", sema.functions)
 
     def test_anonymous_enum_in_struct_members_visible_at_file_scope(self) -> None:
-        source = (
-            "struct S { enum { A=0, B=1 } tag; int x; };"
-            "int val = A;"
-            "int main(){return 0;}"
-        )
+        source = "struct S { enum { A=0, B=1 } tag; int x; };int val = A;int main(){return 0;}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
@@ -6239,17 +6235,14 @@ class SemaTests(unittest.TestCase):
 
     def test_static_assert_with_const_variable_ref(self) -> None:
         """Static assert can fold const variable references."""
-        source = "const int x = 5; _Static_assert(x == 5, \"bad\");"
+        source = 'const int x = 5; _Static_assert(x == 5, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
     def test_static_assert_with_array_subscript_const(self) -> None:
         """Static assert can fold array subscript with const init."""
-        source = (
-            "const int arr[] = {10, 20, 30};\n"
-            '_Static_assert(arr[1] == 20, "bad");'
-        )
+        source = 'const int arr[] = {10, 20, 30};\n_Static_assert(arr[1] == 20, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
@@ -6267,7 +6260,7 @@ class SemaTests(unittest.TestCase):
 
     def test_sizeof_expr_operand_in_constant_expr(self) -> None:
         """sizeof(expr) in constant expression context."""
-        source = "int x; _Static_assert(sizeof(x) == 4, \"bad\");"
+        source = 'int x; _Static_assert(sizeof(x) == 4, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
@@ -6303,10 +6296,7 @@ class SemaTests(unittest.TestCase):
 
     def test_static_assert_designated_init_subscript_returns_none(self) -> None:
         """Static assert with designated init subscript can't evaluate."""
-        source = (
-            "const int arr[3] = {[0] = 1};\n"
-            '_Static_assert(arr[0] == 1, "bad");'
-        )
+        source = 'const int arr[3] = {[0] = 1};\n_Static_assert(arr[0] == 1, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
@@ -6314,11 +6304,7 @@ class SemaTests(unittest.TestCase):
 
     def test_static_assert_non_const_struct_member(self) -> None:
         """Static assert with non-const struct member access fails."""
-        source = (
-            "struct S { int a; };\n"
-            "struct S s = {5};\n"
-            '_Static_assert(s.a == 5, "bad");'
-        )
+        source = 'struct S { int a; };\nstruct S s = {5};\n_Static_assert(s.a == 5, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
@@ -6334,11 +6320,7 @@ class SemaTests(unittest.TestCase):
 
     def test_static_assert_subscript_non_const_index(self) -> None:
         """Static assert with non-constant index fails."""
-        source = (
-            "int idx = 0;\n"
-            "const int arr[] = {1, 2, 3};\n"
-            '_Static_assert(arr[idx] == 1, "bad");'
-        )
+        source = 'int idx = 0;\nconst int arr[] = {1, 2, 3};\n_Static_assert(arr[idx] == 1, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
@@ -6346,10 +6328,7 @@ class SemaTests(unittest.TestCase):
 
     def test_static_assert_nested_init_list_subscript(self) -> None:
         """Static assert with nested init list subscript can't evaluate."""
-        source = (
-            "const int arr[2][2] = {{1, 2}, {3, 4}};\n"
-            '_Static_assert(arr[0][0] == 1, "bad");'
-        )
+        source = 'const int arr[2][2] = {{1, 2}, {3, 4}};\n_Static_assert(arr[0][0] == 1, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
@@ -6365,24 +6344,14 @@ class SemaTests(unittest.TestCase):
 
     def test_const_var_as_vla_size_no_folding(self) -> None:
         """Const var used as array size without const folding flag."""
-        source = (
-            "const int n = 10;\n"
-            "void f(void) {\n"
-            "    int x[n];\n"
-            "    (void)x;\n"
-            "}\n"
-        )
+        source = "const int n = 10;\nvoid f(void) {\n    int x[n];\n    (void)x;\n}\n"
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
     def test_static_assert_non_const_struct_member_fails(self) -> None:
         """Static assert with non-const struct member access fails."""
-        source = (
-            "struct S { int a; };\n"
-            "struct S s = {5};\n"
-            '_Static_assert(s.a == 5, "bad");'
-        )
+        source = 'struct S { int a; };\nstruct S s = {5};\n_Static_assert(s.a == 5, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
@@ -6390,10 +6359,7 @@ class SemaTests(unittest.TestCase):
 
     def test_static_assert_subscript_non_const_base_fails(self) -> None:
         """Static assert subscript on non-const array base can't evaluate."""
-        source = (
-            "int arr[3] = {1, 2, 3};\n"
-            '_Static_assert(arr[0] == 1, "bad");'
-        )
+        source = 'int arr[3] = {1, 2, 3};\n_Static_assert(arr[0] == 1, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
@@ -6404,11 +6370,7 @@ class SemaTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01\x02\x03\x04\x05")
-            source = (
-                "int arr[3] = {\n"
-                '#embed "data.bin"\n'
-                "};\n"
-            )
+            source = 'int arr[3] = {\n#embed "data.bin"\n};\n'
             result = compile_source(
                 source,
                 filename=str(root / "test.c"),
@@ -6421,12 +6383,7 @@ class SemaTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01\x02\x03\x04\x05")
-            source = (
-                "struct S { int a; int b; };\n"
-                "struct S s = {\n"
-                '#embed "data.bin"\n'
-                "};\n"
-            )
+            source = 'struct S { int a; int b; };\nstruct S s = {\n#embed "data.bin"\n};\n'
             result = compile_source(
                 source,
                 filename=str(root / "test.c"),
@@ -6461,31 +6418,21 @@ class SemaTests(unittest.TestCase):
 
     def test_forward_declared_record_member_init(self) -> None:
         """Forward-declared struct with no members triggers empty members path."""
-        source = (
-            "struct S;\n"
-            "struct S { int a; };\n"
-            "struct S s = {5};\n"
-        )
+        source = "struct S;\nstruct S { int a; };\nstruct S s = {5};\n"
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
     def test_extern_identifier_sizeof_in_static_assert(self) -> None:
         """sizeof(extern_var) in static_assert with type not in map."""
-        source = (
-            "extern int x;\n"
-            '_Static_assert(sizeof(x) == sizeof(int), "bad");'
-        )
+        source = 'extern int x;\n_Static_assert(sizeof(x) == sizeof(int), "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
     def test_two_dimensional_array_subscript_static_assert(self) -> None:
         """2D array subscript in static_assert hits nested init list path."""
-        source = (
-            "const int arr[2][2] = {{1, 2}, {3, 4}};\n"
-            '_Static_assert(arr[0][0] == 1, "bad");'
-        )
+        source = 'const int arr[2][2] = {{1, 2}, {3, 4}};\n_Static_assert(arr[0][0] == 1, "bad");'
         unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
             analyze(unit, std="gnu11")
@@ -6523,9 +6470,7 @@ class SemaTests(unittest.TestCase):
     def test_subscript_on_non_identifier_base_static_assert(self) -> None:
         """SubscriptExpr base not an Identifier can't be constant-evaluated."""
         source = (
-            "const int arr[3] = {1, 2, 3};\n"
-            "int *p = (int *)arr;\n"
-            '_Static_assert(p[0] == 1, "bad");'
+            'const int arr[3] = {1, 2, 3};\nint *p = (int *)arr;\n_Static_assert(p[0] == 1, "bad");'
         )
         unit = parse(list(lex(source)), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
@@ -6642,9 +6587,7 @@ class SemaTests(unittest.TestCase):
         analyzer = Analyzer(std="c11")
         analyzer.analyze(unit)
 
-        init_list = InitList(
-            items=(InitItem(designators=(), initializer=IntLiteral("5")),)
-        )
+        init_list = InitList(items=(InitItem(designators=(), initializer=IntLiteral("5")),))
         result = sema_constants._lookup_member_in_init(
             analyzer,
             init_list,
@@ -6665,9 +6608,7 @@ class SemaTests(unittest.TestCase):
         analyzer.analyze(unit)
 
         struct_type = analyzer._resolve_type(unit.declarations[0].type_spec)
-        init_list = InitList(
-            items=(InitItem(designators=(), initializer=IntLiteral("5")),)
-        )
+        init_list = InitList(items=(InitItem(designators=(), initializer=IntLiteral("5")),))
         result = sema_constants._lookup_member_in_init(
             analyzer,
             init_list,
@@ -6681,10 +6622,7 @@ class SemaTests(unittest.TestCase):
         """_lookup_member_in_init with designated item returns None."""
         from xcc.ast import InitItem, InitList, IntLiteral
 
-        source = (
-            "struct S { int a; int b; };\n"
-            "const struct S s = {5, 10};\n"
-        )
+        source = "struct S { int a; int b; };\nconst struct S s = {5, 10};\n"
         unit = parse(list(lex(source)), std="gnu11")
         analyzer = Analyzer(std="gnu11")
         analyzer.analyze(unit)
@@ -6755,9 +6693,7 @@ class SemaTests(unittest.TestCase):
         analyzer.analyze(unit)
 
         struct_type = analyzer._resolve_type(unit.declarations[0].type_spec)
-        init_list = InitList(
-            items=(InitItem(designators=(), initializer=IntLiteral("5")),)
-        )
+        init_list = InitList(items=(InitItem(designators=(), initializer=IntLiteral("5")),))
         result = sema_constants._lookup_member_in_init(
             analyzer,
             init_list,
@@ -6777,9 +6713,7 @@ class SemaTests(unittest.TestCase):
         analyzer.analyze(unit)
 
         struct_type = analyzer._resolve_type(unit.declarations[0].type_spec)
-        init_list = InitList(
-            items=(InitItem(designators=(), initializer=IntLiteral("5")),)
-        )
+        init_list = InitList(items=(InitItem(designators=(), initializer=IntLiteral("5")),))
         result = sema_constants._lookup_member_in_init(
             analyzer,
             init_list,
@@ -6801,9 +6735,7 @@ class SemaTests(unittest.TestCase):
         try:
             result = analyzer._eval_int_constant_expr(
                 SubscriptExpr(
-                    base=MemberExpr(
-                        base=Identifier("x"), member="a", through_pointer=False
-                    ),
+                    base=MemberExpr(base=Identifier("x"), member="a", through_pointer=False),
                     index=IntLiteral("0"),
                 ),
                 analyzer._file_scope,
@@ -6832,9 +6764,7 @@ class SemaTests(unittest.TestCase):
                 ),
             )
         )
-        analyzer._file_scope.define(
-            VarSymbol(name="arr2d", type_=INT, _init_expr=nested_list)
-        )
+        analyzer._file_scope.define(VarSymbol(name="arr2d", type_=INT, _init_expr=nested_list))
         analyzer._allow_const_var_folding = True
         try:
             result = analyzer._eval_int_constant_expr(
@@ -6852,20 +6782,14 @@ class SemaTests(unittest.TestCase):
         """MemberExpr where base _eval_int_constant_expr returns scalar."""
         from xcc.ast import Identifier, IntLiteral, MemberExpr
 
-        source = (
-            "struct S { int a; };\n"
-            "const struct S s = {42};\n"
-            '_Static_assert(s.a == 42, "ok");'
-        )
+        source = 'struct S { int a; };\nconst struct S s = {42};\n_Static_assert(s.a == 42, "ok");'
         unit = parse(list(lex(source)), std="gnu11")
         analyzer = Analyzer(std="gnu11")
         analyzer.analyze(unit)
         analyzer._allow_const_var_folding = True
         try:
             result = analyzer._eval_int_constant_expr(
-                MemberExpr(
-                    base=Identifier("s"), member="a", through_pointer=False
-                ),
+                MemberExpr(base=Identifier("s"), member="a", through_pointer=False),
                 analyzer._file_scope,
             )
             self.assertEqual(result, 42)
@@ -6883,9 +6807,7 @@ class SemaTests(unittest.TestCase):
         analyzer._allow_const_var_folding = True
         try:
             result = analyzer._eval_int_constant_expr(
-                MemberExpr(
-                    base=Identifier("x"), member="a", through_pointer=False
-                ),
+                MemberExpr(base=Identifier("x"), member="a", through_pointer=False),
                 analyzer._file_scope,
             )
             # base evaluates to 5 (scalar), returned directly
@@ -6895,11 +6817,7 @@ class SemaTests(unittest.TestCase):
 
     def test_const_struct_init_from_non_const_function(self) -> None:
         """Qualifier-only mismatch: const struct from non-const function return."""
-        source = (
-            "struct S { int a; };\n"
-            "struct S get_s(void);\n"
-            "const struct S cs = get_s();\n"
-        )
+        source = "struct S { int a; };\nstruct S get_s(void);\nconst struct S cs = get_s();\n"
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
@@ -6908,10 +6826,7 @@ class SemaTests(unittest.TestCase):
         """Subscript with index >= len(init_list.items) → branch 181→189."""
         from xcc.ast import Identifier, IntLiteral, SubscriptExpr
 
-        source = (
-            "const int arr[3] = {1, 2, 3};\n"
-            '_Static_assert(arr[0] == 1, "ok");'
-        )
+        source = 'const int arr[3] = {1, 2, 3};\n_Static_assert(arr[0] == 1, "ok");'
         unit = parse(list(lex(source)), std="gnu11")
         analyzer = Analyzer(std="gnu11")
         analyzer.analyze(unit)
@@ -6940,15 +6855,11 @@ class SemaTests(unittest.TestCase):
         analyzer = Analyzer(std="c11")
         analyzer.analyze(unit)
         # Manually define symbol with _init_expr = IntLiteral (not InitList)
-        analyzer._file_scope.define(
-            VarSymbol(name="y", type_=INT, _init_expr=IntLiteral("10"))
-        )
+        analyzer._file_scope.define(VarSymbol(name="y", type_=INT, _init_expr=IntLiteral("10")))
         analyzer._allow_const_var_folding = True
         try:
             result = analyzer._eval_int_constant_expr(
-                MemberExpr(
-                    base=Identifier("y"), member="a", through_pointer=False
-                ),
+                MemberExpr(base=Identifier("y"), member="a", through_pointer=False),
                 analyzer._file_scope,
             )
             self.assertIsNone(result)
@@ -7126,10 +7037,12 @@ int f(struct S *s) { return s->dict_offset; }
 
     def test_analyzer_effective_global_pack_from_changes(self) -> None:
         """Analyzer derives effective pack from pack_changes."""
-        analyzer = Analyzer(pack_changes=(
-            ("msg.h", 291, 4),
-            ("msg.h", 625, None),
-        ))
+        analyzer = Analyzer(
+            pack_changes=(
+                ("msg.h", 291, 4),
+                ("msg.h", 625, None),
+            )
+        )
         self.assertEqual(analyzer._effective_global_pack, 4)
 
     def test_analyzer_no_effective_pack_without_changes(self) -> None:
@@ -7139,10 +7052,12 @@ int f(struct S *s) { return s->dict_offset; }
 
     def test_pack_alignment_for_finds_correct_pack(self) -> None:
         """_pack_alignment_for returns pack active at given source line."""
-        analyzer = Analyzer(pack_changes=(
-            ("msg.h", 291, 4),
-            ("msg.h", 625, None),
-        ))
+        analyzer = Analyzer(
+            pack_changes=(
+                ("msg.h", 291, 4),
+                ("msg.h", 625, None),
+            )
+        )
         self.assertEqual(analyzer._pack_alignment_for(300), 4)
         self.assertEqual(analyzer._pack_alignment_for(700), None)
 

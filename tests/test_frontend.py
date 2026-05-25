@@ -313,7 +313,7 @@ class FrontendTests(unittest.TestCase):
         source = (
             "int printf(const char *, ...);"
             "typedef unsigned long size_t;"
-            "void f(void) { printf(\"%zu\", (size_t)0); }"
+            'void f(void) { printf("%zu", (size_t)0); }'
         )
         compile_source(source)
 
@@ -381,7 +381,7 @@ class FrontendTests(unittest.TestCase):
             "int printf(const char *, ...);"
             "typedef unsigned long size_t;"
             "void f(int *p, double d, char *s) {"
-            "  printf(\"%d %i %u %o %x %f %e %g %a %c %s %p %n %zu %jd %ju %td\","
+            '  printf("%d %i %u %o %x %f %e %g %a %c %s %p %n %zu %jd %ju %td",'
             "         1, 2, 3U, 4, 5, d, d, d, d, 'x', s, (void*)0, p, (size_t)0,"
             "         1L, 2UL, 3L);"
             "}"
@@ -389,7 +389,7 @@ class FrontendTests(unittest.TestCase):
         compile_source(source)
 
     def test_printf_non_literal_format_skips_check(self) -> None:
-        source = 'int printf(const char *, ...); void f(const char *fmt) { printf(fmt, 42); }'
+        source = "int printf(const char *, ...); void f(const char *fmt) { printf(fmt, 42); }"
         compile_source(source)
 
     def test_printf_percent_escape(self) -> None:
@@ -400,7 +400,7 @@ class FrontendTests(unittest.TestCase):
         source = (
             "int printf(const char *, ...);"
             "void f(int i, double d) {"
-            "  printf(\"%-5d %+d % d %#x %04d %5d %.5f %hd %ld %lld %Lf\","
+            '  printf("%-5d %+d % d %#x %04d %5d %.5f %hd %ld %lld %Lf",'
             "         i, i, i, i, i, i, d, (short)i, 1L, 2LL, (long double)d);"
             "}"
         )
@@ -436,7 +436,7 @@ class FrontendTests(unittest.TestCase):
         source = (
             "int printf(const char *, ...);"
             "void f(int i, char *s, double d) {"
-            "  printf(\"%% %-5d %+d % d %#x %04d %5d %.5f %hd %ld %lld %Lf %hhx %hhd %c %s %p %n\","
+            '  printf("%% %-5d %+d % d %#x %04d %5d %.5f %hd %ld %lld %Lf %hhx %hhd %c %s %p %n",'
             "         i, i, i, i, i, i, d, (short)i, 1L, 2LL, (long double)d, (char)i, (char)i, 'x', s, (void*)0, &i);"
             "}"
         )

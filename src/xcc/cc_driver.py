@@ -9,7 +9,7 @@ from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
 from xcc.options import FrontendOptions
 
-BackendMode = Literal["auto", "xcc", "clang"]
+TargetName = Literal["llvm"]
 DriverAction = Literal["link", "compile", "assembly", "delegate"]
 
 
@@ -19,8 +19,7 @@ class DriverConfig:
     clang_argv: tuple[str, ...]
     c_inputs: tuple[str, ...]
     non_c_inputs: tuple[str, ...]
-    backend: BackendMode
-    no_backend_fallback: bool
+    target: TargetName
     action: DriverAction
     output: str | None
     native_unsupported_flags: tuple[str, ...]
@@ -49,9 +48,8 @@ def looks_like_cc_driver(argv: tuple[str, ...] | list[str]) -> bool:
             "--version",
             "-v",
             "-V",
-            "--backend",
-            "--no-backend-fallback",
-        } or arg.startswith("--backend="):
+            "--target",
+        } or arg.startswith("--target="):
             return True
         if arg in {"-o", "-x"}:
             return True
@@ -121,10 +119,10 @@ def _parse_std(arg: str) -> str:
     raise ValueError(f"Unsupported language standard: {arg}")
 
 
-def _parse_backend(arg: str) -> BackendMode:
-    if arg in {"auto", "xcc", "clang"}:
-        return arg  # type: ignore
-    raise ValueError(f"Unsupported backend: {arg}")
+def _parse_target(arg: str) -> TargetName:
+    if arg == "llvm":
+        return "llvm"
+    raise ValueError(f"Unsupported target: {arg}")
 
 
 def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
@@ -138,8 +136,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
     defines: list[str] = []
     undefs: list[str] = []
     no_standard_includes = False
-    backend: BackendMode = "auto"
-    no_backend_fallback = False
+    target: TargetName = "llvm"
     action: DriverAction = "link"
     output: str | None = None
     language: str | None = None
@@ -161,15 +158,16 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
                 elif not rest.startswith("-"):
                     non_c_inputs.append(rest)
             break
-        if arg == "--backend":
-            backend_value, index = _take_value(argv, index, "--backend")
-            backend = _parse_backend(backend_value)
-            continue
-        if arg.startswith("--backend="):
-            backend = _parse_backend(arg.split("=", 1)[1])
-            continue
+        if arg == "--backend" or arg.startswith("--backend="):
+            raise ValueError("--backend has been removed; use --target=llvm (default)")
         if arg == "--no-backend-fallback":
-            no_backend_fallback = True
+            raise ValueError("--no-backend-fallback has been removed; XCC no longer falls back")
+        if arg == "--target":
+            target_value, index = _take_value(argv, index, "--target")
+            target = _parse_target(target_value)
+            continue
+        if arg.startswith("--target="):
+            target = _parse_target(arg.split("=", 1)[1])
             continue
         if arg in {"-E", "-M", "-MM"}:
             action = "delegate"
@@ -235,7 +233,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
                 clang_argv.append(arg)
             continue
         matched = False
-        for opt, target in (
+        for opt, option_values in (
             ("-I", include_dirs),
             ("-iquote", quote_include_dirs),
             ("-isystem", system_include_dirs),
@@ -249,7 +247,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
             if taken is None:
                 continue
             value, index = taken
-            target.append(value)
+            option_values.append(value)
             if arg == opt:
                 clang_argv.extend((arg, value))
             else:
@@ -257,6 +255,31 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
             matched = True
             break
         if matched:
+            continue
+        for opt in ("-L", "-l"):
+            taken = _take_joined_or_value(argv, index, arg, opt)
+            if taken is None:
+                continue
+            value, index = taken
+            if arg == opt:
+                clang_argv.extend((arg, value))
+            else:
+                clang_argv.append(arg)
+            matched = True
+            break
+        if matched:
+            continue
+        if arg == "-framework":
+            value, index = _take_value(argv, index, "-framework")
+            clang_argv.extend((arg, value))
+            continue
+        if (
+            arg.startswith("-Wl,")
+            or arg.startswith("-O")
+            or arg.startswith("-W")
+            or arg in {"-g", "-pipe", "-pthread"}
+        ):
+            clang_argv.append(arg)
             continue
         clang_argv.append(arg)
         if arg == "-":
@@ -291,8 +314,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
         clang_argv=tuple(clang_argv),
         c_inputs=tuple(c_inputs),
         non_c_inputs=tuple(non_c_inputs),
-        backend=backend,
-        no_backend_fallback=no_backend_fallback,
+        target=target,
         action=action,
         output=output,
         native_unsupported_flags=tuple(native_unsupported_flags),
@@ -306,11 +328,6 @@ def _run_clang(argv: tuple[str, ...] | list[str]) -> int:
         print(f"xcc: failed to execute clang: {error}", file=sys.stderr)
         return 1
     return completed.returncode
-
-
-def _fallback_to_clang(config: DriverConfig, reason: str) -> int:
-    print(f"xcc: falling back to clang backend: {reason}", file=sys.stderr)
-    return _run_clang(config.clang_argv)
 
 
 def _compile_frontend_inputs(
@@ -359,7 +376,7 @@ def _link_argv_with_objects(config: DriverConfig, objects: list[str]) -> list[st
 def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> int:
     if set(argv) & {"--version", "-V"}:
         print("xcc 0.2.0a1", file=sys.stderr)
-        print("Target: arm64-apple-darwin", file=sys.stderr)
+        print("Target: llvm", file=sys.stderr)
         return 0
 
     try:
@@ -371,18 +388,19 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
     if not config.c_inputs:
         return _run_clang(config.clang_argv)
 
-    if config.backend == "auto" and config.native_unsupported_flags:
-        flags = " ".join(config.native_unsupported_flags)
-        return _fallback_to_clang(config, f"unsupported native flag(s): {flags}")
+    if config.action == "delegate":
+        return _run_clang(config.clang_argv)
 
-    # Always run frontend for validation
+    if config.native_unsupported_flags:
+        flags = " ".join(config.native_unsupported_flags)
+        print(f"xcc: unsupported option(s) for target {config.target}: {flags}", file=sys.stderr)
+        return 1
+
     try:
         results = _compile_frontend_inputs(config, stdin=stdin)
     except FrontendError as error:
-        if config.backend == "xcc":
-            print(error, file=sys.stderr)
-            return 1
-        return _fallback_to_clang(config, str(error))
+        print(error, file=sys.stderr)
+        return 1
     except ValueError as error:
         print(f"xcc: driver error: {error}", file=sys.stderr)
         return 1
@@ -390,12 +408,13 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         print(f"xcc: I/O error: {error}", file=sys.stderr)
         return 1
 
-    # LLVM backend
-    if config.backend == "xcc" or config.backend == "auto":
+    if config.target == "llvm":
         try:
             from xcc.codegen import generate_llvm_ir
 
-            output = config.output or _default_output(config.c_inputs[0], config.action)
+            output = config.output or _default_output(
+                config.c_inputs[0], config.action, config.target
+            )
             if config.action == "assembly":
                 for result in results:
                     ir = generate_llvm_ir(result)
@@ -440,17 +459,16 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                     print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
                     return 1
             return 0
-        except (CodegenError, Exception) as error:
-            if config.backend == "xcc":
-                print(f"xcc: {error}", file=sys.stderr)
-                return 1
-            return _fallback_to_clang(config, str(error))
+        except Exception as error:
+            print(f"xcc: {error}", file=sys.stderr)
+            return 1
 
-    # clang: frontend passed, delegate to clang
-    return _run_clang(config.clang_argv)
+    raise AssertionError(f"unhandled target: {config.target}")
 
 
-def _default_output(path: str, action: str) -> str:
+def _default_output(path: str, action: str, target: TargetName) -> str:
     if action == "link":
         return "a.out"
+    if action == "assembly" and target == "llvm":
+        return str(Path(path).with_suffix(".ll"))
     return str(Path(path).with_suffix(".o"))

@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 from xcc.lexer import TokenKind
 
-from .common import PreprocessorError, _SourceLocation
+from . import PreprocessorError, _SourceLocation
 from .macros import (
     _EMPTY_MACRO_TOKEN,
     _join_macro_arguments,

@@ -23,7 +23,7 @@ source.c → [preprocessor] → [lexer] → [parser] → [sema] → [llvm_codege
 
 ## Target
 
-`cd ~/GitHub/cpython && CC="xcc --backend=xcc" ./configure && make`
+`cd ~/GitHub/cpython && CC="xcc" ./configure && make`
 
 ## Lessons from the CPython build fix loop (2026-05)
 

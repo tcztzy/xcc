@@ -155,7 +155,7 @@ int abs(int x) {
 
 ## XCC's Code Generation
 
-XCC doesn't generate machine code itself. It **programmatically builds LLVM IR** via libLLVM-C ctypes bindings:
+XCC doesn't generate machine code itself. It **programmatically builds LLVM IR** via libLLVM-C ctypes bindings. Raw LLVM-C loading and signatures live in `llvm_api.py`; `codegen.py` keeps the AST-to-IR lowering logic:
 
 ### Type Mapping
 

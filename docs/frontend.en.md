@@ -115,15 +115,12 @@ All five projects use **hand-written recursive descent** — the mainstream choi
 ```
 parser/
 ├── __init__.py          # Parser main class: recursive descent entry
-├── model.py             # ParserError, DeclSpecInfo
 ├── expressions.py       # Expression parsing (precedence climbing)
 ├── statements.py        # Statement parsing
-├── type_specs.py        # Type specifier parsing (int, struct, enum, typeof...)
+├── type_specs.py        # Type specifiers plus ParserError/DeclSpecInfo
 ├── declarators.py       # Declarator parsing (pointer, array, function types)
-├── array_sizes.py       # Array size constant evaluation
-├── extensions.py        # GNU/MSVC extensions
-├── diagnostics.py       # Error messages
-└── type_diagnostics.py  # Type error helpers
+├── array_sizes.py       # Array size constant evaluation and diagnostics
+└── extensions.py        # GNU/MSVC extensions
 ```
 
 #### Precedence Climbing

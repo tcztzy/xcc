@@ -9,7 +9,7 @@
 | **语言** | C/C++ | C++ | C | Rust | Python |
 | **首次发布** | 1987 | 2007 | 2002 | 2025 | 2025 |
 | **许可证** | GPLv3+ | Apache 2.0 | LGPLv2 | CC0-1.0 | Apache 2.0 |
-| **代码量 (估算)** | ~15M 行 | ~5M 行 | ~15K 行 | ~100K 行 | ~15K 行 |
+| **代码量 (估算)** | ~15M 行 | ~5M 行 | ~15K 行 | ~100K 行 | ~21K 行 |
 | **维护者** | GNU 项目 | LLVM 基金会 | Fabrice Bellard + 社区 | Anthropic (AI 生成) | 个人 |
 
 ## 设计哲学
@@ -28,10 +28,10 @@
 | **预处理器** | libcpp（token 流） | `clang::Preprocessor` | `tccpp.c` (文本流) | Rust 手写 | Python 手写 |
 | **词法分析** | libcpp 内 | `clang::Lexer` | 合并 `tccpp.c` | Rust 手写 | `lexer.py` |
 | **语法分析** | 递归下降 + 部分 bison | 递归下降 (表驱动) | 递归下降 | 递归下降 | 递归下降 (优先级爬升) |
-| **语义分析** | ~50K 行 C | ~15K 行 C++ | 合并 gen (~9K 行) | ~3K 行 Rust | ~3.5K 行 Python |
+| **语义分析** | ~50K 行 C | ~15K 行 C++ | 合并 gen (~9K 行) | ~3K 行 Rust | ~4.9K 行 Python |
 | **IR** | GENERIC→GIMPLE→RTL | LLVM IR | **无**（值栈） | 自研 SSA IR | AST 即 IR |
 | **优化** | 300+ passes | 150-170 passes (O2) | 局部窥孔 | 15 passes (3 组) | 委托 LLVM |
-| **代码生成** | expand (GIMPLE→RTL) + asm | llc (LLVM IR→MC) | 边解析边 emit | ArchCodegen trait × 4 | libLLVM-C ctypes |
+| **代码生成** | expand (GIMPLE→RTL) + asm | llc (LLVM IR→MC) | 边解析边 emit | ArchCodegen trait × 4 | AST 降低 + libLLVM-C ctypes |
 | **汇编** | GAS / 内联 | 集成汇编器 / GAS | 自研 | 自研 (四架构) | 委托 llc |
 | **链接** | collect2 + GNU ld | lld / 系统 ld | 自研 ELF/PE/Mach-O | 自研 (四架构) | 委托 clang |
 
@@ -69,7 +69,7 @@
 | **LTO** | 是 (fat LTO / slim LTO) | 是 (ThinLTO / FullLTO) | 否 | 否 | 否 (依赖 LLVM) |
 | **PGO** | 是 | 是 | 否 | 否 | 否 |
 | **LSP/IDE** | gcc + clangd | clangd | 无 | 无 | clangd |
-| **包管理集成** | 所有构建系统 | 所有构建系统 | 部分 (make/cmake) | 部分 (drop-in GCC) | `--backend=auto` 模式 |
+| **包管理集成** | 所有构建系统 | 所有构建系统 | 部分 (make/cmake) | 部分 (drop-in GCC) | CC 风格 driver，默认 `--target=llvm` |
 
 ## 特色能力
 

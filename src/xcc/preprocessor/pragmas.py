@@ -1,7 +1,7 @@
 import re
 from typing import NoReturn
 
-from .common import PreprocessorError, _SourceLocation
+from . import PreprocessorError, _SourceLocation
 from .expressions import _strip_condition_comments
 
 _IDENT_RE = re.compile(r"[A-Za-z_]\w*")

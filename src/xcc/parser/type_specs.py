@@ -1,8 +1,8 @@
+from dataclasses import dataclass
 from typing import Any, cast
 
 from xcc.ast import ArrayDecl, Expr, RecordMemberDecl, StorageClass, TypeSpec
 from xcc.lexer import Token, TokenKind
-from xcc.parser.model import DeclSpecInfo, ParserError
 
 INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
@@ -45,6 +45,216 @@ STORAGE_CLASS_KEYWORDS = {"auto", "register", "static", "extern", "typedef"}
 FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
+
+
+@dataclass
+class ParserError(ValueError):
+    message: str
+    token: Token
+
+    def __str__(self) -> str:
+        return f"{self.message} at {self.token.line}:{self.token.column}"
+
+
+@dataclass(frozen=True)
+class DeclSpecInfo:
+    is_typedef: bool = False
+    storage_class: StorageClass | None = None
+    storage_class_token: Token | None = None
+    alignment: int | None = None
+    alignment_token: Token | None = None
+    is_thread_local: bool = False
+    is_inline: bool = False
+    is_noreturn: bool = False
+
+
+def unsupported_type_message(context: str, token: Token) -> str:
+    token_text = str(token.lexeme)
+    if token.kind == TokenKind.IDENT:
+        if context == "type-name":
+            return f"Unknown type name: '{token_text}'"
+        return f"Unknown declaration type name: '{token_text}'"
+    if token.kind == TokenKind.KEYWORD:
+        if context == "type-name":
+            return f"Unsupported type name: '{token_text}'"
+        return f"Unsupported declaration type: '{token_text}'"
+    token_kind = unsupported_type_token_kind(token.kind)
+    if context == "type-name":
+        if token.kind == TokenKind.PUNCTUATOR:
+            return unsupported_type_name_punctuator_message(token_text)
+        return unsupported_type_name_token_message(token_text, token_kind)
+    if token.kind == TokenKind.PUNCTUATOR:
+        return unsupported_declaration_type_punctuator_message(token_text)
+    return unsupported_declaration_type_token_message(token_text, token_kind)
+
+
+def unsupported_type_name_token_message(token_text: str, token_kind: str) -> str:
+    if token_kind == "end of input":
+        return "Type name is missing before end of input"
+    return f"Type name cannot start with {token_kind}: '{token_text}'"
+
+
+def unsupported_declaration_type_token_message(token_text: str, token_kind: str) -> str:
+    if token_kind == "end of input":
+        return "Declaration type is missing before end of input"
+    return f"Declaration type cannot start with {token_kind}: '{token_text}'"
+
+
+_TYPE_NAME_CANNOT_START = {
+    "(",
+    "+",
+    "++",
+    "-",
+    "--",
+    "<",
+    "<=",
+    "<<",
+    ">",
+    ">=",
+    ">>",
+    "!",
+    "~",
+    "&",
+    "&&",
+    "|",
+    "||",
+    "^",
+    "*",
+    "/",
+    "%",
+    "%:",
+    "%:%:",
+    ".",
+    "->",
+    "...",
+    "[",
+    "<:",
+    "#",
+    "##",
+    "=",
+    "==",
+    "!=",
+    "+=",
+    "-=",
+    "*=",
+    "/=",
+    "%=",
+    "&=",
+    "|=",
+    "^=",
+    "<<=",
+    ">>=",
+}
+_TYPE_NAME_MISSING = {
+    ")",
+    "{",
+    "<%",
+    "]",
+    ":>",
+    ",",
+    ":",
+    ";",
+    "?",
+    "}",
+    "%>",
+}
+
+
+def unsupported_type_name_punctuator_message(punctuator: str) -> str:
+    if punctuator in _TYPE_NAME_CANNOT_START:
+        return f"Type name cannot start with '{punctuator}': expected a type specifier"
+    if punctuator in _TYPE_NAME_MISSING:
+        return f"Type name is missing before '{punctuator}'"
+    return f"Unsupported type name punctuator: '{punctuator}'"
+
+
+_DECLARATION_TYPE_CANNOT_START = {"(", "[", "<:"}
+_DECLARATION_TYPE_MISSING_EXPECTED = {
+    "+",
+    "++",
+    "-",
+    "--",
+    "<",
+    "<=",
+    "<<",
+    ">",
+    ">=",
+    ">>",
+    "!",
+    "~",
+    "&",
+    "&&",
+    "|",
+    "||",
+    "^",
+    "/",
+    "%",
+    "%:",
+    "%:%:",
+    ".",
+    "->",
+    "...",
+    "#",
+    "##",
+    "=",
+    "==",
+    "!=",
+    "+=",
+    "-=",
+    "*=",
+    "/=",
+    "%=",
+    "&=",
+    "|=",
+    "^=",
+    "<<=",
+    ">>=",
+}
+_DECLARATION_TYPE_MISSING = {
+    ")",
+    ",",
+    ":",
+    ";",
+    "?",
+    "]",
+    ":>",
+    "{",
+    "<%",
+    "}",
+    "%>",
+}
+
+
+def unsupported_declaration_type_punctuator_message(punctuator: str) -> str:
+    if punctuator in _DECLARATION_TYPE_CANNOT_START:
+        return f"Declaration type cannot start with '{punctuator}': expected a type specifier"
+    if punctuator == "*":
+        return "Declaration type is missing before '*': pointer declarator requires a base type"
+    if punctuator in _DECLARATION_TYPE_MISSING_EXPECTED:
+        return f"Declaration type is missing before '{punctuator}': expected a type specifier"
+    if punctuator in _DECLARATION_TYPE_MISSING:
+        return f"Declaration type is missing before '{punctuator}'"
+    return f"Unsupported declaration type punctuator: '{punctuator}'"
+
+
+def unsupported_type_token_kind(kind: TokenKind) -> str:
+    if kind == TokenKind.INT_CONST:
+        return "integer constant"
+    if kind == TokenKind.FLOAT_CONST:
+        return "floating constant"
+    if kind == TokenKind.CHAR_CONST:
+        return "character constant"
+    if kind == TokenKind.STRING_LITERAL:
+        return "string literal"
+    if kind == TokenKind.PUNCTUATOR:
+        return "punctuator"
+    if kind == TokenKind.HEADER_NAME:
+        return "header name"
+    if kind == TokenKind.PP_NUMBER:
+        return "preprocessor number"
+    if kind == TokenKind.EOF:
+        return "end of input"
+    return "token"
 
 
 def parse_type_spec(

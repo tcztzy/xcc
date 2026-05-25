@@ -7,4 +7,4 @@
 - Run `uv run tox -e lint` and `uv run tox -e type` before handoff.
 - Keep `CHANGELOG.md` for status, `LESSONS.md` for lessons.
 - LLVM IR output goes through `/opt/homebrew/opt/llvm/bin/llc`.
-- Target: `CC="xcc --backend=xcc" ./configure && make` in CPython succeeds.
+- Target: `CC="xcc" ./configure && make` in CPython succeeds without CPython-specific compiler paths.

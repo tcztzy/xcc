@@ -6,7 +6,7 @@ from typing import NoReturn
 
 from xcc.lexer import TokenKind
 
-from .common import PreprocessorError, _SourceLocation
+from . import PreprocessorError, _SourceLocation
 from .macros import _MacroToken, _tokenize_macro_text
 
 _INCLUDE_RE = re.compile(r"^(?:\"(?P<quote>[^\"\n]+)\"|<(?P<angle>[^>\n]+)>)$")

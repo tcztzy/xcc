@@ -5,38 +5,36 @@ XCC is a C11 compiler written in **pure Python**. It's the **most beginner-frien
 ## Design Goals
 
 1. **Python stdlib only**: Zero pip dependencies (LLVM-C dylib doesn't count as a Python package)
-2. **Compile CPython**: Goal: `CC="xcc --backend=xcc" ./configure && make` succeeds
-3. **Delegate to LLVM**: No custom optimizer/backend, saving hundreds of thousands of lines
+2. **Compile real C projects**: CPython is a flagship integration test, not a special case
+3. **Target LLVM by default**: LLVM IR is treated as target assembly, then lowered by llc
 4. **Educational**: Each stage is independently modularized, clear ast/sema/codegen separation
 
 ## Source Overview
 
 ```
-src/xcc/                         (~15,000 lines Python)
+src/xcc/                         (~21,000 lines Python, 41 files)
 ├── __init__.py              CLI entry point (main)
 ├── options.py               FrontendOptions dataclass
 ├── cc_driver.py             CC-compatible mode (-c, -S, -E, -o)
 ├── frontend.py              Frontend pipeline orchestrator
 ├── diag.py                  Diagnostics / error types
-├── lexer.py                 Hand-written C11 lexer (~800 lines)
-├── ast.py                   AST node definitions (~800 lines)
-├── types.py                 Semantic type representation (~500 lines)
-├── codegen.py               LLVM IR code generation (~2000 lines)
+├── lexer.py                 Hand-written C11 lexer (~570 lines)
+├── ast.py                   AST node definitions (~410 lines)
+├── types.py                 Semantic type representation (~150 lines)
+├── llvm_api.py              Raw libLLVM-C ctypes bindings (~700 lines)
+├── codegen.py               AST → LLVM IR lowering (~4500 lines)
 ├── host_includes.py         macOS SDK header path detection
 │
-├── parser/                  Recursive-descent C11 parser (~3000 lines)
+├── parser/                  Recursive-descent C11 parser (~4500 lines)
 │   ├── __init__.py          Parser main class
-│   ├── model.py             ParserError, DeclSpecInfo
 │   ├── expressions.py       Expression parsing (precedence climbing)
 │   ├── statements.py        Statement parsing
 │   ├── type_specs.py        Type specifier parsing
 │   ├── declarators.py       Declarator parsing
-│   ├── array_sizes.py       Array size evaluation
-│   ├── extensions.py        GNU/MSVC extensions
-│   ├── diagnostics.py       Error messages
-│   └── type_diagnostics.py  Type diagnostics
+│   ├── array_sizes.py       Array size evaluation and diagnostics
+│   └── extensions.py        GNU/MSVC extensions
 │
-├── sema/                    Semantic analysis (~3500 lines)
+├── sema/                    Semantic analysis (~5000 lines)
 │   ├── __init__.py          Analyzer main class
 │   ├── symbols.py           Symbol table / TypeMap / SemaUnit
 │   ├── declarations.py      Declaration analysis
@@ -46,15 +44,13 @@ src/xcc/                         (~15,000 lines Python)
 │   ├── type_helpers.py      Integer ranks, promotions, arithmetic conversions
 │   ├── conversions.py       Implicit conversion rules
 │   ├── constants.py         Integer constant expression evaluation
-│   ├── calls.py             Function call argument matching
 │   ├── records.py           Record (struct/union) layout
 │   ├── layout.py            sizeof / alignof computation
 │   ├── initializers.py      Initializer list analysis
 │   └── format_checking.py   Format string checking
 │
-└── preprocessor/            C preprocessor (~2500 lines)
-    ├── __init__.py          _Preprocessor main class
-    ├── common.py            PreprocessorError, _ProcessedText
+└── preprocessor/            C preprocessor (~4200 lines)
+    ├── __init__.py          _Preprocessor, errors, source locations
     ├── text.py              Directive parsing
     ├── macros.py            Macro definition structures
     ├── macro_expansion.py   Macro expansion engine
@@ -101,10 +97,14 @@ src/xcc/                         (~15,000 lines Python)
          └────┬────┘                    │
               ▼                         │
          codegen.py                     │
-         (LLVM IR generation)          │
+         (AST → LLVM IR lowering)      │
+              │                         │
+              ▼                         │
+         llvm_api.py                    │
+         (libLLVM-C ctypes)            │
               │                         │
               ▼                         ▼
-         LLVM IR string         clang (fallback)
+         LLVM IR string
               │
               ▼
          llc (.s → .o)
@@ -141,29 +141,34 @@ class ImplicitCast(Expr):
 
 This avoids the code generator having to handle type conversion logic — it simply mechanically translates each node.
 
-### 3. Three Backend Modes
+### 3. Target-Driven Codegen
 
-XCC has three backend modes:
+XCC has target selection, not backend modes. The default target is `llvm`, so
+normal compiler usage does not need an explicit target flag:
 
 ```python
-# --backend=xcc mode: pure XCC path
+# default target=llvm:
 #   preprocessor → lex → parse → sema → LLVM IR → llc → clang
-#   Any error causes compilation to fail
 
-# --backend=auto mode (default):
-#   Try xcc path first, auto-fallback to clang on unsupported constructs
-#   Currently: 442/442 CPython files pass frontend, 432/442 pass native xcc backend
+# explicit equivalent:
+#   xcc --target=llvm -c file.c -o file.o
 
-# --backend=clang mode:
-#   Frontend validation only (preprocessor → lex → parse → sema)
-#   Code generation fully delegated to clang
+# -S writes the target assembly language.
+# For target=llvm, that means textual LLVM IR.
 ```
 
 ### 4. Opaque Pointers
 
 XCC uses LLVM 15+'s opaque pointer feature — all pointer types are unified as `ptr` (in LLVM-C API: `LLVMPointerType(i8, 0)`), no longer distinguishing `i32*` vs `i64*`. This simplifies type mapping and GEP operations.
 
-### 5. Builtin Handling
+### 5. Typed Helper-Module Contracts
+
+Large parser, preprocessor, and sema helpers are kept in focused modules, but
+their entry points use narrow `Protocol` contracts instead of untyped `Any`.
+That keeps the main classes free to own state while making helper dependencies
+visible to `ty check`.
+
+### 6. Builtin Handling
 
 XCC specially handles C standard `__builtin_*` functions:
 

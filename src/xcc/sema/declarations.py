@@ -1,13 +1,113 @@
-from typing import Any, cast
+from typing import Literal, Protocol
 
-from xcc.ast import DeclGroupStmt, DeclStmt, NullStmt, StaticAssertDecl, Stmt, TypedefDecl
+from xcc.ast import (
+    DeclGroupStmt,
+    DeclStmt,
+    Expr,
+    InitList,
+    NullStmt,
+    StaticAssertDecl,
+    Stmt,
+    TypedefDecl,
+    TypeSpec,
+)
 from xcc.types import Type
 
-from .symbols import SemaError, VarSymbol
+from .symbols import FunctionSignature, Scope, SemaError, VarSymbol
 
 
-def analyze_file_scope_decl(analyzer: object, declaration: Stmt) -> None:
-    a = cast(Any, analyzer)
+class _FileScopeAnalyzer(Protocol):
+    _file_scope: Scope
+    _function_signatures: dict[str, FunctionSignature]
+
+    def _alignof_type(self, type_: Type) -> int | None: ...
+
+    def _analyze_file_scope_decl(self, declaration: Stmt) -> None: ...
+
+    def _analyze_initializer(
+        self,
+        target_type: Type,
+        initializer: Expr | InitList,
+        scope: Scope,
+    ) -> None: ...
+
+    def _check_static_assert(self, declaration: StaticAssertDecl, scope: Scope) -> None: ...
+
+    def _define_enum_members(self, type_spec: TypeSpec, scope: Scope) -> None: ...
+
+    def _ensure_array_size_limit(self, type_: Type) -> None: ...
+
+    def _extern_initializer_message(self, scope_label: str) -> str: ...
+
+    def _infer_array_size_from_init(self, initializer: Expr | InitList) -> int | None: ...
+
+    def _invalid_alignment_message(
+        self,
+        context_label: str,
+        alignment: int,
+        natural_alignment: int | None,
+    ) -> str: ...
+
+    def _invalid_object_type_message(self, scope_label: str, type_label: str) -> str: ...
+
+    def _invalid_typedef_type_message(
+        self,
+        scope_kind: Literal["file-scope", "block-scope"],
+    ) -> str: ...
+
+    def _is_const_qualified(self, type_: Type) -> bool: ...
+
+    def _is_file_scope_vla_type_spec(self, type_spec: TypeSpec) -> bool: ...
+
+    def _is_function_object_type(self, type_spec: TypeSpec) -> bool: ...
+
+    def _is_invalid_atomic_type_spec(self, type_spec: TypeSpec) -> bool: ...
+
+    def _is_invalid_incomplete_record_object_type(self, type_spec: TypeSpec) -> bool: ...
+
+    def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool: ...
+
+    def _is_valid_explicit_alignment(
+        self,
+        alignment: int | None,
+        natural_alignment: int | None,
+    ) -> bool: ...
+
+    def _missing_identifier_for_alignment_message(
+        self,
+        scope_label: str,
+        declaration: DeclStmt,
+    ) -> str: ...
+
+    def _missing_object_identifier_message(
+        self,
+        scope_label: str,
+        declaration: DeclStmt,
+    ) -> str: ...
+
+    def _register_function_typed_file_scope_decl(self, declaration: DeclStmt) -> None: ...
+
+    def _register_type_spec(self, type_spec: TypeSpec) -> None: ...
+
+    def _resolve_type(self, type_spec: TypeSpec) -> Type: ...
+
+    def _thread_local_storage_class_message(
+        self,
+        scope_label: str,
+        storage_class: str | None,
+    ) -> str: ...
+
+    def _try_eval_scalar_initializer(
+        self,
+        initializer: Expr | InitList,
+        scope: Scope,
+    ) -> int | None: ...
+
+    def _typedef_storage_class_object_message(self, scope_label: str) -> str: ...
+
+
+def analyze_file_scope_decl(analyzer: _FileScopeAnalyzer, declaration: Stmt) -> None:
+    a = analyzer
     if isinstance(declaration, DeclGroupStmt):
         for grouped_decl in declaration.declarations:
             a._analyze_file_scope_decl(grouped_decl)
@@ -110,9 +210,7 @@ def analyze_file_scope_decl(analyzer: object, declaration: Stmt) -> None:
                 symbol.constant_value = a._try_eval_scalar_initializer(
                     declaration.init, a._file_scope
                 )
-                from xcc.ast import InitList as _InitList
-
-                if isinstance(declaration.init, _InitList):
+                if isinstance(declaration.init, InitList):
                     symbol._init_expr = declaration.init
             array_bound = var_type.declarator_ops[0][1] if var_type.is_array() else None
             if isinstance(array_bound, int) and array_bound < 0:

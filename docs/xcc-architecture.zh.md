@@ -5,38 +5,36 @@ XCC 是一个用 **纯 Python** 编写的 C11 编译器。这是五个项目中*
 ## 设计目标
 
 1. **只用 Python 标准库**：零 pip 依赖（LLVM-C 的 dylib 不算 Python 包）
-2. **编译 CPython**：目标是 `CC="xcc --backend=xcc" ./configure && make` 成功
-3. **委托 LLVM**：不自研优化/后端，节省数十万行代码
+2. **编译真实 C 项目**：CPython 是旗舰集成测试，不是特殊路径
+3. **默认目标为 LLVM**：LLVM IR 视为目标汇编语言，再由 llc 降低
 4. **教学友好**：每个阶段独立模块化，ast/sema/codegen 明显分离
 
 ## 源码总览
 
 ```
-src/xcc/                         (~15,000 行 Python)
+src/xcc/                         (~21,000 行 Python，41 个文件)
 ├── __init__.py              CLI 入口 (main)
 ├── options.py               FrontendOptions 数据类
 ├── cc_driver.py             CC 兼容模式 (-c, -S, -E, -o)
 ├── frontend.py              前端流水线编排
 ├── diag.py                  诊断 / 错误类型
-├── lexer.py                 手写 C11 词法分析器 (~800 行)
-├── ast.py                   AST 节点定义 (~800 行)
-├── types.py                 语义类型表示 (~500 行)
-├── codegen.py               LLVM IR 代码生成 (~2000 行)
+├── lexer.py                 手写 C11 词法分析器 (~570 行)
+├── ast.py                   AST 节点定义 (~410 行)
+├── types.py                 语义类型表示 (~150 行)
+├── llvm_api.py              原始 libLLVM-C ctypes 绑定 (~700 行)
+├── codegen.py               AST → LLVM IR 降低 (~4500 行)
 ├── host_includes.py         macOS SDK 头文件路径探测
 │
-├── parser/                  递归下降 C11 解析器 (~3000 行)
+├── parser/                  递归下降 C11 解析器 (~4500 行)
 │   ├── __init__.py          Parser 主类
-│   ├── model.py             ParserError, DeclSpecInfo
 │   ├── expressions.py       表达式解析 (优先级爬升)
 │   ├── statements.py        语句解析
 │   ├── type_specs.py        类型说明符解析
 │   ├── declarators.py       声明符解析
-│   ├── array_sizes.py       数组大小求值
-│   ├── extensions.py        GNU/MSVC 扩展
-│   ├── diagnostics.py       错误信息
-│   └── type_diagnostics.py  类型诊断
+│   ├── array_sizes.py       数组大小求值和诊断
+│   └── extensions.py        GNU/MSVC 扩展
 │
-├── sema/                    语义分析 (~3500 行)
+├── sema/                    语义分析 (~5000 行)
 │   ├── __init__.py          Analyzer 主类
 │   ├── symbols.py           符号表 / TypeMap / SemaUnit
 │   ├── declarations.py      声明分析
@@ -46,15 +44,13 @@ src/xcc/                         (~15,000 行 Python)
 │   ├── type_helpers.py      整数等级、提升、算术转换
 │   ├── conversions.py       隐式转换规则
 │   ├── constants.py         整型常量表达式求值
-│   ├── calls.py             函数调用参数匹配
 │   ├── records.py           记录 (struct/union) 布局
 │   ├── layout.py            sizeof / alignof 计算
 │   ├── initializers.py      初始化列表分析
 │   └── format_checking.py   格式化字符串检查
 │
-└── preprocessor/             C 预处理器 (~2500 行)
-    ├── __init__.py          _Preprocessor 主类
-    ├── common.py            PreprocessorError, _ProcessedText
+└── preprocessor/             C 预处理器 (~4200 行)
+    ├── __init__.py          _Preprocessor、错误、源码位置
     ├── text.py              指令解析
     ├── macros.py            宏定义结构
     ├── macro_expansion.py   宏展开引擎
@@ -101,10 +97,14 @@ src/xcc/                         (~15,000 行 Python)
          └────┬────┘                    │
               ▼                         │
          codegen.py                     │
-         (LLVM IR 生成)                │
+         (AST → LLVM IR 降低)          │
+              │                         │
+              ▼                         │
+         llvm_api.py                    │
+         (libLLVM-C ctypes)            │
               │                         │
               ▼                         ▼
-         LLVM IR 字符串         clang (fallback)
+         LLVM IR 字符串
               │
               ▼
          llc (.s → .o)
@@ -141,29 +141,32 @@ class ImplicitCast(Expr):
 
 这避免了代码生成器处理类型转换逻辑——它只需要机械地翻译每个节点。
 
-### 3. 三模式后端
+### 3. 目标驱动代码生成
 
-XCC 有三种后端模式：
+XCC 使用目标选择，而不是后端模式。默认目标是 `llvm`，所以正常使用不需要显式传目标：
 
 ```python
-# --backend=xcc 模式：纯 XCC 路径
+# 默认 target=llvm：
 #   预处理器 → 词法 → 解析 → 语义 → LLVM IR → llc → clang
-#   任何错误都会导致编译失败
 
-# --backend=auto 模式（默认）：
-#   先用 xcc 路径，遇到不支持的语法/特性时自动回退到 clang
-#   当前 442/442 CPython 文件通过前端，432/442 通过原生 xcc 后端
+# 显式等价形式：
+#   xcc --target=llvm -c file.c -o file.o
 
-# --backend=clang 模式：
-#   仅做前端验证（预处理器 → 词法 → 解析 → 语义）
-#   代码生成完全委托给 clang
+# -S 写出目标汇编语言。
+# 对 target=llvm，这意味着文本 LLVM IR。
 ```
 
 ### 4. Opaque Pointer
 
 XCC 使用 LLVM 15+ 的 opaque pointer 特性——所有指针类型统一为 `ptr`（在 LLVM-C API 中为 `LLVMPointerType(i8, 0)`），不再区分 `i32*` vs `i64*`。这简化了类型映射和 GEP 操作。
 
-### 5. 内置函数处理
+### 5. 类型化 helper 模块契约
+
+大型 parser、preprocessor、sema helper 保持在聚焦的小模块里，但入口使用窄
+`Protocol` 契约，而不是无类型 `Any`。这样主类仍然负责状态，helper 依赖也能被
+`ty check` 看到。
+
+### 6. 内置函数处理
 
 XCC 对 C 标准中的 `__builtin_*` 函数做特殊处理：
 

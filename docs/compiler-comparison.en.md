@@ -9,7 +9,7 @@ One table to see all key dimensions of GCC, Clang, TCC, CCC, and XCC.
 | **Language** | C/C++ | C++ | C | Rust | Python |
 | **First Release** | 1987 | 2007 | 2002 | 2025 | 2025 |
 | **License** | GPLv3+ | Apache 2.0 | LGPLv2 | CC0-1.0 | Apache 2.0 |
-| **Code Size (est.)** | ~15M lines | ~5M lines | ~15K lines | ~100K lines | ~15K lines |
+| **Code Size (est.)** | ~15M lines | ~5M lines | ~15K lines | ~100K lines | ~21K lines |
 | **Maintainer** | GNU Project | LLVM Foundation | Fabrice Bellard + community | Anthropic (AI-generated) | Individual |
 
 ## Design Philosophy
@@ -28,10 +28,10 @@ One table to see all key dimensions of GCC, Clang, TCC, CCC, and XCC.
 | **Preprocessor** | libcpp (token stream) | `clang::Preprocessor` | `tccpp.c` (text stream) | Rust hand-written | Python hand-written |
 | **Lexer** | Inside libcpp | `clang::Lexer` | Merged `tccpp.c` | Rust hand-written | `lexer.py` |
 | **Parser** | Recursive descent + partial bison | Recursive descent (table-driven) | Recursive descent | Recursive descent | Recursive descent (precedence climbing) |
-| **Semantic Analysis** | ~50K lines C | ~15K lines C++ | Merged gen (~9K lines) | ~3K lines Rust | ~3.5K lines Python |
+| **Semantic Analysis** | ~50K lines C | ~15K lines C++ | Merged gen (~9K lines) | ~3K lines Rust | ~4.9K lines Python |
 | **IR** | GENERIC→GIMPLE→RTL | LLVM IR | **None** (value stack) | Custom SSA IR | AST as IR |
 | **Optimization** | 300+ passes | 150-170 passes (O2) | Local peephole | 15 passes (3 groups) | Delegated to LLVM |
-| **Code Generation** | expand (GIMPLE→RTL) + asm | llc (LLVM IR→MC) | Parse-and-emit | ArchCodegen trait × 4 | libLLVM-C ctypes |
+| **Code Generation** | expand (GIMPLE→RTL) + asm | llc (LLVM IR→MC) | Parse-and-emit | ArchCodegen trait × 4 | AST lowering + libLLVM-C ctypes |
 | **Assembly** | GAS / inline | Integrated assembler / GAS | Builtin | Builtin (4 arch) | Delegated to llc |
 | **Linking** | collect2 + GNU ld | lld / system ld | Builtin ELF/PE/Mach-O | Builtin (4 arch) | Delegated to clang |
 
@@ -69,7 +69,7 @@ One table to see all key dimensions of GCC, Clang, TCC, CCC, and XCC.
 | **LTO** | Yes (fat LTO / slim LTO) | Yes (ThinLTO / FullLTO) | No | No | No (depends on LLVM) |
 | **PGO** | Yes | Yes | No | No | No |
 | **LSP/IDE** | gcc + clangd | clangd | None | None | clangd |
-| **Build system integration** | All | All | Partial (make/cmake) | Partial (drop-in GCC) | `--backend=auto` mode |
+| **Build system integration** | All | All | Partial (make/cmake) | Partial (drop-in GCC) | CC-style driver, default `--target=llvm` |
 
 ## Signature Capabilities
 

@@ -67,8 +67,7 @@ class CodegenTests(unittest.TestCase):
 
     def test_incomplete_extern_array_subscript_uses_zero_length_global(self) -> None:
         result = compile_source(
-            "extern const unsigned char table[];\n"
-            "int f(int i) { return table[i]; }\n",
+            "extern const unsigned char table[];\nint f(int i) { return table[i]; }\n",
             filename="array.c",
             options=FrontendOptions(std="gnu11"),
         )

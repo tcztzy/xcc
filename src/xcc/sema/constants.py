@@ -235,11 +235,9 @@ def _eval_member_expr(analyzer: object, expr: "MemberExpr", scope: Scope) -> int
         # (scalar initializes struct's first member recursively).
         return base_val
     # If base is an Identifier, resolve the member through the init_list.
-    from xcc.sema.symbols import VarSymbol as _VarSymbol
-
     if isinstance(expr.base, Identifier):
         symbol = scope.lookup(expr.base.name)
-        if isinstance(symbol, _VarSymbol) and symbol._init_expr is not None:
+        if isinstance(symbol, VarSymbol) and symbol._init_expr is not None:
             base_type = symbol.type_
             if isinstance(symbol._init_expr, InitList):
                 return _lookup_member_in_init(

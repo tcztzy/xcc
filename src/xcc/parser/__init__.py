@@ -37,22 +37,18 @@ from xcc.ast import (
     WhileStmt,
 )
 from xcc.lexer import Token, TokenKind
-from xcc.parser.diagnostics import (
-    _array_size_non_ice_error as _array_size_non_ice_error,
-)
-from xcc.parser.diagnostics import (
-    _parse_int_literal_value as _parse_int_literal_value,
-)
-from xcc.parser.model import DeclSpecInfo, ParserError
 
 from . import array_sizes as _array_sizes
 from . import declarators as _declarators
 from . import expressions as _expressions
 from . import extensions as _extensions
 from . import statements as _statements
-from . import type_diagnostics as _type_diagnostics
 from . import type_specs as _type_specs
 
+array_size_non_ice_error = _array_sizes.array_size_non_ice_error
+parse_int_literal_value = _array_sizes.parse_int_literal_value
+DeclSpecInfo = _type_specs.DeclSpecInfo
+ParserError = _type_specs.ParserError
 FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
@@ -543,25 +539,25 @@ class Parser:
         )
 
     def _unsupported_type_message(self, context: str, token: Token) -> str:
-        return _type_diagnostics.unsupported_type_message(context, token)
+        return _type_specs.unsupported_type_message(context, token)
 
     def _unsupported_type_name_token_message(self, token_text: str, token_kind: str) -> str:
-        return _type_diagnostics.unsupported_type_name_token_message(token_text, token_kind)
+        return _type_specs.unsupported_type_name_token_message(token_text, token_kind)
 
     def _unsupported_declaration_type_token_message(self, token_text: str, token_kind: str) -> str:
-        return _type_diagnostics.unsupported_declaration_type_token_message(
+        return _type_specs.unsupported_declaration_type_token_message(
             token_text,
             token_kind,
         )
 
     def _unsupported_type_name_punctuator_message(self, punctuator: str) -> str:
-        return _type_diagnostics.unsupported_type_name_punctuator_message(punctuator)
+        return _type_specs.unsupported_type_name_punctuator_message(punctuator)
 
     def _unsupported_declaration_type_punctuator_message(self, punctuator: str) -> str:
-        return _type_diagnostics.unsupported_declaration_type_punctuator_message(punctuator)
+        return _type_specs.unsupported_declaration_type_punctuator_message(punctuator)
 
     def _unsupported_type_token_kind(self, kind: TokenKind) -> str:
-        return _type_diagnostics.unsupported_type_token_kind(kind)
+        return _type_specs.unsupported_type_token_kind(kind)
 
     def _consume_type_qualifiers(self, *, allow_atomic: bool = False) -> tuple[str, ...]:
         return _type_specs.consume_type_qualifiers(self, allow_atomic=allow_atomic)

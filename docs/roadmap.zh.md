@@ -2,9 +2,9 @@
 
 ## 短期目标
 
-- **消除 clang 回退**：让 `--backend=xcc` 独立编译全部 CPython 文件。
-  - 当前状态：442/442 文件通过前端，432/442 通过原生 LLVM 后端。
-  - 剩余 10 个文件需要完善代码生成。
+- **真实项目集成**：`CC="xcc" ./configure && make` 在没有 CPython 专用编译器路径的情况下工作。
+  - CPython 保留为旗舰集成目标。
+  - 失败应转化为通用的最小 C 回归测试。
 - **增加更多 C11 特性**：
   - 可变参数函数（`va_list` / `va_start` / `va_end`）
   - 位域（bit-fields）
@@ -33,7 +33,7 @@
 - [x] 递归下降解析器（优先级爬升、完整声明符支持）
 - [x] 语义分析（类型检查、符号表、隐式转换、常量求值）
 - [x] LLVM IR 代码生成（libLLVM-C ctypes）
-- [x] 三模式后端（xcc / auto / clang）
+- [x] 目标模型，默认 `--target=llvm`
 - [x] GNU 扩展（`__attribute__`、`typeof`、语句表达式、K&R 函数定义）
 - [x] CPython 源码解析（442/442 文件通过前端）
-- [x] CPython 部分编译（432/442 文件通过原生后端）
+- [x] CPython 构建作为旗舰集成目标

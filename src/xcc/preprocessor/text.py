@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from .common import PreprocessorError
+from . import PreprocessorError
 from .macros import _Macro, _render_macro_tokens
 
 _DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$", re.DOTALL)

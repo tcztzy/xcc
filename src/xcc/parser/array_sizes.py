@@ -1,30 +1,37 @@
+from collections.abc import Callable
 from typing import Any, cast
 
 from xcc.ast import (
     AlignofExpr,
     ArrayDecl,
+    AssignExpr,
     BinaryExpr,
+    CallExpr,
     CastExpr,
+    CharLiteral,
+    CommaExpr,
+    CompoundLiteralExpr,
     ConditionalExpr,
     Expr,
+    FloatLiteral,
     GenericExpr,
     Identifier,
     IntLiteral,
+    LabelAddressExpr,
+    MemberExpr,
     SizeofExpr,
+    StatementExpr,
     StringLiteral,
+    SubscriptExpr,
     TypeSpec,
     UnaryExpr,
+    UpdateExpr,
 )
 from xcc.lexer import Token
 
-from .diagnostics import (
-    _array_size_literal_error,
-    _array_size_non_ice_error,
-    _parse_int_literal_value,
-)
-
 _POINTER_OP = ("ptr", 0)
 _POINTER_SIZE = 8
+_INTEGER_LITERAL_SUFFIXES = {"", "u", "l", "ul", "lu", "ll", "ull", "llu"}
 _BASE_TYPE_SIZES = {
     "_Bool": 1,
     "char": 1,
@@ -57,15 +64,113 @@ _BASE_TYPE_SIZES = {
 }
 
 
+def parse_int_literal_value(lexeme: str) -> int | None:
+    suffix_start = len(lexeme)
+    while suffix_start > 0 and lexeme[suffix_start - 1] in "uUlL":
+        suffix_start -= 1
+    body = lexeme[:suffix_start]
+    suffix = lexeme[suffix_start:].lower()
+    if suffix not in _INTEGER_LITERAL_SUFFIXES:
+        return None
+    if body.startswith(("0x", "0X")):
+        digits = body[2:]
+        return None if not digits else int(digits, 16)
+    if body.startswith("0") and len(body) > 1:
+        if any(ch not in "01234567" for ch in body):
+            return None
+        return int(body, 8)
+    if not body.isdigit():
+        return None
+    return int(body)
+
+
+def array_size_literal_error(lexeme: str) -> str | None:
+    suffix_start = len(lexeme)
+    while suffix_start > 0 and lexeme[suffix_start - 1] in "uUlL":
+        suffix_start -= 1
+    body = lexeme[:suffix_start]
+    suffix = lexeme[suffix_start:].lower()
+    if suffix not in _INTEGER_LITERAL_SUFFIXES:
+        return "Array size literal has unsupported integer suffix"
+    if body.startswith(("0x", "0X")):
+        digits = body[2:]
+        if not digits:
+            return "Array size hexadecimal literal requires at least one digit"
+        return None
+    if body.startswith("0") and len(body) > 1:
+        if any(ch not in "01234567" for ch in body):
+            return "Array size octal literal contains non-octal digits"
+        return None
+    if not body.isdigit():
+        return "Array size literal must contain decimal digits"
+    return None
+
+
+def array_size_non_ice_error(
+    expr: Expr,
+    eval_expr: Callable[[Expr], int | None],
+) -> str:
+    if isinstance(expr, Identifier):
+        return f"Array size identifier '{expr.name}' is not an integer constant expression"
+    if isinstance(expr, UnaryExpr):
+        return f"Array size unary operator '{expr.op}' is not an integer constant expression"
+    if isinstance(expr, BinaryExpr):
+        return f"Array size binary operator '{expr.op}' is not an integer constant expression"
+    if isinstance(expr, CallExpr):
+        return "Array size call expression is not an integer constant expression"
+    if isinstance(expr, GenericExpr):
+        return "Array size generic selection is not an integer constant expression"
+    if isinstance(expr, CommaExpr):
+        return "Array size comma expression is not an integer constant expression"
+    if isinstance(expr, AssignExpr):
+        return "Array size assignment expression is not an integer constant expression"
+    if isinstance(expr, UpdateExpr):
+        return "Array size update expression is not an integer constant expression"
+    if isinstance(expr, SubscriptExpr):
+        return "Array size subscript expression is not an integer constant expression"
+    if isinstance(expr, MemberExpr):
+        return "Array size member access expression is not an integer constant expression"
+    if isinstance(expr, CompoundLiteralExpr):
+        return "Array size compound literal is not an integer constant expression"
+    if isinstance(expr, IntLiteral):
+        return "Array size integer literal is not an integer constant expression"
+    if isinstance(expr, FloatLiteral):
+        return "Array size floating literal is not an integer constant expression"
+    if isinstance(expr, CharLiteral):
+        return "Array size character literal is not an integer constant expression"
+    if isinstance(expr, StringLiteral):
+        return "Array size string literal is not an integer constant expression"
+    if isinstance(expr, StatementExpr):
+        return "Array size statement expression is not an integer constant expression"
+    if isinstance(expr, LabelAddressExpr):
+        return "Array size label address expression is not an integer constant expression"
+    if isinstance(expr, CastExpr):
+        if eval_expr(expr.expr) is None:
+            return array_size_non_ice_error(expr.expr, eval_expr)
+        return "Array size cast expression is not an integer constant expression"
+    if isinstance(expr, SizeofExpr):
+        return "Array size sizeof expression is not an integer constant expression"
+    if isinstance(expr, AlignofExpr):
+        return "Array size alignof expression is not an integer constant expression"
+    if isinstance(expr, ConditionalExpr):
+        if eval_expr(expr.condition) is None:
+            return "Array size conditional condition is not an integer constant expression"
+        branch = expr.then_expr if eval_expr(expr.condition) != 0 else expr.else_expr
+        if eval_expr(branch) is None:
+            return array_size_non_ice_error(branch, eval_expr)
+        return "Array size conditional expression is not an integer constant expression"
+    return f"Array size expression '{type(expr).__name__}' is not an integer constant expression"
+
+
 def parse_array_size(parser: object, token: Token) -> int:
     p = cast(Any, parser)
     lexeme = token.lexeme
     if not isinstance(lexeme, str):
         raise p._make_error("Array size literal token is malformed", token)
-    message = _array_size_literal_error(lexeme)
+    message = array_size_literal_error(lexeme)
     if message is not None:
         raise p._make_error(message, token)
-    size = _parse_int_literal_value(lexeme)
+    size = parse_int_literal_value(lexeme)
     assert size is not None
     if size < 0 or (size == 0 and p._std == "c11"):
         raise p._make_error("Array size must be positive", token)
@@ -76,7 +181,7 @@ def parse_array_size_expr(parser: object, expr: Expr, token: Token) -> int:
     p = cast(Any, parser)
     size = p._eval_array_size_expr(expr)
     if size is None:
-        raise p._make_error(_array_size_non_ice_error(expr, p._eval_array_size_expr), token)
+        raise p._make_error(array_size_non_ice_error(expr, p._eval_array_size_expr), token)
     if size < 0 or (size == 0 and p._std == "c11"):
         raise p._make_error("Array size must be positive", token)
     return size
@@ -96,7 +201,7 @@ def eval_array_size_expr(parser: object, expr: Expr) -> int | None:
     p = cast(Any, parser)
     if isinstance(expr, IntLiteral):
         assert isinstance(expr.value, str)
-        return _parse_int_literal_value(expr.value)
+        return parse_int_literal_value(expr.value)
     if isinstance(expr, Identifier):
         return p._lookup_ordinary_constant(expr.name)
     if isinstance(expr, GenericExpr):

@@ -1,8 +1,10 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Protocol
 
-from .common import (
+from xcc.options import FrontendOptions
+
+from . import (
     PreprocessorError,
     _DirectiveCursor,
     _LogicalCursor,
@@ -17,6 +19,58 @@ from .text import _blank_line, _parse_directive, _scan_block_comment_state
 _PP_UNKNOWN_DIRECTIVE = "XCC-PP-0101"
 _PP_INVALID_DIRECTIVE = "XCC-PP-0104"
 _PP_UNTERMINATED_MACRO = "XCC-PP-0202"
+
+
+class _ProcessTextPreprocessor(Protocol):
+    _options: FrontendOptions
+    _pragma_once_files: set[str]
+
+    def _expand_line(self, line: str, location: _SourceLocation) -> str: ...
+
+    def _handle_conditional(
+        self,
+        name: str,
+        body: str,
+        location: _SourceLocation,
+        stack: list[_ConditionalFrame],
+        *,
+        base_dir: Path | None,
+    ) -> str | None: ...
+
+    def _handle_define(self, body: str) -> None: ...
+
+    def _handle_undef(self, body: str, location: _SourceLocation) -> None: ...
+
+    def _handle_include(
+        self,
+        body: str,
+        location: _SourceLocation,
+        *,
+        base_dir: Path | None,
+        include_stack: tuple[str, ...],
+        include_next: bool = False,
+        is_import: bool = False,
+    ) -> _ProcessedText: ...
+
+    def _parse_line_directive(
+        self,
+        body: str,
+        location: _SourceLocation,
+    ) -> tuple[int, str | None]: ...
+
+    def _handle_embed(
+        self,
+        body: str,
+        location: _SourceLocation,
+        *,
+        base_dir: Path | None,
+    ) -> _ProcessedText: ...
+
+    def _handle_pack_pragma(
+        self,
+        body: str,
+        location: _SourceLocation | None = None,
+    ) -> None: ...
 
 
 def _strip_block_comments(text: str) -> str:
@@ -85,7 +139,7 @@ def _strip_block_comments(text: str) -> str:
 
 
 def process_text(
-    preprocessor: object,
+    preprocessor: _ProcessTextPreprocessor,
     source: str,
     *,
     filename: str,
@@ -94,7 +148,7 @@ def process_text(
     include_stack: tuple[str, ...],
     parse_directive: Callable[[str], tuple[str, str] | None] = _parse_directive,
 ) -> _ProcessedText:
-    self = cast(Any, preprocessor)
+    self = preprocessor
     lines = source.splitlines(keepends=True)
     if not lines:
         return _ProcessedText(source, ())

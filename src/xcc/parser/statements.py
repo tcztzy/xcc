@@ -1,3 +1,5 @@
+from typing import Protocol
+
 from xcc.ast import (
     BreakStmt,
     CaseStmt,
@@ -19,11 +21,13 @@ from xcc.ast import (
     ReturnStmt,
     StaticAssertDecl,
     Stmt,
+    StringLiteral,
     SwitchStmt,
     TypeSpec,
     WhileStmt,
 )
-from xcc.lexer import TokenKind
+from xcc.lexer import Token, TokenKind
+from xcc.parser.type_specs import ParserError
 
 _EXTENSION_MARKER = "__extension__"
 _MS_DECLSPEC_KEYWORD = "__declspec"
@@ -31,82 +35,167 @@ TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
 
 
+class _StatementParser(Protocol):
+    _index: int
+
+    def _advance(self) -> Token: ...
+
+    def _check_keyword(self, value: str) -> bool: ...
+
+    def _check_punct(self, value: str) -> bool: ...
+
+    def _current(self) -> Token: ...
+
+    def _expect(self, kind: TokenKind) -> Token: ...
+
+    def _expect_punct(self, value: str) -> None: ...
+
+    def _is_declaration_start(self) -> bool: ...
+
+    def _is_label_start(self) -> bool: ...
+
+    def _is_typedef_name(self, name: str) -> bool: ...
+
+    def _make_error(self, message: str, token: Token) -> ParserError: ...
+
+    def _parse_assignment(self) -> Expr: ...
+
+    def _parse_case_stmt(self) -> CaseStmt: ...
+
+    def _parse_compound_stmt(self) -> CompoundStmt: ...
+
+    def _parse_conditional(self) -> Expr: ...
+
+    def _parse_decl_stmt(self) -> Stmt: ...
+
+    def _parse_default_stmt(self) -> DefaultStmt: ...
+
+    def _parse_designator_list(
+        self,
+    ) -> tuple[tuple[str, Expr | str | DesignatorRange], ...]: ...
+
+    def _parse_do_while_stmt(self) -> DoWhileStmt: ...
+
+    def _parse_expression(self) -> Expr: ...
+
+    def _parse_for_stmt(self) -> ForStmt: ...
+
+    def _parse_goto_stmt(self) -> Stmt: ...
+
+    def _parse_if_stmt(self) -> IfStmt: ...
+
+    def _parse_initializer(self) -> Expr | InitList: ...
+
+    def _parse_initializer_list(self) -> InitList: ...
+
+    def _parse_label_stmt(self) -> LabelStmt: ...
+
+    def _parse_return_stmt(self) -> ReturnStmt: ...
+
+    def _parse_static_assert_decl(self) -> StaticAssertDecl: ...
+
+    def _parse_statement(self) -> Stmt: ...
+
+    def _parse_string_literal(self) -> StringLiteral: ...
+
+    def _parse_switch_stmt(self) -> SwitchStmt: ...
+
+    def _parse_while_stmt(self) -> WhileStmt: ...
+
+    def _peek_punct(self, value: str) -> bool: ...
+
+    def _pop_scope(self) -> None: ...
+
+    def _push_scope(
+        self,
+        names: set[str] | None = None,
+        types: dict[str, TypeSpec] | None = None,
+    ) -> None: ...
+
+    def _skip_decl_attributes(self) -> bool: ...
+
+    def _skip_extension_markers(self) -> None: ...
+
+
 def parse_compound_stmt(
-    parser: object,
+    parser: _StatementParser,
     initial_names: set[str] | None = None,
     initial_types: dict[str, TypeSpec] | None = None,
 ) -> CompoundStmt:
-    parser._expect_punct("{")  # type: ignore
-    parser._push_scope(initial_names, initial_types)  # type: ignore
+    p = parser
+    p._expect_punct("{")
+    p._push_scope(initial_names, initial_types)
     try:
         statements: list[Stmt] = []
-        while not parser._check_punct("}"):  # type: ignore
-            statements.append(parser._parse_statement())  # type: ignore
-        parser._expect_punct("}")  # type: ignore
+        while not p._check_punct("}"):
+            statements.append(p._parse_statement())
+        p._expect_punct("}")
         return CompoundStmt(statements)
     finally:
-        parser._pop_scope()  # type: ignore
+        p._pop_scope()
 
 
-def parse_statement(parser: object) -> Stmt:
-    parser._skip_extension_markers()  # type: ignore
-    if parser._check_punct(";"):  # type: ignore
-        parser._advance()  # type: ignore
+def parse_statement(parser: _StatementParser) -> Stmt:
+    p = parser
+    p._skip_extension_markers()
+    if p._check_punct(";"):
+        p._advance()
         return NullStmt()
-    if parser._check_punct("{"):  # type: ignore
-        return parser._parse_compound_stmt()  # type: ignore
-    if parser._check_keyword("if"):  # type: ignore
-        return parser._parse_if_stmt()  # type: ignore
-    if parser._check_keyword("while"):  # type: ignore
-        return parser._parse_while_stmt()  # type: ignore
-    if parser._check_keyword("do"):  # type: ignore
-        return parser._parse_do_while_stmt()  # type: ignore
-    if parser._check_keyword("for"):  # type: ignore
-        return parser._parse_for_stmt()  # type: ignore
-    if parser._check_keyword("switch"):  # type: ignore
-        return parser._parse_switch_stmt()  # type: ignore
-    if parser._check_keyword("case"):  # type: ignore
-        return parser._parse_case_stmt()  # type: ignore
-    if parser._check_keyword("default"):  # type: ignore
-        return parser._parse_default_stmt()  # type: ignore
-    if parser._is_label_start():  # type: ignore
-        return parser._parse_label_stmt()  # type: ignore
-    if parser._check_keyword("goto"):  # type: ignore
-        return parser._parse_goto_stmt()  # type: ignore
-    if parser._check_keyword("break"):  # type: ignore
-        parser._advance()  # type: ignore
-        parser._expect_punct(";")  # type: ignore
+    if p._check_punct("{"):
+        return p._parse_compound_stmt()
+    if p._check_keyword("if"):
+        return p._parse_if_stmt()
+    if p._check_keyword("while"):
+        return p._parse_while_stmt()
+    if p._check_keyword("do"):
+        return p._parse_do_while_stmt()
+    if p._check_keyword("for"):
+        return p._parse_for_stmt()
+    if p._check_keyword("switch"):
+        return p._parse_switch_stmt()
+    if p._check_keyword("case"):
+        return p._parse_case_stmt()
+    if p._check_keyword("default"):
+        return p._parse_default_stmt()
+    if p._is_label_start():
+        return p._parse_label_stmt()
+    if p._check_keyword("goto"):
+        return p._parse_goto_stmt()
+    if p._check_keyword("break"):
+        p._advance()
+        p._expect_punct(";")
         return BreakStmt()
-    if parser._check_keyword("continue"):  # type: ignore
-        parser._advance()  # type: ignore
-        parser._expect_punct(";")  # type: ignore
+    if p._check_keyword("continue"):
+        p._advance()
+        p._expect_punct(";")
         return ContinueStmt()
-    if parser._check_keyword("return"):  # type: ignore
-        return parser._parse_return_stmt()  # type: ignore
-    if _is_static_assert_keyword(parser):
-        return parser._parse_static_assert_decl()  # type: ignore
-    if parser._is_declaration_start():  # type: ignore
-        return parser._parse_decl_stmt()  # type: ignore
-    expr = parser._parse_expression()  # type: ignore
-    parser._expect_punct(";")  # type: ignore
+    if p._check_keyword("return"):
+        return p._parse_return_stmt()
+    if _is_static_assert_keyword(p):
+        return p._parse_static_assert_decl()
+    if p._is_declaration_start():
+        return p._parse_decl_stmt()
+    expr = p._parse_expression()
+    p._expect_punct(";")
     return ExprStmt(expr)
 
 
-def is_declaration_start(parser: object) -> bool:
-    if parser._check_keyword(_EXTENSION_MARKER):  # type: ignore
-        saved_index = parser._index  # type: ignore
-        parser._skip_extension_markers()  # type: ignore
-        is_decl = parser._is_declaration_start()  # type: ignore
-        parser._index = saved_index  # type: ignore
+def is_declaration_start(parser: _StatementParser) -> bool:
+    p = parser
+    if p._check_keyword(_EXTENSION_MARKER):
+        saved_index = p._index
+        p._skip_extension_markers()
+        is_decl = p._is_declaration_start()
+        p._index = saved_index
         return is_decl
-    saved_index = parser._index  # type: ignore
-    if parser._skip_decl_attributes():  # type: ignore
-        is_decl = parser._is_declaration_start()  # type: ignore
-        parser._index = saved_index  # type: ignore
+    saved_index = p._index
+    if p._skip_decl_attributes():
+        is_decl = p._is_declaration_start()
+        p._index = saved_index
         return is_decl
-    parser._index = saved_index  # type: ignore
+    p._index = saved_index
     if any(
-        parser._check_keyword(keyword)  # type: ignore
+        p._check_keyword(keyword)
         for keyword in (
             "int",
             "char",
@@ -145,225 +234,239 @@ def is_declaration_start(parser: object) -> bool:
         )
     ):
         return True
-    token = parser._current()  # type: ignore
+    token = p._current()
     if token.kind != TokenKind.IDENT or not isinstance(token.lexeme, str):
         return False
     if token.lexeme in {"__thread", "__inline", "__inline__", "__unaligned", "static_assert"}:
         return True
-    if token.lexeme == _MS_DECLSPEC_KEYWORD and parser._peek_punct("("):  # type: ignore
+    if token.lexeme == _MS_DECLSPEC_KEYWORD and p._peek_punct("("):
         return True
-    return parser._is_typedef_name(token.lexeme)  # type: ignore
+    return p._is_typedef_name(token.lexeme)
 
 
-def parse_if_stmt(parser: object) -> IfStmt:
-    parser._advance()  # type: ignore
-    parser._expect_punct("(")  # type: ignore
-    condition = parser._parse_expression()  # type: ignore
-    parser._expect_punct(")")  # type: ignore
-    then_body = parser._parse_statement()  # type: ignore
+def parse_if_stmt(parser: _StatementParser) -> IfStmt:
+    p = parser
+    p._advance()
+    p._expect_punct("(")
+    condition = p._parse_expression()
+    p._expect_punct(")")
+    then_body = p._parse_statement()
     else_body: Stmt | None = None
-    if parser._check_keyword("else"):  # type: ignore
-        parser._advance()  # type: ignore
-        else_body = parser._parse_statement()  # type: ignore
+    if p._check_keyword("else"):
+        p._advance()
+        else_body = p._parse_statement()
     return IfStmt(condition, then_body, else_body)
 
 
-def parse_while_stmt(parser: object) -> WhileStmt:
-    parser._advance()  # type: ignore
-    parser._expect_punct("(")  # type: ignore
-    condition = parser._parse_expression()  # type: ignore
-    parser._expect_punct(")")  # type: ignore
-    body = parser._parse_statement()  # type: ignore
+def parse_while_stmt(parser: _StatementParser) -> WhileStmt:
+    p = parser
+    p._advance()
+    p._expect_punct("(")
+    condition = p._parse_expression()
+    p._expect_punct(")")
+    body = p._parse_statement()
     return WhileStmt(condition, body)
 
 
-def parse_do_while_stmt(parser: object) -> DoWhileStmt:
-    parser._advance()  # type: ignore
-    body = parser._parse_statement()  # type: ignore
-    if not parser._check_keyword("while"):  # type: ignore
-        raise parser._make_error("Expected while", parser._current())  # type: ignore
-    parser._advance()  # type: ignore
-    parser._expect_punct("(")  # type: ignore
-    condition = parser._parse_expression()  # type: ignore
-    parser._expect_punct(")")  # type: ignore
-    parser._expect_punct(";")  # type: ignore
+def parse_do_while_stmt(parser: _StatementParser) -> DoWhileStmt:
+    p = parser
+    p._advance()
+    body = p._parse_statement()
+    if not p._check_keyword("while"):
+        raise p._make_error("Expected while", p._current())
+    p._advance()
+    p._expect_punct("(")
+    condition = p._parse_expression()
+    p._expect_punct(")")
+    p._expect_punct(";")
     return DoWhileStmt(body, condition)
 
 
-def parse_for_stmt(parser: object) -> ForStmt:
-    parser._advance()  # type: ignore
-    parser._expect_punct("(")  # type: ignore
-    parser._push_scope()  # type: ignore
+def parse_for_stmt(parser: _StatementParser) -> ForStmt:
+    p = parser
+    p._advance()
+    p._expect_punct("(")
+    p._push_scope()
     try:
         init: Stmt | Expr | None
-        if parser._check_punct(";"):  # type: ignore
-            parser._advance()  # type: ignore
+        if p._check_punct(";"):
+            p._advance()
             init = None
-        elif parser._is_declaration_start():  # type: ignore
-            init = parser._parse_decl_stmt()  # type: ignore
+        elif p._is_declaration_start():
+            init = p._parse_decl_stmt()
         else:
-            init = parser._parse_expression()  # type: ignore
-            parser._expect_punct(";")  # type: ignore
-        if parser._check_punct(";"):  # type: ignore
-            parser._advance()  # type: ignore
+            init = p._parse_expression()
+            p._expect_punct(";")
+        if p._check_punct(";"):
+            p._advance()
             condition: Expr | None = None
         else:
-            condition = parser._parse_expression()  # type: ignore
-            parser._expect_punct(";")  # type: ignore
-        if parser._check_punct(")"):  # type: ignore
+            condition = p._parse_expression()
+            p._expect_punct(";")
+        if p._check_punct(")"):
             post: Expr | None = None
         else:
-            post = parser._parse_expression()  # type: ignore
-        parser._expect_punct(")")  # type: ignore
-        body = parser._parse_statement()  # type: ignore
+            post = p._parse_expression()
+        p._expect_punct(")")
+        body = p._parse_statement()
         return ForStmt(init, condition, post, body)
     finally:
-        parser._pop_scope()  # type: ignore
+        p._pop_scope()
 
 
-def parse_switch_stmt(parser: object) -> SwitchStmt:
-    parser._advance()  # type: ignore
-    parser._expect_punct("(")  # type: ignore
-    condition = parser._parse_expression()  # type: ignore
-    parser._expect_punct(")")  # type: ignore
-    body = parser._parse_statement()  # type: ignore
+def parse_switch_stmt(parser: _StatementParser) -> SwitchStmt:
+    p = parser
+    p._advance()
+    p._expect_punct("(")
+    condition = p._parse_expression()
+    p._expect_punct(")")
+    body = p._parse_statement()
     return SwitchStmt(condition, body)
 
 
-def parse_case_stmt(parser: object) -> CaseStmt:
-    parser._advance()  # type: ignore
-    value = parser._parse_expression()  # type: ignore
-    parser._expect_punct(":")  # type: ignore
-    body = parser._parse_statement()  # type: ignore
+def parse_case_stmt(parser: _StatementParser) -> CaseStmt:
+    p = parser
+    p._advance()
+    value = p._parse_expression()
+    p._expect_punct(":")
+    body = p._parse_statement()
     return CaseStmt(value, body)
 
 
-def parse_default_stmt(parser: object) -> DefaultStmt:
-    parser._advance()  # type: ignore
-    parser._expect_punct(":")  # type: ignore
-    body = parser._parse_statement()  # type: ignore
+def parse_default_stmt(parser: _StatementParser) -> DefaultStmt:
+    p = parser
+    p._advance()
+    p._expect_punct(":")
+    body = p._parse_statement()
     return DefaultStmt(body)
 
 
-def parse_label_stmt(parser: object) -> LabelStmt:
-    token = parser._expect(TokenKind.IDENT)  # type: ignore
+def parse_label_stmt(parser: _StatementParser) -> LabelStmt:
+    p = parser
+    token = p._expect(TokenKind.IDENT)
     assert isinstance(token.lexeme, str)
-    parser._expect_punct(":")  # type: ignore
-    body = parser._parse_statement()  # type: ignore
+    p._expect_punct(":")
+    body = p._parse_statement()
     return LabelStmt(token.lexeme, body)
 
 
-def parse_goto_stmt(parser: object) -> Stmt:
-    parser._advance()  # type: ignore
-    if parser._check_punct("*"):  # type: ignore
-        parser._advance()  # type: ignore
-        target = parser._parse_expression()  # type: ignore
-        parser._expect_punct(";")  # type: ignore
+def parse_goto_stmt(parser: _StatementParser) -> Stmt:
+    p = parser
+    p._advance()
+    if p._check_punct("*"):
+        p._advance()
+        target = p._parse_expression()
+        p._expect_punct(";")
         return IndirectGotoStmt(target)
-    label = parser._expect(TokenKind.IDENT)  # type: ignore
+    label = p._expect(TokenKind.IDENT)
     assert isinstance(label.lexeme, str)
-    parser._expect_punct(";")  # type: ignore
+    p._expect_punct(";")
     return GotoStmt(label.lexeme)
 
 
-def is_label_start(parser: object) -> bool:
-    token = parser._current()  # type: ignore
-    return token.kind == TokenKind.IDENT and parser._peek_punct(":")  # type: ignore
+def is_label_start(parser: _StatementParser) -> bool:
+    p = parser
+    token = p._current()
+    return token.kind == TokenKind.IDENT and p._peek_punct(":")
 
 
-def _is_static_assert_keyword(parser: object) -> bool:
+def _is_static_assert_keyword(parser: _StatementParser) -> bool:
     """Check for _Static_assert or C23 static_assert (contextual keyword)."""
-    tok = parser._current()  # type: ignore
+    p = parser
+    tok = p._current()
     if (
         tok.kind == TokenKind.IDENT
         and isinstance(tok.lexeme, str)
         and tok.lexeme == "static_assert"
     ):
         return True
-    return parser._check_keyword("_Static_assert")  # type: ignore
+    return p._check_keyword("_Static_assert")
 
 
-def parse_static_assert_decl(parser: object) -> StaticAssertDecl:
-    if not _is_static_assert_keyword(parser):
-        raise parser._make_error("Expected _Static_assert", parser._current())  # type: ignore
-    parser._advance()  # type: ignore
-    parser._expect_punct("(")  # type: ignore
-    condition = parser._parse_conditional()  # type: ignore
-    if parser._check_punct(","):  # type: ignore
-        parser._expect_punct(",")  # type: ignore
-        if parser._current().kind != TokenKind.STRING_LITERAL:  # type: ignore
-            raise parser._make_error(  # type: ignore
+def parse_static_assert_decl(parser: _StatementParser) -> StaticAssertDecl:
+    p = parser
+    if not _is_static_assert_keyword(p):
+        raise p._make_error("Expected _Static_assert", p._current())
+    p._advance()
+    p._expect_punct("(")
+    condition = p._parse_conditional()
+    if p._check_punct(","):
+        p._expect_punct(",")
+        if p._current().kind != TokenKind.STRING_LITERAL:
+            raise p._make_error(
                 "Expected static assertion message",
-                parser._current(),  # type: ignore
+                p._current(),
             )
-        message = parser._parse_string_literal()  # type: ignore
+        message = p._parse_string_literal()
     else:
         # C23: single-argument form with no message
-        from xcc.ast import StringLiteral
-
         message = StringLiteral('""')
-    parser._expect_punct(")")  # type: ignore
-    parser._expect_punct(";")  # type: ignore
+    p._expect_punct(")")
+    p._expect_punct(";")
     return StaticAssertDecl(condition, message)
 
 
-def parse_return_stmt(parser: object) -> ReturnStmt:
-    parser._advance()  # type: ignore
-    if parser._check_punct(";"):  # type: ignore
-        parser._expect_punct(";")  # type: ignore
+def parse_return_stmt(parser: _StatementParser) -> ReturnStmt:
+    p = parser
+    p._advance()
+    if p._check_punct(";"):
+        p._expect_punct(";")
         return ReturnStmt(None)
-    value = parser._parse_expression()  # type: ignore
-    parser._expect_punct(";")  # type: ignore
+    value = p._parse_expression()
+    p._expect_punct(";")
     return ReturnStmt(value)
 
 
-def parse_initializer(parser: object) -> Expr | InitList:
-    if parser._check_punct("{"):  # type: ignore
-        return parser._parse_initializer_list()  # type: ignore
-    return parser._parse_assignment()  # type: ignore
+def parse_initializer(parser: _StatementParser) -> Expr | InitList:
+    p = parser
+    if p._check_punct("{"):
+        return p._parse_initializer_list()
+    return p._parse_assignment()
 
 
-def parse_initializer_list(parser: object) -> InitList:
-    parser._expect_punct("{")  # type: ignore
-    if parser._check_punct("}"):  # type: ignore
-        raise parser._make_error("Expected initializer", parser._current())  # type: ignore
+def parse_initializer_list(parser: _StatementParser) -> InitList:
+    p = parser
+    p._expect_punct("{")
+    if p._check_punct("}"):
+        raise p._make_error("Expected initializer", p._current())
     items: list[InitItem] = []
     while True:
-        designators = parser._parse_designator_list()  # type: ignore
+        designators = p._parse_designator_list()
         if designators:
-            parser._expect_punct("=")  # type: ignore
-        initializer = parser._parse_initializer()  # type: ignore
+            p._expect_punct("=")
+        initializer = p._parse_initializer()
         items.append(InitItem(designators, initializer))
-        if not parser._check_punct(","):  # type: ignore
+        if not p._check_punct(","):
             break
-        parser._advance()  # type: ignore
-        if parser._check_punct("}"):  # type: ignore
+        p._advance()
+        if p._check_punct("}"):
             break
-    parser._expect_punct("}")  # type: ignore
+    p._expect_punct("}")
     return InitList(tuple(items))
 
 
 def parse_designator_list(
-    parser: object,
+    parser: _StatementParser,
 ) -> tuple[tuple[str, Expr | str | DesignatorRange], ...]:
+    p = parser
     designators: list[tuple[str, Expr | str | DesignatorRange]] = []
     while True:
-        if parser._check_punct("."):  # type: ignore
-            parser._advance()  # type: ignore
-            token = parser._expect(TokenKind.IDENT)  # type: ignore
+        if p._check_punct("."):
+            p._advance()
+            token = p._expect(TokenKind.IDENT)
             assert isinstance(token.lexeme, str)
             designators.append(("member", token.lexeme))
             continue
-        if parser._check_punct("["):  # type: ignore
-            parser._advance()  # type: ignore
-            index_expr = parser._parse_conditional()  # type: ignore
-            if parser._check_punct("..."):  # type: ignore
-                parser._advance()  # type: ignore
-                high_expr = parser._parse_conditional()  # type: ignore
-                parser._expect_punct("]")  # type: ignore
+        if p._check_punct("["):
+            p._advance()
+            index_expr = p._parse_conditional()
+            if p._check_punct("..."):
+                p._advance()
+                high_expr = p._parse_conditional()
+                p._expect_punct("]")
                 designators.append(("range", DesignatorRange(index_expr, high_expr)))
             else:
-                parser._expect_punct("]")  # type: ignore
+                p._expect_punct("]")
                 designators.append(("index", index_expr))
             continue
         break

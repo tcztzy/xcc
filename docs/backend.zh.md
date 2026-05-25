@@ -174,7 +174,7 @@ static void gfunc_return(CType *func_type) {
 
 ## XCC 的代码生成
 
-XCC 不自己生成机器码。它通过 libLLVM-C 的 ctypes 绑定**程序化构建 LLVM IR**：
+XCC 不自己生成机器码。它通过 libLLVM-C 的 ctypes 绑定**程序化构建 LLVM IR**。原始 LLVM-C 加载和函数签名在 `llvm_api.py` 中，`codegen.py` 保留 AST 到 IR 的降低逻辑：
 
 ### 类型映射
 

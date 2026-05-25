@@ -90,7 +90,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertIn("usage:", stdout)
-        self.assertIn("--backend={auto,xcc,clang}", stdout)
+        self.assertIn("--target=llvm", stdout)
+        self.assertNotIn("--backend", stdout)
 
     def test_main_missing_input(self) -> None:
         code, stdout, stderr = self._run_main([])
@@ -103,12 +104,11 @@ class CliTests(unittest.TestCase):
             path = Path(tmp) / "ok.c"
             path.write_text("int main(){return 0;}", encoding="utf-8")
             with patch("xcc.cc_driver.subprocess.run") as run:
-                run.return_value = subprocess.CompletedProcess((), 1)
                 code, stdout, stderr = self._run_main([str(path), "--unknown"])
         self.assertEqual(code, 1)
         self.assertEqual(stdout, "")
-        self.assertIn("falling back to clang backend", stderr)
-        run.assert_called_once_with(("clang", str(path), "--unknown"), check=False)
+        self.assertIn("unsupported option(s) for target llvm: --unknown", stderr)
+        run.assert_not_called()
 
     def test_main_unknown_option_without_c_input_delegates_to_driver(self) -> None:
         with patch("xcc.cc_driver.subprocess.run") as run:
@@ -119,7 +119,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         run.assert_called_once_with(("clang", "-", "--unknown"), check=False)
 
-    def test_main_xcc_backend_passes_o0_to_llc(self) -> None:
+    def test_main_default_target_passes_o0_to_llc(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             src = root / "ok.c"
@@ -133,7 +133,7 @@ class CliTests(unittest.TestCase):
 
             with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
                 code, stdout, stderr = self._run_main(
-                    ["--backend=xcc", "-nostdinc", "-c", str(src), "-o", str(obj)]
+                    ["-nostdinc", "-c", str(src), "-o", str(obj)]
                 )
 
         self.assertEqual(code, 0)
@@ -143,7 +143,71 @@ class CliTests(unittest.TestCase):
         self.assertIn("-O0", llc_cmd)
         self.assertLess(llc_cmd.index("-O0"), llc_cmd.index("-filetype=obj"))
 
-    def test_main_xcc_backend_link_preserves_linker_args(self) -> None:
+    def test_main_explicit_llvm_target_passes_o0_to_llc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            obj = root / "ok.o"
+            src.write_text("int f(void){return 0;}", encoding="utf-8")
+
+            def fake_run(cmd, **kwargs):
+                if cmd[0] == "/opt/homebrew/opt/llvm/bin/llc":
+                    Path(cmd[-1]).write_bytes(b"obj")
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+                code, stdout, stderr = self._run_main(
+                    ["--target=llvm", "-nostdinc", "-c", str(src), "-o", str(obj)]
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        llc_cmd = run.call_args_list[0].args[0]
+        self.assertIn("-O0", llc_cmd)
+        self.assertLess(llc_cmd.index("-O0"), llc_cmd.index("-filetype=obj"))
+
+    def test_main_default_target_assembly_is_llvm_ir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            ll = root / "ok.ll"
+            src.write_text("int f(void){return 0;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(["-nostdinc", "-S", str(src)])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+            self.assertIn("define i32 @f()", ll.read_text(encoding="utf-8"))
+            run.assert_not_called()
+
+    def test_main_unsupported_target_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.c"
+            path.write_text("int main(){return 0;}", encoding="utf-8")
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(["--target=wasm32", str(path)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("Unsupported target: wasm32", stderr)
+        run.assert_not_called()
+
+    def test_main_backend_option_is_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.c"
+            path.write_text("int main(){return 0;}", encoding="utf-8")
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(["--backend=xcc", str(path)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("--backend has been removed", stderr)
+        run.assert_not_called()
+
+    def test_main_llvm_target_link_preserves_linker_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             src = root / "ok.c"
@@ -158,7 +222,6 @@ class CliTests(unittest.TestCase):
             with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
                 code, stdout, stderr = self._run_main(
                     [
-                        "--backend=xcc",
                         "-nostdinc",
                         str(src),
                         "-L/tmp/example",
@@ -182,7 +245,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("CoreFoundation", link_cmd)
         self.assertIn(str(exe), link_cmd)
 
-    def test_main_xcc_backend_link_drops_forced_source_language(self) -> None:
+    def test_main_llvm_target_link_drops_forced_source_language(self) -> None:
         def fake_run(cmd, **kwargs):
             if cmd[0] == "/opt/homebrew/opt/llvm/bin/llc":
                 Path(cmd[-1]).write_bytes(b"obj")
@@ -192,7 +255,7 @@ class CliTests(unittest.TestCase):
             exe = Path(tmp) / "ok"
             with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
                 code, stdout, stderr = self._run_main(
-                    ["--backend=xcc", "-nostdinc", "-x", "c", "-", "-o", str(exe)],
+                    ["-nostdinc", "-x", "c", "-", "-o", str(exe)],
                     stdin_text="int main(void){return 0;}",
                 )
 

@@ -54,10 +54,10 @@ from xcc.preprocessor import (
 
 class PreprocessorTests(unittest.TestCase):
     def test_preprocessor_package_keeps_entry_exports_stable(self) -> None:
-        self.assertEqual(PreprocessorError.__module__, "xcc.preprocessor.common")
-        self.assertEqual(_SourceLocation.__module__, "xcc.preprocessor.common")
-        self.assertEqual(_LineMapBuilder.__module__, "xcc.preprocessor.common")
-        self.assertEqual(_DirectiveCursor.__module__, "xcc.preprocessor.common")
+        self.assertEqual(PreprocessorError.__module__, "xcc.preprocessor")
+        self.assertEqual(_SourceLocation.__module__, "xcc.preprocessor")
+        self.assertEqual(_LineMapBuilder.__module__, "xcc.preprocessor")
+        self.assertEqual(_DirectiveCursor.__module__, "xcc.preprocessor")
         self.assertEqual(_Macro.__module__, "xcc.preprocessor.macros")
         self.assertEqual(_MacroToken.__module__, "xcc.preprocessor.macros")
         self.assertEqual(_parse_macro_parameters.__module__, "xcc.preprocessor.macros")
@@ -315,9 +315,7 @@ A(0)
     def test_token_paste_multi_token_result_gnu11(self) -> None:
         """,##__VA_ARGS__ with non-empty var arg produces multi-token paste result."""
         source = "#define FOO(x, ...) bar(x, ##__VA_ARGS__)\nFOO(1, 2)\n"
-        result = preprocess_source(
-            source, filename="main.c", options=FrontendOptions(std="gnu11")
-        )
+        result = preprocess_source(source, filename="main.c", options=FrontendOptions(std="gnu11"))
         self.assertIn("bar ( 1 , 2 )", result.source)
 
     def test_token_paste_multi_token_non_gnu_raises(self) -> None:
@@ -1665,9 +1663,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source_path = root / "self.c"
-            source_path.write_text(
-                '#import "self.c"\nint self_ok;\n', encoding="utf-8"
-            )
+            source_path.write_text('#import "self.c"\nint self_ok;\n', encoding="utf-8")
             result = preprocess_source(
                 source_path.read_text(encoding="utf-8"), filename=str(source_path)
             )
@@ -2389,11 +2385,11 @@ A(0)
             a_header = root / "a.h"
             b_header = root / "b.h"
             a_header.write_text(
-                "#ifndef A_H\n#define A_H\n#include \"b.h\"\n#endif\n",
+                '#ifndef A_H\n#define A_H\n#include "b.h"\n#endif\n',
                 encoding="utf-8",
             )
             b_header.write_text(
-                "#ifndef B_H\n#define B_H\n#include \"a.h\"\n#endif\n",
+                '#ifndef B_H\n#define B_H\n#include "a.h"\n#endif\n',
                 encoding="utf-8",
             )
             source = '#include "a.h"\n'
@@ -2406,11 +2402,11 @@ A(0)
             a_header = root / "a.h"
             b_header = root / "b.h"
             a_header.write_text(
-                "#ifndef A_H\n#define A_H\n#include \"b.h\"\n#endif\n",
+                '#ifndef A_H\n#define A_H\n#include "b.h"\n#endif\n',
                 encoding="utf-8",
             )
             b_header.write_text(
-                "#ifndef B_H\n#define B_H\n#include \"a.h\"\n#endif\n",
+                '#ifndef B_H\n#define B_H\n#include "a.h"\n#endif\n',
                 encoding="utf-8",
             )
             source = '#define A_H\n#include "a.h"\n'
@@ -2419,64 +2415,76 @@ A(0)
 
     def test_detect_include_guard_standard_pattern(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         guard = _detect_include_guard("#ifndef FOO_H\n#define FOO_H\n")
         self.assertEqual(guard, "FOO_H")
 
     def test_detect_include_guard_if_not_defined(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         guard = _detect_include_guard("#if !defined(FOO_H)\n#define FOO_H\n")
         self.assertEqual(guard, "FOO_H")
 
     def test_detect_include_guard_with_leading_comment(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         guard = _detect_include_guard("/* comment */\n#ifndef FOO_H\n#define FOO_H\n")
         self.assertEqual(guard, "FOO_H")
 
     def test_detect_include_guard_mismatch_returns_none(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         guard = _detect_include_guard("#ifndef FOO_H\n#define BAR_H\n")
         self.assertIsNone(guard)
 
     def test_detect_include_guard_no_define_returns_none(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         guard = _detect_include_guard("#ifndef FOO_H\nint x;\n")
         self.assertIsNone(guard)
 
     def test_detect_include_guard_no_guard_returns_none(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         guard = _detect_include_guard("int x;\n")
         self.assertIsNone(guard)
 
     def test_detect_include_guard_leading_blank_lines(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         guard = _detect_include_guard("\n\n\n#ifndef FOO_H\n#define FOO_H\n")
         self.assertEqual(guard, "FOO_H")
 
     def test_detect_include_guard_with_block_comment_same_line(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         source = "/* header guard */\n#ifndef FOO_H /* guard */\n#define FOO_H\n"
         guard = _detect_include_guard(source)
         self.assertEqual(guard, "FOO_H")
 
     def test_detect_include_guard_block_comment_spanning_lines(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         source = "/* start\n   continued */\n#ifndef FOO_H\n#define FOO_H\n"
         guard = _detect_include_guard(source)
         self.assertEqual(guard, "FOO_H")
 
     def test_detect_include_guard_ifndef_no_matching_define(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         guard = _detect_include_guard("#ifndef FOO_H\n/* no define */\n")
         self.assertIsNone(guard)
 
     def test_detect_include_guard_ifndef_only_no_newline(self) -> None:
         from xcc.preprocessor import _detect_include_guard
+
         guard = _detect_include_guard("#ifndef FOO_H\n")
         self.assertIsNone(guard)
 
     def test_skip_guarded_include_oserror_returns_false(self) -> None:
         from xcc.preprocessor import _Preprocessor
         from xcc.options import FrontendOptions
+
         preprocessor = _Preprocessor(FrontendOptions())
         result = preprocessor._skip_guarded_include(
             Path("/nonexistent/path.h"), "/nonexistent/path.h"
@@ -2488,7 +2496,7 @@ A(0)
             root = Path(tmp)
             a_header = root / "a.h"
             a_header.write_text(
-                "#ifndef A_H\n#define A_H\n#include \"a.h\"\n#endif\n",
+                '#ifndef A_H\n#define A_H\n#include "a.h"\n#endif\n',
                 encoding="utf-8",
             )
             source = '#include "a.h"\n'
@@ -3845,16 +3853,14 @@ A(0)
                 filename=str(root / "test.c"),
                 options=FrontendOptions(std="gnu11", embed_dirs=(tmp,)),
             )
-            self.assertEqual(result.source, 'data[1]\n')
+            self.assertEqual(result.source, "data[1]\n")
 
     def test_embed_in_expression_context(self) -> None:
         """#embed result usable in array initializer."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01\x02")
-            source = (
-                '#embed "data.bin" prefix(int arr[] = {) suffix(};)\n'
-            )
+            source = '#embed "data.bin" prefix(int arr[] = {) suffix(};)\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -3890,9 +3896,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01\x02\x03\x04\x05")
-            source = (
-                '#embed "data.bin" clang::offset(1) clang::limit(2)\n'
-            )
+            source = '#embed "data.bin" clang::offset(1) clang::limit(2)\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -3905,9 +3909,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01\x02")
-            source = (
-                '#embed "data.bin" offset(10) if_empty(0)\n'
-            )
+            source = '#embed "data.bin" offset(10) if_empty(0)\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -3920,9 +3922,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x0a\x0b\x0c")
-            source = (
-                '#embed "data.bin" clang::offset(1)\n'
-            )
+            source = '#embed "data.bin" clang::offset(1)\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -3959,10 +3959,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01")
-            source = (
-                '#define FNAME "data.bin"\n'
-                "#embed FNAME\n"
-            )
+            source = '#define FNAME "data.bin"\n#embed FNAME\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -4004,11 +4001,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "empty.bin").write_bytes(b"")
-            source = (
-                '#if __has_embed("empty.bin") == 2\n'
-                "int is_empty = 1;\n"
-                "#endif\n"
-            )
+            source = '#if __has_embed("empty.bin") == 2\nint is_empty = 1;\n#endif\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -4040,11 +4033,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "header.h").write_text("int x;")
-            source = (
-                '#if __has_include("header.h")\n'
-                "int found = 1;\n"
-                "#endif\n"
-            )
+            source = '#if __has_include("header.h")\nint found = 1;\n#endif\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -4089,11 +4078,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01\x02\x03")
-            source = (
-                '#if __has_embed("data.bin" offset(1))\n'
-                "int found = 1;\n"
-                "#endif\n"
-            )
+            source = '#if __has_embed("data.bin" offset(1))\nint found = 1;\n#endif\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -4106,11 +4091,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01\x02\x03")
-            source = (
-                '#if __has_embed("data.bin" limit(2))\n'
-                "int found = 1;\n"
-                "#endif\n"
-            )
+            source = '#if __has_embed("data.bin" limit(2))\nint found = 1;\n#endif\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -4168,11 +4149,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01")
-            source = (
-                '#if __has_embed("data.bin" meow(1))\n'
-                "int found = 1;\n"
-                "#endif\n"
-            )
+            source = '#if __has_embed("data.bin" meow(1))\nint found = 1;\n#endif\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -4250,9 +4227,7 @@ A(0)
             ]:
                 with self.subTest(param=param, value=value):
                     source = (
-                        f'#if __has_embed("data.bin" {param}({value}))\n'
-                        "int found = 1;\n"
-                        "#endif\n"
+                        f'#if __has_embed("data.bin" {param}({value}))\nint found = 1;\n#endif\n'
                     )
                     result = preprocess_source(
                         source,
@@ -4266,11 +4241,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x01")
-            source = (
-                '#if __has_embed("data.bin" offset(10)) == 2\n'
-                "int is_empty = 1;\n"
-                "#endif\n"
-            )
+            source = '#if __has_embed("data.bin" offset(10)) == 2\nint is_empty = 1;\n#endif\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -4421,8 +4392,7 @@ A(0)
     def test_backslash_newline_splicing_in_macro_argument(self) -> None:
         """Backslash-newline inside a macro argument is spliced."""
         result = preprocess_source(
-            "#define ECHO(x) x\n"
-            'ECHO("hello\\\n world")\n',
+            '#define ECHO(x) x\nECHO("hello\\\n world")\n',
             filename="splice_macro.c",
         )
         self.assertIn('"hello world"', result.source)
@@ -4475,8 +4445,7 @@ A(0)
     def test_comments_inside_string_literals_are_preserved(self) -> None:
         """// and /* inside string literals are not treated as comments."""
         result = preprocess_source(
-            '#define M(x) x\n'
-            'M("test // not a comment /* nor this */ string")\n',
+            '#define M(x) x\nM("test // not a comment /* nor this */ string")\n',
             filename="str_comment.c",
         )
         self.assertIn("test // not a comment /* nor this */ string", result.source)
@@ -4484,9 +4453,7 @@ A(0)
     def test_slashes_in_string_literal_across_macro_lines(self) -> None:
         """//= inside string in multi-line macro arg is preserved."""
         result = preprocess_source(
-            '#define D(x) if (debug) { x; }\n'
-            'D(fprintf(stderr, "%s",\n'
-            '           "\'//=\'"));\n',
+            '#define D(x) if (debug) { x; }\nD(fprintf(stderr, "%s",\n           "\'//=\'"));\n',
             filename="slash_macro.c",
         )
         self.assertIn("'//='", result.source)
@@ -4494,9 +4461,7 @@ A(0)
     def test_escape_sequence_in_string_across_macro_lines(self) -> None:
         """Escape sequences inside strings are preserved in multi-line macros."""
         result = preprocess_source(
-            '#define M(x) x\n'
-            'M("hello\\" \\\n'
-            '  world");\n',
+            '#define M(x) x\nM("hello\\" \\\n  world");\n',
             filename="esc_macro.c",
         )
         # The \\" escape sequence inside the string is preserved
@@ -4505,26 +4470,19 @@ A(0)
 
     def test_strip_gnu_asm_strips_enum_decl(self) -> None:
         """__enum_decl(name, type, {) is translated to enum name {."""
-        result = _strip_gnu_asm_extensions(
-            "__enum_decl(foo, int, {\n} ) ;\n"
-        )
+        result = _strip_gnu_asm_extensions("__enum_decl(foo, int, {\n} ) ;\n")
         self.assertNotIn("__enum_decl", result)
         self.assertIn("enum foo {", result)
 
     def test_strip_gnu_asm_strips_enum_class_decl(self) -> None:
         """__enum_class_decl is also translated."""
-        result = _strip_gnu_asm_extensions(
-            "__enum_class_decl(bar, unsigned, {\n} ) ;\n"
-        )
+        result = _strip_gnu_asm_extensions("__enum_class_decl(bar, unsigned, {\n} ) ;\n")
         self.assertNotIn("__enum_class_decl", result)
         self.assertIn("enum bar {", result)
 
     def test_strip_gnu_asm_closing_paren_semicolon(self) -> None:
         """} ) ; (closing of __enum_decl) is translated to };."""
-        result = _strip_gnu_asm_extensions(
-            "__enum_decl(foo, int, {\n"
-            "} ) ;\n"
-        )
+        result = _strip_gnu_asm_extensions("__enum_decl(foo, int, {\n} ) ;\n")
         self.assertIn("};", result)
 
     def test_strip_gnu_asm_closing_not_replaced_without_opening(self) -> None:
@@ -4550,12 +4508,7 @@ A(0)
     def test_unterminated_macro_with_inner_directive_has_continuation(self) -> None:
         """Unterminated macro where next line is #if with \ continuation."""
         result = preprocess_source(
-            "#define M(x) x\n"
-            "M(42\n"
-            "#if 1 \\\n"
-            "  && 1\n"
-            "#endif\n"
-            ")\n",
+            "#define M(x) x\nM(42\n#if 1 \\\n  && 1\n#endif\n)\n",
             filename="inner_dir.c",
         )
         self.assertNotIn("M(", result.source)
@@ -4563,8 +4516,7 @@ A(0)
     def test_pragma_pack_push_sets_pack_alignment(self) -> None:
         """#pragma pack(push, 4) sets pack alignment."""
         result = preprocess_source(
-            "#pragma pack(push, 4)\n"
-            "int x;\n",
+            "#pragma pack(push, 4)\nint x;\n",
             filename="pack.c",
             options=FrontendOptions(std="gnu11"),
         )
@@ -4574,9 +4526,7 @@ A(0)
     def test_pragma_pack_pop_restores_pack(self) -> None:
         """#pragma pack(pop) restores previous pack."""
         result = preprocess_source(
-            "#pragma pack(push, 4)\n"
-            "#pragma pack(pop)\n"
-            "int x;\n",
+            "#pragma pack(push, 4)\n#pragma pack(pop)\nint x;\n",
             filename="pack.c",
             options=FrontendOptions(std="gnu11"),
         )
@@ -4587,8 +4537,7 @@ A(0)
     def test_pragma_pack_push_defaults_to_8(self) -> None:
         """#pragma pack(push) without explicit value defaults to 8."""
         result = preprocess_source(
-            "#pragma pack(push)\n"
-            "int x;\n",
+            "#pragma pack(push)\nint x;\n",
             filename="pack.c",
             options=FrontendOptions(std="gnu11"),
         )
@@ -4597,8 +4546,7 @@ A(0)
     def test_pragma_pack_pop_empty_stack_no_error(self) -> None:
         """#pragma pack(pop) on empty stack is a no-op."""
         result = preprocess_source(
-            "#pragma pack(pop)\n"
-            "int x;\n",
+            "#pragma pack(pop)\nint x;\n",
             filename="pack.c",
             options=FrontendOptions(std="gnu11"),
         )
@@ -4608,6 +4556,7 @@ A(0)
         """_handle_pack_pragma handles edge case inputs without crashing."""
         from xcc.preprocessor import _Preprocessor
         from xcc.options import FrontendOptions
+
         p = _Preprocessor(FrontendOptions(std="gnu11"))
         # Non-pack pragma (doesn't start with "pack(")
         p._handle_pack_pragma("once")

@@ -2,9 +2,10 @@
 
 ## Near-Term
 
-- **Eliminate clang fallbacks**: `--backend=xcc` compiles all CPython files independently.
-  - Current status: 442/442 files pass frontend, 432/442 pass native LLVM backend.
-  - Remaining 10 files need codegen improvements.
+- **Real-project integration**: `CC="xcc" ./configure && make` works without
+  CPython-specific compiler paths.
+  - CPython remains the flagship integration target.
+  - Failures should become generic minimized C regressions.
 - **More C11 features**:
   - Variadic functions (`va_list` / `va_start` / `va_end`)
   - Bit-fields
@@ -33,7 +34,7 @@
 - [x] Recursive descent parser (precedence climbing, full declarator support)
 - [x] Semantic analysis (type checking, symbol tables, implicit conversions, constant evaluation)
 - [x] LLVM IR code generation (libLLVM-C ctypes)
-- [x] Three backend modes (xcc / auto / clang)
+- [x] Target model with default `--target=llvm`
 - [x] GNU extensions (`__attribute__`, `typeof`, statement expressions, K&R function definitions)
 - [x] CPython source parsing (442/442 files pass frontend)
-- [x] CPython partial compilation (432/442 files pass native backend)
+- [x] CPython build as flagship integration target

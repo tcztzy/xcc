@@ -2,11 +2,11 @@ from typing import Any, cast
 
 from xcc.ast import ArrayDecl, Expr, IntLiteral, TypeSpec
 from xcc.lexer import Token, TokenKind
-from xcc.parser.diagnostics import (
-    _array_size_literal_error,
-    _array_size_non_ice_error,
+from xcc.parser.array_sizes import (
+    array_size_literal_error,
+    array_size_non_ice_error,
 )
-from xcc.parser.model import ParserError
+from xcc.parser.type_specs import ParserError
 
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
@@ -311,7 +311,7 @@ def parse_array_declarator(
     if isinstance(size_expr, IntLiteral):
         if not isinstance(size_expr.value, str):
             raise ParserError("Array size literal token is malformed", size_token)
-        message = _array_size_literal_error(size_expr.value)
+        message = array_size_literal_error(size_expr.value)
         if message is not None:
             raise ParserError(message, size_token)
     size = p._eval_array_size_expr(size_expr)
@@ -324,7 +324,7 @@ def parse_array_declarator(
     if allow_vla:
         return ArrayDecl(size_expr, tuple(qualifiers), has_static_bound)
     raise ParserError(
-        _array_size_non_ice_error(size_expr, p._eval_array_size_expr),
+        array_size_non_ice_error(size_expr, p._eval_array_size_expr),
         size_token,
     )
 

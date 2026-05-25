@@ -122,15 +122,12 @@ enum {
 ```
 parser/
 ├── __init__.py          # Parser 主类：递归下降入口
-├── model.py             # ParserError, DeclSpecInfo
 ├── expressions.py       # 表达式解析（优先级爬升算法）
 ├── statements.py        # 语句解析
-├── type_specs.py        # 类型说明符解析（int, struct, enum, typeof...）
+├── type_specs.py        # 类型说明符，以及 ParserError/DeclSpecInfo
 ├── declarators.py       # 声明符解析（指针、数组、函数类型）
-├── array_sizes.py       # 数组大小常量求值
-├── extensions.py        # GNU/MSVC 扩展
-├── diagnostics.py       # 错误信息
-└── type_diagnostics.py  # 类型错误帮助
+├── array_sizes.py       # 数组大小常量求值和诊断
+└── extensions.py        # GNU/MSVC 扩展
 ```
 
 #### 表达式优先级爬升 (Precedence Climbing)
