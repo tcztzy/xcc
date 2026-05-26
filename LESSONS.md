@@ -14,3 +14,8 @@
 - Constant initializer evaluation must search function-local static globals
   before file-scope symbols, because nested CPython slot arrays refer to
   earlier local static arrays by identifier.
+- Do not infer incomplete array length from initializer item count; sparse
+  designators and ranges make the bound the largest initialized index plus one.
+- Multi-line macro collection must operate on preprocessing structure, not just
+  apparent physical lines; block comments and inactive conditional branches can
+  appear inside macro arguments.

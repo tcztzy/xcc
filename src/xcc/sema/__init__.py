@@ -65,6 +65,7 @@ from .initializers import (
     analyze_initializer_list,
     analyze_record_initializer_list,
     eval_initializer_index,
+    infer_incomplete_array_length,
     is_char_array_string_initializer,
     is_initializer_compatible,
     lookup_initializer_member,
@@ -1249,9 +1250,9 @@ class Analyzer:
     def _is_const_qualified(self, type_: Type) -> bool:
         return is_const_qualified(type_)
 
-    def _infer_array_size_from_init(self, initializer: Expr | InitList) -> int | None:
+    def _infer_array_size_from_init(self, initializer: Expr | InitList, scope: Scope) -> int | None:
         if isinstance(initializer, InitList):
-            return len(initializer.items)
+            return infer_incomplete_array_length(self, initializer, scope)
         if isinstance(initializer, StringLiteral):
             return self._string_literal_required_length(initializer.value)
         return None

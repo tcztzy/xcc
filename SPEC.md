@@ -61,6 +61,9 @@ V19: ∀ `target=llvm` object path → `llc` command includes explicit optimizat
 V20: Handoff after code edit ! `uv run tox -e lint` & `uv run tox -e type` pass or failure documented.
 V21: Broad CPython build run ! delete stale `.o` first when object cache can mask regression.
 V22: Vibe-coded patch accepted only after reproducer, local oracle/gate, and lesson/changelog update when behavior/status changes.
+V23: GNU `void` return expression ! analyze operand + emit side effects before `ret void`; c11 keeps reject.
+V24: Multi-line macro args ! collect through block comments and inactive conditional-directive lines; inactive branch directives do not abort expansion.
+V25: Incomplete array init length ! largest initialized designator/range index + 1, not initializer item count; file/block sema and codegen agree.
 
 ## §T TASKS
 id|status|task|cites
@@ -85,3 +88,6 @@ T18|.|verify full target `CC="xcc" ./configure && make` after high-risk codegen/
 
 ## §B BUGS
 id|date|cause|fix
+B1|2026-05-26|GNU `void return expr;` skipped operand sema/codegen and lost call typemap|V23
+B2|2026-05-26|macro arg collector stopped at block comments/inactive directives inside invocation|V24
+B3|2026-05-26|sparse designated incomplete array used item count, truncating CPython function offset table|V25

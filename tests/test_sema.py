@@ -3943,6 +3943,16 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
+    def test_incomplete_array_designator_infers_highest_index_bound(self) -> None:
+        source = "unsigned long a[] = { [8] = 56, [16] = 112 };"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        assert sema.file_scope is not None
+        symbol = sema.file_scope.lookup("a")
+        self.assertIsInstance(symbol, VarSymbol)
+        assert isinstance(symbol, VarSymbol)
+        self.assertEqual(symbol.type_, ULONG.array_of(17))
+
     def test_incomplete_array_with_member_designator_error(self) -> None:
         unit = parse(list(lex("int main(void){int a[] = {.x = 1}; return 0;}")))
         with self.assertRaises(SemaError) as ctx:

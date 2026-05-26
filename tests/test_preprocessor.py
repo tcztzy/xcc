@@ -3785,6 +3785,13 @@ A(0)
         self.assertIn("GOOD", result.source)
         self.assertNotIn("BAD", result.source)
 
+    def test_multiline_macro_inactive_non_conditional_directive_in_args(self) -> None:
+        """Inactive macro-argument branches may contain non-conditional directives."""
+        source = "#define M(a) a\nM(\n#if 0\n#error bad\n#else\nGOOD\n#endif\n)\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("GOOD", result.source)
+        self.assertNotIn("bad", result.source)
+
     def test_ternary_short_circuit_div_zero(self) -> None:
         """Division by zero in unselected ternary branch must not raise."""
         source = "#if 0 ? 1/0 : 1\nyes\n#else\nno\n#endif\n"
@@ -3802,6 +3809,13 @@ A(0)
         source = "#define M(a, b) b\nM(1, //c\n2)\n"
         result = preprocess_source(source, filename="t.c")
         self.assertIn("2", result.source)
+
+    def test_multiline_macro_block_comment_in_argument(self) -> None:
+        """A block comment inside a multi-line argument does not stop collection."""
+        source = "#define M(a, b) b\nM(1, // head\n/* comment\n   tail */\n2)\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("2", result.source)
+        self.assertNotIn("M(", result.source)
 
     def test_embed_directive_expands_file_bytes(self) -> None:
         """#embed reads file and expands to comma-separated ints."""

@@ -758,6 +758,13 @@ class _LLVMGen:
         c = llvm()
         if stmt.value is None:
             c.BuildRetVoid(self._builder)
+        elif (
+            self._func_sym is not None
+            and self._func_sym.return_type.name == "void"
+            and not self._func_sym.return_type.declarator_ops
+        ):
+            self._emit_expr(stmt.value)
+            c.BuildRetVoid(self._builder)
         else:
             v = self._emit_expr(stmt.value)
             ret_lt = self._type_to_llvm(self._func_sym.return_type if self._func_sym else INT)

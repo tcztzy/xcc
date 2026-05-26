@@ -138,6 +138,13 @@ def _strip_block_comments(text: str) -> str:
     return "".join(result)
 
 
+def _has_unclosed_block_comment(text: str) -> bool:
+    in_block = False
+    for line in text.splitlines(keepends=True):
+        in_block = _scan_block_comment_state(line, in_block)
+    return in_block
+
+
 def process_text(
     preprocessor: _ProcessTextPreprocessor,
     source: str,
@@ -185,6 +192,20 @@ def process_text(
                         all_lines.append(next_line)
                     joined = "".join(text_parts)
                     if len(all_lines) > 1:
+                        if _has_unclosed_block_comment(joined):
+                            next_idx = line_index + len(all_lines)
+                            if next_idx >= len(lines):
+                                raise PreprocessorError(
+                                    "Unterminated macro invocation",
+                                    location.line,
+                                    1,
+                                    filename=location.filename,
+                                    code=_PP_UNTERMINATED_MACRO,
+                                )
+                            next_line = lines[next_idx]
+                            text_parts.append(next_line)
+                            all_lines.append(next_line)
+                            continue
                         joined = _strip_block_comments(joined)
                     try:
                         expanded = self._expand_line(joined, location)
@@ -219,7 +240,11 @@ def process_text(
                                 base_dir=base_dir,
                             )
                             if result is None:
-                                raise
+                                if _is_active(inner_stack):
+                                    raise
+                                for il in inner_lines:
+                                    all_lines.append(il)
+                                continue
                             for il in inner_lines:
                                 all_lines.append(il)
                         elif _is_active(inner_stack):

@@ -92,7 +92,7 @@ def analyze_array_initializer_list(
     assert isinstance(length_value, int)
     length = length_value
     if length < 0:
-        length = _infer_incomplete_array_length(analyzer, init, scope)
+        length = infer_incomplete_array_length(analyzer, init, scope)
     element_type = target_type.element_type()
     assert element_type is not None
     next_index = 0
@@ -136,7 +136,7 @@ def analyze_array_initializer_list(
         next_index += 1
 
 
-def _infer_incomplete_array_length(analyzer: object, init: InitList, scope: Scope) -> int:
+def infer_incomplete_array_length(analyzer: object, init: InitList, scope: Scope) -> int:
     max_index = 0
     next_idx = 0
     for item in init.items:

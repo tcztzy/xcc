@@ -106,7 +106,7 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
                 raise SemaError(a._extern_initializer_message("block-scope"))
             a._analyze_initializer(var_type, stmt.init, scope)
             if var_type.is_array() and var_type.declarator_ops[0][1] < 0:
-                inferred = a._infer_array_size_from_init(stmt.init)
+                inferred = a._infer_array_size_from_init(stmt.init, scope)
                 if inferred is not None:
                     new_ops = (("arr", inferred),) + var_type.declarator_ops[1:]
                     new_type = Type(
@@ -139,6 +139,7 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
         if return_type is VOID:
             if getattr(a, "_std", "c11") != "gnu11":
                 raise SemaError("Void function should not return a value")
+            a._analyze_expr(stmt.value, scope)
             return
         value_type = a._decay_array_value(a._analyze_expr(stmt.value, scope))
         # Allow type mismatch for generic-return builtins (params=None

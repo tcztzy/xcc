@@ -78,6 +78,12 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("getelementptr [0 x i8], ptr @table", ir)
         self.assertNotIn("4294967295", ir)
         self.assertNotIn("load [0 x i8]", ir)
+
+    def test_gnu_void_return_call_expression_keeps_argument_typemap(self) -> None:
+        ir = self.assertLlcAccepts("void sink(int); void f(int x) { return sink(x); }\n")
+        self.assertIn("call void @sink(i32", ir)
+        self.assertIn("ret void", ir)
+        self.assertNotIn("ret i32", ir)
         self.assertNotIn("alloca [0 x i8]", ir)
 
     def test_bool_conversion_uses_nonzero_not_low_bit_truncation(self) -> None:
@@ -348,6 +354,24 @@ int main(void)
         ir = self.assertLlcAccepts(source)
 
         self.assertIn("@values = internal global [4 x i32]", ir)
+        self.assertProgramReturns(source, 0)
+
+    def test_incomplete_array_designator_global_infers_highest_index_bound(self) -> None:
+        source = """
+unsigned long values[] = { [8] = 56, [16] = 112 };
+
+int main(void)
+{
+  if (sizeof(values) / sizeof(values[0]) != 17) return 1;
+  if (values[8] != 56) return 2;
+  if (values[16] != 112) return 3;
+  return 0;
+}
+"""
+
+        ir = self.assertLlcAccepts(source)
+
+        self.assertIn("@values = global [17 x i64]", ir)
         self.assertProgramReturns(source, 0)
 
     def test_gnu_atomic_builtins_lower_to_ir(self) -> None:

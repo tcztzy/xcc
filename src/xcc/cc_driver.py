@@ -9,7 +9,7 @@ from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
 from xcc.options import FrontendOptions
 
-TargetName = Literal["llvm"]
+TargetName = Literal["llvm", "aarch64-apple-darwin"]
 DriverAction = Literal["link", "compile", "assembly", "delegate"]
 
 
@@ -122,6 +122,8 @@ def _parse_std(arg: str) -> str:
 def _parse_target(arg: str) -> TargetName:
     if arg == "llvm":
         return "llvm"
+    if arg == "aarch64-apple-darwin":
+        return "aarch64-apple-darwin"
     raise ValueError(f"Unsupported target: {arg}")
 
 
@@ -463,6 +465,72 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
             print(f"xcc: {error}", file=sys.stderr)
             return 1
 
+    if config.target == "aarch64-apple-darwin":
+        try:
+            from xcc.aarch64_asm import generate_aarch64_asm
+
+            output = config.output or _default_output(
+                config.c_inputs[0], config.action, config.target
+            )
+            if config.action == "assembly":
+                for result in results:
+                    asm = generate_aarch64_asm(result)
+                    if output == "-":
+                        sys.stdout.write(asm)
+                    else:
+                        Path(output).write_text(asm, encoding="utf-8")
+                return 0
+
+            with tempfile.TemporaryDirectory() as tmp:
+                objects: list[str] = []
+                for index, result in enumerate(results):
+                    asm = generate_aarch64_asm(result)
+                    asm_path = Path(tmp) / f"input{index}.s"
+                    asm_path.write_text(asm, encoding="utf-8")
+                    obj_path = Path(tmp) / f"input{index}.o"
+                    assemble_cmd = [
+                        "clang",
+                        "-target",
+                        config.target,
+                        "-c",
+                        str(asm_path),
+                        "-o",
+                        str(obj_path),
+                    ]
+                    r = subprocess.run(
+                        assemble_cmd,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if r.returncode != 0:
+                        stderr = (r.stderr or "").strip()
+                        raise CodegenError(
+                            Diagnostic(
+                                "codegen",
+                                result.filename,
+                                f"clang assembler failed: {stderr}",
+                            )
+                        )
+                    if config.action == "compile":
+                        import shutil
+
+                        shutil.copy(str(obj_path), str(output))
+                        continue
+                    objects.append(str(obj_path))
+                if config.action == "compile":
+                    return 0
+                link_cmd = _link_argv_with_objects(config, objects)
+                link_cmd[1:1] = ["-target", config.target]
+                r = subprocess.run(link_cmd, check=False)
+                if r.returncode != 0:
+                    print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
+                    return 1
+            return 0
+        except Exception as error:
+            print(f"xcc: {error}", file=sys.stderr)
+            return 1
+
     raise AssertionError(f"unhandled target: {config.target}")
 
 
@@ -471,4 +539,6 @@ def _default_output(path: str, action: str, target: TargetName) -> str:
         return "a.out"
     if action == "assembly" and target == "llvm":
         return str(Path(path).with_suffix(".ll"))
+    if action == "assembly" and target == "aarch64-apple-darwin":
+        return str(Path(path).with_suffix(".s"))
     return str(Path(path).with_suffix(".o"))

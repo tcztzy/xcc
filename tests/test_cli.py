@@ -183,6 +183,76 @@ class CliTests(unittest.TestCase):
             self.assertIn("define i32 @f()", ll.read_text(encoding="utf-8"))
             run.assert_not_called()
 
+    def test_main_aarch64_target_assembly_is_native_asm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            asm_path = root / "ok.s"
+            src.write_text("int f(void){return 7;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    ["--target=aarch64-apple-darwin", "-nostdinc", "-S", str(src)]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+            asm = asm_path.read_text(encoding="utf-8")
+            self.assertIn(".globl _f\n_f:", asm)
+            self.assertIn("    mov w0, #7", asm)
+            self.assertNotIn("define i32", asm)
+            run.assert_not_called()
+
+    def test_main_aarch64_target_assembly_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "ok.c"
+            src.write_text("int f(void){return 3;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    ["--target=aarch64-apple-darwin", "-nostdinc", "-S", str(src), "-o", "-"]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stderr, "")
+            self.assertIn(".globl _f\n_f:", stdout)
+            self.assertIn("    mov w0, #3", stdout)
+            run.assert_not_called()
+
+    def test_main_aarch64_target_compile_assembles_generated_asm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            obj = root / "ok.o"
+            src.write_text("int f(void){return 5;}", encoding="utf-8")
+
+            def fake_run(cmd, **kwargs):
+                self.assertNotEqual(cmd[0], "/opt/homebrew/opt/llvm/bin/llc")
+                Path(cmd[cmd.index("-o") + 1]).write_bytes(b"obj")
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+                code, stdout, stderr = self._run_main(
+                    [
+                        "--target=aarch64-apple-darwin",
+                        "-nostdinc",
+                        "-c",
+                        str(src),
+                        "-o",
+                        str(obj),
+                    ]
+                )
+                obj_bytes = obj.read_bytes()
+                assemble_cmd = run.call_args.args[0]
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        self.assertEqual(obj_bytes, b"obj")
+        self.assertEqual(assemble_cmd[:3], ["clang", "-target", "aarch64-apple-darwin"])
+        self.assertIn("-c", assemble_cmd)
+
     def test_main_unsupported_target_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.c"

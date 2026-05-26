@@ -1,24 +1,26 @@
 # XCC
 
 C11 compiler written in Python. Zero runtime dependencies. Generates
-LLVM IR via libLLVM-C ctypes, treats LLVM IR as the default target assembly
-language, and pipes through llc + clang for machine code.
+LLVM IR via libLLVM-C ctypes by default, treats LLVM IR as one target assembly
+language, and can also emit native Darwin AArch64 assembly directly.
 
 ## Pipeline
 
 ```
-.c → [preprocessor → lexer → parser → sema] → LLVM IR (libLLVM-C)
-   → llc → .o → clang → executable
+.c → [preprocessor → lexer → parser → sema] → target assembly
+   → assembler/linker when object or executable output is requested
 ```
 
 - `--target=llvm` (default): emit LLVM IR and lower objects through llc
-- `-S`: write target assembly; for `--target=llvm`, this is textual LLVM IR
+- `--target=aarch64-apple-darwin`: emit native Darwin AArch64 assembly
+- `-S`: write target assembly; for `llvm`, this is textual LLVM IR
 - `-c`: write an object file
 
 ## Status
 
 - Frontend: parses and analyzes real C translation units without CPython-specific paths
-- Target: LLVM object/link path is the default compiler path, with no clang fallback mode
+- Target: LLVM remains the default; Darwin AArch64 has a direct assembly path for
+  scalar integer leaf functions
 - Platform: macOS ARM64
 
 ## Commands
