@@ -310,6 +310,8 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
         defines=tuple(defines),
         undefs=tuple(undefs),
         no_standard_includes=no_standard_includes,
+        host_machine="arm64" if target == "aarch64-apple-darwin" else None,
+        strip_gnu_asm_statements=target != "aarch64-apple-darwin",
     )
     return DriverConfig(
         frontend_options=options,

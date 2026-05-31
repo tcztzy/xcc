@@ -253,6 +253,22 @@ class CliTests(unittest.TestCase):
         self.assertEqual(assemble_cmd[:3], ["clang", "-target", "aarch64-apple-darwin"])
         self.assertIn("-c", assemble_cmd)
 
+    def test_main_aarch64_target_rejects_function_body_gnu_asm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "asm.c"
+            path.write_text(
+                'int main(void){\n  __asm__ __volatile__("movq %rcx, %rax");\n  return 0;\n}',
+                encoding="utf-8",
+            )
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    ["--target=aarch64-apple-darwin", "-nostdinc", str(path)]
+                )
+            self.assertNotEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertIn("GNU asm statement is not supported for this target", stderr)
+            run.assert_not_called()
+
     def test_main_unsupported_target_errors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.c"

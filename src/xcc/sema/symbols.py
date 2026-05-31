@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from xcc.ast import Expr
 from xcc.types import INT, Type
@@ -74,6 +74,7 @@ class SemaUnit:
     type_map: TypeMap
     record_definitions: dict[str, tuple[RecordMemberInfo, ...]]
     file_scope: "Scope | None" = None
+    function_signatures: dict[str, FunctionSignature] = field(default_factory=dict)
 
 
 class Scope:

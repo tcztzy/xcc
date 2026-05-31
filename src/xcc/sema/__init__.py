@@ -396,7 +396,13 @@ class Analyzer:
         for external in externals:
             if isinstance(external, FunctionDef) and external.body is not None:
                 self._analyze_function(external)
-        return SemaUnit(self._functions, self._type_map, self._record_definitions, self._file_scope)
+        return SemaUnit(
+            self._functions,
+            self._type_map,
+            self._record_definitions,
+            self._file_scope,
+            dict(self._function_signatures),
+        )
 
     def _register_function_external(self, func: FunctionDef) -> None:
         if func.storage_class not in {None, "static", "extern"}:

@@ -219,3 +219,29 @@ def _reject_gnu_asm_extensions(
                 filename=mapped_filename,
                 code=code,
             )
+
+
+def _reject_gnu_asm_statements(
+    source: str,
+    line_map: tuple[tuple[str, int], ...],
+    *,
+    code: str,
+    primary_filename: str,
+) -> None:
+    for line_number, line in enumerate(source.splitlines(), start=1):
+        if not _ASM_PREFIX_RE.match(line):
+            continue
+        mapped_filename, mapped_line = (
+            line_map[line_number - 1]
+            if 1 <= line_number <= len(line_map)
+            else ("<input>", line_number)
+        )
+        if mapped_filename != primary_filename:
+            continue
+        raise PreprocessorError(
+            "GNU asm statement is not supported for this target",
+            mapped_line,
+            1,
+            filename=mapped_filename,
+            code=code,
+        )

@@ -135,7 +135,7 @@ class _LLVMGen:
         c = llvm()
         self._ctx = c.ContextCreate()
         self._mod = c.ModuleCreateWithName(result.filename.encode("utf-8"))
-        c.SetTarget(self._mod, b"arm64-apple-macosx15.0.0")
+        c.SetTarget(self._mod, b"aarch64-apple-darwin")
         self._builder = c.CreateBuilder()
         self._str_constants: dict[str, int] = {}  # literal → _LLVMValueRef
         self._compound_literal_globals: dict[int, int] = {}

@@ -564,6 +564,13 @@ def preprocess_source(
     processor = _Preprocessor(normalized_options)
     processed = processor.process(source, filename=filename)
     if normalized_options.std == "gnu11":
+        if not normalized_options.strip_gnu_asm_statements:
+            _text._reject_gnu_asm_statements(
+                processed.source,
+                processed.line_map,
+                code=_PP_GNU_EXTENSION,
+                primary_filename=filename,
+            )
         stripped = _strip_gnu_asm_extensions(processed.source)
     else:
         _reject_gnu_asm_extensions(processed.source, processed.line_map)

@@ -22,6 +22,7 @@ class FrontendOptions:
     diag_format: DiagFormat = "human"
     warn_as_error: bool = False
     host_machine: str | None = None
+    strip_gnu_asm_statements: bool = True
 
     def __post_init__(self) -> None:
         if self.std not in {"c11", "gnu11"}:
