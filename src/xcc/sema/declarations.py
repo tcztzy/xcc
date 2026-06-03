@@ -105,6 +105,8 @@ class _FileScopeAnalyzer(Protocol):
         scope: Scope,
     ) -> int | None: ...
 
+    def _register_transparent_union_typedef(self, type_: Type) -> None: ...
+
     def _typedef_storage_class_object_message(self, scope_label: str) -> str: ...
 
 
@@ -123,6 +125,8 @@ def analyze_file_scope_decl(analyzer: _FileScopeAnalyzer, declaration: Stmt) -> 
         a._define_enum_members(declaration.type_spec, a._file_scope)
         typedef_type = a._resolve_type(declaration.type_spec)
         a._ensure_array_size_limit(typedef_type)
+        if declaration.is_transparent_union:
+            a._register_transparent_union_typedef(typedef_type)
         a._file_scope.define_typedef(declaration.name, typedef_type)
         return
     if isinstance(declaration, DeclStmt):

@@ -116,6 +116,26 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int ok", result.source)
         self.assertNotIn("int bad", result.source)
 
+    def test_linux_target_predefines_linux_not_darwin(self) -> None:
+        result = preprocess_source(
+            "#if defined(__linux__) && defined(__x86_64__)\nint linux_ok;\n#endif\n"
+            "#if defined(__APPLE__) || defined(__MACH__)\nint darwin_bad;\n#endif\n",
+            filename="if.c",
+            options=FrontendOptions(std="gnu11", host_machine="x86_64", target_os="linux"),
+        )
+        self.assertIn("int linux_ok", result.source)
+        self.assertNotIn("int darwin_bad", result.source)
+
+    def test_linux_target_uses_gpu02_gcc_version_macros(self) -> None:
+        result = preprocess_source(
+            "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n",
+            filename="if.c",
+            options=FrontendOptions(std="gnu11", host_machine="x86_64", target_os="linux"),
+        )
+        self.assertIn("int g = 8 ;", result.source)
+        self.assertIn("int gm = 5 ;", result.source)
+        self.assertIn("int gp = 0 ;", result.source)
+
     def test_little_endian_host_does_not_define_big_endian_macro(self) -> None:
         source = (
             "#ifdef __BIG_ENDIAN__\n"
@@ -217,7 +237,8 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source(
             "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n"
             "int gsi = __GNUC_STDC_INLINE__;\n"
-            "const char *v = __VERSION__;\n",
+            "const char *v = __VERSION__;\n"
+            "const char *pf = __PRETTY_FUNCTION__;\n",
             filename="main.c",
             options=FrontendOptions(std="gnu11"),
         )
@@ -226,6 +247,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int gp = 1 ;", result.source)
         self.assertIn("int gsi = 1 ;", result.source)
         self.assertIn('const char * v = "xcc gnu11" ;', result.source)
+        self.assertIn('const char * pf = "<unknown>" ;', result.source)
 
     def test_gnu_mode_does_not_define_strict_ansi_macro(self) -> None:
         result = preprocess_source(
@@ -991,6 +1013,13 @@ A(0)
         result = preprocess_source(source, filename="if.c")
         self.assertIn("int ok;", result.source)
 
+    def test_endif_allows_multiline_trailing_block_comment(self) -> None:
+        source = "#if 1\nint ok;\n#endif /* !_A && !_B\n  || __need_X */\nint after;\n"
+        result = preprocess_source(source, filename="if.c")
+        self.assertIn("int ok;", result.source)
+        self.assertIn("int after;", result.source)
+        self.assertNotIn("__need_X", result.source)
+
     def test_unterminated_conditional(self) -> None:
         with self.assertRaises(PreprocessorError):
             preprocess_source("#if 1\nint a;\n", filename="if.c")
@@ -1102,6 +1131,20 @@ A(0)
         self.assertNotIn("y = 1", before_function)
         self.assertIn("y = 1", function_body)
         self.assertNotIn("tail */", result.source)
+
+    def test_macro_before_unclosed_trailing_block_comment_expands(self) -> None:
+        result = preprocess_source(
+            "#define __ASSERT_VOID_CAST (void)\n"
+            "#define assert(expr) (__ASSERT_VOID_CAST (0))\n"
+            "void f(int wsign, int vsign) {\n"
+            "    assert(wsign != 0); /* closed */\n"
+            "    assert(vsign != 0); /* multiline\n"
+            "                           tail */\n"
+            "}\n",
+            filename="trailing_comment.c",
+        )
+        self.assertNotIn("assert ( vsign", result.source)
+        self.assertIn("( ( void ) ( 0 ) ) ;/* multiline", result.source)
 
     def test_block_comment_sigil_inside_string_does_not_disable_directives(self) -> None:
         result = preprocess_source(
@@ -3333,6 +3376,15 @@ A(0)
         stripped = _strip_gnu_asm_extensions(source)
         self.assertEqual(stripped.splitlines(), ["", "int x  = 0;", "", "", ""])
 
+    def test_strip_gnu_asm_extensions_strips_inline_statement(self) -> None:
+        source = (
+            'do { int d0, d1; __asm__ __volatile__("cld; rep; stosq" '
+            ': "=c"(d0), "=D"(d1) : "a"(0), "0"(8), "1"(ptr) : "memory"); } while (0);\n'
+            'int x __asm("sym") = 1;\n'
+        )
+        stripped = _strip_gnu_asm_extensions(source)
+        self.assertEqual(stripped, "do { int d0, d1; ; } while (0);\nint x  = 1;\n")
+
     def test_macro_name_from_cli_define_handles_unclosed_parameter_list(self) -> None:
         self.assertEqual(_macro_name_from_cli_define("FUNC("), "FUNC(")
 
@@ -3720,6 +3772,22 @@ A(0)
         lines = result.source.splitlines(keepends=True)
         self.assertEqual(len(lines), 4)
         self.assertIn("int x", lines[3])
+
+    def test_function_like_macro_name_before_newline_paren_expands(self) -> None:
+        source = (
+            "#define ATTR(msg) __attribute__((deprecated(msg)))\n"
+            "int f(void) ATTR\n"
+            '  ("Use g instead");\n'
+        )
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn('__attribute__ ( ( deprecated ( "Use g instead" ) ) )', result.source)
+        self.assertNotIn("ATTR", result.source)
+
+    def test_function_like_macro_name_at_line_end_without_paren_is_not_collected(self) -> None:
+        source = "#define ID(x) x\nint x = ID\nint y;\n"
+        result = preprocess_source(source, filename="t.c")
+        self.assertIn("int x = ID\n", result.source)
+        self.assertIn("int y ;\n", result.source)
 
     def test_multiline_macro_unterminated_at_eof_raises(self) -> None:
         source = "#define M(a,b) a+b\nM(1,\n"
@@ -4381,6 +4449,30 @@ A(0)
         self.assertNotIn("BAR", result.source)
         self.assertNotIn("FOO", result.source)
         self.assertIn("3 + 1", result.source)
+
+    def test_member_position_macro_with_self_reference_expands_once(self) -> None:
+        result = preprocess_source(
+            "struct H { int sa_handler; };\n"
+            "struct S { struct H __sigaction_handler; };\n"
+            "#define sa_handler __sigaction_handler.sa_handler\n"
+            "int f(struct S context) { return context.sa_handler; }\n",
+            filename="member_macro.c",
+        )
+        self.assertIn("context . __sigaction_handler . sa_handler", result.source)
+
+    def test_self_reference_macro_argument_is_not_reexpanded_in_outer_macro(self) -> None:
+        result = preprocess_source(
+            "#define fatal_error _PyRuntime.faulthandler.fatal_error\n"
+            "#define SET(dst, src) __typeof__(dst) *p = &(dst)\n"
+            "SET(fatal_error.file, file)\n",
+            filename="nested_self_reference.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        self.assertIn(
+            "__typeof__ ( _PyRuntime . faulthandler . fatal_error . file )",
+            result.source,
+        )
+        self.assertNotIn("_PyRuntime . faulthandler . _PyRuntime", result.source)
 
     def test_function_like_macro_token_paste_rescan(self) -> None:
         """Token-paste result that forms a function-like macro name is re-scanned."""

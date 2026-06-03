@@ -1,3 +1,4 @@
+import platform
 import subprocess
 import sys
 import tempfile
@@ -9,7 +10,7 @@ from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
 from xcc.options import FrontendOptions
 
-TargetName = Literal["llvm", "aarch64-apple-darwin"]
+TargetName = Literal["llvm", "aarch64-apple-darwin", "x86_64-linux-gnu"]
 DriverAction = Literal["link", "compile", "assembly", "delegate"]
 
 
@@ -124,7 +125,16 @@ def _parse_target(arg: str) -> TargetName:
         return "llvm"
     if arg == "aarch64-apple-darwin":
         return "aarch64-apple-darwin"
+    if arg == "x86_64-linux-gnu":
+        return "x86_64-linux-gnu"
     raise ValueError(f"Unsupported target: {arg}")
+
+
+def _default_target() -> TargetName:
+    machine = platform.machine().lower()
+    if sys.platform.startswith("linux") and machine in {"x86_64", "amd64"}:
+        return "x86_64-linux-gnu"
+    return "llvm"
 
 
 def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
@@ -138,7 +148,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
     defines: list[str] = []
     undefs: list[str] = []
     no_standard_includes = False
-    target: TargetName = "llvm"
+    target = _default_target()
     action: DriverAction = "link"
     output: str | None = None
     language: str | None = None
@@ -279,7 +289,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
             arg.startswith("-Wl,")
             or arg.startswith("-O")
             or arg.startswith("-W")
-            or arg in {"-g", "-pipe", "-pthread"}
+            or arg in {"-g", "-pipe", "-pthread", "-fno-strict-aliasing", "-fPIC", "-fpic"}
         ):
             clang_argv.append(arg)
             continue
@@ -310,8 +320,21 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
         defines=tuple(defines),
         undefs=tuple(undefs),
         no_standard_includes=no_standard_includes,
-        host_machine="arm64" if target == "aarch64-apple-darwin" else None,
-        strip_gnu_asm_statements=target != "aarch64-apple-darwin",
+        host_machine=(
+            "arm64"
+            if target == "aarch64-apple-darwin"
+            else "x86_64"
+            if target == "x86_64-linux-gnu"
+            else None
+        ),
+        target_os=(
+            "darwin"
+            if target == "aarch64-apple-darwin"
+            else "linux"
+            if target == "x86_64-linux-gnu"
+            else None
+        ),
+        strip_gnu_asm_statements=target == "x86_64-linux-gnu",
     )
     return DriverConfig(
         frontend_options=options,
@@ -325,13 +348,38 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
     )
 
 
-def _run_clang(argv: tuple[str, ...] | list[str]) -> int:
+def _run_tool(tool: str, argv: tuple[str, ...] | list[str]) -> int:
     try:
-        completed = subprocess.run(("clang", *argv), check=False)
+        completed = subprocess.run((tool, *argv), check=False)
     except OSError as error:
-        print(f"xcc: failed to execute clang: {error}", file=sys.stderr)
+        print(f"xcc: failed to execute {tool}: {error}", file=sys.stderr)
         return 1
     return completed.returncode
+
+
+def _delegate_tool(target: TargetName) -> str:
+    return "cc" if target == "x86_64-linux-gnu" else "clang"
+
+
+def _drop_x86_64_linux_latomic(argv: list[str] | tuple[str, ...]) -> list[str]:
+    filtered: list[str] = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        index += 1
+        if arg == "-latomic":
+            continue
+        if arg == "-l" and index < len(argv) and argv[index] == "atomic":
+            index += 1
+            continue
+        filtered.append(arg)
+    return filtered
+
+
+def _delegate_argv(config: DriverConfig) -> tuple[str, ...] | list[str]:
+    if config.target == "x86_64-linux-gnu":
+        return _drop_x86_64_linux_latomic(config.clang_argv)
+    return config.clang_argv
 
 
 def _compile_frontend_inputs(
@@ -355,7 +403,12 @@ def _compile_frontend_inputs(
     return results
 
 
-def _link_argv_with_objects(config: DriverConfig, objects: list[str]) -> list[str]:
+def _link_argv_with_objects(
+    config: DriverConfig,
+    objects: list[str],
+    *,
+    linker: str = "clang",
+) -> list[str]:
     replacements = iter(objects)
     link_args: list[str] = []
     c_inputs = list(config.c_inputs)
@@ -374,13 +427,13 @@ def _link_argv_with_objects(config: DriverConfig, objects: list[str]) -> list[st
             c_inputs.pop(0)
             continue
         link_args.append(arg)
-    return ["clang", *link_args]
+    return [linker, *link_args]
 
 
 def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> int:
     if set(argv) & {"--version", "-V"}:
         print("xcc 0.2.0a1", file=sys.stderr)
-        print("Target: llvm", file=sys.stderr)
+        print(f"Target: {_default_target()}", file=sys.stderr)
         return 0
 
     try:
@@ -390,10 +443,10 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         return 1
 
     if not config.c_inputs:
-        return _run_clang(config.clang_argv)
+        return _run_tool(_delegate_tool(config.target), _delegate_argv(config))
 
     if config.action == "delegate":
-        return _run_clang(config.clang_argv)
+        return _run_tool(_delegate_tool(config.target), _delegate_argv(config))
 
     if config.native_unsupported_flags:
         flags = " ".join(config.native_unsupported_flags)
@@ -533,6 +586,71 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
             print(f"xcc: {error}", file=sys.stderr)
             return 1
 
+    if config.target == "x86_64-linux-gnu":
+        try:
+            from xcc.x86_64_asm import generate_x86_64_asm
+
+            output = config.output or _default_output(
+                config.c_inputs[0], config.action, config.target
+            )
+            if config.action == "assembly":
+                for result in results:
+                    asm = generate_x86_64_asm(result)
+                    if output == "-":
+                        sys.stdout.write(asm)
+                    else:
+                        Path(output).write_text(asm, encoding="utf-8")
+                return 0
+
+            with tempfile.TemporaryDirectory() as tmp:
+                objects: list[str] = []
+                for index, result in enumerate(results):
+                    asm = generate_x86_64_asm(result)
+                    asm_path = Path(tmp) / f"input{index}.s"
+                    asm_path.write_text(asm, encoding="utf-8")
+                    obj_path = Path(tmp) / f"input{index}.o"
+                    assemble_cmd = [
+                        "cc",
+                        "-c",
+                        str(asm_path),
+                        "-o",
+                        str(obj_path),
+                    ]
+                    r = subprocess.run(
+                        assemble_cmd,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if r.returncode != 0:
+                        stderr = (r.stderr or "").strip()
+                        raise CodegenError(
+                            Diagnostic(
+                                "codegen",
+                                result.filename,
+                                f"cc assembler failed: {stderr}",
+                            )
+                        )
+                    if config.action == "compile":
+                        import shutil
+
+                        shutil.copy(str(obj_path), str(output))
+                        continue
+                    objects.append(str(obj_path))
+                if config.action == "compile":
+                    return 0
+                link_cmd = _drop_x86_64_linux_latomic(
+                    _link_argv_with_objects(config, objects, linker="cc")
+                )
+                r = subprocess.run(link_cmd, check=False)
+                if r.returncode != 0:
+                    print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
+                    return 1
+            return 0
+        except Exception as error:
+            print(f"xcc: {error}", file=sys.stderr)
+            return 1
+
     raise AssertionError(f"unhandled target: {config.target}")
 
 
@@ -541,6 +659,6 @@ def _default_output(path: str, action: str, target: TargetName) -> str:
         return "a.out"
     if action == "assembly" and target == "llvm":
         return str(Path(path).with_suffix(".ll"))
-    if action == "assembly" and target == "aarch64-apple-darwin":
+    if action == "assembly" and target in {"aarch64-apple-darwin", "x86_64-linux-gnu"}:
         return str(Path(path).with_suffix(".s"))
     return str(Path(path).with_suffix(".o"))

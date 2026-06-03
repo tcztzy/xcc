@@ -77,7 +77,7 @@ PAREN_TYPE_NAME_KEYWORDS = (
     }
     | TYPEOF_KEYWORDS
 )
-TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
+TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
 _NULLABLE_QUALIFIERS = {"_Nullable", "_Nonnull", "_Null_unspecified"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
 _GNU_EXTENSION_TYPES = {
@@ -793,7 +793,7 @@ class Parser:
             else:
                 decl_type = self._build_declarator_type(raw_base_type, declarator_ops)
             if is_typedef:
-                self._skip_decl_extensions()
+                _, has_transparent_union = self._consume_decl_extensions()
                 if self._check_punct("="):
                     raise ParserError("Typedef cannot have initializer", self._current())
                 is_top_level_qualified = self._is_top_level_qualified_type_name(
@@ -804,7 +804,7 @@ class Parser:
                     top_pointer_is_qualified=top_pointer_is_qualified,
                 )
                 self._define_typedef(name, decl_type, is_top_level_qualified=is_top_level_qualified)
-                declarations.append(TypedefDecl(decl_type, name))
+                declarations.append(TypedefDecl(decl_type, name, has_transparent_union))
             else:
                 if self._is_invalid_void_object_type(decl_type):
                     raise ParserError(
@@ -1210,6 +1210,9 @@ class Parser:
 
     def _skip_decl_extensions(self) -> None:
         _extensions._skip_decl_extensions(self)
+
+    def _consume_decl_extensions(self) -> tuple[bool, bool]:
+        return _extensions._consume_decl_extensions(self)
 
     def _consume_decl_attributes(self) -> tuple[bool, bool]:
         return _extensions._consume_decl_attributes(self)

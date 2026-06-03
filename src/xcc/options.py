@@ -3,6 +3,7 @@ from typing import Literal
 
 DiagFormat = Literal["human", "json"]
 StdMode = Literal["c11", "gnu11"]
+TargetOS = Literal["darwin", "linux"]
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class FrontendOptions:
     diag_format: DiagFormat = "human"
     warn_as_error: bool = False
     host_machine: str | None = None
+    target_os: TargetOS | None = None
     strip_gnu_asm_statements: bool = True
 
     def __post_init__(self) -> None:
@@ -29,6 +31,8 @@ class FrontendOptions:
             raise ValueError(f"Unsupported language standard: {self.std}")
         if self.diag_format not in {"human", "json"}:
             raise ValueError(f"Unsupported diagnostic format: {self.diag_format}")
+        if self.target_os is not None and self.target_os not in {"darwin", "linux"}:
+            raise ValueError(f"Unsupported target OS: {self.target_os}")
 
 
 def normalize_options(options: FrontendOptions | None) -> FrontendOptions:

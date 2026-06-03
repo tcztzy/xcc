@@ -358,6 +358,13 @@ class SemaTests(unittest.TestCase):
             "Invalid declaration specifier for function declaration: '_Thread_local'",
         )
 
+    def test_block_scope_extern_function_declaration_registers_signature(self) -> None:
+        unit = parse(list(lex("int main(void){ extern int callee(int); return callee(7); }")))
+        sema = analyze(unit)
+        signature = sema.function_signatures["callee"]
+        self.assertEqual(signature.return_type, INT)
+        self.assertEqual(signature.params, (INT,))
+
     def test_file_scope_storage_without_identifier_error(self) -> None:
         unit = parse(list(lex("static struct S;")))
         with self.assertRaises(SemaError) as ctx:
@@ -2363,6 +2370,42 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Argument 1 type mismatch")
 
+    def test_transparent_union_parameter_accepts_member_pointer_argument(self) -> None:
+        source = """
+            struct sockaddr { int family; };
+            struct sockaddr_in { int family; int port; };
+            typedef union {
+                struct sockaddr *sa;
+                struct sockaddr_in *sin;
+            } SockArg __attribute__((__transparent_union__));
+            int accept4(int fd, SockArg addr, unsigned int *len, int flags);
+            int first(struct sockaddr *addr, unsigned int *len) {
+                return accept4(3, addr, len, 0);
+            }
+            int second(struct sockaddr_in *addr, unsigned int *len) {
+                return accept4(3, addr, len, 0);
+            }
+        """
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        self.assertEqual(sema.transparent_union_types, {"union <anon:1>"})
+
+    def test_transparent_union_parameter_rejects_non_member_argument(self) -> None:
+        source = """
+            struct sockaddr { int family; };
+            typedef union {
+                struct sockaddr *sa;
+            } SockArg __attribute__((__transparent_union__));
+            int accept4(int fd, SockArg addr, unsigned int *len, int flags);
+            int bad(unsigned int *len) {
+                return accept4(3, 1, len, 0);
+            }
+        """
+        unit = parse(list(lex(source)), std="gnu11")
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit, std="gnu11")
+        self.assertEqual(str(ctx.exception), "Argument 2 type mismatch: accept4")
+
     def test_function_pointer_without_prototype_call(self) -> None:
         source = "int apply(int (*fp)(), int x){return fp(x,x);}"
         unit = parse(list(lex(source)))
@@ -3100,6 +3143,27 @@ class SemaTests(unittest.TestCase):
         call_expr = _body(unit.functions[1]).statements[0].value
         self.assertIsInstance(call_expr, CallExpr)
         self.assertIs(sema.type_map.get(call_expr), INT)
+
+    def test_function_pointer_call_callee_typemap_shadows_same_named_function(self) -> None:
+        source = """
+int dict_contains(int x) { return x + 100; }
+int dictkeys_contains(int x) { return x + 7; }
+int caller(int x) {
+  int (*dict_contains)(int);
+  dict_contains = dictkeys_contains;
+  return dict_contains(x);
+}
+"""
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        stmt = _body(unit.functions[2]).statements[2]
+        self.assertIsInstance(stmt, ReturnStmt)
+        self.assertIsInstance(stmt.value, CallExpr)
+        self.assertEqual(
+            sema.type_map.require(stmt.value.callee),
+            INT.function_of((INT,)).pointer_to(),
+        )
+        self.assertEqual(sema.type_map.require(stmt.value), INT)
 
     def test_pointer_address_of_and_dereference_typemap(self) -> None:
         source = "int main(){int x=1; int *p=&x; return *p;}"
@@ -6144,6 +6208,14 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="c11")
         self.assertIsNotNone(sema)
 
+    def test_builtin_memset_returns_void_pointer(self) -> None:
+        source = "void *f(char *p) { return __builtin_memset(p, 0, 4); }"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        call = _body(unit.functions[0]).statements[0].value
+        self.assertIsInstance(call, CallExpr)
+        self.assertEqual(sema.type_map.get(call), Type("void", pointer_depth=1))
+
     def test_c11_atomic_load_returns_pointee_type(self) -> None:
         source = "_Atomic(void*) slot; void use(void *); void f(void) { use(__c11_atomic_load(&slot, 2)); }"
         unit = parse(list(lex(source)), std="gnu11")
@@ -6186,6 +6258,24 @@ class SemaTests(unittest.TestCase):
                 unit = parse(list(lex(source)), std="c11")
                 sema = analyze(unit, std="c11")
                 self.assertIsNotNone(sema)
+
+    def test_builtin_isinf_sign_accepted_in_c11(self) -> None:
+        source = "int f(double x) { return __builtin_isinf_sign(x); }"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
+    def test_builtin_signbit_accepted_in_c11(self) -> None:
+        source = "int f(double x) { return __builtin_signbit(x); }"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
+
+    def test_builtin_isnormal_accepted_in_c11(self) -> None:
+        source = "int f(double x) { return __builtin_isnormal(x); }"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        self.assertIsNotNone(sema)
 
     def test_const_qualified_type_is_detected(self) -> None:
         """is_const_qualified returns True for const-qualified type."""

@@ -20,6 +20,7 @@ class FrontendOptionsTests(unittest.TestCase):
         self.assertFalse(options.no_standard_includes)
         self.assertEqual(options.diag_format, "human")
         self.assertFalse(options.warn_as_error)
+        self.assertIsNone(options.target_os)
 
     def test_invalid_standard(self) -> None:
         with self.assertRaises(ValueError):
@@ -28,6 +29,10 @@ class FrontendOptionsTests(unittest.TestCase):
     def test_invalid_diag_format(self) -> None:
         with self.assertRaises(ValueError):
             FrontendOptions(diag_format="xml")  # type: ignore[arg-type]
+
+    def test_invalid_target_os(self) -> None:
+        with self.assertRaises(ValueError):
+            FrontendOptions(target_os="plan9")  # type: ignore[arg-type]
 
     def test_normalize_options(self) -> None:
         normalized = normalize_options(None)

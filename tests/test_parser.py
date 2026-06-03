@@ -164,6 +164,22 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parser._current().lexeme, "int")
         self.assertFalse(parser._skip_gnu_attributes())
 
+    def test_typedef_preserves_transparent_union_attribute(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "typedef union { int *i; float *f; } Arg "
+                    "__attribute__((__transparent_union__));"
+                )
+            )
+        )
+        self.assertEqual(len(unit.declarations), 1)
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, TypedefDecl)
+        assert isinstance(declaration, TypedefDecl)
+        self.assertTrue(declaration.is_transparent_union)
+        self.assertEqual(declaration.name, "Arg")
+
     def test_parse_function(self) -> None:
         source = "int main(){return 1+2*3;}"
         tokens = list(lex(source))
@@ -359,6 +375,41 @@ class ParserTests(unittest.TestCase):
         statements = _body(unit.functions[0]).statements
         self.assertIsInstance(statements[0], DeclStmt)
         self.assertEqual(statements[0].type_spec, TypeSpec("int", qualifiers=("const",)))
+
+    def test_gnu_restrict_aliases_are_canonicalized(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "typedef struct S FILE;"
+                    "extern FILE *fopen(const char *__restrict __filename, "
+                    "const char *__restrict__ __modes);"
+                )
+            )
+        )
+        self.assertEqual(unit.functions[0].name, "fopen")
+        self.assertEqual(unit.functions[0].params[0].name, "__filename")
+        self.assertEqual(unit.functions[0].params[1].name, "__modes")
+
+    def test_duplicate_gnu_restrict_aliases_are_rejected_as_restrict(self) -> None:
+        with self.assertRaises(ParserError) as ctx:
+            parse(list(lex("int main(void){__restrict __restrict__ int *p; return 0;}")))
+        self.assertEqual(ctx.exception.message, "Duplicate type qualifier: 'restrict'")
+
+    def test_extension_marker_before_record_member_is_ignored(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "struct S {"
+                    "  __extension__ union {"
+                    "    __extension__ unsigned long long int w;"
+                    "  };"
+                    "};"
+                )
+            )
+        )
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.type_spec.record_tag, "S")
 
     def test_duplicate_leading_type_qualifiers_are_rejected(self) -> None:
         with self.assertRaises(ParserError) as ctx:

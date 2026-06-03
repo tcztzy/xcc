@@ -398,6 +398,7 @@ class DeclStmt(Stmt):
 class TypedefDecl(Stmt):
     type_spec: TypeSpec
     name: str
+    is_transparent_union: bool = False
 
 
 @dataclass(frozen=True)

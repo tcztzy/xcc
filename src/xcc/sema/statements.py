@@ -82,6 +82,9 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
             raise SemaError(a._invalid_object_type_message("block-scope", "void"))
         if a._is_invalid_incomplete_record_object_type(stmt.type_spec):
             raise SemaError(a._invalid_object_type_message("block-scope", "incomplete"))
+        if a._is_function_object_type(stmt.type_spec):
+            a._register_function_typed_block_scope_decl(stmt, scope)
+            return
         var_type = a._resolve_type(stmt.type_spec)
         var_alignment = a._alignof_type(var_type)
         if not a._is_valid_explicit_alignment(stmt.alignment, var_alignment):
@@ -126,6 +129,8 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
         a._define_enum_members(stmt.type_spec, scope)
         typedef_type = a._resolve_type(stmt.type_spec)
         a._ensure_array_size_limit(typedef_type)
+        if stmt.is_transparent_union:
+            a._register_transparent_union_typedef(typedef_type)
         scope.define_typedef(stmt.name, typedef_type)
         return
     if isinstance(stmt, ExprStmt):

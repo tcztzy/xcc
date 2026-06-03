@@ -49,8 +49,38 @@ def _macos_clang_resource_include_dir(sdk: str) -> str | None:
     return str(Path(resource_dir) / "include")
 
 
+def _cc_system_include_dirs() -> tuple[str, ...]:
+    try:
+        proc = subprocess.run(
+            ("cc", "-E", "-v", "-x", "c", "-"),
+            input="",
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ("/usr/local/include", "/usr/include")
+    include_dirs: list[str] = []
+    in_search_list = False
+    for raw_line in proc.stderr.splitlines():
+        line = raw_line.strip()
+        if line == "#include <...> search starts here:":
+            in_search_list = True
+            continue
+        if line == "End of search list.":
+            break
+        if in_search_list and line:
+            include_dirs.append(line)
+    if not include_dirs:
+        include_dirs.extend(("/usr/local/include", "/usr/include"))
+    return _dedupe_in_order(include_dirs)
+
+
 @cache
 def _host_system_include_dirs(platform: str, sdkroot: str) -> tuple[str, ...]:
+    if platform.startswith("linux"):
+        return _cc_system_include_dirs()
     if platform != "darwin":
         return ()
 

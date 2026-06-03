@@ -27,6 +27,12 @@ class _ProcessTextPreprocessor(Protocol):
 
     def _expand_line(self, line: str, location: _SourceLocation) -> str: ...
 
+    def _should_collect_function_macro_continuation(
+        self,
+        text: str,
+        next_line: str,
+    ) -> bool: ...
+
     def _handle_conditional(
         self,
         name: str,
@@ -207,6 +213,15 @@ def process_text(
                             all_lines.append(next_line)
                             continue
                         joined = _strip_block_comments(joined)
+                    next_idx = line_index + len(all_lines)
+                    if next_idx < len(lines) and self._should_collect_function_macro_continuation(
+                        joined,
+                        lines[next_idx],
+                    ):
+                        next_line = lines[next_idx]
+                        text_parts.append(next_line)
+                        all_lines.append(next_line)
+                        continue
                     try:
                         expanded = self._expand_line(joined, location)
                     except PreprocessorError as exc:

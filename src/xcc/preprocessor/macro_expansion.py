@@ -17,6 +17,12 @@ _PP_INVALID_MACRO = "XCC-PP-0201"
 _PP_UNTERMINATED_MACRO = "XCC-PP-0202"
 
 
+def _disable_macro_on_token(token: _MacroToken, name: str) -> _MacroToken:
+    if name in token.no_expand:
+        return token
+    return _MacroToken(token.kind, token.text, frozenset((*token.no_expand, name)))
+
+
 def _expand_macro_tokens(
     tokens: list[_MacroToken],
     macros: dict[str, _Macro],
@@ -55,21 +61,20 @@ def _expand_macro_tokens(
             index += 1
             continue
         macro = macros.get(token.text)
-        if (
-            macro is not None
-            and macro.parameters is None
-            and index > 0
-            and tokens[index - 1].text in {".", "->"}
-            and any(repl.text == macro.name for repl in macro.replacement)
-        ):
-            expanded.append(token)
-            index += 1
-            continue
         # A macro is skipped if: it's in the permanent ancestor set, OR
         # it's the macro whose replacement is currently being rescanned
         # (self-disable to prevent re-expansion of the same macro in its
         # own replacement text).
-        if macro is None or macro.name in ancestor_disabled or macro.name == self_disabled:
+        if (
+            macro is None
+            or macro.name in token.no_expand
+            or macro.name in ancestor_disabled
+            or macro.name == self_disabled
+        ):
+            if macro is not None and (
+                macro.name in ancestor_disabled or macro.name == self_disabled
+            ):
+                token = _disable_macro_on_token(token, macro.name)
             expanded.append(token)
             index += 1
             # If the blocked macro is in the ancestor set (cross-reference,

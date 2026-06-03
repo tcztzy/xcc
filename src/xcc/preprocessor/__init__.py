@@ -205,6 +205,33 @@ _IF_NOT_DEFINED_RE = re.compile(r"#\s*if\s+!\s*defined\s*\(\s*([A-Za-z_]\w*)\s*\
 _DEFINE_RE = re.compile(r"#\s*define\s+([A-Za-z_]\w*)")
 
 
+def _split_unclosed_block_comment_tail(text: str) -> tuple[str, str] | None:
+    in_string: str | None = None
+    index = 0
+    while index < len(text):
+        ch = text[index]
+        if in_string is not None:
+            if ch == "\\" and index + 1 < len(text):
+                index += 2
+                continue
+            if ch == in_string:
+                in_string = None
+            index += 1
+            continue
+        if ch in {'"', "'"}:
+            in_string = ch
+            index += 1
+            continue
+        if ch == "/" and index + 1 < len(text):
+            nxt = text[index + 1]
+            if nxt == "/":
+                return None
+            if nxt == "*" and _scan_block_comment_state(text[index:], False):
+                return text[:index], text[index:]
+        index += 1
+    return None
+
+
 def _detect_include_guard(source: str) -> str | None:
     """Detect #ifndef / #define include guard from the start of a source file.
 
@@ -494,11 +521,27 @@ _GNU_MODE_PREDEFINED_MACROS = (
     "__GNUC_MINOR__=8",
     "__GNUC_PATCHLEVEL__=1",
     "__GNUC_STDC_INLINE__=1",
+    '__VERSION__="xcc gnu11"',
+    '__func__="<unknown>"',
+    '__PRETTY_FUNCTION__="<unknown>"',
+)
+_DARWIN_PREDEFINED_MACROS = (
     "__APPLE__=1",
     "__MACH__=1",
     "__APPLE_CC__=6000",  # Identify as Apple GCC-compatible for TargetConditionals.h
-    '__VERSION__="xcc gnu11"',
-    '__func__="<unknown>"',
+)
+_LINUX_PREDEFINED_MACROS = (
+    "__GNUC__=8",
+    "__GNUC_MINOR__=5",
+    "__GNUC_PATCHLEVEL__=0",
+    "__linux__=1",
+    "__linux=1",
+    "linux=1",
+    "__unix__=1",
+    "__unix=1",
+    "unix=1",
+    "__ELF__=1",
+    "__gnu_linux__=1",
 )
 _SUPPORTED_WARNINGS = frozenset(
     {
@@ -539,6 +582,8 @@ _PREDEFINED_MACRO_NAMES = frozenset(
         *_PREDEFINED_MACROS,
         *_STRICT_MODE_PREDEFINED_MACROS,
         *_GNU_MODE_PREDEFINED_MACROS,
+        *_DARWIN_PREDEFINED_MACROS,
+        *_LINUX_PREDEFINED_MACROS,
         *_HOST_ARCH_DEFINE_STRINGS,
     )
 ) | frozenset(_PREDEFINED_DYNAMIC_MACROS | _PREDEFINED_STATIC_MACROS | {"__STDC_HOSTED__"})
@@ -610,6 +655,15 @@ class _Preprocessor:
         for define in mode_defines:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
+        if options.std == "gnu11":
+            target_defines = (
+                _LINUX_PREDEFINED_MACROS
+                if options.target_os == "linux"
+                else _DARWIN_PREDEFINED_MACROS
+            )
+            for define in target_defines:
+                macro = self._parse_cli_define(define)
+                self._macros[macro.name] = macro
         host_machine = self._options.host_machine or platform.machine()
         for define in _HOST_ARCH_PREDEFINED_MACROS.get(host_machine, ()):
             macro = self._parse_cli_define(define)
@@ -790,9 +844,30 @@ class _Preprocessor:
             return False
         return any(token.kind == TokenKind.IDENT and token.text in self._macros for token in tokens)
 
+    def _should_collect_function_macro_continuation(
+        self,
+        text: str,
+        next_line: str,
+    ) -> bool:
+        if not next_line.lstrip().startswith("("):
+            return False
+        tokens = _tokenize_macro_text(text.rstrip())
+        if tokens is None or not tokens:
+            return False
+        last = tokens[-1]
+        if last.kind != TokenKind.IDENT:
+            return False
+        macro = self._macros.get(last.text)
+        return macro is not None and macro.parameters is not None
+
     def _expand_macro_text(self, text: str, location: _SourceLocation) -> str:
         tokens = _tokenize_macro_text(text)
         if tokens is None:
+            split = _split_unclosed_block_comment_tail(text)
+            if split is not None:
+                before_comment, comment_tail = split
+                expanded_prefix = self._expand_macro_text(before_comment, location)
+                return expanded_prefix + comment_tail
             return text
         expanded = _expand_macro_tokens(
             tokens,

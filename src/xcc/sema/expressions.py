@@ -686,8 +686,14 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         raise SemaError(f"Unsupported assignment operator: {expr.op}")
     if isinstance(expr, CallExpr):
         if isinstance(expr.callee, Identifier):
-            signature = self._function_signatures.get(expr.callee.name)
-            if signature is not None:
+            symbol = scope.lookup(expr.callee.name)
+            if symbol is not None:
+                callee_type = symbol.type_
+                self._type_map.set(expr.callee, callee_type)
+            else:
+                signature = self._function_signatures.get(expr.callee.name)
+                if signature is None:
+                    raise SemaError(f"Undeclared function: {expr.callee.name}")
                 signature = self._resolve_call_signature(
                     expr.callee.name,
                     expr.args,
@@ -709,11 +715,6 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
                 )
                 self._type_map.set(expr, return_type)
                 return return_type
-            symbol = scope.lookup(expr.callee.name)
-            if symbol is None:
-                raise SemaError(f"Undeclared function: {expr.callee.name}")
-            callee_type = symbol.type_
-            self._type_map.set(expr.callee, callee_type)
         else:
             callee_type = self._analyze_expr(expr.callee, scope)
             overload_name = self._get_overload_expr_name(expr.callee)

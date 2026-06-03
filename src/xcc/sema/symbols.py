@@ -75,6 +75,7 @@ class SemaUnit:
     record_definitions: dict[str, tuple[RecordMemberInfo, ...]]
     file_scope: "Scope | None" = None
     function_signatures: dict[str, FunctionSignature] = field(default_factory=dict)
+    transparent_union_types: set[str] = field(default_factory=set)
 
 
 class Scope:

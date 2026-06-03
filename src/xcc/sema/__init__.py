@@ -159,6 +159,7 @@ class Analyzer:
         self._overload_expr_ids: dict[int, str] = {}
         self._defined_functions: set[str] = set()
         self._record_definitions: dict[str, tuple[RecordMemberInfo, ...]] = {}
+        self._transparent_union_types: set[str] = set()
         self._record_pack: dict[str, int | None] = {}
         self._record_member_lookup_cache: dict[
             str,
@@ -319,6 +320,9 @@ class Analyzer:
             "__builtin_alloca_with_align",
             "__builtin_malloc",
             "__builtin_calloc",
+            "__builtin_memcpy",
+            "__builtin_memmove",
+            "__builtin_memset",
         )
         _voidp_sig = FunctionSignature(
             return_type=VOID.pointer_to(),
@@ -349,8 +353,11 @@ class Analyzer:
             "__builtin_umull_overflow",
             "__builtin_umulll_overflow",
             "__builtin_isinf",
+            "__builtin_isinf_sign",
             "__builtin_isnan",
             "__builtin_isfinite",
+            "__builtin_isnormal",
+            "__builtin_signbit",
         )
         _int_sig = FunctionSignature(return_type=INT, params=None, is_variadic=True)
         for name in _INTEGER_BUILTINS:
@@ -402,6 +409,7 @@ class Analyzer:
             self._record_definitions,
             self._file_scope,
             dict(self._function_signatures),
+            set(self._transparent_union_types),
         )
 
     def _register_function_external(self, func: FunctionDef) -> None:
@@ -453,6 +461,22 @@ class Analyzer:
         if self._file_scope.lookup_typedef(declaration.name) is not None:
             raise SemaError(f"Conflicting declaration: {declaration.name}")
         resolved_type = self._resolve_type(declaration.type_spec)
+        callable_signature = resolved_type.callable_signature()
+        assert callable_signature is not None
+        return_type, params = callable_signature
+        parameter_types, is_variadic = params
+        self._register_function_signature(
+            declaration.name,
+            FunctionSignature(return_type, parameter_types, is_variadic),
+        )
+
+    def _register_function_typed_block_scope_decl(
+        self, declaration: DeclStmt, scope: Scope
+    ) -> None:
+        assert declaration.name is not None
+        resolved_type = self._resolve_type(declaration.type_spec)
+        var_alignment = self._alignof_type(resolved_type)
+        scope.define(VarSymbol(declaration.name, resolved_type, var_alignment, is_extern=True))
         callable_signature = resolved_type.callable_signature()
         assert callable_signature is not None
         return_type, params = callable_signature
@@ -773,6 +797,12 @@ class Analyzer:
 
     def _record_members(self, record_name: str) -> tuple[RecordMemberInfo, ...] | None:
         return record_members(self._record_definitions, record_name)
+
+    def _register_transparent_union_typedef(self, type_: Type) -> None:
+        if type_.declarator_ops or not type_.name.startswith("union "):
+            return
+        if self._record_members(type_.name) is not None:
+            self._transparent_union_types.add(type_.name)
 
     def _is_anonymous_record_member(self, member: RecordMemberInfo) -> bool:
         return is_anonymous_record_member(member, self._is_record_name)
@@ -1231,7 +1261,7 @@ class Analyzer:
         exact_matches = 0
         fixed_params = signature.params
         for arg, arg_type, param_type in zip(args, arg_types, fixed_params, strict=False):
-            if not self._is_assignment_expr_compatible(param_type, arg, arg_type, scope):
+            if not self._is_call_argument_compatible(param_type, arg, arg_type, scope):
                 return None
             if arg_type == param_type:
                 exact_matches += 1
@@ -1308,14 +1338,44 @@ class Analyzer:
         for index, arg in enumerate(args[: len(parameter_types)]):
             arg_type = self._type_map.require(arg)
             value_arg_type = self._decay_array_value(arg_type)
-            if not self._is_assignment_expr_compatible(
-                parameter_types[index],
-                arg,
-                value_arg_type,
-                scope,
+            if not self._is_call_argument_compatible(
+                parameter_types[index], arg, value_arg_type, scope
             ):
                 suffix = f": {function_name}" if function_name is not None else ""
                 raise SemaError(f"Argument {index + 1} type mismatch{suffix}")
+
+    def _is_call_argument_compatible(
+        self,
+        parameter_type: Type,
+        arg: Expr,
+        value_arg_type: Type,
+        scope: Scope,
+    ) -> bool:
+        if self._is_assignment_expr_compatible(parameter_type, arg, value_arg_type, scope):
+            return True
+        return self._is_transparent_union_argument_compatible(
+            parameter_type, arg, value_arg_type, scope
+        )
+
+    def _is_transparent_union_argument_compatible(
+        self,
+        parameter_type: Type,
+        arg: Expr,
+        value_arg_type: Type,
+        scope: Scope,
+    ) -> bool:
+        if (
+            parameter_type.declarator_ops
+            or parameter_type.name not in self._transparent_union_types
+        ):
+            return False
+        members = self._record_members(parameter_type.name)
+        if members is None:
+            return False
+        for member in members:
+            if self._is_assignment_expr_compatible(member.type_, arg, value_arg_type, scope):
+                return True
+        return False
 
     def _is_assignable(self, expr: Expr) -> bool:
         return isinstance(expr, (Identifier, SubscriptExpr, MemberExpr, CompoundLiteralExpr)) or (

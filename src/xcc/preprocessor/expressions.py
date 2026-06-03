@@ -185,7 +185,7 @@ def _parse_pp_char_literal(token: str) -> int | None:
 
 
 def _strip_condition_comments(expr: str) -> str:
-    without_block = re.sub(r"/\*.*?\*/", " ", expr)
+    without_block = re.sub(r"/\*.*?\*/", " ", expr, flags=re.DOTALL)
     if "//" in without_block:
         return without_block.split("//", 1)[0]
     return without_block

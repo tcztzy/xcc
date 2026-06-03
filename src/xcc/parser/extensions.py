@@ -44,8 +44,26 @@ def _skip_gnu_attributes(parser: object, make_error: Callable[[str, Token], Exce
 
 
 def _skip_decl_extensions(parser: object) -> None:
-    while _skip_decl_attributes(parser) or _skip_asm_label(parser):
-        pass
+    _consume_decl_extensions(parser)
+
+
+def _consume_decl_extensions(parser: object) -> tuple[bool, bool]:
+    found = False
+    has_transparent_union = False
+    while True:
+        (
+            attr_found,
+            _attr_has_overloadable,
+            _alignment,
+            _alignment_token,
+            attr_has_transparent_union,
+        ) = _consume_decl_attributes_with_details(parser)
+        asm_found = _skip_asm_label(parser)
+        if not attr_found and not asm_found:
+            break
+        found = True
+        has_transparent_union = has_transparent_union or attr_has_transparent_union
+    return found, has_transparent_union
 
 
 def _consume_decl_attributes(parser: object) -> tuple[bool, bool]:
@@ -61,8 +79,22 @@ def _consume_decl_attribute_alignment(parser: object) -> tuple[bool, int | None,
 def _consume_decl_attributes_with_alignment(
     parser: object,
 ) -> tuple[bool, bool, int | None, Token | None]:
+    (
+        found,
+        has_overloadable,
+        alignment,
+        alignment_token,
+        _has_transparent_union,
+    ) = _consume_decl_attributes_with_details(parser)
+    return found, has_overloadable, alignment, alignment_token
+
+
+def _consume_decl_attributes_with_details(
+    parser: object,
+) -> tuple[bool, bool, int | None, Token | None, bool]:
     found = False
     has_overloadable = False
+    has_transparent_union = False
     alignment: int | None = None
     alignment_token: Token | None = None
     while True:
@@ -71,7 +103,8 @@ def _consume_decl_attributes_with_alignment(
             gnu_has_overloadable,
             gnu_alignment,
             gnu_alignment_token,
-        ) = _consume_gnu_attributes_with_alignment(
+            gnu_has_transparent_union,
+        ) = _consume_gnu_attributes_with_details(
             parser,
             parser._make_error,  # type: ignore
         )
@@ -85,12 +118,13 @@ def _consume_decl_attributes_with_alignment(
         )
         found = found or gnu_found or ms_found or availability_found
         has_overloadable = has_overloadable or gnu_has_overloadable
+        has_transparent_union = has_transparent_union or gnu_has_transparent_union
         if gnu_alignment is not None and (alignment is None or gnu_alignment > alignment):
             alignment = gnu_alignment
             alignment_token = gnu_alignment_token
         if not gnu_found and not ms_found and not availability_found:
             break
-    return found, has_overloadable, alignment, alignment_token
+    return found, has_overloadable, alignment, alignment_token, has_transparent_union
 
 
 def _consume_gnu_attributes(
@@ -108,8 +142,23 @@ def _consume_gnu_attributes_with_alignment(
     parser: object,
     make_error: Callable[[str, Token], Exception],
 ) -> tuple[bool, bool, int | None, Token | None]:
+    (
+        found,
+        has_overloadable,
+        alignment,
+        alignment_token,
+        _has_transparent_union,
+    ) = _consume_gnu_attributes_with_details(parser, make_error)
+    return found, has_overloadable, alignment, alignment_token
+
+
+def _consume_gnu_attributes_with_details(
+    parser: object,
+    make_error: Callable[[str, Token], Exception],
+) -> tuple[bool, bool, int | None, Token | None, bool]:
     found = False
     has_overloadable = False
+    has_transparent_union = False
     alignment: int | None = None
     alignment_token: Token | None = None
     while _is_gnu_attribute_start(parser):
@@ -123,6 +172,11 @@ def _consume_gnu_attributes_with_alignment(
                 raise make_error("Expected ')'", start)
             if token.kind == TokenKind.IDENT and token.lexeme == "overloadable":
                 has_overloadable = True
+            if token.kind == TokenKind.IDENT and token.lexeme in {
+                "transparent_union",
+                "__transparent_union__",
+            }:
+                has_transparent_union = True
             if (
                 depth == 2
                 and token.kind == TokenKind.IDENT
@@ -167,7 +221,7 @@ def _consume_gnu_attributes_with_alignment(
                     depth -= 1
             parser._advance()  # type: ignore
         found = True
-    return found, has_overloadable, alignment, alignment_token
+    return found, has_overloadable, alignment, alignment_token, has_transparent_union
 
 
 def _is_gnu_attribute_start(parser: object) -> bool:

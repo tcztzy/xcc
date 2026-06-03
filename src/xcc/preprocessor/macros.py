@@ -10,6 +10,7 @@ _IDENT_RE = re.compile(r"[A-Za-z_]\w*")
 class _MacroToken:
     kind: TokenKind
     text: str
+    no_expand: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

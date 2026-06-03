@@ -8,8 +8,9 @@ from xcc.parser.array_sizes import (
 )
 from xcc.parser.type_specs import ParserError
 
-TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
+TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
+_TYPE_QUALIFIER_ALIASES = {"__restrict": "restrict", "__restrict__": "restrict"}
 FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
@@ -280,10 +281,11 @@ def parse_array_declarator(
     while allow_parameter_arrays and p._current().kind == TokenKind.KEYWORD:
         lexeme = str(p._current().lexeme)
         if lexeme in TYPE_QUALIFIER_KEYWORDS:
-            if lexeme in seen_qualifiers:
-                raise ParserError(f"Duplicate type qualifier: '{lexeme}'", p._current())
-            qualifiers.append(lexeme)
-            seen_qualifiers.add(lexeme)
+            qualifier = _TYPE_QUALIFIER_ALIASES.get(lexeme, lexeme)
+            if qualifier in seen_qualifiers:
+                raise ParserError(f"Duplicate type qualifier: '{qualifier}'", p._current())
+            qualifiers.append(qualifier)
+            seen_qualifiers.add(qualifier)
             p._advance()
             continue
         if lexeme == "static":

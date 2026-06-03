@@ -25,11 +25,37 @@ class HostIncludesTests(unittest.TestCase):
         with patch("xcc.host_includes.subprocess.run", return_value=completed):
             self.assertIsNone(host_includes._xcrun_stdout("--version"))
 
-    def test_host_system_include_dirs_non_darwin_returns_empty(self) -> None:
-        with patch("xcc.host_includes.sys.platform", "linux"):
-            with patch("xcc.host_includes.subprocess.run") as run:
-                self.assertEqual(host_includes.host_system_include_dirs(), ())
+    def test_host_system_include_dirs_unknown_platform_returns_empty(self) -> None:
+        with (
+            patch("xcc.host_includes.sys.platform", "win32"),
+            patch("xcc.host_includes.subprocess.run") as run,
+        ):
+            self.assertEqual(host_includes.host_system_include_dirs(), ())
         run.assert_not_called()
+
+    def test_host_system_include_dirs_linux_parses_cc_search_list(self) -> None:
+        stderr = """
+#include "..." search starts here:
+#include <...> search starts here:
+ /usr/lib/gcc/x86_64-redhat-linux/8/include
+ /usr/local/include
+ /usr/include
+End of search list.
+"""
+        completed = subprocess.CompletedProcess(("cc",), 0, stdout="", stderr=stderr)
+        with (
+            patch("xcc.host_includes.sys.platform", "linux"),
+            patch("xcc.host_includes.subprocess.run", return_value=completed) as run,
+        ):
+            self.assertEqual(
+                host_includes.host_system_include_dirs(),
+                (
+                    "/usr/lib/gcc/x86_64-redhat-linux/8/include",
+                    "/usr/local/include",
+                    "/usr/include",
+                ),
+            )
+        run.assert_called_once()
 
     def test_host_system_include_dirs_darwin_uses_sdkroot_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

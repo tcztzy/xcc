@@ -39,7 +39,7 @@ FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 _EXTENSION_MARKER = "__extension__"
 ALIGNOF_KEYWORDS = {"_Alignof", "__alignof__"}
-TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
+TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
 PAREN_TYPE_NAME_KEYWORDS = {
     "_Atomic",

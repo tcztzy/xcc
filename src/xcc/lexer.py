@@ -37,6 +37,8 @@ KEYWORDS = {
     "long",
     "register",
     "restrict",
+    "__restrict",
+    "__restrict__",
     "return",
     "short",
     "signed",

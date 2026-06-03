@@ -9,6 +9,8 @@ _DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$", re.DO
 _ASM_PREFIX_RE = re.compile(r"^\s*(?:__asm__|__asm|asm)\b")
 _ASM_STMT_RE = re.compile(r"^\s*asm\b")
 _ASM_LABEL_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\b[^;]*\)")
+_ASM_KEYWORD_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\b")
+_ASM_QUALIFIERS = frozenset({"volatile", "__volatile__", "inline", "__inline__"})
 _ENUM_DECL_RE = re.compile(
     r"(?<!\w)__(?:enum|enum_class)_decl\s*\(\s*([A-Za-z_]\w*)\s*,[^,]*,\s*\{"
 )
@@ -138,8 +140,8 @@ def _strip_gnu_asm_extensions(source: str) -> str:
             stripped_lines.append(_blank_line(line))
             in_asm_statement = ";" not in line
             continue
-        # __asm__ or __asm labels/attributes (strip just the asm part).
-        stripped = _ASM_LABEL_RE.sub("", line)
+        # __asm__ or __asm labels/attributes/statements (strip just the asm part).
+        stripped = _strip_inline_asm_segments(line)
         # Translate __enum_decl(name, type, { -> enum name {
         m = _ENUM_DECL_RE.search(stripped)
         if m:
@@ -156,6 +158,92 @@ def _strip_gnu_asm_extensions(source: str) -> str:
         # declaration like size_t wcsftime(...) __asm("_wcsftime");).
         stripped_lines.append(stripped)
     return "".join(stripped_lines)
+
+
+def _strip_inline_asm_segments(line: str) -> str:
+    result: list[str] = []
+    index = 0
+    while True:
+        match = _ASM_KEYWORD_RE.search(line, index)
+        if match is None:
+            result.append(line[index:])
+            return "".join(result)
+        result.append(line[index : match.start()])
+        open_index = _asm_operand_open_index(line, match.end())
+        if open_index is None:
+            index = match.end()
+            continue
+        close_index = _find_matching_paren(line, open_index)
+        if close_index is None:
+            index = match.end()
+            continue
+        after = close_index + 1
+        statement_end = _asm_statement_end(line, after)
+        if statement_end is not None and _asm_statement_context(line[: match.start()]):
+            result.append(";")
+            index = statement_end
+            continue
+        index = after
+
+
+def _asm_operand_open_index(line: str, index: int) -> int | None:
+    cursor = _skip_space(line, index)
+    while True:
+        word_match = re.match(r"[A-Za-z_]\w*", line[cursor:])
+        if word_match is None or word_match.group(0) not in _ASM_QUALIFIERS:
+            break
+        cursor = _skip_space(line, cursor + len(word_match.group(0)))
+    if cursor < len(line) and line[cursor] == "(":
+        return cursor
+    return None
+
+
+def _find_matching_paren(line: str, open_index: int) -> int | None:
+    depth = 0
+    index = open_index
+    in_string: str | None = None
+    while index < len(line):
+        ch = line[index]
+        if in_string is not None:
+            if ch == "\\":
+                index += 2
+                continue
+            if ch == in_string:
+                in_string = None
+            index += 1
+            continue
+        if ch in {'"', "'"}:
+            in_string = ch
+            index += 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
+
+
+def _asm_statement_end(line: str, index: int) -> int | None:
+    cursor = _skip_space(line, index)
+    if cursor < len(line) and line[cursor] == ";":
+        return cursor + 1
+    return None
+
+
+def _asm_statement_context(prefix: str) -> bool:
+    stripped = prefix.rstrip()
+    if not stripped:
+        return True
+    return stripped[-1] in "{;"
+
+
+def _skip_space(line: str, index: int) -> int:
+    while index < len(line) and line[index].isspace():
+        index += 1
+    return index
 
 
 def _quote_string_literal(text: str) -> str:

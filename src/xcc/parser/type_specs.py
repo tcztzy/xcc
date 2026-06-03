@@ -15,7 +15,7 @@ TYPEOF_KEYWORDS = {
     "__typeof_unqual__",
     "__typeof_unqual",
 }
-TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
+TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
 _NULLABLE_QUALIFIERS = {
     "_Nullable",
     "_Nonnull",
@@ -25,6 +25,7 @@ _NULLABLE_QUALIFIERS = {
     "__null_unspecified",
 }
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned", "constexpr"}
+_TYPE_QUALIFIER_ALIASES = {"__restrict": "restrict", "__restrict__": "restrict"}
 _GNU_EXTENSION_TYPES = {
     "bool",
     "_Float16",
@@ -421,9 +422,10 @@ def consume_type_qualifiers(parser: object, *, allow_atomic: bool = False) -> tu
         if token.kind == TokenKind.KEYWORD and token.lexeme in qualifiers:
             token = p._advance()
             lexeme = str(token.lexeme)
-            if lexeme in seen:
-                raise ParserError(f"Duplicate type qualifier: '{lexeme}'", token)
-            seen.append(lexeme)
+            qualifier = _TYPE_QUALIFIER_ALIASES.get(lexeme, lexeme)
+            if qualifier in seen:
+                raise ParserError(f"Duplicate type qualifier: '{qualifier}'", token)
+            seen.append(qualifier)
             continue
         if token.kind == TokenKind.IDENT and token.lexeme in _IGNORED_IDENT_TYPE_QUALIFIERS:
             # For contextual keywords like constexpr, only consume as a
@@ -654,6 +656,7 @@ def parse_record_members(parser: object) -> tuple[RecordMemberDecl, ...]:
 
 def parse_record_member_declaration(parser: object) -> list[RecordMemberDecl]:
     p = cast(Any, parser)
+    p._skip_extension_markers()
     decl_specs = p._consume_decl_specifiers()
     if decl_specs.is_typedef or decl_specs.storage_class not in {None, "typedef"}:
         raise ParserError("Expected type specifier", p._current())

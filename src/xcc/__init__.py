@@ -13,8 +13,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run the XCC frontend pipeline on C source input.",
         epilog=(
-            "Driver mode supports --target=llvm (default), --target=aarch64-apple-darwin, "
-            "-S, -c, and -o when compiling C inputs."
+            "Driver mode supports --target=llvm, --target=aarch64-apple-darwin, "
+            "--target=x86_64-linux-gnu, -S, -c, and -o when compiling C inputs. "
+            "The default target follows the host platform."
         ),
     )
     parser.add_argument(

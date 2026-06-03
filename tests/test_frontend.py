@@ -51,6 +51,29 @@ class FrontendTests(unittest.TestCase):
         result = compile_source(source, filename="pp.c")
         self.assertEqual(result.unit.functions[0].name, "f")
 
+    def test_compile_source_expands_member_position_self_reference_macro(self) -> None:
+        source = (
+            "struct H { int sa_handler; };\n"
+            "struct S { struct H __sigaction_handler; };\n"
+            "#define sa_handler __sigaction_handler.sa_handler\n"
+            "int f(struct S context){return context.sa_handler;}\n"
+        )
+        result = compile_source(source, filename="pp.c")
+        self.assertEqual(result.unit.functions[0].name, "f")
+
+    def test_compile_source_preserves_self_reference_macro_argument_disable(self) -> None:
+        source = (
+            "struct F { int file; };\n"
+            "struct H { struct F fatal_error; };\n"
+            "struct R { struct H faulthandler; };\n"
+            "extern struct R _PyRuntime;\n"
+            "#define fatal_error _PyRuntime.faulthandler.fatal_error\n"
+            "#define SET(dst, src) do { __typeof__(dst) *p = &(dst); *p = (src); } while (0)\n"
+            "void f(int file){SET(fatal_error.file, file);}\n"
+        )
+        result = compile_source(source, filename="pp.c", options=FrontendOptions(std="gnu11"))
+        self.assertEqual(result.unit.functions[0].name, "f")
+
     def test_compile_source_expands_command_line_define(self) -> None:
         result = compile_source(
             "int main(void){return ZERO;}\n",

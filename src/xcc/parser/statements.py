@@ -31,7 +31,7 @@ from xcc.parser.type_specs import ParserError
 
 _EXTENSION_MARKER = "__extension__"
 _MS_DECLSPEC_KEYWORD = "__declspec"
-TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict"}
+TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
 
 
@@ -221,6 +221,8 @@ def is_declaration_start(parser: _StatementParser) -> bool:
             "const",
             "volatile",
             "restrict",
+            "__restrict",
+            "__restrict__",
             "typedef",
             "auto",
             "register",

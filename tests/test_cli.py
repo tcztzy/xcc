@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
-from xcc import main
+from xcc import cc_driver, main
 
 
 class CliTests(unittest.TestCase):
@@ -91,6 +91,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertIn("usage:", stdout)
         self.assertIn("--target=llvm", stdout)
+        self.assertIn("--target=x86_64-linux-gnu", stdout)
         self.assertNotIn("--backend", stdout)
 
     def test_main_missing_input(self) -> None:
@@ -118,6 +119,49 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertEqual(stderr, "")
         run.assert_called_once_with(("clang", "-", "--unknown"), check=False)
+
+    def test_driver_default_target_on_x86_64_linux_is_native(self) -> None:
+        with (
+            patch("xcc.cc_driver.sys.platform", "linux"),
+            patch("xcc.cc_driver.platform.machine", return_value="x86_64"),
+        ):
+            config = cc_driver._parse_driver_config(["-c", "ok.c"])
+        self.assertEqual(config.target, "x86_64-linux-gnu")
+        self.assertEqual(config.frontend_options.host_machine, "x86_64")
+        self.assertEqual(config.frontend_options.target_os, "linux")
+
+    def test_main_version_reports_x86_64_linux_default_target(self) -> None:
+        with (
+            patch("xcc.cc_driver.sys.platform", "linux"),
+            patch("xcc.cc_driver.platform.machine", return_value="x86_64"),
+        ):
+            code, stdout, stderr = self._run_main(["--version"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertIn("Target: x86_64-linux-gnu", stderr)
+
+    def test_main_x86_64_linux_target_without_c_input_delegates_to_cc(self) -> None:
+        with patch("xcc.cc_driver.subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess((), 0)
+            code, stdout, stderr = self._run_main(["--target=x86_64-linux-gnu", "-v"])
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        run.assert_called_once_with(("cc", "-v"), check=False)
+
+    def test_main_x86_64_linux_target_preprocessor_delegate_uses_cc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ok.c"
+            path.write_text("int main(void){return 0;}\n", encoding="utf-8")
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                run.return_value = subprocess.CompletedProcess((), 0)
+                code, stdout, stderr = self._run_main(
+                    ["--target=x86_64-linux-gnu", "-E", str(path)]
+                )
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        run.assert_called_once_with(("cc", "-E", str(path)), check=False)
 
     def test_main_default_target_passes_o0_to_llc(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -219,6 +263,203 @@ class CliTests(unittest.TestCase):
             self.assertIn(".globl _f\n_f:", stdout)
             self.assertIn("    mov w0, #3", stdout)
             run.assert_not_called()
+
+    def test_main_x86_64_linux_target_assembly_is_native_asm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            asm_path = root / "ok.s"
+            src.write_text("int f(void){return 7;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    ["--target=x86_64-linux-gnu", "-nostdinc", "-S", str(src)]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+            asm = asm_path.read_text(encoding="utf-8")
+            self.assertIn(".globl f\nf:", asm)
+            self.assertIn("    mov eax, 7", asm)
+            self.assertNotIn("define i32", asm)
+            run.assert_not_called()
+
+    def test_main_x86_64_linux_target_strips_macro_expanded_gnu_asm(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "cpuid.c"
+            asm_path = root / "cpuid.s"
+            src.write_text(
+                "#define CPUID() __asm__ __volatile__(\"cpuid\")\n"
+                "int f(void){\n"
+                "  CPUID();\n"
+                "  return 7;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    [
+                        "--target=x86_64-linux-gnu",
+                        "-nostdinc",
+                        "-S",
+                        str(src),
+                        "-o",
+                        str(asm_path),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+            self.assertIn(".globl f\nf:", asm_path.read_text(encoding="utf-8"))
+            run.assert_not_called()
+
+    def test_main_x86_64_linux_target_accepts_aliasing_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            asm_path = root / "ok.s"
+            src.write_text("int f(void){return 7;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    [
+                        "--target=x86_64-linux-gnu",
+                        "-nostdinc",
+                        "-fno-strict-aliasing",
+                        "-S",
+                        str(src),
+                        "-o",
+                        str(asm_path),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+            self.assertIn(".globl f\nf:", asm_path.read_text(encoding="utf-8"))
+            run.assert_not_called()
+
+    def test_main_x86_64_linux_target_accepts_pic_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            asm_path = root / "ok.s"
+            src.write_text("int f(void){return 7;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    [
+                        "--target=x86_64-linux-gnu",
+                        "-nostdinc",
+                        "-fPIC",
+                        "-S",
+                        str(src),
+                        "-o",
+                        str(asm_path),
+                    ]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+            self.assertIn(".globl f\nf:", asm_path.read_text(encoding="utf-8"))
+            run.assert_not_called()
+
+    def test_main_x86_64_linux_target_compile_assembles_generated_asm_with_cc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            obj = root / "ok.o"
+            src.write_text("int f(void){return 5;}", encoding="utf-8")
+
+            def fake_run(cmd, **kwargs):
+                self.assertNotEqual(cmd[0], "/opt/homebrew/opt/llvm/bin/llc")
+                self.assertNotEqual(cmd[0], "clang")
+                Path(cmd[cmd.index("-o") + 1]).write_bytes(b"obj")
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+                code, stdout, stderr = self._run_main(
+                    [
+                        "--target=x86_64-linux-gnu",
+                        "-nostdinc",
+                        "-c",
+                        str(src),
+                        "-o",
+                        str(obj),
+                    ]
+                )
+                obj_bytes = obj.read_bytes()
+                assemble_cmd = run.call_args.args[0]
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        self.assertEqual(obj_bytes, b"obj")
+        self.assertEqual(assemble_cmd[0], "cc")
+        self.assertIn("-c", assemble_cmd)
+
+    def test_main_x86_64_linux_target_link_drops_latomic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            exe = root / "a.out"
+            src.write_text("int main(void){return 0;}", encoding="utf-8")
+            link_cmds = []
+
+            def fake_run(cmd, **kwargs):
+                if "-c" in cmd:
+                    Path(cmd[cmd.index("-o") + 1]).write_bytes(b"obj")
+                else:
+                    link_cmds.append(cmd)
+                return subprocess.CompletedProcess(cmd, 0)
+
+            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run):
+                code, stdout, stderr = self._run_main(
+                    [
+                        "--target=x86_64-linux-gnu",
+                        "-nostdinc",
+                        str(src),
+                        "-latomic",
+                        "-o",
+                        str(exe),
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        self.assertEqual(len(link_cmds), 1)
+        self.assertNotIn("-latomic", link_cmds[0])
+
+    def test_main_x86_64_linux_target_object_only_link_drops_latomic(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            obj = root / "ok.o"
+            exe = root / "a.out"
+            obj.write_bytes(b"obj")
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                run.return_value = subprocess.CompletedProcess((), 0)
+                code, stdout, stderr = self._run_main(
+                    [
+                        "--target=x86_64-linux-gnu",
+                        str(obj),
+                        "-latomic",
+                        "-l",
+                        "atomic",
+                        "-o",
+                        str(exe),
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        run.assert_called_once_with(("cc", str(obj), "-o", str(exe)), check=False)
 
     def test_main_aarch64_target_compile_assembles_generated_asm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
