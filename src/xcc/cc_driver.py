@@ -4,13 +4,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
 
 from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
-from xcc.options import FrontendOptions
+from xcc.options import FrontendOptions, StdMode
 
 TargetName = Literal["llvm", "aarch64-apple-darwin", "x86_64-linux-gnu"]
 DriverAction = Literal["link", "compile", "assembly", "delegate"]
@@ -100,28 +101,11 @@ def _take_joined_or_value(
     return None
 
 
-def _parse_std(arg: str) -> str:
-    accepted = {
-        "c90",
-        "c99",
-        "c11",
-        "c17",
-        "c23",
-        "c2x",
-        "gnu90",
-        "gnu99",
-        "gnu11",
-        "gnu17",
-        "gnu23",
-        "gnu2x",
-        "iso9899:1990",
-        "iso9899:1999",
-        "iso9899:2011",
-    }
-    if arg in accepted:
-        return arg
-    if arg.startswith("c") or arg.startswith("gnu"):
-        return arg
+def _parse_std(arg: str) -> StdMode:
+    if arg.startswith("gnu"):
+        return "gnu11"
+    if arg.startswith("c") or arg in {"iso9899:1990", "iso9899:1999", "iso9899:2011"}:
+        return "c11"
     raise ValueError(f"Unsupported language standard: {arg}")
 
 
@@ -215,6 +199,7 @@ def _find_llc() -> str:
 
 def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
     hosted = True
+    std: StdMode = "gnu11"
     include_dirs: list[str] = []
     quote_include_dirs: list[str] = []
     system_include_dirs: list[str] = []
@@ -293,11 +278,11 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
             continue
         if arg == "-std":
             std_value, index = _take_value(argv, index, "-std")
-            _parse_std(std_value)
+            std = _parse_std(std_value)
             clang_argv.extend((arg, std_value))
             continue
         if arg.startswith("-std="):
-            _parse_std(arg.split("=", 1)[1])
+            std = _parse_std(arg.split("=", 1)[1])
             clang_argv.append(arg)
             continue
         if arg == "-fhosted":
@@ -385,7 +370,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
         native_unsupported_flags.append(arg)
 
     options = FrontendOptions(
-        std="gnu11",
+        std=std,
         hosted=hosted,
         include_dirs=tuple(include_dirs),
         quote_include_dirs=tuple(quote_include_dirs),
@@ -479,6 +464,67 @@ def _compile_frontend_inputs(
     return results
 
 
+def _output_for_input(config: DriverConfig, path: str) -> str:
+    return config.output or _default_output(path, config.action, config.target)
+
+
+def _write_text_output(output: str, text: str) -> None:
+    if output == "-":
+        sys.stdout.write(text)
+    else:
+        Path(output).write_text(text, encoding="utf-8")
+
+
+def _emit_assembly_outputs(
+    config: DriverConfig,
+    results: list[FrontendResult],
+    generate: Callable[[FrontendResult], str],
+) -> int:
+    for path, result in zip(config.c_inputs, results, strict=True):
+        _write_text_output(_output_for_input(config, path), generate(result))
+    return 0
+
+
+def _compile_or_link_generated_outputs(
+    config: DriverConfig,
+    results: list[FrontendResult],
+    *,
+    suffix: str,
+    generate: Callable[[FrontendResult], str],
+    object_cmd: Callable[[Path, Path], list[str]],
+    tool_error: str,
+    link_cmd: Callable[[list[str]], list[str]],
+) -> int:
+    with tempfile.TemporaryDirectory() as tmp:
+        objects: list[str] = []
+        for index, (path, result) in enumerate(zip(config.c_inputs, results, strict=True)):
+            generated_path = Path(tmp) / f"input{index}.{suffix}"
+            generated_path.write_text(generate(result), encoding="utf-8")
+            obj_path = Path(tmp) / f"input{index}.o"
+            r = subprocess.run(
+                object_cmd(generated_path, obj_path),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if r.returncode != 0:
+                stderr = (r.stderr or "").strip()
+                raise CodegenError(
+                    Diagnostic("codegen", result.filename, f"{tool_error}: {stderr}")
+                )
+            if config.action == "compile":
+                shutil.copy(str(obj_path), _output_for_input(config, path))
+                continue
+            objects.append(str(obj_path))
+        if config.action == "compile":
+            return 0
+        r = subprocess.run(link_cmd(objects), check=False)
+        if r.returncode != 0:
+            print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
+            return 1
+    return 0
+
+
 def _link_argv_with_objects(
     config: DriverConfig,
     objects: list[str],
@@ -529,6 +575,17 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         print(f"xcc: unsupported option(s) for target {config.target}: {flags}", file=sys.stderr)
         return 1
 
+    if (
+        config.action in {"assembly", "compile"}
+        and config.output is not None
+        and len(config.c_inputs) > 1
+    ):
+        print(
+            "xcc: driver error: cannot specify -o when generating multiple output files",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         results = _compile_frontend_inputs(config, stdin=stdin)
     except FrontendError as error:
@@ -541,192 +598,86 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         print(f"xcc: I/O error: {error}", file=sys.stderr)
         return 1
 
-    if config.target == "llvm":
-        try:
+    try:
+        if config.target == "llvm":
             from xcc.codegen import generate_llvm_ir
 
-            output = config.output or _default_output(
-                config.c_inputs[0], config.action, config.target
-            )
             if config.action == "assembly":
-                for result in results:
-                    ir = generate_llvm_ir(result)
-                    if output == "-":
-                        sys.stdout.write(ir)
-                    else:
-                        Path(output).write_text(ir, encoding="utf-8")
-                return 0
+                return _emit_assembly_outputs(config, results, generate_llvm_ir)
 
             llc_path = _find_llc()
-            with tempfile.TemporaryDirectory() as tmp:
-                objects: list[str] = []
-                for index, result in enumerate(results):
-                    ir = generate_llvm_ir(result)
-                    ll_path = Path(tmp) / f"input{index}.ll"
-                    ll_path.write_text(ir, encoding="utf-8")
-                    obj_path = Path(tmp) / f"input{index}.o"
-                    llc_cmd = [
-                        llc_path,
-                        "-O0",
-                        "-filetype=obj",
-                        str(ll_path),
-                        "-o",
-                        str(obj_path),
-                    ]
-                    r = subprocess.run(llc_cmd, check=False, capture_output=True, text=True)
-                    if r.returncode != 0:
-                        stderr = (r.stderr or "").strip()
-                        raise CodegenError(
-                            Diagnostic("codegen", result.filename, f"llc failed: {stderr}")
-                        )
-                    if config.action == "compile":
-                        import shutil
+            return _compile_or_link_generated_outputs(
+                config,
+                results,
+                suffix="ll",
+                generate=generate_llvm_ir,
+                object_cmd=lambda source, obj: [
+                    llc_path,
+                    "-O0",
+                    "-filetype=obj",
+                    str(source),
+                    "-o",
+                    str(obj),
+                ],
+                tool_error="llc failed",
+                link_cmd=lambda objects: _link_argv_with_objects(config, objects),
+            )
 
-                        shutil.copy(str(obj_path), str(output))
-                        continue
-                    objects.append(str(obj_path))
-                if config.action == "compile":
-                    return 0
-                link_cmd = _link_argv_with_objects(config, objects)
-                r = subprocess.run(link_cmd, check=False)
-                if r.returncode != 0:
-                    print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
-                    return 1
-            return 0
-        except Exception as error:
-            print(f"xcc: {error}", file=sys.stderr)
-            return 1
-
-    if config.target == "aarch64-apple-darwin":
-        try:
+        if config.target == "aarch64-apple-darwin":
             from xcc.aarch64_asm import generate_aarch64_asm
 
-            output = config.output or _default_output(
-                config.c_inputs[0], config.action, config.target
-            )
             if config.action == "assembly":
-                for result in results:
-                    asm = generate_aarch64_asm(result)
-                    if output == "-":
-                        sys.stdout.write(asm)
-                    else:
-                        Path(output).write_text(asm, encoding="utf-8")
-                return 0
+                return _emit_assembly_outputs(config, results, generate_aarch64_asm)
 
-            with tempfile.TemporaryDirectory() as tmp:
-                objects: list[str] = []
-                for index, result in enumerate(results):
-                    asm = generate_aarch64_asm(result)
-                    asm_path = Path(tmp) / f"input{index}.s"
-                    asm_path.write_text(asm, encoding="utf-8")
-                    obj_path = Path(tmp) / f"input{index}.o"
-                    assemble_cmd = [
-                        "clang",
-                        "-target",
-                        config.target,
-                        "-c",
-                        str(asm_path),
-                        "-o",
-                        str(obj_path),
-                    ]
-                    r = subprocess.run(
-                        assemble_cmd,
-                        check=False,
-                        capture_output=True,
-                        text=True,
-                    )
-                    if r.returncode != 0:
-                        stderr = (r.stderr or "").strip()
-                        raise CodegenError(
-                            Diagnostic(
-                                "codegen",
-                                result.filename,
-                                f"clang assembler failed: {stderr}",
-                            )
-                        )
-                    if config.action == "compile":
-                        import shutil
+            def link_cmd(objects: list[str]) -> list[str]:
+                command = _link_argv_with_objects(config, objects)
+                command[1:1] = ["-target", config.target]
+                return command
 
-                        shutil.copy(str(obj_path), str(output))
-                        continue
-                    objects.append(str(obj_path))
-                if config.action == "compile":
-                    return 0
-                link_cmd = _link_argv_with_objects(config, objects)
-                link_cmd[1:1] = ["-target", config.target]
-                r = subprocess.run(link_cmd, check=False)
-                if r.returncode != 0:
-                    print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
-                    return 1
-            return 0
-        except Exception as error:
-            print(f"xcc: {error}", file=sys.stderr)
-            return 1
+            return _compile_or_link_generated_outputs(
+                config,
+                results,
+                suffix="s",
+                generate=generate_aarch64_asm,
+                object_cmd=lambda source, obj: [
+                    "clang",
+                    "-target",
+                    config.target,
+                    "-c",
+                    str(source),
+                    "-o",
+                    str(obj),
+                ],
+                tool_error="clang assembler failed",
+                link_cmd=link_cmd,
+            )
 
-    if config.target == "x86_64-linux-gnu":
-        try:
+        if config.target == "x86_64-linux-gnu":
             from xcc.x86_64_asm import generate_x86_64_asm
 
-            output = config.output or _default_output(
-                config.c_inputs[0], config.action, config.target
-            )
             if config.action == "assembly":
-                for result in results:
-                    asm = generate_x86_64_asm(result)
-                    if output == "-":
-                        sys.stdout.write(asm)
-                    else:
-                        Path(output).write_text(asm, encoding="utf-8")
-                return 0
+                return _emit_assembly_outputs(config, results, generate_x86_64_asm)
 
-            with tempfile.TemporaryDirectory() as tmp:
-                objects: list[str] = []
-                for index, result in enumerate(results):
-                    asm = generate_x86_64_asm(result)
-                    asm_path = Path(tmp) / f"input{index}.s"
-                    asm_path.write_text(asm, encoding="utf-8")
-                    obj_path = Path(tmp) / f"input{index}.o"
-                    assemble_cmd = [
-                        "cc",
-                        "-c",
-                        str(asm_path),
-                        "-o",
-                        str(obj_path),
-                    ]
-                    r = subprocess.run(
-                        assemble_cmd,
-                        check=False,
-                        capture_output=True,
-                        text=True,
-                    )
-                    if r.returncode != 0:
-                        stderr = (r.stderr or "").strip()
-                        raise CodegenError(
-                            Diagnostic(
-                                "codegen",
-                                result.filename,
-                                f"cc assembler failed: {stderr}",
-                            )
-                        )
-                    if config.action == "compile":
-                        import shutil
-
-                        shutil.copy(str(obj_path), str(output))
-                        continue
-                    objects.append(str(obj_path))
-                if config.action == "compile":
-                    return 0
-                link_cmd = _drop_x86_64_linux_latomic(
+            return _compile_or_link_generated_outputs(
+                config,
+                results,
+                suffix="s",
+                generate=generate_x86_64_asm,
+                object_cmd=lambda source, obj: [
+                    "cc",
+                    "-c",
+                    str(source),
+                    "-o",
+                    str(obj),
+                ],
+                tool_error="cc assembler failed",
+                link_cmd=lambda objects: _drop_x86_64_linux_latomic(
                     _link_argv_with_objects(config, objects, linker="cc")
-                )
-                r = subprocess.run(link_cmd, check=False)
-                if r.returncode != 0:
-                    print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
-                    return 1
-            return 0
-        except Exception as error:
-            print(f"xcc: {error}", file=sys.stderr)
-            return 1
+                ),
+            )
+    except Exception as error:
+        print(f"xcc: {error}", file=sys.stderr)
+        return 1
 
     raise AssertionError(f"unhandled target: {config.target}")
 

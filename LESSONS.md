@@ -431,3 +431,8 @@
 - External compiler tools need identity checks, not just paths. Discovering
   `llc` through environment/PATH is useful only if the driver verifies the
   candidate's own help output before trusting a same-name executable.
+- Driver flags that affect frontend semantics must be stored in the frontend
+  options, not only forwarded for delegated tool invocations.
+- Generated-output driver actions need per-input output paths. For `-S` and
+  `-c`, an explicit single `-o` with multiple C inputs should fail before any
+  output can be overwritten.

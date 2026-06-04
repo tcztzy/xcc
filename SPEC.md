@@ -337,6 +337,8 @@ V285: Native x86_64 Linux function-pointer shadowing ! a local callable object o
 V286: Native x86_64 Linux `_Bool` conversion ! scalar-to-`_Bool` lowering normalizes by comparing against zero and storing exactly 0 or 1; truncating the low byte of a nonzero integer such as `0x1000000` makes true values false ⊥.
 V287: Native x86_64 Linux wide string literals ! labels for non-byte string literals are aligned to the target code-unit width before emitting UTF-16/UTF-32 storage; placing `L"..."` after arbitrary byte strings without `.p2align 2` can hand glibc `wcscmp` an unaligned `wchar_t *` and crash bootstrap ⊥.
 V288: LLVM `llc` resolution ! target=llvm object/link paths discover candidates through `XCC_LLC`, `LLVM_CONFIG`, or `PATH` and accept only executables whose `--help` stdout contains LLVM `llc` markers; a single hardcoded path or unverified same-name executable ⊥.
+V289: Driver language standard flags ! CC-driver `-std=<mode>` controls preprocessing, parsing, and sema through `FrontendOptions.std`; accepting `-std=c11` while compiling in GNU mode ⊥.
+V290: Driver generated-output actions ! `-S`/`-c` with multiple C inputs either derive one default output per input or reject explicit `-o`; overwriting one output with the last generated file ⊥.
 
 ## §T TASKS
 id|status|task|cites
@@ -632,3 +634,5 @@ B261|2026-06-03|gpu02 `make` segfaulted in `generate-build-details.py` and QEMU 
 B262|2026-06-03|gpu02 `check_extension_modules.py` rejected `typing.NamedTuple` fields under `from __future__ import annotations` because x86_64 lowered `bool future_annotations = flags & CO_FUTURE_ANNOTATIONS` by truncating `0x1000000` to a zero low byte instead of normalizing nonzero to `_Bool` true|V286
 B263|2026-06-03|gpu02 `_bootstrap_python` segfaulted in glibc `wcscmp` during command-line/config parsing because x86_64 emitted UTF-32 `L"..."` storage correctly but let the label follow arbitrary byte strings without 4-byte alignment, producing unaligned `wchar_t *` arguments on gpu02|V287
 B264|2026-06-04|LLVM target object lowering hardcoded Homebrew `llc` and did not verify that a found same-name executable was LLVM `llc` before compiling IR|V288
+B265|2026-06-04|CC-driver `-std=c11` was parsed and forwarded to the delegated tool argv but the frontend always received `std="gnu11"`, so C11 driver invocations accepted GNU-only frontend syntax|V289
+B266|2026-06-04|CC-driver `-S`/`-c` computed one output path from the first C input and reused it for every input, so multi-source generated-output commands overwrote earlier outputs instead of rejecting explicit `-o` or deriving per-input defaults|V290

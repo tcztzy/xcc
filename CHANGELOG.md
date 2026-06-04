@@ -2,6 +2,13 @@
 
 ## Current
 
+- Simplified CC-driver target execution by sharing generated assembly/object
+  handling across LLVM, Darwin AArch64, and Linux x86_64 targets.
+- CC-driver `-std=<mode>` now feeds the frontend language mode instead of only
+  being forwarded to delegated tool arguments.
+- CC-driver `-S`/`-c` with multiple C inputs now writes per-input default
+  outputs when `-o` is absent and rejects explicit `-o` before overwriting
+  output files.
 - LLVM target object lowering now discovers `llc` via `XCC_LLC`,
   `LLVM_CONFIG`, or `PATH` and verifies `llc --help` stdout before use,
   avoiding a hard dependency on Homebrew's LLVM path or an accidental

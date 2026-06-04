@@ -358,6 +358,72 @@ class CliTests(unittest.TestCase):
             self.assertIn("    mov w0, #3", stdout)
             run.assert_not_called()
 
+    def test_main_std_c11_reaches_frontend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "bad.c"
+            src.write_text("int f(void){int x; return _Alignof(x);}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    ["--target=aarch64-apple-darwin", "-nostdinc", "-std=c11", "-S", str(src)]
+                )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("Invalid alignof operand", stderr)
+        run.assert_not_called()
+
+    def test_main_multi_source_assembly_with_output_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "a.c"
+            second = root / "b.c"
+            output = root / "out.s"
+            first.write_text("int a(void){return 1;}", encoding="utf-8")
+            second.write_text("int b(void){return 2;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    [
+                        "--target=aarch64-apple-darwin",
+                        "-nostdinc",
+                        "-S",
+                        str(first),
+                        str(second),
+                        "-o",
+                        str(output),
+                    ]
+                )
+                output_exists = output.exists()
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("cannot specify -o when generating multiple output files", stderr)
+        self.assertFalse(output_exists)
+        run.assert_not_called()
+
+    def test_main_multi_source_assembly_uses_per_input_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "a.c"
+            second = root / "b.c"
+            first.write_text("int a(void){return 1;}", encoding="utf-8")
+            second.write_text("int b(void){return 2;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    ["--target=aarch64-apple-darwin", "-nostdinc", "-S", str(first), str(second)]
+                )
+                first_asm = first.with_suffix(".s").read_text(encoding="utf-8")
+                second_asm = second.with_suffix(".s").read_text(encoding="utf-8")
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "")
+        self.assertIn(".globl _a\n_a:", first_asm)
+        self.assertIn(".globl _b\n_b:", second_asm)
+        run.assert_not_called()
+
     def test_main_x86_64_linux_target_assembly_is_native_asm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
