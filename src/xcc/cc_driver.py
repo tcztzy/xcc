@@ -1,4 +1,6 @@
+import os
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,6 +14,9 @@ from xcc.options import FrontendOptions
 
 TargetName = Literal["llvm", "aarch64-apple-darwin", "x86_64-linux-gnu"]
 DriverAction = Literal["link", "compile", "assembly", "delegate"]
+
+_LLVM_LLC_OVERVIEW = "OVERVIEW: llvm system compiler"
+_LLVM_LLC_USAGE = "USAGE: llc [options] <input bitcode>"
 
 
 @dataclass(frozen=True)
@@ -135,6 +140,77 @@ def _default_target() -> TargetName:
     if sys.platform.startswith("linux") and machine in {"x86_64", "amd64"}:
         return "x86_64-linux-gnu"
     return "llvm"
+
+
+def _unique_tool_candidates(candidates: list[str]) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            result.append(candidate)
+    return tuple(result)
+
+
+def _llvm_config_bindir(llvm_config: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            (llvm_config, "--bindir"),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    bindir = (completed.stdout or "").strip().splitlines()
+    if not bindir:
+        return None
+    return bindir[0]
+
+
+def _llc_candidates() -> tuple[str, ...]:
+    candidates: list[str] = []
+
+    explicit = os.environ.get("XCC_LLC")
+    if explicit:
+        candidates.append(explicit)
+
+    llvm_config = os.environ.get("LLVM_CONFIG") or shutil.which("llvm-config")
+    if llvm_config:
+        bindir = _llvm_config_bindir(llvm_config)
+        if bindir:
+            candidates.append(str(Path(bindir) / "llc"))
+
+    path_llc = shutil.which("llc")
+    if path_llc:
+        candidates.append(path_llc)
+
+    return _unique_tool_candidates(candidates)
+
+
+def _is_llvm_llc(path: str) -> bool:
+    try:
+        completed = subprocess.run(
+            (path, "--help"),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    stdout = completed.stdout or ""
+    return completed.returncode == 0 and _LLVM_LLC_OVERVIEW in stdout and _LLVM_LLC_USAGE in stdout
+
+
+def _find_llc() -> str:
+    for candidate in _llc_candidates():
+        if _is_llvm_llc(candidate):
+            return candidate
+    raise ValueError("unable to find LLVM llc; set XCC_LLC or put LLVM llc on PATH")
 
 
 def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
@@ -481,6 +557,7 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                         Path(output).write_text(ir, encoding="utf-8")
                 return 0
 
+            llc_path = _find_llc()
             with tempfile.TemporaryDirectory() as tmp:
                 objects: list[str] = []
                 for index, result in enumerate(results):
@@ -489,7 +566,7 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                     ll_path.write_text(ir, encoding="utf-8")
                     obj_path = Path(tmp) / f"input{index}.o"
                     llc_cmd = [
-                        "/opt/homebrew/opt/llvm/bin/llc",
+                        llc_path,
                         "-O0",
                         "-filetype=obj",
                         str(ll_path),

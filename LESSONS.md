@@ -5,6 +5,9 @@
 - Compare against permissively licensed Clang fixtures.
 - Treat ABI/layout bugs as high severity.
 - Add a reproducer before changing behavior.
+- For pure-Python Cython performance experiments, disable Cython function
+  binding semantics unless the benchmark needs Python descriptor/signature
+  fidelity; default binding overhead can hide the real throughput win.
 - Wide string literal labels need the same alignment as their element type.
   Correct UTF-32 bytes are still unsafe if `L"..."` follows a byte string at an
   odd address; optimized libc routines may assume `wchar_t *` alignment.
@@ -425,3 +428,6 @@
   `for (int i = ...)` in the enclosing compound scope can hide an outer
   parameter after the loop; CPython flowgraph then rewrites the wrong
   instruction index and produces invalid bytecode CFG.
+- External compiler tools need identity checks, not just paths. Discovering
+  `llc` through environment/PATH is useful only if the driver verifies the
+  candidate's own help output before trusting a same-name executable.

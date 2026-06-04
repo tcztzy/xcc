@@ -12,12 +12,31 @@ from xcc import cc_driver, main
 
 
 class CliTests(unittest.TestCase):
+    LLVM_LLC_HELP = "OVERVIEW: llvm system compiler\nUSAGE: llc [options] <input bitcode>\n"
+
     def _run_main(self, argv: list[str], *, stdin_text: str = "") -> tuple[int, str, str]:
         stdout = io.StringIO()
         stderr = io.StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
             code = main(argv, stdin=io.StringIO(stdin_text))
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def _fake_llvm_llc_run(self, llc_path: str):
+        def fake_run(cmd, **kwargs):
+            if tuple(cmd) == (llc_path, "--help"):
+                return subprocess.CompletedProcess(cmd, 0, stdout=self.LLVM_LLC_HELP, stderr="")
+            if cmd[0] == llc_path and "-filetype=obj" in cmd:
+                Path(cmd[-1]).write_bytes(b"obj")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        return fake_run
+
+    def _llc_compile_cmds(self, run, llc_path: str) -> list[list[str]]:
+        return [
+            call.args[0]
+            for call in run.call_args_list
+            if call.args[0][0] == llc_path and "-filetype=obj" in call.args[0]
+        ]
 
     def test_main_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -166,40 +185,43 @@ class CliTests(unittest.TestCase):
     def test_main_default_target_passes_o0_to_llc(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            llc_path = str(root / "llvm-llc")
             src = root / "ok.c"
             obj = root / "ok.o"
             src.write_text("int f(void){return 0;}", encoding="utf-8")
 
-            def fake_run(cmd, **kwargs):
-                if cmd[0] == "/opt/homebrew/opt/llvm/bin/llc":
-                    Path(cmd[-1]).write_bytes(b"obj")
-                return subprocess.CompletedProcess(cmd, 0)
-
-            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
-                code, stdout, stderr = self._run_main(
-                    ["-nostdinc", "-c", str(src), "-o", str(obj)]
-                )
+            with (
+                patch.dict("os.environ", {"XCC_LLC": llc_path}, clear=False),
+                patch(
+                    "xcc.cc_driver.subprocess.run",
+                    side_effect=self._fake_llvm_llc_run(llc_path),
+                ) as run,
+            ):
+                code, stdout, stderr = self._run_main(["-nostdinc", "-c", str(src), "-o", str(obj)])
 
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
         self.assertEqual(stderr, "")
-        llc_cmd = run.call_args_list[0].args[0]
+        self.assertIn(((llc_path, "--help"),), [call.args for call in run.call_args_list])
+        llc_cmd = self._llc_compile_cmds(run, llc_path)[0]
         self.assertIn("-O0", llc_cmd)
         self.assertLess(llc_cmd.index("-O0"), llc_cmd.index("-filetype=obj"))
 
     def test_main_explicit_llvm_target_passes_o0_to_llc(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            llc_path = str(root / "llvm-llc")
             src = root / "ok.c"
             obj = root / "ok.o"
             src.write_text("int f(void){return 0;}", encoding="utf-8")
 
-            def fake_run(cmd, **kwargs):
-                if cmd[0] == "/opt/homebrew/opt/llvm/bin/llc":
-                    Path(cmd[-1]).write_bytes(b"obj")
-                return subprocess.CompletedProcess(cmd, 0)
-
-            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+            with (
+                patch.dict("os.environ", {"XCC_LLC": llc_path}, clear=False),
+                patch(
+                    "xcc.cc_driver.subprocess.run",
+                    side_effect=self._fake_llvm_llc_run(llc_path),
+                ) as run,
+            ):
                 code, stdout, stderr = self._run_main(
                     ["--target=llvm", "-nostdinc", "-c", str(src), "-o", str(obj)]
                 )
@@ -207,9 +229,81 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
         self.assertEqual(stderr, "")
-        llc_cmd = run.call_args_list[0].args[0]
+        self.assertIn(((llc_path, "--help"),), [call.args for call in run.call_args_list])
+        llc_cmd = self._llc_compile_cmds(run, llc_path)[0]
         self.assertIn("-O0", llc_cmd)
         self.assertLess(llc_cmd.index("-O0"), llc_cmd.index("-filetype=obj"))
+
+    def test_find_llc_accepts_path_candidate_with_llvm_help_stdout(self) -> None:
+        def fake_run(cmd, **kwargs):
+            self.assertEqual(tuple(cmd), ("/toolchain/bin/llc", "--help"))
+            return subprocess.CompletedProcess(cmd, 0, stdout=self.LLVM_LLC_HELP, stderr="")
+
+        def fake_which(name: str) -> str | None:
+            return "/toolchain/bin/llc" if name == "llc" else None
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("xcc.cc_driver.shutil.which", side_effect=fake_which),
+            patch("xcc.cc_driver.subprocess.run", side_effect=fake_run),
+        ):
+            self.assertEqual(cc_driver._find_llc(), "/toolchain/bin/llc")
+
+    def test_find_llc_rejects_same_name_tool_with_wrong_help_stdout(self) -> None:
+        def fake_run(cmd, **kwargs):
+            if tuple(cmd) == ("/bad/bin/llc", "--help"):
+                return subprocess.CompletedProcess(
+                    cmd,
+                    0,
+                    stdout="USAGE: llc but not LLVM\n",
+                    stderr=self.LLVM_LLC_HELP,
+                )
+            if tuple(cmd) == ("/llvm-config", "--bindir"):
+                return subprocess.CompletedProcess(cmd, 0, stdout="/good/bin\n", stderr="")
+            if tuple(cmd) == ("/good/bin/llc", "--help"):
+                return subprocess.CompletedProcess(cmd, 0, stdout=self.LLVM_LLC_HELP, stderr="")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"XCC_LLC": "/bad/bin/llc", "LLVM_CONFIG": "/llvm-config"},
+                clear=True,
+            ),
+            patch("xcc.cc_driver.shutil.which", return_value=None),
+            patch("xcc.cc_driver.subprocess.run", side_effect=fake_run),
+        ):
+            self.assertEqual(cc_driver._find_llc(), "/good/bin/llc")
+
+    def test_main_llvm_target_rejects_when_no_verified_llc_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            obj = root / "ok.o"
+            src.write_text("int f(void){return 0;}", encoding="utf-8")
+
+            def fake_run(cmd, **kwargs):
+                if tuple(cmd) == ("/not-llvm/llc", "--help"):
+                    return subprocess.CompletedProcess(
+                        cmd,
+                        0,
+                        stdout="not the llvm system compiler\n",
+                        stderr=self.LLVM_LLC_HELP,
+                    )
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+            with (
+                patch.dict("os.environ", {"XCC_LLC": "/not-llvm/llc"}, clear=True),
+                patch("xcc.cc_driver.shutil.which", return_value=None),
+                patch("xcc.cc_driver.subprocess.run", side_effect=fake_run),
+            ):
+                code, stdout, stderr = self._run_main(
+                    ["--target=llvm", "-nostdinc", "-c", str(src), "-o", str(obj)]
+                )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("unable to find LLVM llc", stderr)
 
     def test_main_default_target_assembly_is_llvm_ir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -291,7 +385,7 @@ class CliTests(unittest.TestCase):
             src = root / "cpuid.c"
             asm_path = root / "cpuid.s"
             src.write_text(
-                "#define CPUID() __asm__ __volatile__(\"cpuid\")\n"
+                '#define CPUID() __asm__ __volatile__("cpuid")\n'
                 "int f(void){\n"
                 "  CPUID();\n"
                 "  return 7;\n"
@@ -377,7 +471,7 @@ class CliTests(unittest.TestCase):
             src.write_text("int f(void){return 5;}", encoding="utf-8")
 
             def fake_run(cmd, **kwargs):
-                self.assertNotEqual(cmd[0], "/opt/homebrew/opt/llvm/bin/llc")
+                self.assertNotEqual(Path(cmd[0]).name, "llc")
                 self.assertNotEqual(cmd[0], "clang")
                 Path(cmd[cmd.index("-o") + 1]).write_bytes(b"obj")
                 return subprocess.CompletedProcess(cmd, 0)
@@ -469,7 +563,7 @@ class CliTests(unittest.TestCase):
             src.write_text("int f(void){return 5;}", encoding="utf-8")
 
             def fake_run(cmd, **kwargs):
-                self.assertNotEqual(cmd[0], "/opt/homebrew/opt/llvm/bin/llc")
+                self.assertNotEqual(Path(cmd[0]).name, "llc")
                 Path(cmd[cmd.index("-o") + 1]).write_bytes(b"obj")
                 return subprocess.CompletedProcess(cmd, 0)
 
@@ -537,16 +631,18 @@ class CliTests(unittest.TestCase):
     def test_main_llvm_target_link_preserves_linker_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            llc_path = str(root / "llvm-llc")
             src = root / "ok.c"
             exe = root / "ok"
             src.write_text("int f(void){return 0;}", encoding="utf-8")
 
-            def fake_run(cmd, **kwargs):
-                if cmd[0] == "/opt/homebrew/opt/llvm/bin/llc":
-                    Path(cmd[-1]).write_bytes(b"obj")
-                return subprocess.CompletedProcess(cmd, 0)
-
-            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+            with (
+                patch.dict("os.environ", {"XCC_LLC": llc_path}, clear=False),
+                patch(
+                    "xcc.cc_driver.subprocess.run",
+                    side_effect=self._fake_llvm_llc_run(llc_path),
+                ) as run,
+            ):
                 code, stdout, stderr = self._run_main(
                     [
                         "-nostdinc",
@@ -563,7 +659,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
         self.assertEqual(stderr, "")
-        link_cmd = run.call_args_list[1].args[0]
+        link_cmd = next(call.args[0] for call in run.call_args_list if call.args[0][0] == "clang")
         self.assertEqual(link_cmd[0], "clang")
         self.assertNotIn(str(src), link_cmd)
         self.assertIn("-L/tmp/example", link_cmd)
@@ -573,14 +669,17 @@ class CliTests(unittest.TestCase):
         self.assertIn(str(exe), link_cmd)
 
     def test_main_llvm_target_link_drops_forced_source_language(self) -> None:
-        def fake_run(cmd, **kwargs):
-            if cmd[0] == "/opt/homebrew/opt/llvm/bin/llc":
-                Path(cmd[-1]).write_bytes(b"obj")
-            return subprocess.CompletedProcess(cmd, 0)
-
         with tempfile.TemporaryDirectory() as tmp:
-            exe = Path(tmp) / "ok"
-            with patch("xcc.cc_driver.subprocess.run", side_effect=fake_run) as run:
+            root = Path(tmp)
+            llc_path = str(root / "llvm-llc")
+            exe = root / "ok"
+            with (
+                patch.dict("os.environ", {"XCC_LLC": llc_path}, clear=False),
+                patch(
+                    "xcc.cc_driver.subprocess.run",
+                    side_effect=self._fake_llvm_llc_run(llc_path),
+                ) as run,
+            ):
                 code, stdout, stderr = self._run_main(
                     ["-nostdinc", "-x", "c", "-", "-o", str(exe)],
                     stdin_text="int main(void){return 0;}",
@@ -589,7 +688,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
         self.assertEqual(stderr, "")
-        link_cmd = run.call_args_list[1].args[0]
+        link_cmd = next(call.args[0] for call in run.call_args_list if call.args[0][0] == "clang")
         self.assertNotIn("-x", link_cmd)
         self.assertNotIn("c", link_cmd)
         self.assertNotIn("-", link_cmd)

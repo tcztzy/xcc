@@ -2,6 +2,16 @@
 
 ## Current
 
+- LLVM target object lowering now discovers `llc` via `XCC_LLC`,
+  `LLVM_CONFIG`, or `PATH` and verifies `llc --help` stdout before use,
+  avoiding a hard dependency on Homebrew's LLVM path or an accidental
+  same-name executable.
+- Added optional Cython performance experiment tooling: `scripts/cythonize_xcc.py`
+  builds a temporary compiled import tree, and
+  `scripts/benchmark_cython_cpython.py` compares pure Python vs Cython frontend
+  throughput on configured CPython source files without adding runtime
+  dependencies. Local 5-file CPython frontend sample: 27.086s pure median vs
+  22.131s Cython median, or 1.22x.
 - Native x86_64 Linux wide string literals now align UTF-16/UTF-32 literal
   labels to their element width, fixing gpu02 glibc `wcscmp` crashes during
   CPython bootstrap/config parsing.

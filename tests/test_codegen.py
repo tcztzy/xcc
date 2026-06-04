@@ -4,16 +4,20 @@ import unittest
 from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
+from xcc import cc_driver
 from xcc.codegen import generate_llvm_ir
 from xcc.frontend import FrontendOptions, compile_source
 
-LLC = Path("/opt/homebrew/opt/llvm/bin/llc")
-
 
 class CodegenTests(unittest.TestCase):
+    def _find_test_llc(self) -> str:
+        try:
+            return cc_driver._find_llc()
+        except ValueError as error:
+            self.skipTest(str(error))
+
     def assertLlcAccepts(self, source: str) -> str:
-        if not LLC.exists():
-            self.skipTest(f"llc not found: {LLC}")
+        llc = self._find_test_llc()
         result = compile_source(
             source,
             filename="codegen_test.c",
@@ -25,7 +29,7 @@ class CodegenTests(unittest.TestCase):
             obj_path = Path(tmp) / "input.o"
             ll_path.write_text(ir, encoding="utf-8")
             completed = subprocess.run(
-                (str(LLC), "-filetype=obj", str(ll_path), "-o", str(obj_path)),
+                (llc, "-filetype=obj", str(ll_path), "-o", str(obj_path)),
                 check=False,
                 capture_output=True,
                 text=True,
@@ -34,8 +38,7 @@ class CodegenTests(unittest.TestCase):
         return ir
 
     def assertProgramReturns(self, source: str, expected: int) -> None:
-        if not LLC.exists():
-            self.skipTest(f"llc not found: {LLC}")
+        llc_path = self._find_test_llc()
         result = compile_source(
             source,
             filename="program_test.c",
@@ -49,7 +52,7 @@ class CodegenTests(unittest.TestCase):
             exe_path = tmp_path / "a.out"
             ll_path.write_text(ir, encoding="utf-8")
             llc = subprocess.run(
-                (str(LLC), "-filetype=obj", str(ll_path), "-o", str(obj_path)),
+                (llc_path, "-filetype=obj", str(ll_path), "-o", str(obj_path)),
                 check=False,
                 capture_output=True,
                 text=True,

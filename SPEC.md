@@ -11,7 +11,7 @@ Python stdlib-only C11 compiler with target-driven codegen; default `llvm`, `--t
 - Target default = host-sensitive; x86_64 Linux hosts default to
   `x86_64-linux-gnu`, other hosts default to `llvm`.
 - Target selection ! use `--target=<name>`; internal `--backend` mode flag ⊥.
-- LLVM target object output ! via `/opt/homebrew/opt/llvm/bin/llc`.
+- LLVM target object output ! via discovered LLVM `llc`, verified by `llc --help` stdout.
 - Darwin AArch64 target object/executable output ! direct native assembly; LLVM IR/`llc` path ⊥.
 - Linux x86_64 target object/executable output ! direct native ELF assembly assembled/linked by gpu02 GNU-compatible `cc`; LLVM IR/`llc`/clang path ⊥.
 - `CHANGELOG.md` records status changes.
@@ -25,7 +25,7 @@ Python stdlib-only C11 compiler with target-driven codegen; default `llvm`, `--t
 
 ## §I INTERFACES
 - cmd: `xcc [--target=llvm] ...` → CC-style compile/link driver; target defaults to host platform (`x86_64-linux-gnu` on x86_64 Linux, otherwise `llvm`).
-- cmd: `xcc -c source.c -o source.o` → XCC frontend + LLVM IR + `llc` object.
+- cmd: `xcc -c source.c -o source.o` → XCC frontend + LLVM IR + discovered/verified `llc` object.
 - cmd: `xcc --target=llvm -c source.c -o source.o` → same explicit target form.
 - cmd: `xcc --target=aarch64-apple-darwin -c source.c -o source.o` → XCC frontend + native Darwin AArch64 assembly + assembler object.
 - cmd: `xcc --target=aarch64-apple-darwin source.c -o exe` → native Darwin AArch64 executable; no LLVM IR/`llc`.
@@ -57,7 +57,7 @@ V5: ∀ parser/sema/codegen semantic claim → clang or CPython behavior used as
 V6: ∀ ABI/layout change → tests cover `sizeof`, `alignof`, `offsetof`, field order, bit-field? relevant case.
 V7: ∀ integer conversion/promotion change → tests cover signedness, width, constant folding, runtime IR? relevant case.
 V8: ∀ initializer change → tests cover scalar, aggregate, nested aggregate, static storage? relevant case.
-V9: ∀ control-flow codegen change → emitted IR passes `/opt/homebrew/opt/llvm/bin/llc` for reproducer.
+V9: ∀ control-flow codegen change → emitted IR passes discovered/verified LLVM `llc` for reproducer.
 V10: LLVM builder position ! read from `GetInsertBlock` after recursive emit; stale assumed block ⊥.
 V11: LLVM null pointer checks ! handle `None` and `0`.
 V12: `LLVMPositionBuilderAtEnd` on terminated block ⊥ unless caller proves insertion-before-terminator intended.
@@ -336,12 +336,13 @@ V284: Native x86_64 Linux conditional scalar results ! both branches of `cond ? 
 V285: Native x86_64 Linux function-pointer shadowing ! a local callable object or function pointer shadows any same-named file-scope function signature during call lowering; emitting a direct call when a same-name local slot exists bypasses the function pointer value and can pass the wrong receiver object ⊥.
 V286: Native x86_64 Linux `_Bool` conversion ! scalar-to-`_Bool` lowering normalizes by comparing against zero and storing exactly 0 or 1; truncating the low byte of a nonzero integer such as `0x1000000` makes true values false ⊥.
 V287: Native x86_64 Linux wide string literals ! labels for non-byte string literals are aligned to the target code-unit width before emitting UTF-16/UTF-32 storage; placing `L"..."` after arbitrary byte strings without `.p2align 2` can hand glibc `wcscmp` an unaligned `wchar_t *` and crash bootstrap ⊥.
+V288: LLVM `llc` resolution ! target=llvm object/link paths discover candidates through `XCC_LLC`, `LLVM_CONFIG`, or `PATH` and accept only executables whose `--help` stdout contains LLVM `llc` markers; a single hardcoded path or unverified same-name executable ⊥.
 
 ## §T TASKS
 id|status|task|cites
 T1|x|scaffold stdlib-only Python package + `xcc` console script|V1,I.cmd
 T2|x|implement frontend pipeline preprocessor→lexer→parser→sema|I.file
-T3|x|implement LLVM IR backend through libLLVM-C + `llc`|V9,I.file
+T3|x|implement LLVM IR backend through libLLVM-C + `llc`|V9,V288,I.file
 T4|x|replace backend modes with target selection defaulting to `llvm`|V13,V14,I.cmd
 T5|x|add unit suites for lexer/parser/sema/frontend/codegen/driver|V4,V18,I.cmd
 T6|x|delete CPython-specific trial harness and tests|V15,V16,I.file
@@ -630,3 +631,4 @@ B260|2026-06-02|gpu02 `./python -m sysconfig --generate-posix-vars` failed impor
 B261|2026-06-03|gpu02 `make` segfaulted in `generate-build-details.py` and QEMU minimized it to `dict(a=1).keys() & [chr(97)]` because `_PyDictView_Intersect` declared a local function pointer named `dict_contains` but x86_64 call lowering ignored the local slot and emitted a direct call to the same-named file-scope function|V285
 B262|2026-06-03|gpu02 `check_extension_modules.py` rejected `typing.NamedTuple` fields under `from __future__ import annotations` because x86_64 lowered `bool future_annotations = flags & CO_FUTURE_ANNOTATIONS` by truncating `0x1000000` to a zero low byte instead of normalizing nonzero to `_Bool` true|V286
 B263|2026-06-03|gpu02 `_bootstrap_python` segfaulted in glibc `wcscmp` during command-line/config parsing because x86_64 emitted UTF-32 `L"..."` storage correctly but let the label follow arbitrary byte strings without 4-byte alignment, producing unaligned `wchar_t *` arguments on gpu02|V287
+B264|2026-06-04|LLVM target object lowering hardcoded Homebrew `llc` and did not verify that a found same-name executable was LLVM `llc` before compiling IR|V288
