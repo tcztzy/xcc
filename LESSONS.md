@@ -5,6 +5,9 @@
 - Compare against permissively licensed Clang fixtures.
 - Treat ABI/layout bugs as high severity.
 - Add a reproducer before changing behavior.
+- Keep benchmark matrices explicit: pure interpreter environments should measure
+  the source tree under that interpreter, while compiled Cython/mypyc variants
+  should pin to the CPython version used to build compatible extension modules.
 - For pure-Python Cython performance experiments, disable Cython function
   binding semantics unless the benchmark needs Python descriptor/signature
   fidelity; default binding overhead can hide the real throughput win.

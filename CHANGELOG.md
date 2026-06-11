@@ -2,6 +2,14 @@
 
 ## Current
 
+- Merged Cython and mypyc throughput comparisons into
+  `scripts/benchmark_xcc.py` and added tox-uv benchmark environments for
+  py311-py314, pypy311, graalpy311-graalpy312, cython, and mypyc; the compiled
+  variants run under CPython 3.11.
+- Added `docs/benchmark.md` with the local benchmark environment, commands, and
+  single-file CPython frontend throughput results.
+- Added optional mypyc performance tooling: `scripts/mypycize_xcc.py` builds a
+  temporary compiled import tree for the frontend hot path.
 - Simplified CC-driver target execution by sharing generated assembly/object
   handling across LLVM, Darwin AArch64, and Linux x86_64 targets.
 - CC-driver `-std=<mode>` now feeds the frontend language mode instead of only
@@ -14,11 +22,7 @@
   avoiding a hard dependency on Homebrew's LLVM path or an accidental
   same-name executable.
 - Added optional Cython performance experiment tooling: `scripts/cythonize_xcc.py`
-  builds a temporary compiled import tree, and
-  `scripts/benchmark_cython_cpython.py` compares pure Python vs Cython frontend
-  throughput on configured CPython source files without adding runtime
-  dependencies. Local 5-file CPython frontend sample: 27.086s pure median vs
-  22.131s Cython median, or 1.22x.
+  builds a temporary compiled import tree without adding runtime dependencies.
 - Native x86_64 Linux wide string literals now align UTF-16/UTF-32 literal
   labels to their element width, fixing gpu02 glibc `wcscmp` crashes during
   CPython bootstrap/config parsing.

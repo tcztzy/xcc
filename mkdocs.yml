@@ -63,6 +63,7 @@ plugins:
             Semantic Analysis: 语义分析
             IR Landscape: IR 全景对比
             Optimization: 优化
+            Benchmark: 性能基准
             Backend & Code Generation: 后端与代码生成
             Five Compilers Compared: 五编译器横向对比
             XCC Architecture: XCC 架构详解
@@ -99,6 +100,7 @@ nav:
   - Semantic Analysis: semantic-analysis.md
   - IR Landscape: ir-landscape.md
   - Optimization: optimization.md
+  - Benchmark: benchmark.md
   - Backend & Code Generation: backend.md
   - Five Compilers Compared: compiler-comparison.md
   - XCC Architecture: xcc-architecture.md

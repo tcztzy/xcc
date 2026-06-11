@@ -49,21 +49,29 @@ accidentally.
 - Type check: `uv run tox -e type`
 - Test: `uv run python -m unittest discover -v`
 
-## Cython Performance Experiment
+## Performance Benchmark
 
-Cython is optional benchmark tooling, not an XCC runtime dependency. Build a
-temporary Cython import tree, then benchmark the configured CPython checkout:
-
-```
-uv run --with cython --with setuptools python scripts/cythonize_xcc.py --clean --force
-uv run python scripts/benchmark_cython_cpython.py --cpython /path/to/cpython --skip-cython-build --runs 3 --warmups 1
-```
-
-The benchmark runs XCC frontend compilation on a default CPython sample:
+Cython and mypyc are optional benchmark tooling, not XCC runtime dependencies.
+The unified benchmark runs XCC frontend compilation on a default CPython sample:
 `Objects/listobject.c`, `Objects/dictobject.c`, `Python/compile.c`,
-`Parser/parser.c`, and `Modules/_json.c`. In the local run recorded under
-`build/cython`, that sample measured pure Python at 27.086s median and the
-Cython import tree at 22.131s median, a 1.22x median speedup.
+`Parser/parser.c`, and `Modules/_json.c`.
+
+Run the interpreter matrix through tox-uv:
+
+```
+uv run tox -e bench-py311,bench-py312,bench-py313,bench-py314,bench-pypy311,bench-graalpy311,bench-graalpy312,bench-cython,bench-mypyc -- --cpython /path/to/cpython --runs 3 --warmups 1
+```
+
+The `bench-cython` and `bench-mypyc` environments run on CPython 3.11. Use
+`-- --skip-build` to reuse existing compiled import trees, or run one variant
+directly:
+
+```
+uv run python scripts/benchmark_xcc.py --variant all --cpython /path/to/cpython --runs 3 --warmups 1
+```
+
+Use `--profile preprocessor` for the smaller mypyc subset, or the default
+`--profile frontend` for lexer plus preprocessor acceleration.
 
 ## Rules
 

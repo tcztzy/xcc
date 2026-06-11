@@ -67,7 +67,7 @@ show_missing = true
 fail_under = 0
 
 [tool.tox]
-requires = ["tox>=4.54.0", "tox-uv>=1.29.0"]
+requires = ["tox>=4.54.0", "tox-uv>=1.35.2"]
 env_list = ["py311", "py312", "py313", "py313t", "py314", "py314t", "pypy311", "lint", "type"]
 skip_missing_interpreters = true
 
@@ -85,3 +85,66 @@ runner = "uv-venv-lock-runner"
 dependency_groups = ["dev"]
 package = "skip"
 commands = [["ty", "check", "src"]]
+
+[tool.tox.env.bench-py311]
+runner = "uv-venv-lock-runner"
+package = "skip"
+no_default_groups = true
+base_python = ["python3.11"]
+commands = [["python", "scripts/benchmark_xcc.py", "--variant", "pure", "--label", "py311", "--json", "build/benchmark/py311.json", "{posargs:}"]]
+
+[tool.tox.env.bench-py312]
+runner = "uv-venv-lock-runner"
+package = "skip"
+no_default_groups = true
+base_python = ["python3.12"]
+commands = [["python", "scripts/benchmark_xcc.py", "--variant", "pure", "--label", "py312", "--json", "build/benchmark/py312.json", "{posargs:}"]]
+
+[tool.tox.env.bench-py313]
+runner = "uv-venv-lock-runner"
+package = "skip"
+no_default_groups = true
+base_python = ["python3.13"]
+commands = [["python", "scripts/benchmark_xcc.py", "--variant", "pure", "--label", "py313", "--json", "build/benchmark/py313.json", "{posargs:}"]]
+
+[tool.tox.env.bench-py314]
+runner = "uv-venv-lock-runner"
+package = "skip"
+no_default_groups = true
+base_python = ["python3.14"]
+commands = [["python", "scripts/benchmark_xcc.py", "--variant", "pure", "--label", "py314", "--json", "build/benchmark/py314.json", "{posargs:}"]]
+
+[tool.tox.env.bench-pypy311]
+runner = "uv-venv-lock-runner"
+package = "skip"
+no_default_groups = true
+base_python = ["pypy3.11"]
+commands = [["python", "scripts/benchmark_xcc.py", "--variant", "pure", "--label", "pypy311", "--json", "build/benchmark/pypy311.json", "{posargs:}"]]
+
+[tool.tox.env.bench-graalpy311]
+runner = "uv-venv-lock-runner"
+package = "skip"
+no_default_groups = true
+base_python = ["graalpy3.11"]
+commands = [["python", "scripts/benchmark_xcc.py", "--variant", "pure", "--label", "graalpy311", "--json", "build/benchmark/graalpy311.json", "{posargs:}"]]
+
+[tool.tox.env.bench-graalpy312]
+runner = "uv-venv-lock-runner"
+package = "skip"
+no_default_groups = true
+base_python = ["graalpy3.12"]
+commands = [["python", "scripts/benchmark_xcc.py", "--variant", "pure", "--label", "graalpy312", "--json", "build/benchmark/graalpy312.json", "{posargs:}"]]
+
+[tool.tox.env.bench-cython]
+runner = "uv-venv-lock-runner"
+dependency_groups = ["dev"]
+package = "skip"
+base_python = ["python3.11"]
+commands = [["python", "scripts/benchmark_xcc.py", "--variant", "cython", "--label", "cython", "--json", "build/benchmark/cython.json", "{posargs:}"]]
+
+[tool.tox.env.bench-mypyc]
+runner = "uv-venv-lock-runner"
+dependency_groups = ["dev"]
+package = "skip"
+base_python = ["python3.11"]
+commands = [["python", "scripts/benchmark_xcc.py", "--variant", "mypyc", "--label", "mypyc", "--json", "build/benchmark/mypyc.json", "{posargs:}"]]
