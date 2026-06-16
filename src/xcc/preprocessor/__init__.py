@@ -693,9 +693,9 @@ class _Preprocessor:
             self._macros.pop(name, None)
         self.macro_table = self._macros
         if options.no_standard_includes:
-            self._cpath_include_dirs = ()
-            self._c_include_path_dirs = ()
-            self._host_system_include_dirs = ()
+            self._cpath_include_dirs: tuple[str, ...] = ()
+            self._c_include_path_dirs: tuple[str, ...] = ()
+            self._host_system_include_dirs: tuple[str, ...] = ()
         else:
             self._cpath_include_dirs = _env_path_list("CPATH")
             self._c_include_path_dirs = _env_path_list("C_INCLUDE_PATH")

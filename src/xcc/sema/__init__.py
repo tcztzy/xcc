@@ -23,6 +23,8 @@ from xcc.ast import (
 )
 from xcc.types import (
     DOUBLE,
+    EVM_ADDRESS,
+    EVM_UINT256,
     FLOAT,
     INT,
     LONG,
@@ -362,6 +364,276 @@ class Analyzer:
         _int_sig = FunctionSignature(return_type=INT, params=None, is_variadic=True)
         for name in _INTEGER_BUILTINS:
             self._function_signatures[name] = _int_sig
+        for name in ("__builtin_evm_addmod", "__builtin_evm_mulmod"):
+            self._function_signatures[name] = FunctionSignature(
+                return_type=EVM_UINT256,
+                params=(EVM_UINT256, EVM_UINT256, EVM_UINT256),
+                is_variadic=False,
+            )
+        self._function_signatures["__builtin_evm_exp"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_byte"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_signextend"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_sload"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(EVM_UINT256,),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_sstore"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_tload"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(EVM_UINT256,),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_tstore"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_caller"] = FunctionSignature(
+            return_type=EVM_ADDRESS,
+            params=(),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_callvalue"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(),
+            is_variadic=False,
+        )
+        _evm_environment_builtins = {
+            "__builtin_evm_address": EVM_ADDRESS,
+            "__builtin_evm_origin": EVM_ADDRESS,
+            "__builtin_evm_gasprice": EVM_UINT256,
+            "__builtin_evm_coinbase": EVM_ADDRESS,
+            "__builtin_evm_timestamp": EVM_UINT256,
+            "__builtin_evm_number": EVM_UINT256,
+            "__builtin_evm_prevrandao": EVM_UINT256,
+            "__builtin_evm_gaslimit": EVM_UINT256,
+            "__builtin_evm_chainid": EVM_UINT256,
+            "__builtin_evm_selfbalance": EVM_UINT256,
+            "__builtin_evm_basefee": EVM_UINT256,
+            "__builtin_evm_blobbasefee": EVM_UINT256,
+            "__builtin_evm_gas": EVM_UINT256,
+        }
+        for name, return_type in _evm_environment_builtins.items():
+            self._function_signatures[name] = FunctionSignature(
+                return_type=return_type,
+                params=(),
+                is_variadic=False,
+            )
+        _evm_unary_query_builtins = {
+            "__builtin_evm_balance": EVM_ADDRESS,
+            "__builtin_evm_blockhash": EVM_UINT256,
+            "__builtin_evm_extcodesize": EVM_ADDRESS,
+            "__builtin_evm_extcodehash": EVM_ADDRESS,
+        }
+        for name, param_type in _evm_unary_query_builtins.items():
+            self._function_signatures[name] = FunctionSignature(
+                return_type=EVM_UINT256,
+                params=(param_type,),
+                is_variadic=False,
+            )
+        self._function_signatures["__builtin_evm_calldatasize"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_calldataload"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(EVM_UINT256,),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_calldatacopy"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_codesize"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_codecopy"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_mload"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(EVM_UINT256.pointer_to(),),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_mstore"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_mcopy"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256.pointer_to(), EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_mstore8"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_msize"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_pc"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_blobhash"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(EVM_UINT256,),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_extcodecopy"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_ADDRESS, EVM_UINT256.pointer_to(), EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_returndatasize"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_returndatacopy"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_create"] = FunctionSignature(
+            return_type=EVM_ADDRESS,
+            params=(EVM_UINT256, EVM_UINT256.pointer_to(), EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_create2"] = FunctionSignature(
+            return_type=EVM_ADDRESS,
+            params=(EVM_UINT256, EVM_UINT256.pointer_to(), EVM_UINT256, EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_call"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(
+                EVM_UINT256,
+                EVM_ADDRESS,
+                EVM_UINT256,
+                EVM_UINT256.pointer_to(),
+                EVM_UINT256,
+                EVM_UINT256.pointer_to(),
+                EVM_UINT256,
+            ),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_callcode"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(
+                EVM_UINT256,
+                EVM_ADDRESS,
+                EVM_UINT256,
+                EVM_UINT256.pointer_to(),
+                EVM_UINT256,
+                EVM_UINT256.pointer_to(),
+                EVM_UINT256,
+            ),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_staticcall"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(
+                EVM_UINT256,
+                EVM_ADDRESS,
+                EVM_UINT256.pointer_to(),
+                EVM_UINT256,
+                EVM_UINT256.pointer_to(),
+                EVM_UINT256,
+            ),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_delegatecall"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(
+                EVM_UINT256,
+                EVM_ADDRESS,
+                EVM_UINT256.pointer_to(),
+                EVM_UINT256,
+                EVM_UINT256.pointer_to(),
+                EVM_UINT256,
+            ),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_revert"] = FunctionSignature(
+            return_type=VOID,
+            params=(),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_revert_data"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_return"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_stop"] = FunctionSignature(
+            return_type=VOID,
+            params=(),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_invalid"] = FunctionSignature(
+            return_type=VOID,
+            params=(),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_selfdestruct"] = FunctionSignature(
+            return_type=VOID,
+            params=(EVM_ADDRESS,),
+            is_variadic=False,
+        )
+        self._function_signatures["__builtin_evm_keccak256"] = FunctionSignature(
+            return_type=EVM_UINT256,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256),
+            is_variadic=False,
+        )
+        for topic_count in range(5):
+            self._function_signatures[f"__builtin_evm_log{topic_count}"] = FunctionSignature(
+                return_type=VOID,
+                params=(EVM_UINT256,) * (topic_count + 1),
+                is_variadic=False,
+            )
+            self._function_signatures[f"__builtin_evm_log{topic_count}_data"] = FunctionSignature(
+                return_type=VOID,
+                params=(EVM_UINT256,) * topic_count + (EVM_UINT256.pointer_to(), EVM_UINT256),
+                is_variadic=False,
+            )
+        self._function_signatures["__builtin_evm_return_array"] = FunctionSignature(
+            return_type=VOID,
+            params=None,
+            is_variadic=True,
+        )
         self._function_signatures["__builtin_bswap16"] = FunctionSignature(
             return_type=USHORT, params=None, is_variadic=True
         )

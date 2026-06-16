@@ -133,6 +133,14 @@ class Parser:
             "__builtin_va_list",
             TypeSpec(name="__builtin_va_list"),
         )
+        self._define_typedef(
+            "__evm_uint256",
+            TypeSpec(name="__evm_uint256"),
+        )
+        self._define_typedef(
+            "__evm_address",
+            TypeSpec(name="__evm_address"),
+        )
 
     def _push_scope(
         self,
@@ -253,9 +261,9 @@ class Parser:
             if self._match(TokenKind.EOF):
                 break
             if self._check_keyword("_Static_assert") or self._is_static_assert_ident():
-                declaration = self._parse_static_assert_decl()
-                declarations.append(declaration)
-                externals.append(declaration)
+                static_assert_decl = self._parse_static_assert_decl()
+                declarations.append(static_assert_decl)
+                externals.append(static_assert_decl)
                 continue
             if self._looks_like_function():
                 function = self._parse_function()

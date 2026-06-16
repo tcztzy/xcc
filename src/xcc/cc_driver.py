@@ -13,7 +13,7 @@ from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
 from xcc.options import FrontendOptions, StdMode
 
-TargetName = Literal["llvm", "aarch64-apple-darwin", "x86_64-linux-gnu"]
+TargetName = Literal["llvm", "aarch64-apple-darwin", "x86_64-linux-gnu", "evm"]
 DriverAction = Literal["link", "compile", "assembly", "delegate"]
 
 _LLVM_LLC_OVERVIEW = "OVERVIEW: llvm system compiler"
@@ -30,6 +30,7 @@ class DriverConfig:
     action: DriverAction
     output: str | None
     native_unsupported_flags: tuple[str, ...]
+    evm_initcode: bool
 
 
 def looks_like_cc_driver(argv: tuple[str, ...] | list[str]) -> bool:
@@ -55,6 +56,7 @@ def looks_like_cc_driver(argv: tuple[str, ...] | list[str]) -> bool:
             "--version",
             "-v",
             "-V",
+            "--evm-initcode",
             "--target",
         } or arg.startswith("--target="):
             return True
@@ -116,6 +118,8 @@ def _parse_target(arg: str) -> TargetName:
         return "aarch64-apple-darwin"
     if arg == "x86_64-linux-gnu":
         return "x86_64-linux-gnu"
+    if arg == "evm":
+        return "evm"
     raise ValueError(f"Unsupported target: {arg}")
 
 
@@ -212,6 +216,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
     target = _default_target()
     action: DriverAction = "link"
     output: str | None = None
+    evm_initcode = False
     language: str | None = None
     c_inputs: list[str] = []
     non_c_inputs: list[str] = []
@@ -241,6 +246,9 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
             continue
         if arg.startswith("--target="):
             target = _parse_target(arg.split("=", 1)[1])
+            continue
+        if arg == "--evm-initcode":
+            evm_initcode = True
             continue
         if arg in {"-E", "-M", "-MM"}:
             action = "delegate"
@@ -371,7 +379,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
 
     options = FrontendOptions(
         std=std,
-        hosted=hosted,
+        hosted=False if target == "evm" else hosted,
         include_dirs=tuple(include_dirs),
         quote_include_dirs=tuple(quote_include_dirs),
         system_include_dirs=tuple(system_include_dirs),
@@ -406,6 +414,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
         action=action,
         output=output,
         native_unsupported_flags=tuple(native_unsupported_flags),
+        evm_initcode=evm_initcode,
     )
 
 
@@ -465,7 +474,12 @@ def _compile_frontend_inputs(
 
 
 def _output_for_input(config: DriverConfig, path: str) -> str:
-    return config.output or _default_output(path, config.action, config.target)
+    return config.output or _default_output(
+        path,
+        config.action,
+        config.target,
+        evm_initcode=config.evm_initcode,
+    )
 
 
 def _write_text_output(output: str, text: str) -> None:
@@ -501,14 +515,14 @@ def _compile_or_link_generated_outputs(
             generated_path = Path(tmp) / f"input{index}.{suffix}"
             generated_path.write_text(generate(result), encoding="utf-8")
             obj_path = Path(tmp) / f"input{index}.o"
-            r = subprocess.run(
+            compile_result = subprocess.run(
                 object_cmd(generated_path, obj_path),
                 check=False,
                 capture_output=True,
                 text=True,
             )
-            if r.returncode != 0:
-                stderr = (r.stderr or "").strip()
+            if compile_result.returncode != 0:
+                stderr = (compile_result.stderr or "").strip()
                 raise CodegenError(
                     Diagnostic("codegen", result.filename, f"{tool_error}: {stderr}")
                 )
@@ -518,9 +532,9 @@ def _compile_or_link_generated_outputs(
             objects.append(str(obj_path))
         if config.action == "compile":
             return 0
-        r = subprocess.run(link_cmd(objects), check=False)
-        if r.returncode != 0:
-            print(f"xcc: link failed with exit code {r.returncode}", file=sys.stderr)
+        link_result = subprocess.run(link_cmd(objects), check=False)
+        if link_result.returncode != 0:
+            print(f"xcc: link failed with exit code {link_result.returncode}", file=sys.stderr)
             return 1
     return 0
 
@@ -562,6 +576,13 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         config = _parse_driver_config(argv)
     except ValueError as error:
         print(f"xcc: driver error: {error}", file=sys.stderr)
+        return 1
+
+    if config.evm_initcode and (config.target != "evm" or config.action != "compile"):
+        print(
+            "xcc: driver error: --evm-initcode requires --target=evm -c",
+            file=sys.stderr,
+        )
         return 1
 
     if not config.c_inputs:
@@ -675,6 +696,25 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                     _link_argv_with_objects(config, objects, linker="cc")
                 ),
             )
+
+        if config.target == "evm":
+            from xcc.evm import generate_evm_asm, generate_evm_bytecode, generate_evm_initcode
+
+            if config.action == "link":
+                raise ValueError("EVM target does not support link action")
+            if config.action == "assembly":
+                return _emit_assembly_outputs(config, results, generate_evm_asm)
+            if config.evm_initcode:
+                return _emit_assembly_outputs(
+                    config,
+                    results,
+                    lambda result: generate_evm_initcode(result) + "\n",
+                )
+            return _emit_assembly_outputs(
+                config,
+                results,
+                lambda result: generate_evm_bytecode(result) + "\n",
+            )
     except Exception as error:
         print(f"xcc: {error}", file=sys.stderr)
         return 1
@@ -682,11 +722,23 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
     raise AssertionError(f"unhandled target: {config.target}")
 
 
-def _default_output(path: str, action: str, target: TargetName) -> str:
+def _default_output(
+    path: str,
+    action: str,
+    target: TargetName,
+    *,
+    evm_initcode: bool = False,
+) -> str:
     if action == "link":
         return "a.out"
     if action == "assembly" and target == "llvm":
         return str(Path(path).with_suffix(".ll"))
     if action == "assembly" and target in {"aarch64-apple-darwin", "x86_64-linux-gnu"}:
         return str(Path(path).with_suffix(".s"))
+    if action == "assembly" and target == "evm":
+        return str(Path(path).with_suffix(".evmasm"))
+    if action == "compile" and target == "evm" and evm_initcode:
+        return str(Path(path).with_suffix(".init.bin"))
+    if action == "compile" and target == "evm":
+        return str(Path(path).with_suffix(".bin"))
     return str(Path(path).with_suffix(".o"))

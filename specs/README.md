@@ -11,6 +11,7 @@ large root file.
 - `target-llvm.md` owns the LLVM target.
 - `target-aarch64-apple-darwin.md` owns the Darwin AArch64 target.
 - `target-x86_64-linux-gnu.md` owns the Linux x86_64 target.
+- `target-evm.md` owns the Ethereum Virtual Machine bytecode target.
 
 ## Conventions
 

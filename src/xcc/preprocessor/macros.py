@@ -93,6 +93,8 @@ def _tokenize_macro_text(text: str) -> list[_MacroToken] | None:
     for token in tokens:
         if token.kind == TokenKind.EOF:
             continue
+        if not isinstance(token.kind, TokenKind):
+            return None
         lexeme = token.lexeme
         assert lexeme is not None
         out.append(_MacroToken(token.kind, lexeme))

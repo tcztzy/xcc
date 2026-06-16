@@ -265,8 +265,8 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
             and len(node.args) == 1
             and not node.keywords
         ):
-            value = _eval_pp_node(node.args[0])
-            return _PPValue(value.as_unsigned(), True)
+            arg_value = _eval_pp_node(node.args[0])
+            return _PPValue(arg_value.as_unsigned(), True)
         raise ValueError("Unsupported preprocessor call expression")
     if isinstance(node, ast.UnaryOp):
         operand = _eval_pp_node(node.operand)
@@ -275,23 +275,23 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
         if isinstance(node.op, ast.UAdd):
             return operand.normalize()
         if isinstance(node.op, ast.USub):
-            value = -operand.value
-            result = _PPValue(value, operand.is_unsigned)
+            unary_value = -operand.value
+            result = _PPValue(unary_value, operand.is_unsigned)
             return result.normalize()
         if isinstance(node.op, ast.Invert):
-            value = ~operand.value
-            result = _PPValue(value, operand.is_unsigned)
+            unary_value = ~operand.value
+            result = _PPValue(unary_value, operand.is_unsigned)
             return result.normalize()
         raise ValueError(f"Unsupported preprocessor unary operator: {type(node.op).__name__}")
     if isinstance(node, ast.BoolOp):
         if isinstance(node.op, ast.And):
-            for value in node.values:
-                if _eval_pp_node(value).value == 0:
+            for child in node.values:
+                if _eval_pp_node(child).value == 0:
                     return _PPValue(0)
             return _PPValue(1)
         if isinstance(node.op, ast.Or):
-            for value in node.values:
-                if _eval_pp_node(value).value != 0:
+            for child in node.values:
+                if _eval_pp_node(child).value != 0:
                     return _PPValue(1)
             return _PPValue(0)
         raise ValueError(f"Unsupported preprocessor boolean operator: {type(node.op).__name__}")
@@ -302,28 +302,28 @@ def _eval_pp_node(node: ast.AST) -> _PPValue:
         left_value = left.as_unsigned() if is_unsigned else left.value
         right_value = right.as_unsigned() if is_unsigned else right.value
         if isinstance(node.op, ast.Add):
-            value = left_value + right_value
+            result_value = left_value + right_value
         elif isinstance(node.op, ast.Sub):
-            value = left_value - right_value
+            result_value = left_value - right_value
         elif isinstance(node.op, ast.Mult):
-            value = left_value * right_value
+            result_value = left_value * right_value
         elif isinstance(node.op, ast.FloorDiv):
-            value = left_value // right_value
+            result_value = left_value // right_value
         elif isinstance(node.op, ast.Mod):
-            value = left_value % right_value
+            result_value = left_value % right_value
         elif isinstance(node.op, ast.LShift):
-            value = left_value << right_value
+            result_value = left_value << right_value
         elif isinstance(node.op, ast.RShift):
-            value = left_value >> right_value
+            result_value = left_value >> right_value
         elif isinstance(node.op, ast.BitOr):
-            value = left_value | right_value
+            result_value = left_value | right_value
         elif isinstance(node.op, ast.BitAnd):
-            value = left_value & right_value
+            result_value = left_value & right_value
         elif isinstance(node.op, ast.BitXor):
-            value = left_value ^ right_value
+            result_value = left_value ^ right_value
         else:
             raise ValueError(f"Unsupported preprocessor binary operator: {type(node.op).__name__}")
-        result = _PPValue(value, is_unsigned)
+        result = _PPValue(result_value, is_unsigned)
         return result.normalize()
     if isinstance(node, ast.Compare):
         if len(node.ops) != 1:
@@ -389,25 +389,25 @@ def _eval_node(node: ast.AST) -> int:
             f"Unsupported integer-expression literal type: {type(node.value).__name__}"
         )
     if isinstance(node, ast.UnaryOp):
-        value = _eval_node(node.operand)
+        operand_value = _eval_node(node.operand)
         if isinstance(node.op, ast.Not):
-            return 0 if value else 1
+            return 0 if operand_value else 1
         if isinstance(node.op, ast.UAdd):
-            return value
+            return operand_value
         if isinstance(node.op, ast.USub):
-            return -value
+            return -operand_value
         if isinstance(node.op, ast.Invert):
-            return ~value
+            return ~operand_value
         raise ValueError(f"Unsupported integer-expression unary operator: {type(node.op).__name__}")
     if isinstance(node, ast.BoolOp):
         if isinstance(node.op, ast.And):
-            for value in node.values:
-                if _eval_node(value) == 0:
+            for child in node.values:
+                if _eval_node(child) == 0:
                     return 0
             return 1
         if isinstance(node.op, ast.Or):
-            for value in node.values:
-                if _eval_node(value) != 0:
+            for child in node.values:
+                if _eval_node(child) != 0:
                     return 1
             return 0
         raise ValueError(

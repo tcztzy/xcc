@@ -111,6 +111,8 @@ class CliTests(unittest.TestCase):
         self.assertIn("usage:", stdout)
         self.assertIn("--target=llvm", stdout)
         self.assertIn("--target=x86_64-linux-gnu", stdout)
+        self.assertIn("--target=evm", stdout)
+        self.assertIn("--evm-initcode", stdout)
         self.assertNotIn("--backend", stdout)
 
     def test_main_missing_input(self) -> None:
@@ -444,6 +446,104 @@ class CliTests(unittest.TestCase):
             self.assertIn("    mov eax, 7", asm)
             self.assertNotIn("define i32", asm)
             run.assert_not_called()
+
+    def test_main_evm_target_assembly_is_evm_opcodes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            asm_path = root / "ok.evmasm"
+            src.write_text("unsigned int get(void){return 7;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(["--target=evm", "-nostdinc", "-S", str(src)])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+            asm = asm_path.read_text(encoding="utf-8")
+            self.assertIn("PUSH4 0x6d4ce63c", asm)
+            self.assertIn("RETURN", asm)
+            self.assertNotIn("define i32", asm)
+            run.assert_not_called()
+
+    def test_main_evm_target_compile_writes_hex_bytecode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            bytecode_path = root / "ok.bin"
+            src.write_text("unsigned int get(void){return 7;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(["--target=evm", "-nostdinc", "-c", str(src)])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+            bytecode = bytecode_path.read_text(encoding="utf-8").strip()
+            self.assertRegex(bytecode, r"^[0-9a-f]+$")
+            self.assertIn("636d4ce63c", bytecode)
+            run.assert_not_called()
+
+    def test_main_evm_target_compile_can_write_deployment_initcode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "ok.c"
+            initcode_path = root / "ok.init.bin"
+            runtime_path = root / "ok.bin"
+            src.write_text(
+                "typedef __evm_uint256 uint256;\n"
+                "uint256 counter = 7;\n"
+                "uint256 get(void){return counter;}\n",
+                encoding="utf-8",
+            )
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(
+                    ["--target=evm", "-nostdinc", "--evm-initcode", "-c", str(src)]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "")
+            initcode = initcode_path.read_text(encoding="utf-8").strip()
+            self.assertRegex(initcode, r"^[0-9a-f]+$")
+            self.assertIn("636d4ce63c", initcode)
+            self.assertFalse(runtime_path.exists())
+            run.assert_not_called()
+
+    def test_main_evm_initcode_option_requires_evm_compile_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "ok.c"
+            src.write_text("unsigned int get(void){return 7;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                non_evm_code, non_evm_stdout, non_evm_stderr = self._run_main(
+                    ["--target=llvm", "-nostdinc", "--evm-initcode", "-c", str(src)]
+                )
+                assembly_code, assembly_stdout, assembly_stderr = self._run_main(
+                    ["--target=evm", "-nostdinc", "--evm-initcode", "-S", str(src)]
+                )
+
+        self.assertEqual(non_evm_code, 1)
+        self.assertEqual(non_evm_stdout, "")
+        self.assertIn("--evm-initcode requires --target=evm -c", non_evm_stderr)
+        self.assertEqual(assembly_code, 1)
+        self.assertEqual(assembly_stdout, "")
+        self.assertIn("--evm-initcode requires --target=evm -c", assembly_stderr)
+        run.assert_not_called()
+
+    def test_main_evm_target_rejects_link_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "ok.c"
+            src.write_text("unsigned int get(void){return 7;}", encoding="utf-8")
+
+            with patch("xcc.cc_driver.subprocess.run") as run:
+                code, stdout, stderr = self._run_main(["--target=evm", "-nostdinc", str(src)])
+
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("EVM target does not support link action", stderr)
+        run.assert_not_called()
 
     def test_main_x86_64_linux_target_strips_macro_expanded_gnu_asm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

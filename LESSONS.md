@@ -5,9 +5,181 @@
 - Compare against permissively licensed Clang fixtures.
 - Treat ABI/layout bugs as high severity.
 - Add a reproducer before changing behavior.
+- Ethereum ABI selectors use pre-FIPS Keccak-256, not `hashlib.sha3_256`.
+  Keep a known selector regression test when adding EVM ABI behavior.
+- EVM arithmetic tests need execution checks, not just opcode snapshots. Stack
+  order bugs in non-commutative operators such as `-` and `-=` can still emit
+  plausible bytecode while returning 256-bit wrapped wrong answers.
+- EVM file-scope storage variables need deterministic slot assignment tests.
+  Nonzero initial storage is deploy-time initcode behavior, not runtime
+  bytecode behavior, so reject it until the target grows an initcode path.
+- EVM pointer tests need execution through bytecode. Pointer arithmetic must
+  scale by the backend memory slot size, and ABI dynamic arrays need a concrete
+  calldata copy test so selectors, offsets, and memory reads stay aligned.
+- EVM dynamic ABI array tests need non-`uint256` element types. A `uint256[]`
+  copy can pass while `uint32[]`, signed, or boolean arrays still fail to apply
+  the same element conversions used for scalar ABI parameters.
+- EVM bit-field tests need to inspect the stored word, not only the loaded
+  member value. A masked load can hide initcode or store paths that wrote an
+  untruncated value into memory or storage.
+- EVM unnamed bit-field support needs positional initializer tests. A layout
+  change can allow the record allocation while `{...}` still tries to
+  initialize the padding field instead of skipping to the next named member.
+- EVM expression-order tests need side effects, not only returned constants.
+  Logical and conditional lowering must prove skipped branches do not write
+  storage before treating it as C-compatible control expression support.
+- EVM signed integer tests need ABI two's-complement inputs and signed result
+  decoding. Unsigned opcodes can pass positive-only tests while breaking C
+  `int` comparison, division, modulo, and arithmetic right shift.
+- EVM integer conversion tests need both narrow and expression-boundary cases.
+  A cast-only test can miss 256-bit word values leaking through local stores,
+  returns, and unsigned arithmetic wraparound comparisons.
+- EVM internal-call tests need caller locals that are used after the call.
+  A helper can appear to work while sharing `_LOCAL_BASE` storage with its
+  caller and corrupting live local values.
+- EVM `sizeof` tests need side-effect operands. A constant result alone does
+  not prove the backend avoided evaluating expressions such as
+  `sizeof(marker = 99)`.
+- EVM `switch` tests need separate inputs for break, fallthrough, direct case
+  entry, and default. A single matched case does not prove the switch end label
+  or label-to-label fallthrough is correct.
+- EVM character literal tests need both runtime returns and `case` labels, with
+  ordinary, common escaped, hexadecimal, and octal forms. The runtime expression
+  path and integer-constant path can fail independently.
+- EVM `offsetof` tests should include nested members and assert byte offsets,
+  not slot offsets. The backend stores aggregate layout internally in 32-byte
+  words, but C `__builtin_offsetof` reports bytes.
+- EVM `_Generic` tests need a side-effecting control expression. Selecting the
+  right association is not enough; the control expression must be type-checked
+  but not emitted or executed.
+- EVM statement-expression tests should include a local declaration, an
+  intermediate side effect, and a final expression-statement result. Emitting
+  the whole compound statement through the normal statement path would pop the
+  value that the enclosing expression needs.
+- EVM user labels must be unique per emitted function copy, not just per source
+  function. The ABI dispatcher body and internal helper body both lower the
+  same C labels; duplicate assembler labels can make an ABI `goto` jump into an
+  internal-return body.
+- EVM labels-as-values should reuse the same function-copy-local label naming
+  as direct `goto`. `&&label` stores an EVM byte offset, so mixing ABI and
+  internal body labels would make later indirect `JUMP` targets mode-crossing.
+- EVM compound literals need planned frame slots, not opportunistic allocation
+  while emitting code. Dynamic ABI array memory starts after planned frames, so
+  late compound-literal allocation can collide with calldata copies.
+- EVM string literals follow the target word-object layout, not byte-packed C
+  memory. Tests should assert subscript behavior through char-word slots and
+  include the null terminator so pointer-expression storage is proved.
+- EVM record initializers need omitted-member checks. A full initializer can
+  pass while uninitialized frame words leak through `{7}`-style partial record
+  initialization.
+- EVM aggregate assignment tests should cover memory-to-memory,
+  memory-to-storage, and storage-to-memory copies. A local-only copy can miss
+  the different address units: memory uses byte offsets while storage uses word
+  slots.
+- EVM anonymous record member support needs both access and initializer tests.
+  Recursive promoted-member lookup can pass assignment syntax while positional
+  initializers still reject the anonymous owner field.
+- EVM aggregate initcode tests should assert individual storage slots as well
+  as runtime reads. A flattened initializer can return the right aggregate sum
+  while still writing the wrong declaration-order slot.
+- EVM designated initializer tests should cover both local memory reads and
+  initcode storage slot assertions. Field/index designators use different
+  address units across memory byte offsets and storage word slots.
+- EVM no-op syntax still needs backend coverage. Empty statements, block
+  typedefs, and checked `_Static_assert` declarations should emit no bytecode,
+  but an unsupported-statement fallback can reject otherwise valid C bodies.
+- EVM storage string literal tests should assert individual slots. The runtime
+  read can hide mistakes in escape decoding, null terminator padding, or the
+  initcode flattening order for char-word arrays.
+- EVM static local tests need repeated runtime calls against the same storage
+  dict. A single call cannot distinguish persistent storage from a local frame
+  that is reinitialized on every entry.
+- EVM enum support needs both runtime expression and integer-constant tests.
+  `case ENUM_VALUE` exercises a different path than `return ENUM_VALUE`.
+- EVM pointer arithmetic tests should include pointer-pointer subtraction, not
+  only pointer-plus-integer. Otherwise the backend can accidentally scale a
+  pointer address as though it were an integer index.
+- EVM ADDMOD/MULMOD tests need operands that distinguish native arbitrary-width
+  modular arithmetic from a wrapped 256-bit C expression followed by `%`.
+  Otherwise a lowering bug can still produce small correct-looking results.
+- EVM MSTORE8 tests need byte addresses, not word-scaled pointer arithmetic.
+  Cast through `__evm_uint256` or target a base pointer directly when proving
+  single-byte writes and `MSIZE` behavior.
+- EVM PC tests should avoid fixed byte-offset expectations. Assert a stable
+  relation such as nonzero execution position because dispatcher and preceding
+  lowering changes legitimately move the opcode.
+- EVM MCOPY tests should copy visible high-order bytes from a word value and
+  inspect transient storage separately. A return value alone can hide whether
+  `TSTORE` persisted in the transaction-local map.
+- EVM PUSH0 changes byte offsets for later labels. Prefer execution checks and
+  mnemonic/byte presence over exact dispatcher offsets unless the test is
+  explicitly about label address calculation.
+- EVM raw RETURN tests should put a distinct C `return` after the builtin.
+  That proves the terminal opcode wins and the normal ABI return path is not
+  accidentally reached.
+- EVM raw LOG and REVERT memory-range tests should slice across word
+  boundaries. That catches swapped pointer/length operands and proves byte
+  offsets are honored instead of only word-aligned data.
+- EVM deploy/initcode support needs driver-level coverage, not just a Python
+  API test. Use an initialized storage global so runtime `.bin` cannot mask
+  whether the CLI actually selected creation bytecode.
+- EVM ABI decoder tests should include truncated calldata, not only valid ABI
+  payloads. `CALLDATALOAD` returns zero past the end, so missing bounds checks
+  can look like valid zero arguments.
+- EVM dynamic ABI offset tests need malformed offsets that are still in bounds.
+  Offset-zero and misaligned-offset payloads can decode as empty arrays unless
+  the backend checks the ABI head boundary and 32-byte alignment explicitly.
+- EVM LOG builtin tests should verify topic order for multi-topic logs. A
+  single-topic test cannot catch reversed stack emission for `LOG2` through
+  `LOG4`.
+- EVM Keccak/SHA3 tests should hash real memory bytes, not just assert an
+  opcode appears. Word-object memory layout makes the exact byte range part of
+  the contract.
+- EVM environment opcode tests should combine runtime values with distinct
+  weights and assert assembly mnemonics. That catches both wrong opcode
+  selection and MiniEVM field wiring.
+- EVM account-query tests should use explicit fixture maps for balances,
+  code sizes, code hashes, and block hashes. Unknown values should default to
+  zero, matching the EVM's query-style behavior in tests.
+- EVM raw calldata tests should include bytes beyond the ABI-decoded head.
+  That proves `CALLDATALOAD` and `CALLDATACOPY` operate on raw calldata, not
+  just values already copied into local frame slots.
+- EVM codecopy tests should compute expectations from the emitted bytecode.
+  Runtime length and first-byte values can shift as the dispatcher changes, so
+  hard-coded code bytes make the test brittle.
+- EVM extcodecopy tests should use an address-keyed code fixture with nonzero
+  copy offsets. That catches both wrong stack argument order and accidental
+  copying from the current contract's runtime code.
+- EVM return-data tests should preload nonempty return bytes and copy a
+  nonzero offset. That proves `RETURNDATACOPY` reads prior-call return data,
+  not calldata or deployed code memory.
+- EVM CREATE tests should build initcode bytes at the start of an EVM word.
+  Local `uint256` stores are big-endian 32-byte memory writes, so short bytecode
+  constants need shifting before `CREATE` copies from offset zero.
+- EVM CREATE2 tests should assert the salt separately from initcode bytes.
+  `CREATE2` shares the `CREATE` memory boundary, so salt coverage is what keeps
+  deterministic creation stack order from silently regressing.
+- EVM SELFDESTRUCT tests should prove halting, not just opcode emission. A
+  void builtin can otherwise leave normal function-return code reachable after
+  the terminal opcode.
+- EVM CALL tests should assert both sides of the memory boundary. Checking only
+  the success flag can miss wrong stack argument order; record gas/address/value
+  and input bytes, then assert returned bytes land in the requested output
+  buffer.
+- EVM CALLCODE tests should keep an explicit value argument even though the
+  call executes in the current context. It shares the memory boundary and stack
+  arity with `CALL`, but must still prove the legacy opcode is emitted.
+- EVM STATICCALL tests should keep the call trace value at zero. It shares the
+  memory boundary shape with `CALL`, but its stack omits the value argument.
+- EVM DELEGATECALL tests should preload a nonzero current call value. That
+  catches accidentally lowering it like `CALL` with a stack value argument or
+  like `STATICCALL` with an always-zero value.
 - Keep benchmark matrices explicit: pure interpreter environments should measure
   the source tree under that interpreter, while compiled Cython/mypyc variants
   should pin to the CPython version used to build compatible extension modules.
+- Mypyc enforces dataclass field annotations at runtime. If a parser recovery
+  path intentionally accepts synthetic enum token kinds, annotate the token
+  field to that public contract rather than the common concrete enum.
 - For pure-Python Cython performance experiments, disable Cython function
   binding semantics unless the benchmark needs Python descriptor/signature
   fidelity; default binding overhead can hide the real throughput win.
@@ -21,6 +193,25 @@
   function pointer can legally have the same name as a file-scope function, and
   calls through that identifier must use the local slot instead of the global
   function signature.
+- Storage initializer constant folding must preserve non-integer word values.
+  Function pointer labels need branch selection before generic integer constant
+  evaluation, or constant conditionals discard the selected runtime label.
+- EVM local declaration planning must classify block-scope function prototypes
+  before allocating locals. They are declarations only, not stack/memory
+  objects, and direct helper-call lowering should remain available.
+- EVM function pointer return tests should keep the selector helper internal
+  and immediately indirect-call the returned value. That proves runtime labels
+  survive the return slot without making function pointers part of the public
+  ABI parameter surface.
+- EVM word pointer return support needs two tests: one static helper returning
+  a memory pointer that is dereferenced by the caller, and one exported
+  function that still rejects pointer returns at the ABI boundary.
+- EVM internal helper parameter validation should be separate from exported ABI
+  parameter validation. Function pointer parameters are valid word values for
+  static helpers but must not become public ABI parameter types.
+- EVM internal aggregate parameter tests should mutate the caller's record
+  after the call. That proves direct helper arguments are copied into the
+  callee frame by value instead of aliasing caller storage.
 - Conditional expression codegen has to apply the expression's final type to
   each branch, not just trust branch-local expression widths. Otherwise an
   `int -1` branch in a `long` conditional returns `0xffffffff` and breaks
@@ -439,3 +630,106 @@
 - Generated-output driver actions need per-input output paths. For `-S` and
   `-c`, an explicit single `-o` with multiple C inputs should fail before any
   output can be overwritten.
+- A pure-Python macro-text pre-scan can lose even when it reduces `lex_pp`
+  calls. In the CPython cold frontend profile, simple rendered tokens were the
+  cheap lexer cases; the expensive fallback strings still dominated while the
+  pre-scan added its own full pass.
+- CPython already compiles membership in a constant set literal to a frozenset
+  constant. Hoisting `name in {"a", ...}` sets by hand is not a meaningful hot
+  path optimization unless bytecode/profile evidence says otherwise.
+- Avoid assuming that replacing a public list-returning tokenizer with an
+  internal tuple-returning helper will help every caller. After macro text reads
+  already use cached tuples, a direct macro-replacement tuple helper reduced one
+  wrapper call count but made the CPython cold frontend profile worse.
+- Compatibility projections inside hot immutable data constructors should avoid
+  repeated scans over the same canonical shape. Keep the canonical field intact,
+  but derive legacy views such as pointer depth and integer array bounds in one
+  pass.
+- Tiny helper layers are still measurable when they sit under every preprocessor
+  output line. If a helper only destructures an already-validated value into a
+  tuple, inline it at the hot append site and leave the standalone helper for
+  colder direct callers.
+- Do not allocate source-location objects for paths that only need line-map
+  coordinates. Keep full `_SourceLocation` construction for diagnostics and
+  macro expansion, but pass raw filename/line pairs through output-only paths.
+- `pstats.strip_dirs()` can erase the only module identity needed to distinguish
+  hot `__init__.py` functions. Keep full paths in machine-readable profiles
+  when residual recommendations depend on package/module ownership.
+- Once a helper sits under hundreds of thousands of blank/output-line writes,
+  preserving its behavior may still require inlining the single-line fast path;
+  measure both the helper row and its caller because work can shift from one
+  row to the other.
+- Do not recollect or reparse a directive after a successful first parse when
+  the physical line proves it is a simple single-line directive. Keep
+  continuation and block-comment-bearing directives on the normalized path, but
+  let the common case reuse the classification already paid for.
+- Helper-internal fast paths still pay call overhead at CPython-header scale.
+  If the caller can prove a no-op condition with a cheap local check, skip the
+  helper call entirely and leave the helper to cover the state-changing paths.
+- Reducing lexer call count is not enough evidence for a frontend win. A
+  simple macro-replacement token fast path reduced `lex_pp` calls but worsened
+  the CPython cold frontend profile, because the added pre-scan did not remove
+  the expensive fallback tokenization work.
+- Gate speculative parser probes with syntax that cannot produce the probed
+  construct. A file-scope `typedef` cannot be a function definition, so parse
+  it as a declaration before invoking function-shape lookahead.
+- When inlining a hot helper into its caller, judge the caller chain by
+  cumulative time and total calls, not only the caller's self time. Moving
+  `append_at` work into `process_text` raised `process_text` self time but
+  reduced the full preprocessor path.
+- Profile noise from one-time library/module loading can obscure a local hot-path
+  win.
+  Before rejecting a narrow optimization, rerun and compare local rows, total
+  call count, and unrelated load/runtime rows separately.
+- Callback adapter functions are real work in highly repeated frontend paths.
+  If a helper can accept the canonical callable shape directly, avoid allocating
+  a forwarding lambda in the wrapper on every call.
+- Once a shared helper owns the behavior boundary, hot callers can call it
+  directly with cached context instead of paying an object wrapper method on
+  every directive. Keep a focused test around wrapper bypasses so the shortcut
+  remains intentional.
+- A shared helper does not have to own every success path if the caller already
+  has the complete state transition locally. Empty `#else`/`#endif` can update
+  the conditional stack in `process_text`; keep nonempty tails and error paths
+  on the shared helper so diagnostics stay centralized.
+- For directive fast paths, make the accepted shape narrower than the language
+  shape. Plain ASCII `#ifdef NAME` can skip the shared helper, while comments,
+  Unicode names, and malformed tails should fall back so one canonical
+  diagnostic/comment-stripping implementation remains in charge.
+- Pure-comment conditional tails are still a narrow success shape. Let hot
+  `process_text` handle `#else /* ... */` and `#endif // ...` locally, but keep
+  trailing tokens and malformed comments on the shared helper so the diagnostic
+  contract remains centralized.
+- Put conditional-expression shape parsing at the eval boundary, not at every
+  directive dispatch site. A `process_text`-level simple `defined` fast path
+  made every `#if`/`#elif` pay a pre-scan and worsened the cold frontend
+  profile; the helper-level version only runs after branch state proves an
+  expression would otherwise be evaluated.
+- Cache pure post-expansion expression evaluation, not higher-level condition
+  evaluation. Macro expansion, `defined`, and probe operators can depend on the
+  current preprocessor state, but the final Python expression string is a pure
+  bounded cache key.
+- In parser precedence loops, wrapper methods can dominate even when each
+  wrapper is tiny. If a recursive expression layer only delegates to a module
+  helper, pass the module helper directly through the hot loop and leave the
+  public wrapper surface intact for external callers/tests.
+- Mypy tracks local variable names across an entire function. In large backend
+  methods, reuse names such as `value`, `item`, `index`, or `function` only when
+  the type really stays the same; otherwise prefer semantic one-shot names so
+  the checker does not merge unrelated branch types.
+- EVM function-pointer tests should cover both implicit function designators
+  and explicit `&function` addresses. The first proves expression-position
+  function names lower to code labels; the second keeps address-of from falling
+  back to ordinary object lvalue handling.
+- EVM function-pointer storage initializer tests need to execute initcode and
+  then call through the deployed runtime. The stored value is a runtime bytecode
+  offset, so testing only the initializer evaluator misses label resolution
+  against the final assembled runtime.
+- EVM aggregate return tests should cover both direct helper locals and
+  assignment/function-pointer call flows. Return slots are just source
+  addresses for later word-slot copies, so scratch-slot ordering bugs can hide
+  unless the right-hand side itself evaluates a helper call.
+- EVM function-pointer aggregate parameter tests should let the callee mutate
+  its parameter and then read the caller's original record. That distinguishes
+  true by-value argument slot copies from accidentally aliasing caller storage
+  through the indirect dispatch path.

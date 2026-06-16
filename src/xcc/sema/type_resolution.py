@@ -14,6 +14,8 @@ from xcc.types import (
     BOOL,
     CHAR,
     DOUBLE,
+    EVM_ADDRESS,
+    EVM_UINT256,
     FLOAT,
     INT,
     INT128,
@@ -154,6 +156,10 @@ def resolve_type(analyzer: object, type_spec: TypeSpec) -> Type:
         return INT128
     if type_spec.name == "__uint128_t" and is_unqualified_scalar:
         return UINT128
+    if type_spec.name == "__evm_uint256" and is_unqualified_scalar:
+        return EVM_UINT256
+    if type_spec.name == "__evm_address" and is_unqualified_scalar:
+        return EVM_ADDRESS
     if type_spec.name == "float" and is_unqualified_scalar:
         return FLOAT
     if type_spec.name == "double" and is_unqualified_scalar:
@@ -255,13 +261,14 @@ def define_enum_members(analyzer: object, type_spec: TypeSpec, scope: Scope) -> 
     self = cast(Any, analyzer)
     next_value = 0
     for name, expr in type_spec.enum_members:
-        value = next_value
+        enum_value = next_value
         if expr is not None:
-            value = _eval_enum_int_constant_expr(self, expr, scope)
-            if value is None:
+            evaluated = _eval_enum_int_constant_expr(self, expr, scope)
+            if evaluated is None:
                 raise SemaError("Enumerator value is not integer constant")
-        scope.define(EnumConstSymbol(name, value))
-        next_value = value + 1
+            enum_value = evaluated
+        scope.define(EnumConstSymbol(name, enum_value))
+        next_value = enum_value + 1
 
 
 def _eval_enum_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | None:

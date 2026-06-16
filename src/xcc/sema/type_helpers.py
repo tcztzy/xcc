@@ -2,6 +2,8 @@ from xcc.types import (
     BOOL,
     CHAR,
     DOUBLE,
+    EVM_ADDRESS,
+    EVM_UINT256,
     FLOAT,
     INT,
     INT128,
@@ -30,6 +32,8 @@ UNSIGNED_INTEGER_TYPE_LIMITS = {
     ULONG: (1 << 64) - 1,
     ULLONG: (1 << 64) - 1,
     UINT128: (1 << 128) - 1,
+    EVM_UINT256: (1 << 256) - 1,
+    EVM_ADDRESS: (1 << 160) - 1,
 }
 INTEGER_PROMOTION_TYPES = {
     BOOL.name: INT,
@@ -52,6 +56,8 @@ INTEGER_TYPE_RANKS = {
     ULLONG.name: 6,
     INT128.name: 7,
     UINT128.name: 7,
+    EVM_ADDRESS.name: 8,
+    EVM_UINT256.name: 9,
 }
 SIGNED_INTEGER_NAMES = {CHAR.name, SHORT.name, INT.name, LONG.name, LLONG.name, INT128.name}
 UNSIGNED_COUNTERPARTS = {
@@ -74,6 +80,8 @@ CANONICAL_INTEGER_TYPES = {
     ULLONG.name: ULLONG,
     INT128.name: INT128,
     UINT128.name: UINT128,
+    EVM_ADDRESS.name: EVM_ADDRESS,
+    EVM_UINT256.name: EVM_UINT256,
 }
 
 

@@ -2,6 +2,182 @@
 
 ## Current
 
+- Added an explicit `--target=evm` backend that emits Ethereum legacy EVM
+  opcode assembly with `-S` and lowercase hex runtime bytecode with `-c`,
+  including stdlib-only Keccak ABI selectors, scalar integer ABI dispatch, and
+  `__builtin_evm_sload`/`__builtin_evm_sstore` lowering.
+- Expanded the EVM target with `while`/`do while`/`for` plus
+  `break`/`continue`, `__builtin_evm_caller`, `__builtin_evm_callvalue`,
+  `__builtin_evm_revert`, `__builtin_evm_log1`, and ABI scalar types
+  `__evm_uint256` / `__evm_address`.
+- Added EVM file-scope scalar storage variables mapped to deterministic
+  declaration-order storage slots, with initialized storage globals rejected
+  until deploy-time initcode exists.
+- Expanded the EVM backend with word-addressed memory pointers, fixed local
+  arrays, dynamic ABI word-array parameters, `__builtin_evm_return_array`,
+  deployment initcode generation for scalar initialized storage globals, and
+  deterministic struct-member storage slots.
+- Fixed EVM dynamic ABI array decoding so calldata elements are converted to
+  the pointer element type while being copied into EVM memory, matching scalar
+  ABI parameter truncation and sign/boolean normalization.
+- Expanded EVM scalar expression lowering with short-circuit `&&`/`||`,
+  selected-branch `?:`, and comma expressions while preserving side-effect
+  ordering through explicit jumps.
+- Expanded EVM signed scalar lowering so signed comparison, division, modulo,
+  and right shift use `SLT`/`SGT`/`SDIV`/`SMOD`/`SAR` according to C integer
+  conversions.
+- Expanded EVM integer conversion lowering so casts, scalar stores, returns,
+  and integer expression results truncate unsigned widths, sign-extend signed
+  widths, and normalize `_Bool` values to 0/1.
+- Added EVM direct internal function calls for same-translation-unit helpers,
+  using per-function memory frames plus return-PC and return-value slots while
+  keeping static helpers out of the ABI dispatcher.
+- Added EVM internal helper returns for word pointer values while keeping
+  pointer returns out of the exported ABI surface.
+- Added EVM function pointer calls for same-translation-unit fixed-prototype
+  helpers, lowering function designators and `&function` addresses to internal
+  jump labels and dispatching indirect calls through matching signatures.
+- Added EVM function pointer call support for record/union parameters by
+  copying aggregate word slots through indirect-call argument frames before
+  dispatching to the selected helper.
+- Added EVM internal helper parameters for word-valued arguments, including
+  function pointer parameters that can be indirect-called by the helper.
+- Added EVM internal helper record/union parameters by copying aggregate word
+  slots into the callee frame for direct same-translation-unit helper calls.
+- Added EVM internal helper record/union returns by copying aggregate word slots
+  through callee return frames into caller locals, assignments, member access,
+  and function pointer return-call paths.
+- Added EVM internal helper returns for function pointer values so a helper can
+  select a local target and callers can immediately indirect-call it.
+- Added EVM handling for block-scope helper prototypes so local function
+  declarations are treated as declarations rather than stack objects.
+- Added EVM initcode storage initialization for function pointer globals,
+  resolving function designators and `&function` initializers to deployed
+  runtime jump offsets before emitting deployment-time `SSTORE`s.
+- Added EVM initcode constant folding for conditional function pointer storage
+  initializers so deployment bytecode stores the selected runtime helper label.
+- Added EVM `sizeof` and `_Alignof` lowering for the target's 32-byte
+  word-object layout, without evaluating expression operands.
+- Added EVM `switch`/`case`/`default` lowering with explicit case dispatch,
+  fallthrough behavior, and switch-scoped `break` targets.
+- Added EVM character literal lowering for ordinary and escaped constants,
+  including hexadecimal/octal escapes in scalar expressions and `switch` case
+  constants.
+- Added EVM `__builtin_offsetof` lowering for simple and nested record members
+  using the target's 32-byte word-object layout.
+- Added EVM lowering for `__builtin_types_compatible_p` and `_Generic`,
+  selecting only the matched generic association without evaluating the control
+  expression.
+- Added EVM GNU statement-expression lowering for ordered embedded statements,
+  local declarations, and final expression-statement results.
+- Added EVM direct `goto`/label lowering with function-copy-local labels so ABI
+  and internal helper bodies do not cross-jump.
+- Added EVM labels-as-values and indirect `goto` lowering through current
+  function-copy-local EVM jump offsets.
+- Added EVM scalar and fixed-array compound literal lowering using planned
+  function-frame word storage, including array decay and assignable lvalue use.
+- Added EVM char-word string literal lowering for local char-array
+  initializers and pointer-expression use, including C escape decoding and null
+  terminators.
+- Expanded EVM aggregate initializer lowering to local records and record
+  compound literals, with positional member stores and zeroed omitted members.
+- Added EVM anonymous union member layout and promoted member access for local
+  records, including positional local initialization through the anonymous
+  union slot.
+- Added EVM word-backed record bit-field lowering for local memory and storage
+  records, including width-masked member reads/writes and initcode storage
+  initializers.
+- Added EVM unnamed bit-field padding support so local and initcode storage
+  record initializers skip padding fields instead of rejecting them as
+  anonymous storage members.
+- Added EVM record assignment lowering through word-slot copies across memory
+  and storage address spaces.
+- Expanded EVM initcode storage initialization to flatten fixed-array and
+  simple-record aggregate initializers into deployment-time `SSTORE`s.
+- Added EVM designated aggregate initializer lowering for fixed-array indexes
+  and record fields across local word memory and initcode storage slots.
+- Added EVM no-op lowering for null statements, block-scope typedefs, and
+  semantically checked `_Static_assert` declarations.
+- Added EVM initcode support for storage char arrays initialized from C string
+  literals, including escapes and null padding in word slots.
+- Added EVM block-scope static local variables backed by persistent storage
+  slots, including initcode initialization and zero-initialized statics.
+- Added EVM enum constant lowering for runtime expressions and integer
+  constant contexts such as `switch` case values.
+- Fixed EVM pointer subtraction so pointer differences are divided by the
+  target word-object element stride instead of scaling the right pointer.
+- Added `__builtin_evm_addmod`, `__builtin_evm_mulmod`, and
+  `__builtin_evm_exp` lowering to the native `ADDMOD`, `MULMOD`, and `EXP`
+  opcodes, with execution coverage for large operands that would differ under
+  premature 256-bit wrapping.
+- Added `__builtin_evm_byte`, `__builtin_evm_mstore8`, and
+  `__builtin_evm_msize` lowering to the native `BYTE`, `MSTORE8`, and `MSIZE`
+  opcodes, with execution coverage for byte extraction, single-byte memory
+  writes, and active memory size.
+- Added `__builtin_evm_mload`, `__builtin_evm_mstore`,
+  `__builtin_evm_signextend`, and `__builtin_evm_pc` lowering to the native
+  `MLOAD`, `MSTORE`, `SIGNEXTEND`, and `PC` opcodes.
+- Added `__builtin_evm_tload`, `__builtin_evm_tstore`,
+  `__builtin_evm_mcopy`, `__builtin_evm_blobhash`, and
+  `__builtin_evm_blobbasefee` lowering to the native transient storage, memory
+  copy, and blob fee/hash opcodes.
+- Added EVM assembler `PUSH0` emission for implicit zero constants while
+  preserving explicit push widths for labels and ABI selectors.
+- Added `__builtin_evm_return`, `__builtin_evm_stop`, and
+  `__builtin_evm_invalid` lowering to raw `RETURN`, `STOP`, and `INVALID`
+  terminal opcodes.
+- Added `__builtin_evm_revert_data(ptr, len)` and
+  `__builtin_evm_log0_data` through `__builtin_evm_log4_data` lowering so C
+  code can use raw memory ranges for `REVERT` and `LOG0`-`LOG4`.
+- Added `xcc --target=evm --evm-initcode -c` so the driver can write
+  deployable `.init.bin` creation bytecode, including storage initialization,
+  without replacing the existing runtime `.bin` output path.
+- Added EVM ABI calldata bounds checks so truncated scalar arguments or dynamic
+  `uint256[]` payloads revert instead of decoding missing words as zero.
+- Hardened EVM dynamic ABI array decoding to reject offsets that point into the
+  static argument head or are not 32-byte aligned.
+- Expanded EVM event log builtins from `__builtin_evm_log1` to the full
+  `__builtin_evm_log0` through `__builtin_evm_log4` opcode family.
+- Added `__builtin_evm_keccak256(ptr, len)` lowering to the native EVM `SHA3`
+  opcode for hashing memory ranges with the backend's Keccak implementation.
+- Added zero-argument EVM environment builtins for `ADDRESS`, `ORIGIN`,
+  `GASPRICE`, `COINBASE`, `TIMESTAMP`, `NUMBER`, `PREVRANDAO`, `GASLIMIT`,
+  `CHAINID`, `SELFBALANCE`, `BASEFEE`, and `GAS`.
+- Added one-argument EVM account/block query builtins for `BALANCE`,
+  `BLOCKHASH`, `EXTCODESIZE`, and `EXTCODEHASH`.
+- Added raw calldata builtins for `CALLDATASIZE`, `CALLDATALOAD`, and
+  `CALLDATACOPY`, including execution tests that copy calldata bytes into EVM
+  word memory.
+- Added runtime code introspection builtins for `CODESIZE` and `CODECOPY`,
+  including execution tests that copy deployed bytecode bytes into memory.
+- Added `__builtin_evm_extcodecopy(address, dst, offset, len)` lowering to the
+  native `EXTCODECOPY` opcode, with execution coverage for copying external
+  account code bytes into EVM memory.
+- Added return-data builtins for `RETURNDATASIZE` and `RETURNDATACOPY`,
+  including execution tests that copy prior-call return bytes into EVM memory.
+- Added `__builtin_evm_create(value, init, init_len)` lowering to the native
+  `CREATE` opcode, with execution coverage for copied initcode bytes, call
+  value, emitted opcode, and returned created address.
+- Added `__builtin_evm_create2(value, init, init_len, salt)` lowering to the
+  native `CREATE2` opcode, with execution coverage for copied initcode bytes,
+  call value, salt, emitted opcode, and returned created address.
+- Added `__builtin_evm_selfdestruct(beneficiary)` lowering to the native
+  `SELFDESTRUCT` opcode, with execution coverage for beneficiary stack order
+  and halting behavior.
+- Added `__builtin_evm_call(gas, address, value, in, in_len, out, out_len)`
+  lowering to the native `CALL` opcode, with execution coverage for copied call
+  input, return bytes, success status, gas, target address, and call value.
+- Added `__builtin_evm_callcode(gas, address, value, in, in_len, out, out_len)`
+  lowering to the native `CALLCODE` opcode, with execution coverage for copied
+  input, return bytes, success status, gas, target address, and call value.
+- Added `__builtin_evm_staticcall(gas, address, in, in_len, out, out_len)`
+  lowering to the native `STATICCALL` opcode, with execution coverage for
+  copied input, return bytes, success status, gas, target address, and zero
+  call value.
+- Added `__builtin_evm_delegatecall(gas, address, in, in_len, out, out_len)`
+  lowering to the native `DELEGATECALL` opcode, with execution coverage for
+  copied input, return bytes, success status, gas, target address, and the
+  current call value.
 - Merged Cython and mypyc throughput comparisons into
   `scripts/benchmark_xcc.py` and added tox-uv benchmark environments for
   py311-py314, pypy311, graalpy311-graalpy312, cython, and mypyc; the compiled
@@ -10,6 +186,8 @@
   single-file CPython frontend throughput results.
 - Added optional mypyc performance tooling: `scripts/mypycize_xcc.py` builds a
   temporary compiled import tree for the frontend hot path.
+- Added mypy checking to the dev type gate and pre-commit hook, with source
+  annotations/local names tightened so `uv run mypy` passes on `src`.
 - Simplified CC-driver target execution by sharing generated assembly/object
   handling across LLVM, Darwin AArch64, and Linux x86_64 targets.
 - CC-driver `-std=<mode>` now feeds the frontend language mode instead of only

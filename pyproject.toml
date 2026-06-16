@@ -23,6 +23,7 @@ dev = [
     "mkdocs-material>=9.7.6",
     "mkdocs-static-i18n>=1.3.1",
     "mypy[mypyc]>=2.1.0",
+    "pre-commit>=4.6.0",
     "ruff>=0.15.13",
     "tox>=4.54.0",
     "tox-uv>=1.35.2",
@@ -58,6 +59,11 @@ exclude = [
     "site/**",
 ]
 
+[tool.mypy]
+python_version = "3.11"
+files = ["src"]
+show_error_codes = true
+
 [tool.coverage.run]
 branch = true
 source = ["src"]
@@ -84,7 +90,7 @@ commands = [["ruff", "check", "src"], ["ruff", "format", "--check", "src"]]
 runner = "uv-venv-lock-runner"
 dependency_groups = ["dev"]
 package = "skip"
-commands = [["ty", "check", "src"]]
+commands = [["ty", "check", "src"], ["mypy"]]
 
 [tool.tox.env.bench-py311]
 runner = "uv-venv-lock-runner"

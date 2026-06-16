@@ -79,7 +79,11 @@ def unsupported_type_message(context: str, token: Token) -> str:
         if context == "type-name":
             return f"Unsupported type name: '{token_text}'"
         return f"Unsupported declaration type: '{token_text}'"
-    token_kind = unsupported_type_token_kind(token.kind)
+    token_kind = (
+        unsupported_type_token_kind(token.kind)
+        if isinstance(token.kind, TokenKind)
+        else f"unsupported token kind '{token.kind.name}'"
+    )
     if context == "type-name":
         if token.kind == TokenKind.PUNCTUATOR:
             return unsupported_type_name_punctuator_message(token_text)
@@ -723,7 +727,7 @@ def parse_record_member_declaration(parser: object) -> list[RecordMemberDecl]:
 
 def consume_decl_specifiers(parser: object) -> DeclSpecInfo:
     p = cast(Any, parser)
-    storage_class: str | None = None
+    storage_class: StorageClass | None = None
     storage_class_token: Token | None = None
     alignment: int | None = None
     alignment_token: Token | None = None

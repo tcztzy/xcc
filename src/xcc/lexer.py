@@ -199,7 +199,7 @@ class TokenKind(Enum):
 
 @dataclass(frozen=True)
 class Token:
-    kind: TokenKind
+    kind: Enum
     lexeme: str | None
     line: int
     column: int

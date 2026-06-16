@@ -180,7 +180,7 @@ class _LLVMGen:
             elif kind == "fn":
                 if result is None:
                     result = self._base_type(base_name)
-                params = ()
+                params: tuple[Type, ...] = ()
                 is_var = False
                 if isinstance(value, tuple):
                     params = value[0] if value[0] else ()
@@ -496,9 +496,9 @@ class _LLVMGen:
             if isinstance(symbol, VarSymbol):
                 t = symbol.type_
         if t.is_array():
-            val = t.declarator_ops[0][1]
-            unspecified = (isinstance(val, int) and val <= 0) or (
-                isinstance(val, ArrayDecl) and val.length is None
+            array_length = t.declarator_ops[0][1]
+            unspecified = (isinstance(array_length, int) and array_length <= 0) or (
+                isinstance(array_length, ArrayDecl) and array_length.length is None
             )
             if unspecified and isinstance(decl.init, InitList):
                 inferred = self._infer_array_init_length(decl.init)
@@ -521,16 +521,16 @@ class _LLVMGen:
             c.SetLinkage(gv, LLVM_INTERNAL_LINKAGE)
         if decl.init:
             if flexible_members and isinstance(decl.init, InitList):
-                val = self._eval_record_init(
+                init_value = self._eval_record_init(
                     decl.init,
                     t,
                     member_type_overrides=flexible_members,
                     record_lt=lt,
                 )
             else:
-                val = self._eval_init(decl.init, t)
-            if val:
-                c.SetInitializer(gv, val)
+                init_value = self._eval_init(decl.init, t)
+            if init_value:
+                c.SetInitializer(gv, init_value)
                 return
         c.SetInitializer(gv, c.ConstNull(lt))
 
@@ -1483,9 +1483,9 @@ class _LLVMGen:
         if self._is_function_designator_type(val_type):
             return self._function_designator(name, val_type)
         if self._sema.file_scope is not None:
-            sym = self._sema.file_scope.lookup(name)
-            if isinstance(sym, EnumConstSymbol):
-                return c.ConstInt(c.Int32Type(), sym.value, True)
+            file_symbol = self._sema.file_scope.lookup(name)
+            if isinstance(file_symbol, EnumConstSymbol):
+                return c.ConstInt(c.Int32Type(), file_symbol.value, True)
         lt = self._type_to_llvm(val_type)
         # Function type → reference the existing function declaration.
         if c.GetTypeKind(lt) == LLVMTypeKind.FUNCTION:
@@ -1515,7 +1515,7 @@ class _LLVMGen:
             if fn:
                 return fn
             return_type = INT
-            params = ((), False)
+            params: FunctionParams = ((), False)
         else:
             return_type, params = signature
         ret_lt = self._type_to_llvm(return_type)
@@ -3253,8 +3253,8 @@ class _LLVMGen:
                         evaluated = self._eval_int_constant_value(value.length)
                         length = evaluated if evaluated is not None else -1
                 else:
+                    assert isinstance(value, int)
                     length = value
-                assert isinstance(length, int)
                 resolved.append((kind, length))
                 continue
             if kind == "fn":
@@ -3519,10 +3519,10 @@ class _LLVMGen:
                     continue
                 if kind != "index" or not isinstance(value, Expr):
                     return None
-                index = self._eval_int_constant_value(value)
-                if index is None:
+                designated_index = self._eval_int_constant_value(value)
+                if designated_index is None:
                     return None
-                if 0 <= index < length:
+                if 0 <= designated_index < length:
                     val = self._eval_designated_init(
                         elem_type,
                         item.designators[1:],
@@ -3530,8 +3530,8 @@ class _LLVMGen:
                     )
                     if val is None:
                         continue
-                    elems[index] = val
-                next_index = index + 1
+                    elems[designated_index] = val
+                next_index = designated_index + 1
                 continue
             if next_index >= length:
                 continue
@@ -4009,8 +4009,8 @@ class _LLVMGen:
                 if target_lt is None:
                     return None
                 text = expr.operand.value.rstrip("fFlL")
-                value = float.fromhex(text) if text.startswith(("0x", "0X")) else float(text)
-                return c.ConstReal(target_lt, -value)
+                float_value = float.fromhex(text) if text.startswith(("0x", "0X")) else float(text)
+                return c.ConstReal(target_lt, -float_value)
         if isinstance(expr, CastExpr):
             result_type = self._resolve_type(expr.type_spec)
             result_lt = self._type_to_llvm(result_type)
@@ -4128,9 +4128,10 @@ class _LLVMGen:
             struct_ptr = base
         else:
             struct_t = base_t
-            struct_ptr = self._eval_const_addr(expr.base)
-            if struct_ptr is None:
+            struct_ptr_value = self._eval_const_addr(expr.base)
+            if struct_ptr_value is None:
                 return None
+            struct_ptr = struct_ptr_value
         path = self._member_path(struct_t.name, expr.member)
         if path is None:
             return None

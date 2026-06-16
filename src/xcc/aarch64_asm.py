@@ -273,12 +273,12 @@ class _AArch64AsmGen:
             name = pending.pop()
             if name in used:
                 continue
-            function = inline_by_name.get(name)
-            if function is None or function.body is None:
+            inline_function = inline_by_name.get(name)
+            if inline_function is None or inline_function.body is None:
                 continue
             used.add(name)
-            ordered.append(function)
-            pending.extend(self._referenced_function_names(function.body))
+            ordered.append(inline_function)
+            pending.extend(self._referenced_function_names(inline_function.body))
         return ordered
 
     def _referenced_function_names(self, node: object) -> list[str]:
@@ -488,9 +488,10 @@ class _AArch64AsmGen:
                 kind, value = item.designators[0]
                 if kind != "index" or not isinstance(value, Expr):
                     raise self._error("AArch64 target does not support global array designator")
-                item_index = self._eval_int_constant(value)
-                if item_index is None:
+                evaluated_index = self._eval_int_constant(value)
+                if evaluated_index is None:
                     raise self._error("AArch64 target requires constant array designator")
+                item_index = evaluated_index
             items_by_index[item_index] = item
             positional_index = item_index + 1
         return items_by_index
@@ -568,14 +569,16 @@ class _AArch64AsmGen:
                     active_bit_used = 0
                     active_bit_type = member.type_
                     active_bit_value = 0
-                item = items_by_index.get(index)
-                if item is not None:
-                    if not isinstance(item.initializer, Expr):
+                bitfield_item = items_by_index.get(index)
+                if bitfield_item is not None:
+                    if not isinstance(bitfield_item.initializer, Expr):
                         raise self._error("AArch64 target requires scalar bit-field initializer")
-                    value = self._eval_int_constant(item.initializer)
-                    if value is None:
+                    bitfield_value = self._eval_int_constant(bitfield_item.initializer)
+                    if bitfield_value is None:
                         raise self._error("AArch64 target requires constant bit-field initializer")
-                    active_bit_value |= (value & ((1 << member.bit_width) - 1)) << active_bit_used
+                    active_bit_value |= (
+                        bitfield_value & ((1 << member.bit_width) - 1)
+                    ) << active_bit_used
                 active_bit_used += member.bit_width
                 continue
             flush_bitfield_unit()
@@ -583,20 +586,20 @@ class _AArch64AsmGen:
             if member_align is None:
                 raise self._error(f"AArch64 target cannot align record member {member.name}")
             access_offset = self._align_to(offset, member_align)
-            item = items_by_index.get(index)
+            member_item = items_by_index.get(index)
             if self._is_trailing_flexible_array_member(members, index):
                 if access_offset > offset:
                     self._lines.append(f"    .zero {access_offset - offset}")
-                if item is not None:
-                    if isinstance(item.initializer, Expr) and self._is_zero_initializer(
-                        item.initializer
+                if member_item is not None:
+                    if isinstance(member_item.initializer, Expr) and self._is_zero_initializer(
+                        member_item.initializer
                     ):
                         offset = access_offset
                         continue
                     flex_type = self._complete_flexible_array_initializer_type(
-                        member.type_, item.initializer
+                        member.type_, member_item.initializer
                     )
-                    self._emit_global_initializer(flex_type, item.initializer)
+                    self._emit_global_initializer(flex_type, member_item.initializer)
                     flex_size = self._type_size(flex_type)
                     if flex_size is None:
                         raise self._error(f"AArch64 target cannot size record member {member.name}")
@@ -609,18 +612,18 @@ class _AArch64AsmGen:
                 raise self._error(f"AArch64 target cannot size record member {member.name}")
             if access_offset > offset:
                 self._lines.append(f"    .zero {access_offset - offset}")
-            if item is None:
+            if member_item is None:
                 self._emit_global_zero(member.type_)
             else:
                 if (
-                    isinstance(item.initializer, Expr)
+                    isinstance(member_item.initializer, Expr)
                     and self._is_aggregate_type(member.type_)
-                    and self._is_zero_initializer(item.initializer)
+                    and self._is_zero_initializer(member_item.initializer)
                 ):
                     self._emit_global_zero(member.type_)
                     offset = access_offset + member_size
                     continue
-                self._emit_global_initializer(member.type_, item.initializer)
+                self._emit_global_initializer(member.type_, member_item.initializer)
             offset = access_offset + member_size
         flush_bitfield_unit()
         size = self._type_size(type_)
@@ -859,20 +862,20 @@ class _AArch64AsmGen:
         if isinstance(expr, MemberExpr):
             if expr.through_pointer:
                 base = self._global_pointer_initializer_address(expr.base)
-                base_type = self._expr_type(expr.base).pointee()
+                member_base_type = self._expr_type(expr.base).pointee()
             else:
                 base = self._global_lvalue_initializer_symbol(expr.base)
-                base_type = self._expr_type(expr.base)
+                member_base_type = self._expr_type(expr.base)
             if base is None:
                 return None
             base_label, base_offset = base
             if (
-                base_type is None
-                or base_type.declarator_ops
-                or not base_type.name.startswith(("struct ", "union "))
+                member_base_type is None
+                or member_base_type.declarator_ops
+                or not member_base_type.name.startswith(("struct ", "union "))
             ):
                 return None
-            access = self._record_member_access(base_type.name, expr.member)
+            access = self._record_member_access(member_base_type.name, expr.member)
             if access is None or access.bit_width is not None:
                 return None
             return base_label, base_offset + access.offset
@@ -1756,10 +1759,12 @@ class _AArch64AsmGen:
         spec_kind, spec_value = stmt.type_spec.declarator_ops[0]
         if spec_kind != "arr" or not isinstance(spec_value, ArrayDecl):
             return type_
+        resolved_length: int | None
         if isinstance(spec_value.length, int):
             resolved_length = spec_value.length
         elif isinstance(spec_value.length, Expr):
-            resolved_length = self._eval_int_constant(spec_value.length)
+            evaluated_length = self._eval_int_constant(spec_value.length)
+            resolved_length = evaluated_length
         else:
             resolved_length = None
         if resolved_length is None or resolved_length < 0:
@@ -3118,19 +3123,23 @@ class _AArch64AsmGen:
                         if isinstance(symbol, VarSymbol):
                             base_raw = symbol.type_
                     if base_raw is not None:
-                        base_type = base_raw
-                        if base_type.declarator_ops and base_type.declarator_ops[0][0] == "ptr":
-                            base_type = base_type.pointee() or base_type
-                        if base_type is not None and not base_type.declarator_ops:
+                        current_type: Type | None = base_raw
+                        if (
+                            current_type is not None
+                            and current_type.declarator_ops
+                            and current_type.declarator_ops[0][0] == "ptr"
+                        ):
+                            current_type = current_type.pointee() or current_type
+                        if current_type is not None and not current_type.declarator_ops:
                             for member_name in reversed(chain):
-                                access = self._record_member_access(base_type.name, member_name)
+                                access = self._record_member_access(current_type.name, member_name)
                                 if access is not None:
-                                    base_type = access.type_
+                                    current_type = access.type_
                                 else:
-                                    base_type = None
+                                    current_type = None
                                     break
-                            if base_type is not None:
-                                return base_type
+                            if current_type is not None:
+                                return current_type
             raise self._error("AArch64 target cannot resolve sizeof operand type")
         return type_
 
@@ -4245,18 +4254,18 @@ class _AArch64AsmGen:
             else:
                 self._coerce_value(value, target_type, target_info, target)
                 if target_info.is_float:
-                    instruction = {
+                    float_instruction = {
                         "+": "fadd",
                         "-": "fsub",
                         "*": "fmul",
                         "/": "fdiv",
                     }.get(op)
-                    if instruction is None:
+                    if float_instruction is None:
                         raise self._error(
                             f"AArch64 target does not support assignment operator {expr.op}"
                         )
                     self._emit(
-                        f"{instruction} {self._reg(target, target_info)}, "
+                        f"{float_instruction} {self._reg(target, target_info)}, "
                         f"{self._reg(9, target_info)}, {self._reg(target, target_info)}"
                     )
                 else:
@@ -4283,18 +4292,18 @@ class _AArch64AsmGen:
             else:
                 self._coerce_value(value, slot.type_, slot.info, target)
                 if slot.info.is_float:
-                    instruction = {
+                    float_instruction = {
                         "+": "fadd",
                         "-": "fsub",
                         "*": "fmul",
                         "/": "fdiv",
                     }.get(op)
-                    if instruction is None:
+                    if float_instruction is None:
                         raise self._error(
                             f"AArch64 target does not support assignment operator {expr.op}"
                         )
                     self._emit(
-                        f"{instruction} {self._reg(target, slot.info)}, "
+                        f"{float_instruction} {self._reg(target, slot.info)}, "
                         f"{self._reg(9, slot.info)}, {self._reg(target, slot.info)}"
                     )
                 else:
@@ -4313,18 +4322,18 @@ class _AArch64AsmGen:
         else:
             self._coerce_value(value, target_type, target_info, target)
             if target_info.is_float:
-                instruction = {
+                float_instruction = {
                     "+": "fadd",
                     "-": "fsub",
                     "*": "fmul",
                     "/": "fdiv",
                 }.get(op)
-                if instruction is None:
+                if float_instruction is None:
                     raise self._error(
                         f"AArch64 target does not support assignment operator {expr.op}"
                     )
                 self._emit(
-                    f"{instruction} {self._reg(target, target_info)}, "
+                    f"{float_instruction} {self._reg(target, target_info)}, "
                     f"{self._reg(9, target_info)}, {self._reg(target, target_info)}"
                 )
             else:
@@ -4626,12 +4635,12 @@ class _AArch64AsmGen:
                 if base_contains_call:
                     base_type = self._emit_subscript_base_address(expr.base, target_reg)
                     self._emit_scratch_store_reg(f"x{target_reg}", 8)
-                    index = self._emit_expr(expr.index, index_reg)
+                    index_value = self._emit_expr(expr.index, index_reg)
                 else:
-                    index = self._emit_expr(expr.index, index_reg)
+                    index_value = self._emit_expr(expr.index, index_reg)
                     base_type = self._emit_subscript_base_address(expr.base, target_reg)
-                if index.info.size < 8:
-                    if index.info.signed:
+                if index_value.info.size < 8:
+                    if index_value.info.signed:
                         self._emit(f"sxtw x{index_reg}, w{index_reg}")
                     else:
                         self._emit(f"mov w{index_reg}, w{index_reg}")
@@ -4851,9 +4860,10 @@ class _AArch64AsmGen:
         elif type_spec.name == "enum":
             base = INT
         elif type_spec.name == "typeof" and type_spec.typeof_expr is not None:
-            base = self._type_map.get(type_spec.typeof_expr)
-            if base is None:
+            typeof_base = self._type_map.get(type_spec.typeof_expr)
+            if typeof_base is None:
                 raise self._error("AArch64 target cannot resolve typeof expression")
+            base = typeof_base
         else:
             base = Type(type_spec.name, qualifiers=type_spec.qualifiers)
         ops: list[tuple[str, int | tuple[tuple[Type, ...] | None, bool]]] = []

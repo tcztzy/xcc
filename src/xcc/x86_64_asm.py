@@ -301,12 +301,12 @@ class _X86_64AsmGen:
             name = pending.pop()
             if name in used:
                 continue
-            function = inline_by_name.get(name)
-            if function is None or function.body is None:
+            inline_function = inline_by_name.get(name)
+            if inline_function is None or inline_function.body is None:
                 continue
             used.add(name)
-            ordered.append(function)
-            pending.extend(self._referenced_function_names(function.body))
+            ordered.append(inline_function)
+            pending.extend(self._referenced_function_names(inline_function.body))
         return ordered
 
     def _referenced_function_names(self, node: object) -> list[str]:
@@ -382,9 +382,9 @@ class _X86_64AsmGen:
                 return
             key = (type_spec.name, type_spec.record_tag)
             for scope in reversed(tag_scopes):
-                name = scope.get(key)
-                if name is not None:
-                    resolved[id(type_spec)] = name
+                resolved_name = scope.get(key)
+                if resolved_name is not None:
+                    resolved[id(type_spec)] = resolved_name
                     return
 
         def walk(node: object) -> None:
@@ -1552,8 +1552,8 @@ class _X86_64AsmGen:
             "__builtin_nan",
             "__builtin_nanl",
         }:
-            value = float("nan") if "nan" in callee_name else float("inf")
-            return self._emit_float_constant_builtin(expr, target, value)
+            float_value = float("nan") if "nan" in callee_name else float("inf")
+            return self._emit_float_constant_builtin(expr, target, float_value)
         return None
 
     def _emit_alloca_builtin(self, callee_name: str, expr: CallExpr, target: str) -> _Value:
@@ -3080,33 +3080,35 @@ class _X86_64AsmGen:
                     active_bit_used = 0
                     active_bit_type = member.type_
                     active_bit_value = 0
-                item = items_by_index.get(index)
-                if item is not None:
-                    if not isinstance(item.initializer, Expr):
+                bitfield_item = items_by_index.get(index)
+                if bitfield_item is not None:
+                    if not isinstance(bitfield_item.initializer, Expr):
                         raise self._error("x86_64 target requires scalar bit-field initializer")
-                    value = self._eval_int_constant(item.initializer)
-                    if value is None:
+                    bitfield_value = self._eval_int_constant(bitfield_item.initializer)
+                    if bitfield_value is None:
                         raise self._error("x86_64 target requires constant bit-field initializer")
-                    active_bit_value |= (value & ((1 << member.bit_width) - 1)) << active_bit_used
+                    active_bit_value |= (
+                        bitfield_value & ((1 << member.bit_width) - 1)
+                    ) << active_bit_used
                 active_bit_used += member.bit_width
                 continue
             flush_bitfield_unit()
             access_offset = self._align_to(offset, member_align)
             if access_offset > offset:
                 self._lines.append(f"    .zero {access_offset - offset}")
-            item = items_by_index.get(index)
-            if item is None:
+            member_item = items_by_index.get(index)
+            if member_item is None:
                 if member_size:
                     self._emit_global_zero(member.type_)
             else:
                 if (
-                    isinstance(item.initializer, Expr)
+                    isinstance(member_item.initializer, Expr)
                     and self._is_aggregate_type(member.type_)
-                    and self._is_zero_initializer(item.initializer)
+                    and self._is_zero_initializer(member_item.initializer)
                 ):
                     self._emit_global_zero(member.type_)
                 else:
-                    self._emit_global_initializer(member.type_, item.initializer)
+                    self._emit_global_initializer(member.type_, member_item.initializer)
             offset = access_offset + member_size
         flush_bitfield_unit()
         size = self._type_size(type_)
@@ -4094,8 +4096,8 @@ class _X86_64AsmGen:
                 if size is None:
                     return None
                 largest = max(largest, size)
-            align = self._type_align(type_) or 1
-            return self._align_to(largest, align)
+            union_align = self._type_align(type_) or 1
+            return self._align_to(largest, union_align)
         offset = 0
         active_bit_size = 0
         active_bit_used = 0
@@ -4103,24 +4105,24 @@ class _X86_64AsmGen:
         max_align = 1
         for index, member in enumerate(members):
             size = self._type_size(member.type_)
-            align = self._type_align(member.type_)
+            member_align = self._type_align(member.type_)
             if (
                 size is None
                 and self._is_flexible_array_member(member.type_)
                 and index == len(members) - 1
             ):
                 size = 0
-            if size is None or align is None:
+            if size is None or member_align is None:
                 return None
-            max_align = max(max_align, align)
+            max_align = max(max_align, member_align)
             if member.bit_width is not None:
                 if member.bit_width == 0:
                     active_bit_type = None
                     active_bit_used = 0
-                    offset = self._align_to(offset, align)
+                    offset = self._align_to(offset, member_align)
                     continue
                 if active_bit_type != member.type_ or active_bit_used + member.bit_width > size * 8:
-                    offset = self._align_to(offset, align)
+                    offset = self._align_to(offset, member_align)
                     active_bit_size = size
                     active_bit_used = 0
                     active_bit_type = member.type_
@@ -4129,7 +4131,7 @@ class _X86_64AsmGen:
                 continue
             active_bit_type = None
             active_bit_used = 0
-            offset = self._align_to(offset, align)
+            offset = self._align_to(offset, member_align)
             offset += size
         return self._align_to(offset, max_align)
 

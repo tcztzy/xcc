@@ -17,8 +17,43 @@ bar is CPython-scale C rather than toy examples.
   `llc` executable
 - `--target=aarch64-apple-darwin`: emit native Darwin AArch64 assembly directly
 - `--target=x86_64-linux-gnu`: emit native ELF x86_64 SysV assembly directly
+- `--target=evm`: emit Ethereum legacy EVM opcode assembly or hex runtime
+  bytecode for a freestanding integer/pointer C subset, including
+  ABI-dispatched scalar and dynamic word-array functions with calldata bounds,
+  offset validation, and element conversions, loop control flow, word-pointer
+  arithmetic and differences, signed scalar operations, native modular
+  arithmetic/exponent builtins, integer conversions, short-circuit scalar
+  expressions, switch
+  dispatch,
+  `sizeof`/`_Alignof`/`__builtin_offsetof` constants, character literals, enum
+  constants, `_Generic`/`__builtin_types_compatible_p`, GNU statement
+  expressions, fixed-array and record compound literals, anonymous union member
+  layout/access, word-backed record bit-fields and unnamed bit-field padding,
+  char-word string literals, aggregate assignment, designated aggregate
+  initializers, direct and indirect `goto`/labels, direct internal helper calls,
+  fixed-prototype
+  function pointer calls with word and aggregate parameters to
+  same-translation-unit helpers, internal helpers accepting function-pointer and
+  record/union parameters and returning word/function
+  pointers or records, block-scope helper prototypes, conditional
+  function-pointer initcode initializers, no-op
+  declarations/statements, file-scope scalar and struct storage variables,
+  block-scope static local storage, storage/environment builtins including
+  block/gas/account query opcodes, LOG0-LOG4 word and raw memory-range logs,
+  Keccak memory hashing, contract
+  creation and deterministic creation, self-destruction, external
+  message/static/delegate/call-code calls, raw calldata, return data, runtime
+  code size/copy, byte extraction, raw memory load/store, single-byte memory
+  writes, active memory size, memory copy, sign extension, transient storage,
+  blob hash/basefee queries, program-counter queries, and external account
+  code copy opcodes, raw return/revert/stop/invalid termination opcodes,
+  `PUSH0` zero constants, deployment initcode generation with aggregate,
+  function-pointer, and char-array string storage initializers, and
+  `__evm_uint256`/`__evm_address` ABI scalar types
 - `-S`: write target assembly; for `llvm`, this is textual LLVM IR
-- `-c`: write an object file
+- `-c`: write an object file, except `evm` where it writes `.bin` hex runtime
+  bytecode; add `--evm-initcode` with `--target=evm -c` to write deployable
+  `.init.bin` creation bytecode
 
 On x86_64 Linux hosts, the driver defaults to `x86_64-linux-gnu`; otherwise it
 defaults to `llvm`.
@@ -35,7 +70,8 @@ accidentally.
 - Frontend: preprocesses, parses, and analyzes real C translation units plus
   the CPython-relevant GNU extensions encountered in system headers
 - Targets: LLVM IR, native Darwin AArch64, and native x86_64 Linux all have
-  working object/link driver paths
+  working object/link driver paths; EVM has direct `.evmasm` and `.bin`
+  freestanding contract bytecode outputs
 - Platform: macOS ARM64 and x86_64 Linux; optional CPython extension modules
   still depend on the local system libraries available to the build
 

@@ -95,16 +95,16 @@ def _expand_macro_tokens(
             continue
         next_disabled = frozenset((*ancestor_disabled, macro.name))
         if macro.parameters is None:
-            _rescan_ancestor: frozenset[str] = frozenset()
+            object_rescan_ancestor: frozenset[str] = frozenset()
             if self_disabled is not None:
-                _rescan_ancestor = frozenset((self_disabled,))
+                object_rescan_ancestor = frozenset((self_disabled,))
             replacement = _expand_macro_tokens(
                 list(macro.replacement),
                 macros,
                 std,
                 location,
                 disabled=next_disabled,
-                ancestor_disabled=_rescan_ancestor,
+                ancestor_disabled=object_rescan_ancestor,
                 base_ancestor_disabled=ancestor_disabled,
                 self_disabled=macro.name,
                 dynamic_macro_resolver=dynamic_macro_resolver,
@@ -163,16 +163,16 @@ def _expand_macro_tokens(
         # (self_disabled) is tracked.  This blocks direct A→B→A
         # cross-references while allowing deeper re-expansion through
         # argument chains as in CPython's _PyObject_CAST pattern.
-        _rescan_ancestor: frozenset[str] = frozenset()
+        function_rescan_ancestor: frozenset[str] = frozenset()
         if self_disabled is not None:
-            _rescan_ancestor = frozenset((self_disabled,))
+            function_rescan_ancestor = frozenset((self_disabled,))
         replacement = _expand_macro_tokens(
             replacement,
             macros,
             std,
             location,
             disabled=next_disabled,
-            ancestor_disabled=_rescan_ancestor,
+            ancestor_disabled=function_rescan_ancestor,
             base_ancestor_disabled=base_ancestor_disabled,
             self_disabled=macro.name,
             dynamic_macro_resolver=dynamic_macro_resolver,
