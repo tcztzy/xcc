@@ -1,13 +1,16 @@
 # XCC Architecture
 
-XCC is a C11 compiler written in **pure Python**. It's the **most beginner-friendly** of the five projects — clean code, independent modules, no deep dependencies.
+XCC is a Python 3.11+ standard-library C11 compiler and an engineering specimen
+for keeping coding agents inside intended behavior with specs, tests, oracles,
+and negative boundaries. The implementation remains readable, but the project
+is organized around CPython-scale validation and explicit agent controls.
 
 ## Design Goals
 
-1. **Python stdlib only**: Zero pip dependencies (LLVM-C dylib doesn't count as a Python package)
-2. **Compile real C projects**: CPython is a flagship integration test, not a special case
-3. **Target LLVM by default**: LLVM IR is treated as target assembly, then lowered by llc
-4. **Educational**: Each stage is independently modularized, clear ast/sema/codegen separation
+1. **Python 3.11+ stdlib runtime**: no runtime package dependencies.
+2. **Compile real C projects**: CPython is a flagship integration test, not a special case.
+3. **Target-owned output paths**: LLVM, Darwin AArch64, Linux x86_64, and EVM are explicit targets with no hidden fallback compiler.
+4. **Agent-control engineering**: behavior lives in specs, tests, oracles, negative boundaries, `CHANGELOG.md`, and `LESSONS.md`.
 
 ## Source Overview
 
@@ -23,6 +26,9 @@ src/xcc/                         (~21,000 lines Python, 41 files)
 ├── types.py                 Semantic type representation (~150 lines)
 ├── llvm_api.py              Raw libLLVM-C ctypes bindings (~700 lines)
 ├── codegen.py               AST → LLVM IR lowering (~4500 lines)
+├── aarch64_asm.py           Native Darwin AArch64 assembly target
+├── x86_64_asm.py            Native Linux x86_64 assembly target
+├── evm.py                   Ethereum EVM assembly/bytecode target
 ├── host_includes.py         macOS SDK header path detection
 │
 ├── parser/                  Recursive-descent C11 parser (~4500 lines)
@@ -96,21 +102,14 @@ src/xcc/                         (~21,000 lines Python, 41 files)
          │         │                    │
          └────┬────┘                    │
               ▼                         │
-         codegen.py                     │
-         (AST → LLVM IR lowering)      │
-              │                         │
-              ▼                         │
-         llvm_api.py                    │
-         (libLLVM-C ctypes)            │
-              │                         │
-              ▼                         ▼
-         LLVM IR string
-              │
-              ▼
-         llc (.s → .o)
-              │
-              ▼
-         clang (link)
+        target backend                  │
+   ┌──────────┼──────────┐              │
+   ▼          ▼          ▼              ▼
+codegen.py  aarch64_asm.py  x86_64_asm.py  evm.py
+LLVM IR    Darwin asm      Linux asm      EVM asm/bin
+   │          │             │              │
+   ▼          ▼             ▼              ▼
+  llc      system tools  system tools   bytecode output
 ```
 
 ## Key Design Decisions
@@ -143,15 +142,20 @@ This avoids the code generator having to handle type conversion logic — it sim
 
 ### 3. Target-Driven Codegen
 
-XCC has target selection, not backend modes. The default target is `llvm`, so
-normal compiler usage does not need an explicit target flag:
+XCC has target selection, not backend modes. On x86_64 Linux hosts, the driver
+defaults to `x86_64-linux-gnu`; other hosts default to `llvm`. Unsupported
+targets are rejected before source compilation:
 
 ```python
-# default target=llvm:
-#   preprocessor → lex → parse → sema → LLVM IR → llc → clang
+# host default:
+#   x86_64 Linux -> x86_64-linux-gnu
+#   other hosts  -> llvm
 
-# explicit equivalent:
+# explicit target:
 #   xcc --target=llvm -c file.c -o file.o
+#   xcc --target=aarch64-apple-darwin -c file.c -o file.o
+#   xcc --target=x86_64-linux-gnu -c file.c -o file.o
+#   xcc --target=evm -c file.c -o file.bin
 
 # -S writes the target assembly language.
 # For target=llvm, that means textual LLVM IR.

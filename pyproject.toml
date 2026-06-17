@@ -1,7 +1,7 @@
 [project]
 name = "xcc"
 version = "0.2.0a1"
-description = "Python C11 compiler with LLVM IR backend."
+description = "Agent-controlled Python 3.11+ C11 compiler with stdlib runtime."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []

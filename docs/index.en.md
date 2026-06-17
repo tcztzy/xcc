@@ -1,6 +1,6 @@
 # Compiler Construction Guide
 
-XCC is a C11 compiler written in Python with zero runtime dependencies. It generates LLVM IR via libLLVM-C (ctypes) and delegates to llc + clang for machine code.
+XCC is a Python 3.11+ standard-library C11 compiler and, more importantly, an engineering specimen for keeping coding agents inside intended behavior with specs, tests, oracles, and negative boundaries.
 
 This guide systematically explains the complete compiler construction process by comparing **GCC**, **Clang**, **TCC**, **CCC (Claude's C Compiler)**, and **XCC**.
 
@@ -21,7 +21,7 @@ This guide systematically explains the complete compiler construction process by
 | **Clang** | C++ | Clang AST → LLVM IR | LLVM multi-arch | Modular toolchain ecosystem |
 | **TCC** | C | **No explicit IR** (value stack) | Custom x86/ARM/RISC-V | Ultimate compilation speed |
 | **CCC** | Rust | Custom SSA IR + mem2reg | Custom 4 arch + assembler/linker | Fully self-contained, zero deps |
-| **XCC** | Python | AST-as-IR → LLVM IR | LLVM (llc + clang) | Educational, CPython self-hosting |
+| **XCC** | Python | AST-as-IR → target output | LLVM `llc`, native Darwin AArch64, native Linux x86_64, EVM | Agent-control engineering + CPython-scale C |
 
 ## Suggested Reading Order
 

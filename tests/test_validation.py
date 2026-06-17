@@ -1,8 +1,11 @@
 import importlib.util
+import io
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 
 def _repo_root() -> Path:
@@ -37,6 +40,8 @@ class ValidationScriptTests(unittest.TestCase):
         def fake_run(command, *, cwd=None, env=None, timeout=None):
             calls.append(list(command))
             executable = Path(command[-1])
+            if len(command) == 1 and executable.name in {"xcc.out", "clang.out"}:
+                return validate.CommandResult(tuple(command), 7, "", "")
             if executable.name in {"xcc.out", "clang.out"}:
                 executable.write_text("#!/bin/sh\nexit 7\n", encoding="utf-8")
                 executable.chmod(0o755)
@@ -83,6 +88,28 @@ class ValidationScriptTests(unittest.TestCase):
 
         self.assertEqual(result.status, "ok")
         self.assertIn("rejected with", result.details)
+
+    def test_keep_work_without_work_dir_uses_persistent_tempdir(self) -> None:
+        validate = _load_validation_module()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            kept = Path(tmp) / "kept"
+            work_roots: list[Path] = []
+
+            def fake_run_validation(**kwargs):
+                work_roots.append(kwargs["work_root"])
+                return []
+
+            with (
+                patch.object(validate.tempfile, "mkdtemp", return_value=str(kept)),
+                patch.object(validate, "run_validation", fake_run_validation),
+                redirect_stdout(io.StringIO()),
+            ):
+                code = validate.main(["--keep-work"])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(work_roots, [kept])
+            self.assertTrue(kept.exists())
 
 
 if __name__ == "__main__":

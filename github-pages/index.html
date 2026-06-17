@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="XCC is a Python 3.11+ standard-library C11 compiler and an engineering specimen for keeping coding agents inside intended behavior with specs, tests, oracles, and negative boundaries."
+    />
+    <title>XCC - An Agent-Controlled C Compiler</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="XCC home">
+        <span class="brand-mark">X</span>
+        <span>XCC</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="#control">Control</a>
+        <a href="#evidence">Evidence</a>
+        <a href="#pipeline">Pipeline</a>
+        <a href="#try">Try it</a>
+      </nav>
+      <a class="header-link" href="https://github.com/tcztzy/xcc">GitHub</a>
+    </header>
+
+    <main id="top">
+      <section class="hero section-shell">
+        <div class="hero-copy">
+          <h1>XCC</h1>
+          <p class="hero-subtitle">An agent-controlled C compiler.</p>
+          <p class="hero-lede">
+            XCC is a Python 3.11+ standard-library C11 compiler and, more
+            importantly, an engineering specimen for keeping coding agents
+            inside intended behavior with specs, tests, oracles, and negative
+            boundaries.
+          </p>
+          <div class="hero-actions" aria-label="Primary actions">
+            <a class="button primary" href="#control">See the control model</a>
+            <a class="button secondary" href="#try">Run the gates</a>
+          </div>
+        </div>
+        <div class="hero-visual" aria-label="Agent control system diagram">
+          <div class="control-board">
+            <div class="board-row source-row">
+              <span>AGENTS.md</span>
+              <span>SPEC.md</span>
+              <span>LESSONS.md</span>
+            </div>
+            <div class="board-center">
+              <div class="agent-node">
+                <span class="node-title">agent</span>
+                <span class="node-subtitle">bounded worker</span>
+              </div>
+              <svg class="flow-lines" viewBox="0 0 420 150" aria-hidden="true">
+                <path d="M32 24 C110 20 126 75 191 75" />
+                <path d="M210 20 L210 58" />
+                <path d="M388 24 C310 20 294 75 229 75" />
+                <path d="M210 92 L210 130" />
+              </svg>
+            </div>
+            <div class="board-row gate-row">
+              <span>clang oracle</span>
+              <span>negative tests</span>
+              <span>real builds</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof-strip section-shell" aria-label="Project proof points">
+        <article>
+          <strong>CPython scale</strong>
+          <span><code>CC="xcc" ./configure &amp;&amp; make</code></span>
+        </article>
+        <article>
+          <strong>Python 3.11+ runtime</strong>
+          <span>No compiler runtime dependencies beyond the Python standard library.</span>
+        </article>
+        <article>
+          <strong>Four targets</strong>
+          <span>LLVM IR, Darwin AArch64, Linux x86_64, and EVM.</span>
+        </article>
+      </section>
+
+      <section class="split-section section-shell" id="control">
+        <div class="section-copy">
+          <p class="section-number">01</p>
+          <h2>The control model</h2>
+          <p>
+            XCC treats agent development as an engineering control problem. The
+            repository tells agents what they may do, which evidence counts, and
+            which shortcuts are forbidden.
+          </p>
+        </div>
+        <div class="control-grid">
+          <article class="control-card">
+            <span class="card-kicker">Operating rules</span>
+            <h3>AGENTS.md</h3>
+            <p>CPython 3.11+ support, stdlib-only runtime, licensing, and handoff gates.</p>
+          </article>
+          <article class="control-card">
+            <span class="card-kicker">Behavior contract</span>
+            <h3>SPEC.md + specs/</h3>
+            <p>Goals, constraints, interfaces, invariants, tasks, and bug backprops.</p>
+          </article>
+          <article class="control-card">
+            <span class="card-kicker">Executable truth</span>
+            <h3>Tests and oracles</h3>
+            <p>clang, LLVM llc, executable return codes, diagnostics, and real builds.</p>
+          </article>
+          <article class="control-card">
+            <span class="card-kicker">Memory</span>
+            <h3>CHANGELOG + LESSONS</h3>
+            <p>Future agents inherit status and failure lessons instead of guessing.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="evidence-section" id="evidence">
+        <div class="section-shell evidence-layout">
+          <div class="terminal-panel">
+            <div class="terminal-bar">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <pre><code>uv run python scripts/validate_compiler.py
+uv run python -m unittest discover -v
+uv run tox -e lint
+uv run tox -e type</code></pre>
+          </div>
+          <div class="section-copy light-copy">
+            <p class="section-number">02</p>
+            <h2>Evidence over claims</h2>
+            <p>
+              A compiler patch is not accepted because it looks plausible. It
+              has to pass local gates that prove both correctness and restraint.
+            </p>
+            <button class="button copy-button" type="button" data-copy-target="gate-commands">
+              Copy validation commands
+            </button>
+            <textarea id="gate-commands" class="copy-source" tabindex="-1" aria-hidden="true">
+uv run python scripts/validate_compiler.py
+uv run python -m unittest discover -v
+uv run tox -e lint
+uv run tox -e type</textarea
+            >
+          </div>
+        </div>
+      </section>
+
+      <section class="section-shell failure-section">
+        <div class="section-heading">
+          <p class="section-number">03</p>
+          <h2>Failure modes blocked</h2>
+          <p>
+            The project validates negative space too. Unsupported work should
+            fail loudly instead of slipping through as accidental behavior.
+          </p>
+        </div>
+        <div class="comparison-table" role="table" aria-label="Blocked agent failure modes">
+          <div class="table-row table-head" role="row">
+            <span role="columnheader">Failure mode</span>
+            <span role="columnheader">Repository control</span>
+          </div>
+          <div class="table-row" role="row">
+            <span role="cell">Hidden fallback compiler</span>
+            <span role="cell">Driver specs and tests reject fallback backends.</span>
+          </div>
+          <div class="table-row" role="row">
+            <span role="cell">CPython-specific compiler hacks</span>
+            <span role="cell">Specs require general C semantics and forbid path/file branches.</span>
+          </div>
+          <div class="table-row" role="row">
+            <span role="cell">Unsupported input accepted by accident</span>
+            <span role="cell">Negative tests and validation cases check rejection boundaries.</span>
+          </div>
+          <div class="table-row" role="row">
+            <span role="cell">Unverified behavior change</span>
+            <span role="cell">Minimal reproducers, oracle checks, lint, and type gates.</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="pipeline-section section-shell" id="pipeline">
+        <div class="section-heading">
+          <p class="section-number">04</p>
+          <h2>Compiler pipeline</h2>
+          <p>
+            The implementation stays compact enough to inspect while running
+            against real-world C translation units.
+          </p>
+        </div>
+        <div class="pipeline" aria-label="Compiler pipeline">
+          <span>.c</span>
+          <i></i>
+          <span>preprocessor</span>
+          <i></i>
+          <span>lexer</span>
+          <i></i>
+          <span>parser</span>
+          <i></i>
+          <span>sema</span>
+          <i></i>
+          <span>target assembly</span>
+        </div>
+        <div class="target-grid">
+          <article>
+            <h3>LLVM IR</h3>
+            <p>Textual IR and object lowering through verified LLVM <code>llc</code>.</p>
+          </article>
+          <article>
+            <h3>Darwin AArch64</h3>
+            <p>Native assembly emitted directly for macOS ARM64 development.</p>
+          </article>
+          <article>
+            <h3>Linux x86_64</h3>
+            <p>Native ELF SysV assembly with project-agnostic driver behavior.</p>
+          </article>
+          <article>
+            <h3>EVM</h3>
+            <p>Freestanding contract bytecode for a focused C subset.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="try-section" id="try">
+        <div class="section-shell try-layout">
+          <div>
+            <p class="section-number">05</p>
+            <h2>Try the gates</h2>
+            <p>
+              The fastest way to understand XCC is to run the same evidence
+              loop that constrains agent changes.
+            </p>
+          </div>
+          <div class="command-stack">
+            <div class="command-line">
+              <code>uv sync --dev</code>
+              <button type="button" data-copy="uv sync --dev">Copy</button>
+            </div>
+            <div class="command-line">
+              <code>uv run python scripts/validate_compiler.py</code>
+              <button type="button" data-copy="uv run python scripts/validate_compiler.py">
+                Copy
+              </button>
+            </div>
+            <div class="command-line">
+              <code>CC="xcc" ./configure &amp;&amp; make</code>
+              <button type="button" data-copy='CC="xcc" ./configure && make'>Copy</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Copyright <span id="year">2026</span> XCC contributors.</span>
+      <a href="https://github.com/tcztzy/xcc">github.com/tcztzy/xcc</a>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>

@@ -1,6 +1,6 @@
 # 编译器构建指南
 
-XCC 是一个用 Python 编写的 C11 编译器，零运行时依赖，通过 libLLVM-C (ctypes) 生成 LLVM IR，委托 llc + clang 产出机器码。
+XCC 是一个用 Python 3.11+ 标准库实现的 C11 编译器，更重要的是一个展示如何用规格、测试、oracle 和负边界把 coding agent 管控在预期行为内的工程样板。
 
 本文档通过对比 **GCC**、**Clang**、**TCC**、**CCC (Claude's C Compiler)** 和 **XCC** 五个项目，系统讲解编译器构建的全过程。
 
@@ -21,7 +21,7 @@ XCC 是一个用 Python 编写的 C11 编译器，零运行时依赖，通过 li
 | **Clang** | C++ | Clang AST → LLVM IR | LLVM 多架构 | 模块化，工具链生态 |
 | **TCC** | C | **无显式 IR**（值栈） | 自研 x86/ARM/RISC-V | 极致编译速度 |
 | **CCC** | Rust | 自研 SSA IR + mem2reg | 自研 4 架构 + 汇编器/链接器 | 全自举，零外部依赖 |
-| **XCC** | Python | AST 即 IR → LLVM IR | LLVM (llc + clang) | 教学友好，CPython 自举 |
+| **XCC** | Python | AST 即 IR → 目标输出 | LLVM `llc`、原生 Darwin AArch64、原生 Linux x86_64、EVM | Agent 管控工程 + CPython 规模 C |
 
 ## 阅读顺序建议
 

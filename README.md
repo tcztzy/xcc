@@ -1,10 +1,57 @@
-# XCC
+# XCC - An Agent-Controlled C Compiler
 
-XCC is a working C11 compiler written in Python. It uses only the Python
-standard library at runtime and can be used as a `CC` driver for real build
-systems: CPython builds with `CC="xcc" ./configure && make` on the supported
-targets. The implementation is still compact and readable, but the validation
-bar is CPython-scale C rather than toy examples.
+[![CI](https://github.com/tcztzy/xcc/actions/workflows/ci.yml/badge.svg)](https://github.com/tcztzy/xcc/actions/workflows/ci.yml)
+[![GitHub Pages](https://github.com/tcztzy/xcc/actions/workflows/pages.yml/badge.svg)](https://github.com/tcztzy/xcc/actions/workflows/pages.yml)
+[Project site](https://tcztzy.github.io/xcc/)
+
+XCC is a Python 3.11+ standard-library C11 compiler and, more importantly, an
+engineering specimen for keeping coding agents inside intended behavior with
+specs, tests, oracles, and negative boundaries. It can act as a real `CC`
+driver: CPython builds with `CC="xcc" ./configure && make` on the supported
+targets.
+
+The compiler matters, but the engineering model is the main point. XCC is built
+to answer a harder question than "can an agent write code?": can a repository be
+structured so agents make the changes you intend, avoid the changes you did not
+intend, and leave behind evidence that the result is real?
+
+This repo treats agent work as an engineering control problem:
+
+- desired behavior is written down as specs and invariants, not loose prompts
+- every compiler claim is tied to a reproducible command, oracle, or real build
+- CPython-scale validation is allowed, but CPython-specific compiler hacks are
+  forbidden
+- unsupported inputs must be rejected as deliberately as supported inputs are
+  accepted
+- status and lessons are recorded in `CHANGELOG.md` and `LESSONS.md`, so future
+  agents inherit constraints instead of rediscovering old failures
+
+In short: XCC is a compact C compiler whose development process is designed to
+keep autonomous agents inside the rails.
+
+## Why XCC Is Different
+
+Many agent-built projects demonstrate throughput. XCC emphasizes control. The
+project is organized so an agent can move quickly, but only through narrow
+interfaces that make wrong work visible:
+
+- `SPEC.md` and `specs/` define the compiler contract as goals, constraints,
+  interfaces, invariants, tasks, and bug backprops.
+- `AGENTS.md` gives non-negotiable execution rules: stdlib-only runtime,
+  CPython 3.11+, no GPL sources or tests, no `from __future__ import
+  annotations`, and mandatory lint/type gates before handoff.
+- Regression tests start from minimized C or CLI reproducers, then use clang,
+  LLVM `llc`, execution results, diagnostics, or real build behavior as the
+  oracle.
+- `scripts/validate_compiler.py` runs differential executable checks against
+  `clang` and negative boundary checks for cases XCC must not accept.
+- The driver and specs explicitly ban hidden fallback backends and
+  CPython-path/file special cases. Passing CPython must come from general C
+  semantics.
+
+This is the project's central bet: agent reliability comes less from asking
+nicely and more from surrounding the agent with executable contracts, narrow
+ledgers, deterministic tests, and explicit rejection boundaries.
 
 ## Pipeline
 
@@ -75,12 +122,37 @@ accidentally.
 - Platform: macOS ARM64 and x86_64 Linux; optional CPython extension modules
   still depend on the local system libraries available to the build
 
+## Agent-Control Engineering
+
+XCC borrows the public lesson from large agent compiler projects: agents can
+produce a lot of code, but the surrounding harness decides whether that code
+converges on the right system. XCC makes that harness part of the repository.
+
+The control loop is deliberately concrete:
+
+1. Write the rule where future agents will look: `AGENTS.md` for operating
+   constraints, `SPEC.md`/`specs/` for behavior contracts, `CHANGELOG.md` for
+   status, and `LESSONS.md` for reusable failures.
+2. Turn each bug into a small C or CLI reproducer before changing behavior.
+3. Pick an oracle: clang behavior, `llc` acceptance, executable return code,
+   deterministic diagnostic text, or a real build command.
+4. Verify both sides of the boundary: valid programs should compile and run;
+   invalid or unsupported inputs should fail clearly.
+5. Run the handoff gates: `uv run python -m unittest discover -v`,
+   `uv run tox -e lint`, and `uv run tox -e type`.
+
+That loop is how the project keeps agents from "helpfully" doing the wrong
+thing. A patch that passes a toy example but adds a CPython-specific shortcut,
+runtime dependency, hidden fallback compiler, vague diagnostic, or unrecorded
+behavior change is not progress here.
+
 ## Commands
 
 - Install: `uv sync --dev`
 - CPython build: `CC="xcc" ./configure && make`
 - CPython with explicit target:
   `CC="xcc --target=aarch64-apple-darwin" ./configure && make`
+- Validation: `uv run python scripts/validate_compiler.py`
 - Lint: `uv run tox -e lint`
 - Type check: `uv run tox -e type`
 - Test: `uv run python -m unittest discover -v`

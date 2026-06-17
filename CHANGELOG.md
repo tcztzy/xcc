@@ -2,6 +2,15 @@
 
 ## Current
 
+- Added GitHub Actions workflows for CI validation gates and static GitHub
+  Pages deployment, then synchronized entry docs and package metadata with the
+  agent-controlled C compiler positioning.
+- Added a standalone `github-pages/` static landing page that presents XCC as
+  an agent-controlled C compiler and explains the repository-level control
+  system behind agent work.
+- Added `scripts/validate_compiler.py`, a stdlib-only validation harness that
+  compares selected XCC-generated executables against `clang` and checks
+  driver/frontend rejection boundaries for inputs XCC must not accept.
 - Added an explicit `--target=evm` backend that emits Ethereum legacy EVM
   opcode assembly with `-S` and lowercase hex runtime bytecode with `-c`,
   including stdlib-only Keccak ABI selectors, scalar integer ABI dispatch, and

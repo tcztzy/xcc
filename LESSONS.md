@@ -1,6 +1,9 @@
 # Lessons
 
 - Keep diagnostics deterministic and covered by negative tests.
+- Compiler validation should pair differential execution tests with negative
+  boundary tests; matching `clang` on valid programs is not enough if the
+  driver/frontend also accepts inputs outside XCC's explicit contract.
 - Do not hard-code host paths, dates, or toolchain assumptions.
 - Compare against permissively licensed Clang fixtures.
 - Treat ABI/layout bugs as high severity.

@@ -1,13 +1,13 @@
 # XCC 架构详解
 
-XCC 是一个用 **纯 Python** 编写的 C11 编译器。这是五个项目中**对初学者最友好的一个**——代码清晰、模块独立、无深层依赖。
+XCC 是一个用 Python 3.11+ 标准库实现的 C11 编译器，也是一个展示如何用规格、测试、oracle 和负边界把 coding agent 管控在预期行为内的工程样板。实现仍然保持可读，但项目组织已经围绕 CPython 规模验证和显式 agent 控制展开。
 
 ## 设计目标
 
-1. **只用 Python 标准库**：零 pip 依赖（LLVM-C 的 dylib 不算 Python 包）
+1. **Python 3.11+ 标准库运行时**：没有运行时包依赖
 2. **编译真实 C 项目**：CPython 是旗舰集成测试，不是特殊路径
-3. **默认目标为 LLVM**：LLVM IR 视为目标汇编语言，再由 llc 降低
-4. **教学友好**：每个阶段独立模块化，ast/sema/codegen 明显分离
+3. **目标自有输出路径**：LLVM、Darwin AArch64、Linux x86_64 和 EVM 都是显式目标，没有隐藏 fallback compiler
+4. **Agent-control 工程**：行为写入 specs、tests、oracles、负边界、`CHANGELOG.md` 和 `LESSONS.md`
 
 ## 源码总览
 
@@ -23,6 +23,9 @@ src/xcc/                         (~21,000 行 Python，41 个文件)
 ├── types.py                 语义类型表示 (~150 行)
 ├── llvm_api.py              原始 libLLVM-C ctypes 绑定 (~700 行)
 ├── codegen.py               AST → LLVM IR 降低 (~4500 行)
+├── aarch64_asm.py           原生 Darwin AArch64 汇编目标
+├── x86_64_asm.py            原生 Linux x86_64 汇编目标
+├── evm.py                   Ethereum EVM 汇编/字节码目标
 ├── host_includes.py         macOS SDK 头文件路径探测
 │
 ├── parser/                  递归下降 C11 解析器 (~4500 行)
@@ -96,21 +99,14 @@ src/xcc/                         (~21,000 行 Python，41 个文件)
          │         │                    │
          └────┬────┘                    │
               ▼                         │
-         codegen.py                     │
-         (AST → LLVM IR 降低)          │
-              │                         │
-              ▼                         │
-         llvm_api.py                    │
-         (libLLVM-C ctypes)            │
-              │                         │
-              ▼                         ▼
-         LLVM IR 字符串
-              │
-              ▼
-         llc (.s → .o)
-              │
-              ▼
-         clang (链接)
+        target backend                  │
+   ┌──────────┼──────────┐              │
+   ▼          ▼          ▼              ▼
+codegen.py  aarch64_asm.py  x86_64_asm.py  evm.py
+LLVM IR    Darwin asm      Linux asm      EVM asm/bin
+   │          │             │              │
+   ▼          ▼             ▼              ▼
+  llc      system tools  system tools   bytecode output
 ```
 
 ## 关键设计决策
@@ -143,14 +139,19 @@ class ImplicitCast(Expr):
 
 ### 3. 目标驱动代码生成
 
-XCC 使用目标选择，而不是后端模式。默认目标是 `llvm`，所以正常使用不需要显式传目标：
+XCC 使用目标选择，而不是后端模式。在 x86_64 Linux 宿主上，driver 默认选择
+`x86_64-linux-gnu`；其他宿主默认选择 `llvm`。不支持的目标会在编译源码前被拒绝：
 
 ```python
-# 默认 target=llvm：
-#   预处理器 → 词法 → 解析 → 语义 → LLVM IR → llc → clang
+# 宿主默认目标：
+#   x86_64 Linux -> x86_64-linux-gnu
+#   其他宿主      -> llvm
 
-# 显式等价形式：
+# 显式 target：
 #   xcc --target=llvm -c file.c -o file.o
+#   xcc --target=aarch64-apple-darwin -c file.c -o file.o
+#   xcc --target=x86_64-linux-gnu -c file.c -o file.o
+#   xcc --target=evm -c file.c -o file.bin
 
 # -S 写出目标汇编语言。
 # 对 target=llvm，这意味着文本 LLVM IR。
