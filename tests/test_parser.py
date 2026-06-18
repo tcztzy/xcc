@@ -376,6 +376,16 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(statements[0], DeclStmt)
         self.assertEqual(statements[0].type_spec, TypeSpec("int", qualifiers=("const",)))
 
+    def test_trailing_type_qualifiers_are_recorded_before_pointer(self) -> None:
+        unit = parse(list(lex("void f(void const *p, char const *q);")))
+        self.assertEqual(
+            unit.functions[0].params,
+            [
+                Param(TypeSpec("void", pointer_depth=1, qualifiers=("const",)), "p"),
+                Param(TypeSpec("char", pointer_depth=1, qualifiers=("const",)), "q"),
+            ],
+        )
+
     def test_gnu_restrict_aliases_are_canonicalized(self) -> None:
         unit = parse(
             list(
@@ -2700,6 +2710,19 @@ class ParserTests(unittest.TestCase):
         self.assertIsNotNone(expr.expr)
         self.assertIsNone(expr.type_spec)
 
+    def test_dunder_alignof_expression_accepted_in_c11(self) -> None:
+        unit = parse(
+            list(lex("int main(){char buf[4]; return __extension__ __alignof__(buf);}")),
+            std="c11",
+        )
+        stmt = _body(unit.functions[0]).statements[1]
+        self.assertIsInstance(stmt, ReturnStmt)
+        expr = stmt.value
+        self.assertIsInstance(expr, AlignofExpr)
+        self.assertIsNotNone(expr.expr)
+        self.assertIsNone(expr.type_spec)
+        self.assertTrue(expr.is_gnu)
+
     def test_alignof_expression_rejected_in_c11(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int main(){int x; return _Alignof(x);}")), std="c11")
@@ -2982,8 +3005,10 @@ class ParserTests(unittest.TestCase):
                 CastExpr(TypeSpec("int"), Identifier("n")),
                 Token(TokenKind.PUNCTUATOR, "(", 1, 1),
             )
-        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
-            parser._parse_array_size_expr(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1))
+        self.assertEqual(
+            parser._parse_array_size_expr(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1)),
+            0,
+        )
         self.assertEqual(
             parser._parse_array_size_expr_or_vla(
                 Identifier("n"), Token(TokenKind.IDENT, "n", 1, 1)
@@ -2991,8 +3016,8 @@ class ParserTests(unittest.TestCase):
             -1,
         )
 
-    def test_gnu11_zero_length_array_allowed(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)], std="gnu11")
+    def test_zero_length_array_allowed(self) -> None:
+        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
         self.assertEqual(
             parser._parse_array_size_expr(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1)), 0
         )
@@ -3004,15 +3029,15 @@ class ParserTests(unittest.TestCase):
             0,
         )
 
-    def test_gnu11_zero_length_array_struct_member(self) -> None:
+    def test_zero_length_array_struct_member(self) -> None:
         src = "struct s { int n; char data[0]; };"
-        tu = parse(lex(src), std="gnu11")
+        tu = parse(lex(src))
         self.assertEqual(len(tu.declarations), 1)
 
-    def test_c11_zero_length_array_rejected(self) -> None:
+    def test_c11_zero_length_array_struct_member_allowed(self) -> None:
         src = "struct s { int n; char data[0]; };"
-        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
-            parse(lex(src), std="c11")
+        tu = parse(lex(src), std="c11")
+        self.assertEqual(len(tu.declarations), 1)
 
     def test_sizeof_type_spec_handles_array_decl_forms(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
@@ -3484,9 +3509,11 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parser._parse_static_assert_decl()
 
-    def test_array_size_must_be_positive(self) -> None:
-        with self.assertRaises(ParserError):
-            parse(list(lex("int main(){int a[0];return 0;}")))
+    def test_zero_array_size_is_allowed(self) -> None:
+        unit = parse(list(lex("int main(){int a[0];return 0;}")))
+        stmt = _body(unit.functions[0]).statements[0]
+        self.assertIsInstance(stmt, DeclStmt)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (0,)))
 
     def test_array_size_accepts_hex_literal(self) -> None:
         unit = parse(list(lex("int main(){int a[0x10];return 0;}")))
@@ -3539,9 +3566,9 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(stmt.type_spec, TypeSpec("char", 0, (8,)))
 
-    def test_array_size_must_be_positive_after_literal_conversion(self) -> None:
+    def test_negative_array_size_rejected_after_literal_conversion(self) -> None:
         with self.assertRaises(ParserError):
-            parse(list(lex("int main(){int a[0x0u];return 0;}")))
+            parse(list(lex("int main(){int a[-0x1u];return 0;}")))
 
     def test_array_size_helper_rejects_invalid_literals(self) -> None:
         self.assertIsNone(parse_int_literal_value("1uu"))
@@ -3551,8 +3578,7 @@ class ParserTests(unittest.TestCase):
     def test_array_size_rejects_non_string_or_invalid_literal_tokens(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
         self.assertEqual(parser._parse_array_size(Token(TokenKind.INT_CONST, "1", 1, 1)), 1)
-        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
-            parser._parse_array_size(Token(TokenKind.INT_CONST, "0", 1, 1))
+        self.assertEqual(parser._parse_array_size(Token(TokenKind.INT_CONST, "0", 1, 1)), 0)
         with self.assertRaisesRegex(ParserError, "Array size literal token is malformed"):
             parser._parse_array_size(Token(TokenKind.INT_CONST, None, 1, 1))
         with self.assertRaisesRegex(
@@ -3847,11 +3873,10 @@ class ParserTests(unittest.TestCase):
         token = Token(TokenKind.INT_CONST, "4", 1, 1)
         self.assertEqual(parser._parse_array_size_expr_or_vla(IntLiteral("4"), token), 4)
 
-    def test_array_size_helper_or_vla_rejects_non_positive_size(self) -> None:
+    def test_array_size_helper_or_vla_accepts_zero_size(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
         token = Token(TokenKind.INT_CONST, "0", 1, 1)
-        with self.assertRaises(ParserError):
-            parser._parse_array_size_expr_or_vla(IntLiteral("0"), token)
+        self.assertEqual(parser._parse_array_size_expr_or_vla(IntLiteral("0"), token), 0)
 
     def test_array_size_accepts_simple_ternary(self) -> None:
         unit = parse(list(lex("int main(){int a[1 ? 4 : 8];return 0;}")))

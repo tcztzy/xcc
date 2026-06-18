@@ -192,6 +192,43 @@ XCC 不实现任何优化 pass。所有优化由 LLVM 工具链 (`llc`) 内置�
 XCC 生成 → LLVM IR → llc (O0/O1/O2/O3) → 机器码
 ```
 
+### XCC 前端吞吐优化
+
+XCC 也需要优化编译器实现本身。2026-06-17 的 profiling 循环使用已配置
+CPython 源树中的 `Python/getcompiler.c` 作为真实项目样本。cProfile 显示，
+主要可避免成本来自重复的预处理 tokenization：基线 profile 中 `lex_pp`
+累计耗时 17.296 秒。
+
+本轮接受的改动是：
+
+- 将 `FrontendResult.pp_tokens` 改为惰性生成，普通编译路径不再为了未使用的
+  dump 信息重新词法扫描完整预处理输出；
+- 在完整宏 tokenization 前增加廉价的标识符候选扫描，同时保留非预定义宏存在时
+  既有的 token-rendered 空格行为。
+
+在 CPython `Python/getcompiler.c` profile 上，cProfile 总时间从 49.608 秒降到
+17.690 秒，`lex_pp` 累计耗时从 17.296 秒降到 3.521 秒。一次 parser 标点检查的
+微优化也被尝试过，但因为没有在 CPython 规模样本上给出可靠收益而回退。经验是：
+优化编译器吞吐和优化生成代码一样，必须先 profile、一次只改一件事，并拒绝只在局部
+看起来更快的改动。
+
+2026-06-18 的验证把性能比较和集成验证口径收紧了。和 GCC/Clang 比较前端吞吐时，
+XCC 的代表数字必须来自 mypyc 预编译 import tree，而不是纯 Python import tree。
+重新构建 `bench-mypyc` 后，CPython `Objects/listobject.c` 三次 measured run 为
+4.608、4.592、4.510 秒；同一个已配置 CPython 文件在 Homebrew GCC 15.3.0 下
+`-fsyntax-only` 三次为 0.187、0.176、0.181 秒，在 Homebrew Clang 22.1.7 下为
+0.140、0.118、0.140 秒。这个表述只代表前端/语法检查耗时，不代表完整目标文件
+吞吐。
+
+集成验证也从局部对象文件 smoke test 改为全量 clean CPython 构建。在新的 out-of-tree
+build 目录中，`CC=/Users/tcztzy/GitHub/xcc/.venv/bin/xcc ./configure && make -j1`
+配合 `XCC_LLC=/opt/homebrew/opt/llvm/bin/llc` 已完整通过，最终检查 116 个模块且
+0 个 import 失败。完整构建暴露了三文件 smoke 漏掉的两类问题：OpenSSL 宏把
+`const char **` 经过 `void *` 传递，以及 CPython 在 C11 编译下使用 GNU
+`__extension__ __alignof__(expr)`。反复出现的根因是局部样本没有覆盖真实项目中的
+GNU/系统头兼容边界；修复策略是先用 GCC/Clang 最小化确认，再从 clean 目录重跑全量
+构建。
+
 ---
 
 ## 优化传递的关键技巧

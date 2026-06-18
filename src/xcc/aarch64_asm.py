@@ -3442,6 +3442,8 @@ class _AArch64AsmGen:
 
     def _emit_identifier(self, expr: Identifier, target: int) -> _Value:
         assert self._func_sym is not None
+        if expr.name == "__func__" and self._func is not None:
+            return self._emit_func_name_literal(expr, target)
         symbol = self._func_sym.locals.get(expr.name)
         if isinstance(symbol, EnumConstSymbol):
             info = self._scalar_info(symbol.type_)
@@ -3527,6 +3529,15 @@ class _AArch64AsmGen:
                     self._emit_load_from_address(info, target, 11)
                     return _Value(file_symbol.type_, info, target)
         raise self._error(f"AArch64 target does not support global identifier: {expr.name}")
+
+    def _emit_func_name_literal(self, expr: Identifier, target: int) -> _Value:
+        assert self._func is not None
+        label = self._string_literal_label(StringLiteral(f'"{self._func.name}"'))
+        self._emit(f"adrp x{target}, {label}@PAGE")
+        self._emit(f"add x{target}, x{target}, {label}@PAGEOFF")
+        type_ = self._expr_type(expr)
+        element_type = type_.element_type() or CHAR
+        return _Value(element_type.pointer_to(), _ScalarInfo(8, 8, False), target)
 
     def _emit_unary(self, expr: UnaryExpr, target: int) -> _Value:
         if expr.op == "&":

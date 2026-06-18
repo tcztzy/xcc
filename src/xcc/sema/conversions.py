@@ -53,12 +53,7 @@ def _is_pointer_arithmetic_type(analyzer: object, type_: Type) -> bool:
     if analyzer._is_complete_object_pointer_type(type_):  # type: ignore
         return True
     pointee = type_.pointee()
-    return (
-        getattr(analyzer, "_std", "c11") == "gnu11"
-        and pointee is not None
-        and pointee.name == VOID.name
-        and not pointee.declarator_ops
-    )
+    return pointee is not None and pointee.name == VOID.name and not pointee.declarator_ops
 
 
 def analyze_additive_types(
@@ -84,6 +79,8 @@ def analyze_additive_types(
         right_type
     ):
         return left_type
+    if analyzer._is_void_pointer_type(left_type) and analyzer._is_void_pointer_type(right_type):  # type: ignore
+        return INT
     if analyzer._is_compatible_nonvoid_object_pointer_pair(left_type, right_type):  # type: ignore
         return INT
     # In GNU mode, allow subtraction of any two complete object pointer types
@@ -123,6 +120,17 @@ def is_pointer_relational_compatible(
     left_type: Type,
     right_type: Type,
 ) -> bool:
+    left_pointee = left_type.pointee()
+    right_pointee = right_type.pointee()
+    if (
+        left_pointee is not None
+        and right_pointee is not None
+        and left_pointee.name == VOID.name
+        and right_pointee.name == VOID.name
+        and not left_pointee.declarator_ops
+        and not right_pointee.declarator_ops
+    ):
+        return True
     return analyzer._is_compatible_nonvoid_object_pointer_pair(left_type, right_type)  # type: ignore
 
 
@@ -131,6 +139,14 @@ def is_pointer_equality_compatible(
     left_type: Type,
     right_type: Type,
 ) -> bool:
+    if (
+        analyzer._is_void_pointer_type(left_type)  # type: ignore
+        and right_type.callable_signature() is not None
+    ) or (
+        analyzer._is_void_pointer_type(right_type)  # type: ignore
+        and left_type.callable_signature() is not None
+    ):
+        return True
     return analyzer._is_assignment_compatible(  # type: ignore
         left_type, right_type
     ) or analyzer._is_assignment_compatible(  # type: ignore
@@ -180,6 +196,18 @@ def conditional_pointer_result(
         if analyzer._is_void_pointer_type(else_type) and analyzer._is_object_pointer_type(  # type: ignore
             then_type
         ):
+            return Type(
+                VOID.name,
+                declarator_ops=else_type.declarator_ops,
+                qualifiers=analyzer._merged_qualifiers(then_pointee, else_pointee),  # type: ignore
+            )
+        if analyzer._is_void_pointer_type(then_type) and else_type.callable_signature() is not None:  # type: ignore
+            return Type(
+                VOID.name,
+                declarator_ops=then_type.declarator_ops,
+                qualifiers=analyzer._merged_qualifiers(then_pointee, else_pointee),  # type: ignore
+            )
+        if analyzer._is_void_pointer_type(else_type) and then_type.callable_signature() is not None:  # type: ignore
             return Type(
                 VOID.name,
                 declarator_ops=else_type.declarator_ops,

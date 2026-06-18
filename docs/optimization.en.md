@@ -190,6 +190,51 @@ XCC implements zero optimization passes. All optimization is done by LLVM toolch
 XCC generates → LLVM IR → llc (O0/O1/O2/O3) → machine code
 ```
 
+### XCC Frontend Throughput Optimization
+
+XCC still needs to optimize the compiler implementation itself. The
+2026-06-17 profiling loop used `Python/getcompiler.c` from a configured CPython
+tree as the representative real-project workload. cProfile showed repeated
+preprocessor tokenization as the main avoidable cost: `lex_pp` accounted for
+17.296 s cumulative time in the baseline profile.
+
+The accepted changes were:
+
+- lazily materialize `FrontendResult.pp_tokens`, so ordinary compile paths do
+  not re-lex the preprocessed source unless a caller requests preprocessor
+  tokens;
+- add a cheap identifier scan before full macro tokenization, while preserving
+  the existing token-rendered spacing behavior once non-predefined macros are
+  present.
+
+On the CPython `Python/getcompiler.c` profile, cProfile total time dropped from
+49.608 s to 17.690 s, and `lex_pp` cumulative time dropped from 17.296 s to
+3.521 s. A parser punctuation-check micro-optimization was tried and reverted
+because it did not give a reliable CPython-scale win. The lesson is that
+compiler throughput work needs the same discipline as generated-code
+optimization: profile first, change one thing, and reject changes that only
+look faster in isolation.
+
+The 2026-06-18 validation tightened the measurement and integration rules.
+When comparing XCC against GCC or Clang for frontend throughput, XCC is measured
+through the mypyc-precompiled import tree, not the pure-Python tree. Rebuilt
+`bench-mypyc` on CPython `Objects/listobject.c` measured 4.608, 4.592, and
+4.510 seconds, while the same configured CPython file passed syntax-only checks
+under Homebrew GCC 15.3.0 at 0.187, 0.176, and 0.181 seconds and Homebrew Clang
+22.1.7 at 0.140, 0.118, and 0.140 seconds. These are frontend/syntax timings,
+not full object-code throughput timings.
+
+Integration validation also moved from partial object-file smoke tests to a
+fresh full CPython build. A clean out-of-tree
+`CC=/Users/tcztzy/GitHub/xcc/.venv/bin/xcc ./configure && make -j1`, with
+`XCC_LLC=/opt/homebrew/opt/llvm/bin/llc`, completed successfully and checked
+116 modules with 0 failed imports. The full build found two issues the earlier
+three-file smoke missed: OpenSSL macros passing `const char **` through
+`void *`, and CPython's GNU `__extension__ __alignof__(expr)` under C11. The
+recurring root cause was insufficient coverage of real-project GNU/system-header
+compatibility edges; the fix was to minimize each case against GCC/Clang and
+then rerun the full build from a clean directory.
+
 ---
 
 ## Key Optimization Techniques

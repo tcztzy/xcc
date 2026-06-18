@@ -1458,6 +1458,9 @@ class _LLVMGen:
         name = expr.name
         assert isinstance(name, str)
 
+        if name == "__func__" and self._func_sym is not None:
+            return self._string_literal(StringLiteral(f'"{self._func_sym.name}"'))
+
         addr = self._lookup_local(name)
         if addr is not None:
             val_type = self._type_map.require(expr)

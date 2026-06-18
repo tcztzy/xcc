@@ -36,12 +36,20 @@ class FrontendResult:
     filename: str
     source: str
     preprocessed_source: str
-    pp_tokens: list[Token]
     tokens: list[Token]
     unit: TranslationUnit
     sema: SemaUnit
     include_trace: tuple[str, ...]
     macro_table: tuple[str, ...]
+    _pp_tokens: list[Token] | None = None
+
+    @property
+    def pp_tokens(self) -> list[Token]:
+        tokens = self._pp_tokens
+        if tokens is None:
+            tokens = lex_pp(self.preprocessed_source)
+            object.__setattr__(self, "_pp_tokens", tokens)
+        return tokens
 
 
 def _map_diagnostic_location(
@@ -137,12 +145,10 @@ def compile_source(
         raise FrontendError(
             Diagnostic("sema", filename, str(error), code=_SEMA_ERROR_CODE)
         ) from error
-    pp_tokens = lex_pp(pp_result.source)
     return FrontendResult(
         filename,
         source,
         pp_result.source,
-        pp_tokens,
         tokens,
         unit,
         sema,

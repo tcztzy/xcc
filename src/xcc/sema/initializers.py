@@ -13,6 +13,10 @@ def is_initializer_compatible(
 ) -> bool:
     if analyzer._is_char_array_string_initializer(target_type, init_expr):  # type: ignore
         return True
+    if analyzer._is_void_pointer_type(target_type) and init_type.callable_signature() is not None:  # type: ignore
+        return True
+    if target_type.callable_signature() is not None and analyzer._is_void_pointer_type(init_type):  # type: ignore
+        return True
     return analyzer._is_assignment_expr_compatible(  # type: ignore
         target_type,
         init_expr,
@@ -323,14 +327,15 @@ def is_char_array_string_initializer(
     if init_expr.value.startswith(('L"', 'u"', 'U"')):
         return False
     elem = target_type.element_type()
-    if elem is None or elem.name != "char" or elem.declarator_ops:
+    if elem is None or elem.name not in {"char", "unsigned char"} or elem.declarator_ops:
         return False
-    required_length = analyzer._string_literal_required_length(init_expr.value)  # type: ignore
-    if required_length is None:
+    body = analyzer._string_literal_body(init_expr.value)  # type: ignore
+    if body is None:
         return False
+    data_length = len(analyzer._decode_escaped_units(body))  # type: ignore
     assert target_type.declarator_ops
     _, value = target_type.declarator_ops[0]
     assert isinstance(value, int)
     if value < 0:
         return True
-    return required_length <= value
+    return data_length <= value

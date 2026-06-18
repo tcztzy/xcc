@@ -172,7 +172,7 @@ def parse_array_size(parser: object, token: Token) -> int:
         raise p._make_error(message, token)
     size = parse_int_literal_value(lexeme)
     assert size is not None
-    if size < 0 or (size == 0 and p._std == "c11"):
+    if size < 0:
         raise p._make_error("Array size must be positive", token)
     return size
 
@@ -182,7 +182,7 @@ def parse_array_size_expr(parser: object, expr: Expr, token: Token) -> int:
     size = p._eval_array_size_expr(expr)
     if size is None:
         raise p._make_error(array_size_non_ice_error(expr, p._eval_array_size_expr), token)
-    if size < 0 or (size == 0 and p._std == "c11"):
+    if size < 0:
         raise p._make_error("Array size must be positive", token)
     return size
 
@@ -192,7 +192,7 @@ def parse_array_size_expr_or_vla(parser: object, expr: Expr, token: Token) -> in
     size = p._eval_array_size_expr(expr)
     if size is None:
         return -1
-    if size < 0 or (size == 0 and p._std == "c11"):
+    if size < 0:
         raise p._make_error("Array size must be positive", token)
     return size
 

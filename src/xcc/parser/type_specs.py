@@ -48,6 +48,15 @@ DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
 
 
+def _consume_trailing_type_qualifiers(
+    parser: object,
+    qualifiers: tuple[str, ...],
+) -> tuple[str, ...]:
+    p = cast(Any, parser)
+    trailing = p._consume_type_qualifiers()
+    return tuple(dict.fromkeys((*qualifiers, *trailing)))
+
+
 @dataclass
 class ParserError(ValueError):
     message: str
@@ -284,6 +293,7 @@ def parse_type_spec(
                     atomic_token,
                 )
             atomic_type = p._mark_atomic_type_spec(atomic_base)
+            qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
             if parse_pointer_depth:
                 pointer_depth = p._parse_pointer_depth()
                 if pointer_depth:
@@ -308,6 +318,7 @@ def parse_type_spec(
                 atomic_token,
             )
         atomic_type = p._mark_atomic_type_spec(atomic_base)
+        qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
         if parse_pointer_depth:
             pointer_depth = p._parse_pointer_depth()
             if pointer_depth:
@@ -322,6 +333,7 @@ def parse_type_spec(
         if token.lexeme in _GNU_EXTENSION_TYPES:
             p._advance()
             type_spec = TypeSpec(token.lexeme)
+            qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
             pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
             if pointer_depth:
                 type_spec = p._build_declarator_type(
@@ -332,20 +344,27 @@ def parse_type_spec(
         type_spec = p._lookup_typedef(token.lexeme)
         if type_spec is None:
             raise ParserError(p._unsupported_type_message(context, token), token)
+        typedef_has_declarator_ops = bool(type_spec.declarator_ops)
         p._advance()
+        qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
         pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
         if pointer_depth:
             type_spec = p._build_declarator_type(
                 type_spec,
                 (POINTER_OP,) * pointer_depth,
             )
-        return p._apply_type_qualifiers(type_spec, qualifiers)
+        return apply_typedef_type_qualifiers(
+            type_spec,
+            qualifiers,
+            typedef_has_declarator_ops=typedef_has_declarator_ops,
+        )
     token = p._current()
     if token.kind != TokenKind.KEYWORD:
         raise ParserError(p._unsupported_type_message(context, token), token)
     p._advance()
     if token.lexeme in TYPEOF_KEYWORDS:
         type_spec = p._parse_typeof_type_spec()
+        qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
         pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
         if pointer_depth:
             type_spec = p._build_declarator_type(
@@ -357,6 +376,7 @@ def parse_type_spec(
         if p._check_keyword("float") or p._check_keyword("double"):
             complex_base = p._advance()
             assert isinstance(complex_base.lexeme, str)
+            qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
             pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
             return TypeSpec(str(complex_base.lexeme), pointer_depth, qualifiers=qualifiers)
         if (
@@ -366,6 +386,7 @@ def parse_type_spec(
         ):
             p._advance()
             p._advance()
+            qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
             pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
             return TypeSpec("long double", pointer_depth, qualifiers=qualifiers)
         raise ParserError(p._unsupported_type_message(context, token), token)
@@ -373,14 +394,17 @@ def parse_type_spec(
         assert isinstance(token.lexeme, str)
         type_name = str(token.lexeme)
         p._reject_optional_complex_specifier(context, allow=True)
+        qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
         pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
         return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
     if token.lexeme == "_Bool":
+        qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
         pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
         return TypeSpec("_Bool", pointer_depth, qualifiers=qualifiers)
     if token.lexeme in SIMPLE_TYPE_SPEC_KEYWORDS:
         assert isinstance(token.lexeme, str)
         if token.lexeme == "void":
+            qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
             pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
             return TypeSpec("void", pointer_depth, qualifiers=qualifiers)
         type_name = p._parse_integer_type_spec(token.lexeme, token, context=context)
@@ -388,10 +412,12 @@ def parse_type_spec(
             p._advance()
             type_name = "long double"
         p._reject_optional_complex_specifier(context, allow=type_name == "long double")
+        qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
         pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
         return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
     if token.lexeme == "enum":
         enum_tag, enum_members = p._parse_enum_spec(token)
+        qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
         pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
         return TypeSpec(
             "enum",
@@ -405,6 +431,7 @@ def parse_type_spec(
             token,
             str(token.lexeme),
         )
+        qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
         pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
         return TypeSpec(
             str(token.lexeme),
@@ -469,6 +496,23 @@ def apply_type_qualifiers(type_spec: TypeSpec, qualifiers: tuple[str, ...]) -> T
         record_members=type_spec.record_members,
         typeof_expr=type_spec.typeof_expr,
     )
+
+
+def apply_typedef_type_qualifiers(
+    type_spec: TypeSpec,
+    qualifiers: tuple[str, ...],
+    *,
+    typedef_has_declarator_ops: bool,
+) -> TypeSpec:
+    if not qualifiers:
+        return type_spec
+    if (
+        typedef_has_declarator_ops
+        and type_spec.declarator_ops
+        and type_spec.declarator_ops[0][0] in {"ptr", "fn"}
+    ):
+        return type_spec
+    return apply_type_qualifiers(type_spec, qualifiers)
 
 
 def reject_optional_complex_specifier(
@@ -951,7 +995,9 @@ def classify_invalid_atomic_type(
     is_qualified_atomic_target: bool = False,
     include_atomic: bool = True,
 ) -> str | None:
-    if is_qualified_atomic_target:
+    if is_qualified_atomic_target or (
+        type_spec.qualifiers and not any(kind == "ptr" for kind, _ in type_spec.declarator_ops)
+    ):
         return "qualified"
     if include_atomic and type_spec.is_atomic:
         return "atomic"

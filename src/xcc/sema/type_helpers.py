@@ -232,13 +232,14 @@ def is_assignment_compatible(target_type: Type, value_type: Type) -> bool:
     value_pointee = value_type.pointee()
     if target_pointee is None or value_pointee is None:
         return False
+    if (is_void_pointer_type(target_type) and value_type.callable_signature() is not None) or (
+        is_void_pointer_type(value_type) and target_type.callable_signature() is not None
+    ):
+        return qualifiers_contain(target_pointee, value_pointee)
     if is_pointer_conversion_compatible(target_type, value_type):
         return True
     if is_void_pointer_type(target_type):
-        return is_object_pointer_type(value_type) and qualifiers_contain(
-            target_pointee,
-            value_pointee,
-        )
+        return is_object_pointer_type(value_type)
     if is_void_pointer_type(value_type):
         return is_object_pointer_type(target_type) and qualifiers_contain(
             target_pointee,

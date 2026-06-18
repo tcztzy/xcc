@@ -176,6 +176,7 @@ class Analyzer:
         self._pending_goto_labels: list[str] = []
         self._current_return_type: Type | None = None
         self._current_scope: Scope | None = None
+        self._current_function_name: str | None = None
         self._anon_record_counter = 0
         self._anon_record_names: dict[tuple[str, tuple[RecordMemberDecl, ...]], str] = {}
         self._scoped_record_counter = 0
@@ -874,8 +875,10 @@ class Analyzer:
         self._pending_goto_labels = []
         previous_return_type = self._current_return_type
         previous_scope = self._current_scope
+        previous_function_name = self._current_function_name
         self._current_return_type = return_type
         self._current_scope = scope
+        self._current_function_name = func.name
         try:
             self._define_params(func.params, scope)
             self._analyze_compound(func.body, scope, return_type)
@@ -886,6 +889,7 @@ class Analyzer:
         finally:
             self._current_return_type = previous_return_type
             self._current_scope = previous_scope
+            self._current_function_name = previous_function_name
 
     def _define_params(self, params: list[Param], scope: Scope) -> None:
         for param in params:

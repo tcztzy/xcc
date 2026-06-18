@@ -2,6 +2,27 @@
 
 ## Current
 
+- Optimized CPython-scale frontend throughput by making `FrontendResult.pp_tokens`
+  lazy and adding a guarded preprocessor macro-candidate scan; on
+  `Python/getcompiler.c`, cProfile total time dropped from 49.608 s to
+  17.690 s and `lex_pp` cumulative time dropped from 17.296 s to 3.521 s.
+- Retested CPython integration from a clean out-of-tree build directory with
+  `CC=/Users/tcztzy/GitHub/xcc/.venv/bin/xcc`,
+  `XCC_LLC=/opt/homebrew/opt/llvm/bin/llc`, and `make -j1`; the build completed
+  with 116 modules checked, 0 failed imports, and only `_gdbm` missing due to
+  local dependencies.
+- Fixed full-CPython-build compatibility gaps missed by partial object smoke
+  tests: OpenSSL-style `const char **` arguments may pass through `void *`, and
+  GNU `__extension__ __alignof__(expr)` is accepted under C11 while standard
+  `_Alignof(expr)` remains rejected in strict C11 mode.
+- Preserved GNU `return expr;` side effects in `void` functions while keeping
+  strict C11 rejection for non-`void` return expressions.
+- Rebuilt and reran the mypyc-precompiled XCC frontend benchmark on CPython
+  `Objects/listobject.c`; the measured runs were 4.608, 4.592, and 4.510 s,
+  while real GCC (`gcc-15`) and Homebrew Clang syntax-only checks on the same
+  file measured 0.181 s and 0.140 s median respectively.
+- Removed unused preprocessor private-constant re-exports that blocked mypyc
+  compilation of the benchmark import tree.
 - Added GitHub Actions workflows for CI validation gates and static GitHub
   Pages deployment, then synchronized entry docs and package metadata with the
   agent-controlled C compiler positioning.

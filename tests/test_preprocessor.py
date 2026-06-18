@@ -128,13 +128,15 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_linux_target_uses_gpu02_gcc_version_macros(self) -> None:
         result = preprocess_source(
-            "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n",
+            "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n"
+            "const char *v = __VERSION__;\n",
             filename="if.c",
             options=FrontendOptions(std="gnu11", host_machine="x86_64", target_os="linux"),
         )
         self.assertIn("int g = 8 ;", result.source)
         self.assertIn("int gm = 5 ;", result.source)
         self.assertIn("int gp = 0 ;", result.source)
+        self.assertIn('const char * v = "8.5.0" ;', result.source)
 
     def test_little_endian_host_does_not_define_big_endian_macro(self) -> None:
         source = (
@@ -204,7 +206,7 @@ class PreprocessorTests(unittest.TestCase):
     def test_variadic_macro_with_gnu_comma_swallow(self) -> None:
         source = '#define LOG(fmt, ...) printf(fmt, ##__VA_ARGS__)\nLOG("x")\n'
         c11_result = preprocess_source(source, filename="main.c")
-        self.assertIn('printf ( "x" , )', c11_result.source)
+        self.assertIn('printf ( "x" )', c11_result.source)
         gnu11_result = preprocess_source(
             source,
             filename="main.c",
@@ -233,7 +235,7 @@ class PreprocessorTests(unittest.TestCase):
         )
         self.assertIn("int hosted = 0 ;", result.source)
 
-    def test_gnu_mode_defines_gnu_version_macros(self) -> None:
+    def test_gnu_mode_defines_compiler_compat_and_gnu_function_macros(self) -> None:
         result = preprocess_source(
             "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n"
             "int gsi = __GNUC_STDC_INLINE__;\n"
@@ -246,8 +248,21 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int gm = 8 ;", result.source)
         self.assertIn("int gp = 1 ;", result.source)
         self.assertIn("int gsi = 1 ;", result.source)
-        self.assertIn('const char * v = "xcc gnu11" ;', result.source)
+        self.assertIn('const char * v = "xcc" ;', result.source)
         self.assertIn('const char * pf = "<unknown>" ;', result.source)
+
+    def test_strict_mode_defines_compiler_compat_macros(self) -> None:
+        result = preprocess_source(
+            "int g = __GNUC__;\nint gm = __GNUC_MINOR__;\nint gp = __GNUC_PATCHLEVEL__;\n"
+            "int gsi = __GNUC_STDC_INLINE__;\n"
+            "const char *v = __VERSION__;\n",
+            filename="main.c",
+        )
+        self.assertIn("int g = 4 ;", result.source)
+        self.assertIn("int gm = 8 ;", result.source)
+        self.assertIn("int gp = 1 ;", result.source)
+        self.assertIn("int gsi = 1 ;", result.source)
+        self.assertIn('const char * v = "xcc" ;', result.source)
 
     def test_gnu_mode_does_not_define_strict_ansi_macro(self) -> None:
         result = preprocess_source(
@@ -257,15 +272,30 @@ class PreprocessorTests(unittest.TestCase):
         )
         self.assertNotIn("strict", result.source)
 
-    def test_strict_mode_does_not_define_gnu_version_macros(self) -> None:
+    def test_strict_mode_does_not_define_gnu_extension_macros(self) -> None:
         result = preprocess_source(
-            "#if defined(__GNUC__) || defined(__GNUC_MINOR__) || defined(__GNUC_PATCHLEVEL__) || "
-            "defined(__GNUC_STDC_INLINE__)\n"
+            "#if defined(__func__) || defined(__PRETTY_FUNCTION__)\n"
             "int g = 1;\n"
             "#endif\n",
             filename="main.c",
         )
         self.assertNotIn("int g", result.source)
+
+    def test_strict_getcompiler_style_version_concat_expands(self) -> None:
+        result = preprocess_source(
+            '#if defined(__GNUC__)\n#define COMPILER "[GCC " __VERSION__ "]"\n#endif\n'
+            "const char *f(void){return COMPILER;}\n",
+            filename="main.c",
+        )
+        self.assertIn('return "[GCC " "xcc" "]" ;', result.source)
+
+    def test_strict_darwin_target_defines_darwin_macros(self) -> None:
+        result = preprocess_source(
+            "#if defined(__APPLE__) && defined(__MACH__)\nint darwin_ok;\n#endif\n",
+            filename="main.c",
+            options=FrontendOptions(std="c11", target_os="darwin"),
+        )
+        self.assertIn("int darwin_ok", result.source)
 
     def test_variadic_macro_multiple_arguments_keep_commas(self) -> None:
         source = "#define V(...) __VA_ARGS__\nV(1, 2, 3)\n"
@@ -340,11 +370,11 @@ A(0)
         result = preprocess_source(source, filename="main.c", options=FrontendOptions(std="gnu11"))
         self.assertIn("bar ( 1 , 2 )", result.source)
 
-    def test_token_paste_multi_token_non_gnu_raises(self) -> None:
-        """Token paste producing multiple tokens raises in non-GNU mode."""
+    def test_token_paste_comma_variadic_extension_works_in_c11(self) -> None:
+        """,##__VA_ARGS__ with non-empty var arg works in strict C mode."""
         source = "#define FOO(x, ...) bar(x, ##__VA_ARGS__)\nFOO(1, 2)\n"
-        with self.assertRaises(PreprocessorError):
-            preprocess_source(source, filename="main.c")
+        result = preprocess_source(source, filename="main.c")
+        self.assertIn("bar ( 1 , 2 )", result.source)
 
     def test_malformed_function_like_define_is_ignored(self) -> None:
         source = "#define BAD(x\nBAD(1)\n"
@@ -3067,15 +3097,62 @@ A(0)
         result = preprocess_source("int keep;\n", filename="main.c")
         self.assertEqual(result.source, "int keep;\n")
 
-    def test_c11_rejects_gnu_asm_extensions(self) -> None:
-        with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source(
-                'asm("inst");\n', filename="main.c", options=FrontendOptions(std="c11")
-            )
-        self.assertEqual(ctx.exception.code, "XCC-PP-0105")
-        self.assertEqual(
-            str(ctx.exception), "GNU asm extension is not allowed in c11 at main.c:1:1"
+    def test_c11_strips_gnu_asm_statement(self) -> None:
+        result = preprocess_source(
+            'asm("inst");\n', filename="main.c", options=FrontendOptions(std="c11")
         )
+        self.assertEqual(result.source, ";\n")
+
+    def test_c11_strips_gnu_asm_declaration_labels(self) -> None:
+        result = preprocess_source(
+            'int value __asm("value_alias") = 0;\n'
+            'int f(void) __asm("_f");\n'
+            'int g(void)\n__asm("_g");\n',
+            filename="main.c",
+            options=FrontendOptions(std="c11"),
+        )
+        self.assertEqual(result.source, "int value  = 0;\nint f(void) ;\nint g(void)\n;\n")
+
+    def test_c11_strips_inline_gnu_asm_statement(self) -> None:
+        result = preprocess_source(
+            'void f(void){ __asm__("nop"); }\n',
+            filename="main.c",
+            options=FrontendOptions(std="c11"),
+        )
+        self.assertEqual(result.source, "void f(void){ ; }\n")
+
+    def test_c11_rewrites_aarch64_stack_pointer_gnu_asm(self) -> None:
+        result = preprocess_source(
+            'unsigned long f(void){ unsigned long result; __asm__ ("mov %0, sp" : "=r" (result)); return result; }\n',
+            filename="main.c",
+            options=FrontendOptions(std="c11"),
+        )
+        self.assertNotIn("__asm", result.source)
+        self.assertIn("result = (unsigned long)&result", result.source)
+
+    def test_c11_strips_multiline_control_gnu_asm_statement(self) -> None:
+        result = preprocess_source(
+            'void f(int value){\nif (value)\n__asm__("nop");\n}\n',
+            filename="main.c",
+            options=FrontendOptions(std="c11"),
+        )
+        self.assertEqual(result.source, "void f(int value){\nif (value)\n;\n}\n")
+
+    def test_c11_strips_included_gnu_asm_statement(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "inc.h").write_text(
+                'static inline void pause(void){ __asm__("nop"); }\n',
+                encoding="utf-8",
+            )
+            result = preprocess_source(
+                '#include "inc.h"\nint value;\n',
+                filename=str(root / "main.c"),
+                options=FrontendOptions(std="c11", include_dirs=(str(root),)),
+            )
+        self.assertNotIn("__asm", result.source)
+        self.assertIn("static inline void pause", result.source)
+        self.assertIn("int value", result.source)
 
     def test_include_trace_and_macro_table(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3374,7 +3451,7 @@ A(0)
         self.assertEqual(_strip_gnu_asm_extensions(""), "")
         source = 'asm("inst");\nint x __asm("foo") = 0;\nasm volatile(\n  "inst"\n);\n'
         stripped = _strip_gnu_asm_extensions(source)
-        self.assertEqual(stripped.splitlines(), ["", "int x  = 0;", "", "", ""])
+        self.assertEqual(stripped.splitlines(), [";", "int x  = 0;", ";", "", ""])
 
     def test_strip_gnu_asm_extensions_strips_inline_statement(self) -> None:
         source = (
@@ -3384,6 +3461,11 @@ A(0)
         )
         stripped = _strip_gnu_asm_extensions(source)
         self.assertEqual(stripped, "do { int d0, d1; ; } while (0);\nint x  = 1;\n")
+
+    def test_strip_gnu_asm_extensions_rewrites_aarch64_stack_pointer_read(self) -> None:
+        source = '    __asm__ ("mov %0, sp" : "=r" (result));\n'
+        stripped = _strip_gnu_asm_extensions(source)
+        self.assertEqual(stripped, "    result = (unsigned long)&result;\n")
 
     def test_macro_name_from_cli_define_handles_unclosed_parameter_list(self) -> None:
         self.assertEqual(_macro_name_from_cli_define("FUNC("), "FUNC(")

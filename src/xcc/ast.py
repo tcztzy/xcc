@@ -297,6 +297,7 @@ class SizeofExpr(Expr):
 class AlignofExpr(Expr):
     expr: Expr | None
     type_spec: TypeSpec | None
+    is_gnu: bool = False
 
 
 @dataclass(frozen=True)

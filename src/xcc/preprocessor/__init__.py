@@ -162,8 +162,6 @@ _apply_token_paste = _macro_expansion._apply_token_paste
 _expand_function_like_macro = _macro_expansion._expand_function_like_macro
 _parse_macro_invocation = _macro_expansion._parse_macro_invocation
 _paste_token_pair = _macro_expansion._paste_token_pair
-_COMMA_MACRO_TOKEN = _macros._COMMA_MACRO_TOKEN
-_EMPTY_MACRO_TOKEN = _macros._EMPTY_MACRO_TOKEN
 _Macro = _macros._Macro
 _MacroToken = _macros._MacroToken
 _join_macro_arguments = _macros._join_macro_arguments
@@ -514,14 +512,16 @@ _PREDEFINED_DYNAMIC_MACROS = frozenset(
     {"__FILE__", "__FILE_NAME__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"}
 )
 _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__", "__TIMESTAMP__"})
-_STRICT_MODE_PREDEFINED_MACROS = ("__STRICT_ANSI__=1",)
-_GNU_MODE_PREDEFINED_MACROS = (
+_COMPILER_COMPAT_PREDEFINED_MACROS = (
     "__has_attribute(x)=0",  # Not implemented; stub to 0 for SDK header compatibility
     "__GNUC__=4",
     "__GNUC_MINOR__=8",
     "__GNUC_PATCHLEVEL__=1",
     "__GNUC_STDC_INLINE__=1",
-    '__VERSION__="xcc gnu11"',
+    '__VERSION__="xcc"',
+)
+_STRICT_MODE_PREDEFINED_MACROS = ("__STRICT_ANSI__=1",)
+_GNU_MODE_PREDEFINED_MACROS = (
     '__func__="<unknown>"',
     '__PRETTY_FUNCTION__="<unknown>"',
 )
@@ -534,6 +534,7 @@ _LINUX_PREDEFINED_MACROS = (
     "__GNUC__=8",
     "__GNUC_MINOR__=5",
     "__GNUC_PATCHLEVEL__=0",
+    '__VERSION__="8.5.0"',
     "__linux__=1",
     "__linux=1",
     "linux=1",
@@ -580,6 +581,7 @@ _PREDEFINED_MACRO_NAMES = frozenset(
     _macro_name_from_cli_define(item)
     for item in (
         *_PREDEFINED_MACROS,
+        *_COMPILER_COMPAT_PREDEFINED_MACROS,
         *_STRICT_MODE_PREDEFINED_MACROS,
         *_GNU_MODE_PREDEFINED_MACROS,
         *_DARWIN_PREDEFINED_MACROS,
@@ -618,8 +620,7 @@ def preprocess_source(
             )
         stripped = _strip_gnu_asm_extensions(processed.source)
     else:
-        _reject_gnu_asm_extensions(processed.source, processed.line_map)
-        stripped = processed.source
+        stripped = _strip_gnu_asm_extensions(processed.source)
     return PreprocessResult(
         stripped,
         processed.line_map,
@@ -647,6 +648,9 @@ class _Preprocessor:
         hosted_define = "__STDC_HOSTED__=1" if options.hosted else "__STDC_HOSTED__=0"
         hosted_macro = self._parse_cli_define(hosted_define)
         self._macros[hosted_macro.name] = hosted_macro
+        for define in _COMPILER_COMPAT_PREDEFINED_MACROS:
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
         mode_defines = (
             _GNU_MODE_PREDEFINED_MACROS
             if options.std == "gnu11"
@@ -655,15 +659,12 @@ class _Preprocessor:
         for define in mode_defines:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
-        if options.std == "gnu11":
-            target_defines = (
-                _LINUX_PREDEFINED_MACROS
-                if options.target_os == "linux"
-                else _DARWIN_PREDEFINED_MACROS
-            )
-            for define in target_defines:
-                macro = self._parse_cli_define(define)
-                self._macros[macro.name] = macro
+        target_defines = (
+            _LINUX_PREDEFINED_MACROS if options.target_os == "linux" else _DARWIN_PREDEFINED_MACROS
+        )
+        for define in target_defines:
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
         host_machine = self._options.host_machine or platform.machine()
         for define in _HOST_ARCH_PREDEFINED_MACROS.get(host_machine, ()):
             macro = self._parse_cli_define(define)
@@ -827,9 +828,7 @@ class _Preprocessor:
             return self._handle_pragma_operator(line)
         trailing_newline = "\n" if line.endswith("\n") else ""
         text = line[:-1] if trailing_newline else line
-        if self._macros.keys() <= _PREDEFINED_MACRO_NAMES and not self._line_needs_macro_expansion(
-            text
-        ):
+        if not self._line_needs_macro_expansion(text):
             return self._handle_pragma_operator(line)
         expanded = self._expand_macro_text(text, location)
         result = self._handle_pragma_operator(expanded)
@@ -839,10 +838,14 @@ class _Preprocessor:
         return re.sub(r'_Pragma\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)', "\n", text)
 
     def _line_needs_macro_expansion(self, text: str) -> bool:
-        tokens = _tokenize_macro_text(text)
-        if tokens is None:
+        has_identifier = False
+        for match in _IDENT_RE.finditer(text):
+            has_identifier = True
+            if match.group(0) in self._macros:
+                return True
+        if self._macros.keys() <= _PREDEFINED_MACRO_NAMES:
             return False
-        return any(token.kind == TokenKind.IDENT and token.text in self._macros for token in tokens)
+        return has_identifier
 
     def _should_collect_function_macro_continuation(
         self,
@@ -1621,5 +1624,12 @@ def _expand_macro_tokens(
 def _reject_gnu_asm_extensions(
     source: str,
     line_map: tuple[tuple[str, int], ...],
+    *,
+    primary_filename: str | None = None,
 ) -> None:
-    _text._reject_gnu_asm_extensions(source, line_map, code=_PP_GNU_EXTENSION)
+    _text._reject_gnu_asm_extensions(
+        source,
+        line_map,
+        code=_PP_GNU_EXTENSION,
+        primary_filename=primary_filename,
+    )

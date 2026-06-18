@@ -138,15 +138,19 @@ class FrontendTests(unittest.TestCase):
         self.assertEqual(declaration.type_spec.record_tag, "Tagged")
         self.assertIsNone(declaration.name)
 
-    def test_compile_source_rejects_gnu_asm_in_c11(self) -> None:
-        with self.assertRaises(FrontendError) as ctx:
-            compile_source(
-                'asm("INST r1, 0");\n', filename="asm.c", options=FrontendOptions(std="c11")
-            )
-        diagnostic = ctx.exception.diagnostic
-        self.assertEqual(diagnostic.stage, "pp")
-        self.assertEqual(diagnostic.code, "XCC-PP-0105")
-        self.assertEqual(diagnostic.message, "GNU asm extension is not allowed in c11")
+    def test_compile_source_strips_gnu_asm_in_c11(self) -> None:
+        result = compile_source(
+            'asm("INST r1, 0");\nint value;\n',
+            filename="asm.c",
+            options=FrontendOptions(std="c11"),
+        )
+        self.assertEqual(result.preprocessed_source, ";\nint value;\n")
+
+    def test_compile_source_accepts_c11_gnu_asm_declaration_labels(self) -> None:
+        source = 'int value __asm("value_alias") = 1;\nint f(void){return value;}\n'
+        result = compile_source(source, filename="asm.c", options=FrontendOptions(std="c11"))
+        self.assertNotIn("__asm", result.preprocessed_source)
+        self.assertEqual(result.unit.functions[0].name, "f")
 
     def test_compile_source_accepts_statement_expression_in_c11(self) -> None:
         result = compile_source(

@@ -1397,6 +1397,22 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit, std="gnu11")
         self.assertEqual(sema.record_definitions["struct A"][1].type_, CHAR.array_of(9))
 
+    def test_char_array_string_initializer_can_fill_without_null_terminator(self) -> None:
+        unit = parse(list(lex('char c[8] = "xdebugpy"; int main(){return c[0];}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_unsigned_char_array_string_initializer_ok(self) -> None:
+        unit = parse(list(lex('unsigned char s[3] = "abc"; int main(){return s[0];}')))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_char_array_string_initializer_too_small_error(self) -> None:
+        unit = parse(list(lex('char c[7] = "xdebugpy"; int main(){return c[0];}')))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+
     def test_wide_string_literal_typemap_and_sizeof(self) -> None:
         source = '_Static_assert(sizeof(L"ab") == 12, "bad"); int main(){L"ab"; return 0;}'
         unit = parse(list(lex(source)), std="gnu11")
@@ -1408,6 +1424,16 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex('int main(){char *s="abc";return 0;}')))
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
+
+    def test_initializer_function_designator_to_void_pointer_ok(self) -> None:
+        source = (
+            "void f(void *p) { (void)p; }\n"
+            "struct S { int slot; void *pfunc; };\n"
+            "struct S s = {1, f};\n"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
 
     def test_char_array_string_initializer_ok(self) -> None:
         unit = parse(list(lex('int main(){char s[4]="abc";return 0;}')))
@@ -1429,14 +1455,14 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
-    def test_char_array_string_initializer_too_long_error(self) -> None:
-        unit = parse(list(lex('int main(){char s[3]="abc";return 0;}')))
+    def test_char_array_string_initializer_too_small_error_existing(self) -> None:
+        unit = parse(list(lex('int main(){char s[2]="abc";return 0;}')))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
 
-    def test_char_array_concatenated_string_initializer_too_long_error(self) -> None:
-        unit = parse(list(lex('int main(){char s[2]="a""b";return 0;}')))
+    def test_char_array_concatenated_string_initializer_too_small_error(self) -> None:
+        unit = parse(list(lex('int main(){char s[1]="a""b";return 0;}')))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
@@ -2282,6 +2308,15 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIn("main", sema.functions)
+
+    def test_gnu_void_return_with_non_void_value_allowed(self) -> None:
+        source = "int g(void){return 1;} void f(void){return g();} int main(){return 0;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        sema = analyze(unit, std="gnu11")
+        ret = _body(unit.functions[1]).statements[0]
+        self.assertIsInstance(ret, ReturnStmt)
+        self.assertIsNotNone(ret.value)
+        self.assertIs(sema.type_map.get(ret.value), INT)
 
     def test_function_parameters(self) -> None:
         unit = parse(list(lex("int add(int a, int b){return a+b;}")))
@@ -3452,6 +3487,14 @@ int caller(int x) {
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
 
+    def test_dunder_alignof_expression_typemap_in_c11(self) -> None:
+        source = "int main(){char buf[4]; return __extension__ __alignof__(buf) >= 4;}"
+        unit = parse(list(lex(source)), std="c11")
+        sema = analyze(unit, std="c11")
+        return_expr = _body(unit.functions[0]).statements[1].value
+        assert return_expr is not None
+        self.assertEqual(sema.type_map.get(return_expr), INT)
+
     def test_alignof_expression_rejected_in_c11(self) -> None:
         unit = parse(list(lex("int main(){int x; return _Alignof(x);}")), std="gnu11")
         with self.assertRaises(SemaError) as ctx:
@@ -3525,6 +3568,19 @@ int caller(int x) {
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
 
+    def test_const_function_pointer_typedef_array_preserves_return_pointer_typemap(self) -> None:
+        source = (
+            "typedef int *(*F)(int *, int *); "
+            "int *pick(int *left, int *right){return left;} "
+            "const F ops[]={pick}; "
+            "int main(){int x; int *p=ops[0](&x,&x); return *p;}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        init_expr = _body(unit.functions[1]).statements[1].init
+        assert init_expr is not None
+        self.assertEqual(sema.type_map.get(init_expr), Type("int", 1))
+
     def test_typedef_inner_scope_shadowing(self) -> None:
         source = "int main(){typedef int T; {typedef int* T; int x=1; T p=&x;} T y=2; return y;}"
         unit = parse(list(lex(source)))
@@ -3583,12 +3639,17 @@ int caller(int x) {
         sema = analyze(unit)
         self.assertIn("main", sema.functions)
 
-    def test_file_scope_void_pointer_initializer_from_function_pointer_error(self) -> None:
+    def test_file_scope_void_pointer_initializer_from_function_pointer_ok(self) -> None:
         source = "int f(void); void *g=f; int f(void){return 0;} int main(){return 0;}"
         unit = parse(list(lex(source)))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_function_pointer_initializer_from_void_pointer_ok(self) -> None:
+        source = "void *slot(void){return 0;} int main(){void (*fp)(void)=slot(); return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_gnu_cross_pointer_init_allowed(self) -> None:
         # char* = int* is rejected in c11 but allowed in gnu11
@@ -3848,6 +3909,22 @@ int caller(int x) {
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Undeclared identifier: x")
+
+    def test_func_identifier_is_function_local_const_char_array(self) -> None:
+        source = "const char *name(void){return __func__;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[0].value
+        self.assertEqual(
+            sema.type_map.get(return_expr),
+            Type("char", declarator_ops=(("arr", 5),), qualifiers=("const",)),
+        )
+
+    def test_func_identifier_outside_function_is_undeclared(self) -> None:
+        unit = parse(list(lex("const char *name = __func__;")))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Undeclared identifier: __func__")
 
     def test_initializer_type_mismatch(self) -> None:
         unit = parse(list(lex("int main(){int *p=1; return 0;}")))
@@ -4119,14 +4196,10 @@ int caller(int x) {
             "Compound additive assignment requires arithmetic operands or pointer/integer",
         )
 
-    def test_compound_assignment_void_pointer_plus_equals_int_error(self) -> None:
+    def test_compound_assignment_void_pointer_plus_equals_int_ok(self) -> None:
         unit = parse(list(lex("int main(){void *p=0; p+=1; return 0;}")))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Compound additive assignment requires arithmetic operands or pointer/integer",
-        )
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_compound_assignment_function_pointer_minus_equals_int_error(self) -> None:
         source = "int f(void){return 0;} int main(){int (*fp)(void)=f; fp-=1; return 0;}"
@@ -4240,11 +4313,30 @@ int caller(int x) {
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
 
+    def test_assignment_to_pointer_to_const_object_ok(self) -> None:
+        source = 'int main(){const char *msg; msg="cannot assign"; return msg != 0;}'
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
+    def test_assignment_through_pointer_to_const_object_error(self) -> None:
+        source = 'int main(){const char *msg="x"; *msg = 0; return 0;}'
+        unit = parse(list(lex(source)))
+        with self.assertRaises(SemaError) as ctx:
+            analyze(unit)
+        self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
+
     def test_update_const_object_error(self) -> None:
         unit = parse(list(lex("int main(){const int x=0; ++x; return x;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Assignment target is not assignable")
+
+    def test_update_pointer_to_const_object_ok(self) -> None:
+        source = 'int main(){const char *msg="x"; ++msg; return msg != 0;}'
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_assignment_non_constant_integer_to_pointer_error(self) -> None:
         unit = parse(list(lex("int main(){int z=0; int *p; p=z; return 0;}")))
@@ -4278,14 +4370,13 @@ int caller(int x) {
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Initializer type mismatch")
 
-    def test_assignment_function_pointer_to_void_pointer_error(self) -> None:
+    def test_assignment_function_pointer_to_void_pointer_ok(self) -> None:
         source = (
             "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; vp=fp; return 0;}"
         )
         unit = parse(list(lex(source)))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment value is not compatible with target type")
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_assignment_function_pointer_to_void_pointer_ok_in_gnu_mode(self) -> None:
         source = (
@@ -4316,14 +4407,13 @@ int caller(int x) {
         sema = analyze(unit, std="gnu11")
         self.assertIn("main", sema.functions)
 
-    def test_assignment_void_pointer_to_function_pointer_error(self) -> None:
+    def test_assignment_void_pointer_to_function_pointer_ok(self) -> None:
         source = (
             "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; fp=vp; return 0;}"
         )
         unit = parse(list(lex(source)))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Assignment value is not compatible with target type")
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_assignment_incompatible_object_pointers_error(self) -> None:
         source = "int main(){int x=1; char y=97; int *p=&x; char *q=&y; p=q; return 0;}"
@@ -4352,14 +4442,11 @@ int caller(int x) {
         sema = analyze(unit)
         self.assertIn("f", sema.functions)
 
-    def test_return_void_pointer_from_function_pointer_error(self) -> None:
+    def test_return_void_pointer_from_function_pointer_ok(self) -> None:
         source = "void *f(int (*fp)(void)){return fp;} int g(void){return 0;} int main(){return 0;}"
         unit = parse(list(lex(source)))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception), "Return value is not compatible with function return type"
-        )
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
 
     def test_argument_type_mismatch(self) -> None:
         unit = parse(list(lex("int *id(int *p){return p;} int main(){int x=1; return id(x);}")))
@@ -4377,6 +4464,28 @@ int caller(int x) {
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         self.assertIn("ok", sema.functions)
+
+    def test_argument_void_pointer_from_const_object_pointer_ok(self) -> None:
+        source = "int ok(void *p){return p!=0;} int main(){const int *p=0; return ok(p);}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("ok", sema.functions)
+
+    def test_argument_void_pointer_from_openssl_output_pointer_ok(self) -> None:
+        source = (
+            "long SSL_ctrl(void *ssl, int cmd, long larg, void *parg); "
+            "int f(void *ssl){const char *sigalg; "
+            "return SSL_ctrl(ssl, 140, 0, (1 ? (&sigalg) : (const char **)0));}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
+
+    def test_argument_trailing_const_void_pointer_ok(self) -> None:
+        source = "void takes(void const *p){} int main(){const void *p=0; takes(p); return 0;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_argument_object_pointer_from_void_pointer_ok(self) -> None:
         source = "int *id(int *p){return p;} int main(){void *vp=0; return id(vp)==0;}"
@@ -4404,12 +4513,11 @@ int caller(int x) {
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Argument 1 type mismatch: f")
 
-    def test_argument_void_pointer_from_function_pointer_error(self) -> None:
+    def test_argument_void_pointer_from_function_pointer_ok(self) -> None:
         source = "int takes(void *p){return 0;} int f(void){return 0;} int main(){return takes(f);}"
         unit = parse(list(lex(source)))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Argument 1 type mismatch: takes")
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_dereference_non_pointer_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; return *x;}")))
@@ -4506,23 +4614,16 @@ int caller(int x) {
             "Subtraction operands must be arithmetic, pointer/integer, or compatible pointers",
         )
 
-    def test_additive_void_pointer_subtraction_error(self) -> None:
+    def test_additive_void_pointer_subtraction_ok(self) -> None:
         unit = parse(list(lex("int main(){void *p=0; void *q=0; return p-q;}")))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Subtraction operands must be arithmetic, pointer/integer, or compatible pointers",
-        )
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[2].value
+        self.assertEqual(sema.type_map.require(return_expr), INT)
 
-    def test_additive_void_pointer_plus_integer_error(self) -> None:
+    def test_additive_void_pointer_plus_integer_ok(self) -> None:
         unit = parse(list(lex("int main(){void *p=0; return p+1==0;}")))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Addition operands must be arithmetic or pointer/integer",
-        )
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_additive_void_pointer_plus_integer_allowed_in_gnu11(self) -> None:
         source = "void *f(void *p, unsigned long n) { return p + n; }"
@@ -4568,8 +4669,14 @@ int caller(int x) {
             "Relational operator requires integer or compatible object pointer operands",
         )
 
-    def test_relational_void_pointer_error(self) -> None:
-        unit = parse(list(lex("int main(){void *p; void *q; return p<q;}")))
+    def test_relational_void_pointer_allowed(self) -> None:
+        unit = parse(list(lex("int main(){void *p; const void *q; return p<q;}")))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[0]).statements[2].value
+        self.assertEqual(sema.type_map.require(return_expr), INT)
+
+    def test_relational_void_pointer_and_object_pointer_error(self) -> None:
+        unit = parse(list(lex("int main(){void *p; char *q; return p<q;}")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -4642,15 +4749,19 @@ int caller(int x) {
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Conditional type mismatch")
 
-    def test_equality_void_pointer_and_function_pointer_error(self) -> None:
+    def test_equality_void_pointer_and_function_pointer_ok(self) -> None:
         source = "int f(void){return 0;} int main(){void *vp=0; int (*fp)(void)=f; return vp==fp;}"
         unit = parse(list(lex(source)))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Equality operator requires integer or compatible pointer operands",
-        )
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[1]).statements[2].value
+        self.assertEqual(sema.type_map.require(return_expr), INT)
+
+    def test_equality_void_pointer_and_function_designator_ok(self) -> None:
+        source = "int f(void){return 0;} int main(){void *vp=0; return vp==f;}"
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        return_expr = _body(unit.functions[1]).statements[1].value
+        self.assertEqual(sema.type_map.require(return_expr), INT)
 
     def test_equality_pointer_and_integer_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; int *p=&x; return p==1;}")))
@@ -5015,6 +5126,16 @@ int caller(int x) {
         result = analyze(unit)
         self.assertIsNotNone(result)
 
+    def test_const_typedef_record_pointer_argument_preserves_const_pointee(self) -> None:
+        source = (
+            "typedef struct { int length; } List; "
+            "int copy(List *dst, const List *src){return src->length;} "
+            "int main(){List dst={0}; const List src={1}; return copy(&dst, &src);}"
+        )
+        unit = parse(list(lex(source)))
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
+
     def test_incomplete_struct_object_error(self) -> None:
         unit = parse(list(lex("int main(){struct Node value; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -5161,6 +5282,11 @@ int caller(int x) {
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Void function should not return a value")
 
+    def test_void_function_return_void_expression_ok(self) -> None:
+        unit = parse(list(lex("void h(void){} void f(void){return h();}")))
+        sema = analyze(unit)
+        self.assertIn("f", sema.functions)
+
     def test_non_void_return_without_value_error(self) -> None:
         unit = parse(list(lex("int main(){return;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -5185,11 +5311,10 @@ int caller(int x) {
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Update operand must be integer or pointer")
 
-    def test_update_void_pointer_error(self) -> None:
+    def test_update_void_pointer_ok(self) -> None:
         unit = parse(list(lex("int main(){void *p=0; ++p; return 0;}")))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Update operand must be integer or pointer")
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_update_pointer_to_void_pointer_ok(self) -> None:
         unit = parse(list(lex("int main(){void *items[2]; void **p=items; ++p; return 0;}")))
@@ -5707,14 +5832,14 @@ int caller(int x) {
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Conditional type mismatch")
 
-    def test_conditional_void_pointer_and_function_pointer_error(self) -> None:
+    def test_conditional_void_pointer_and_function_pointer_ok(self) -> None:
         source = (
-            "int f(void){return 0;} int main(){void *vp=0; int (*fp)(void)=f; return 1 ? vp : fp;}"
+            "int f(void){return 0;} int main(){void *vp=0; int (*fp)(void)=f; "
+            "void *p = 1 ? vp : fp; return p != 0;}"
         )
         unit = parse(list(lex(source)))
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Conditional type mismatch")
+        sema = analyze(unit)
+        self.assertIn("main", sema.functions)
 
     def test_while_void_condition_error(self) -> None:
         unit = parse(list(lex("void foo(){return;} int main(){while(foo()) return 0;}")))

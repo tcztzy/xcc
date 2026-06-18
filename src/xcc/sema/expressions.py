@@ -89,6 +89,10 @@ _ATOMIC_VOID_RETURN_BUILTINS = {
 }
 
 
+def _is_readonly_assignment_target(type_: Type) -> bool:
+    return "const" in type_.qualifiers and type_.pointee() is None
+
+
 def _atomic_builtin_return_type(
     analyzer: Any,
     name: str,
@@ -136,6 +140,14 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         self._type_map.set(expr, string_type)
         return string_type
     if isinstance(expr, Identifier):
+        if expr.name == "__func__" and self._current_function_name is not None:
+            function_name_type = Type(
+                "char",
+                declarator_ops=(("arr", len(self._current_function_name) + 1),),
+                qualifiers=("const",),
+            )
+            self._type_map.set(expr, function_name_type)
+            return function_name_type
         symbol = scope.lookup(expr.name)
         if symbol is not None:
             self._type_map.set(expr, symbol.type_)
@@ -219,7 +231,7 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
                 raise SemaError("Invalid alignof operand: unknown or unsupported type")
         else:
             assert expr.expr is not None
-            if self._std == "c11":
+            if self._std == "c11" and not expr.is_gnu:
                 raise SemaError("Invalid alignof operand: expression form requires GNU mode")
             operand_type = self._analyze_expr(expr.expr, scope)
             reason = self._invalid_alignof_operand_reason_for_type(operand_type)
@@ -333,14 +345,16 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         if not self._is_assignable(expr.operand):
             raise SemaError("Assignment target is not assignable")
         operand_type = self._analyze_expr(expr.operand, scope)
-        if self._is_const_qualified(operand_type) and self._std == "c11":
+        if _is_readonly_assignment_target(operand_type) and self._std == "c11":
             raise SemaError("Assignment target is not assignable")
         if operand_type.is_array():
             raise SemaError("Assignment target is not assignable")
         value_operand_type = self._decay_array_value(operand_type)
-        if not self._is_integer_type(
-            value_operand_type
-        ) and not self._is_complete_object_pointer_type(value_operand_type):
+        if (
+            not self._is_integer_type(value_operand_type)
+            and not self._is_complete_object_pointer_type(value_operand_type)
+            and not self._is_void_pointer_type(value_operand_type)
+        ):
             raise SemaError("Update operand must be integer or pointer")
         self._type_map.set(expr, operand_type)
         return operand_type
@@ -633,7 +647,7 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         if not self._is_assignable(expr.target):
             raise SemaError("Assignment target is not assignable")
         target_type = self._analyze_expr(expr.target, scope)
-        if self._is_const_qualified(target_type) and self._std == "c11":
+        if _is_readonly_assignment_target(target_type) and self._std == "c11":
             raise SemaError("Assignment target is not assignable")
         value_type = self._decay_array_value(self._analyze_expr(expr.value, scope))
         if target_type.is_array():
@@ -668,9 +682,10 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
             if self._is_arithmetic_type(target_type) and self._is_arithmetic_type(value_type):
                 self._type_map.set(expr, target_type)
                 return target_type
-            if self._is_complete_object_pointer_type(target_type) and self._is_integer_type(
-                value_type
-            ):
+            if (
+                self._is_complete_object_pointer_type(target_type)
+                or self._is_void_pointer_type(target_type)
+            ) and self._is_integer_type(value_type):
                 self._type_map.set(expr, target_type)
                 return target_type
             raise SemaError(

@@ -1,5 +1,33 @@
 # Lessons
 
+- Partial object-file smoke tests are useful for fast localization, but they
+  are not integration evidence. A full clean CPython `configure && make -j1`
+  later exposed `_ssl.c` and `_testcapimodule.c` failures that three selected
+  files missed. Treat per-file rebuilds as debugging aids and require a fresh
+  build directory for the final CPython claim.
+- Compiler-compatibility bugs often hide in macro-expanded system-header
+  shapes, not in the visible source line. OpenSSL's `SSL_ctrl` macros pass
+  `const char **` through `void *`, and CPython's tests use GNU
+  `__extension__ __alignof__(expr)` under C11. Minimize these cases and compare
+  against real GCC and Clang before deciding whether XCC is too strict.
+- A passing CPython build is not a substitute for the full compiler test suite.
+  The build can miss dialect edges such as GNU `return int_expr;` in a `void`
+  function, where the expression's side effects must still be emitted while
+  strict C11 continues to reject the same source.
+- Performance comparisons against GCC/Clang need a representative XCC runtime.
+  Pure-Python XCC is useful for diagnosis, but published frontend-throughput
+  comparisons should use the mypyc-precompiled import tree and record whether
+  compiled artifacts were rebuilt or reused.
+- Performance changes need a profile -> optimize -> re-profile loop on real
+  translation units. Parser micro-optimizations that pass unit tests can still
+  fail to improve CPython-scale throughput; keep only changes that move the
+  measured hotspot.
+- The preprocessor's token-rendered spacing is observable behavior in tests.
+  Skipping tokenization for speed is safe only when the shortcut cannot change
+  output formatting, such as lines without identifiers.
+- CPython frontend benchmarks have a large cold-start component from host
+  include discovery, header traversal, and macro state. Report cold and warm
+  measurements separately instead of mixing subprocess and in-process timings.
 - Keep diagnostics deterministic and covered by negative tests.
 - Compiler validation should pair differential execution tests with negative
   boundary tests; matching `clang` on valid programs is not enough if the

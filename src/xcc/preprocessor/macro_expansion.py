@@ -404,14 +404,14 @@ def _paste_token_pair(
     if not left_text:
         return [right]
     if not right_text:
-        if std == "gnu11" and left_text == ",":
+        if left_text == ",":
             return []
         return [left]
     pasted = _tokenize_macro_text(left_text + right_text)
-    if pasted and len(pasted) != 1 and std == "gnu11":
-        # In GNU mode, allow paste to produce multiple tokens (e.g. , ## rest
-        # for the GNU ##__VA_ARGS__ extension where , pasted with a non-empty
-        # var arg produces two tokens).
+    if pasted and len(pasted) != 1 and (std == "gnu11" or left_text == ","):
+        # Allow the GCC/Clang , ## __VA_ARGS__ extension even in strict C mode:
+        # non-empty varargs paste the comma back as a separate token, while
+        # empty varargs are handled above by removing the comma.
         return pasted
     if not pasted or len(pasted) != 1:
         raise PreprocessorError(

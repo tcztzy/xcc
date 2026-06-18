@@ -8,9 +8,12 @@ from .macros import _Macro, _render_macro_tokens
 _DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$", re.DOTALL)
 _ASM_PREFIX_RE = re.compile(r"^\s*(?:__asm__|__asm|asm)\b")
 _ASM_STMT_RE = re.compile(r"^\s*asm\b")
-_ASM_LABEL_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\b[^;]*\)")
 _ASM_KEYWORD_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\b")
 _ASM_QUALIFIERS = frozenset({"volatile", "__volatile__", "inline", "__inline__"})
+_AARCH64_SP_ASM_RE = re.compile(
+    r'^\(\s*"mov\s+%0\s*,\s*sp"\s*:\s*"=r"\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\)$'
+)
+_CONTROL_STATEMENT_PREFIXES = frozenset({"if", "for", "switch", "while"})
 _ENUM_DECL_RE = re.compile(
     r"(?<!\w)__(?:enum|enum_class)_decl\s*\(\s*([A-Za-z_]\w*)\s*,[^,]*,\s*\{"
 )
@@ -137,7 +140,7 @@ def _strip_gnu_asm_extensions(source: str) -> str:
             continue
         # Bare 'asm' at line start: standalone asm statement.
         if _ASM_STMT_RE.match(line):
-            stripped_lines.append(_blank_line(line))
+            stripped_lines.append(";\n" if line.endswith("\n") else ";")
             in_asm_statement = ";" not in line
             continue
         # __asm__ or __asm labels/attributes/statements (strip just the asm part).
@@ -180,10 +183,20 @@ def _strip_inline_asm_segments(line: str) -> str:
         after = close_index + 1
         statement_end = _asm_statement_end(line, after)
         if statement_end is not None and _asm_statement_context(line[: match.start()]):
-            result.append(";")
+            asm_text = line[open_index : close_index + 1]
+            rewrite = _rewrite_aarch64_stack_pointer_asm(asm_text)
+            result.append(rewrite if rewrite is not None else ";")
             index = statement_end
             continue
         index = after
+
+
+def _rewrite_aarch64_stack_pointer_asm(asm_text: str) -> str | None:
+    match = _AARCH64_SP_ASM_RE.match(asm_text)
+    if match is None:
+        return None
+    target = match.group(1)
+    return f"{target} = (unsigned long)&{target};"
 
 
 def _asm_operand_open_index(line: str, index: int) -> int | None:
@@ -292,14 +305,23 @@ def _reject_gnu_asm_extensions(
     line_map: tuple[tuple[str, int], ...],
     *,
     code: str,
+    primary_filename: str | None = None,
 ) -> None:
+    previous_significant_line = ""
     for line_number, line in enumerate(source.splitlines(), start=1):
-        if _ASM_PREFIX_RE.match(line) or _ASM_LABEL_RE.search(line):
+        if _contains_gnu_asm_statement(
+            line,
+            previous_significant_line=previous_significant_line,
+        ):
             mapped_filename, mapped_line = (
                 line_map[line_number - 1]
                 if 1 <= line_number <= len(line_map)
                 else ("<input>", line_number)
             )
+            if primary_filename is not None and mapped_filename != primary_filename:
+                if line.strip():
+                    previous_significant_line = line.strip()
+                continue
             raise PreprocessorError(
                 "GNU asm extension is not allowed in c11",
                 mapped_line,
@@ -307,6 +329,48 @@ def _reject_gnu_asm_extensions(
                 filename=mapped_filename,
                 code=code,
             )
+        if line.strip():
+            previous_significant_line = line.strip()
+
+
+def _contains_gnu_asm_statement(line: str, *, previous_significant_line: str = "") -> bool:
+    index = 0
+    while True:
+        match = _ASM_KEYWORD_RE.search(line, index)
+        if match is None:
+            return False
+        prefix = line[: match.start()]
+        open_index = _asm_operand_open_index(line, match.end())
+        if open_index is None:
+            index = match.end()
+            continue
+        close_index = _find_matching_paren(line, open_index)
+        if close_index is None:
+            if _asm_statement_context(prefix):
+                return True
+            index = match.end()
+            continue
+        if _asm_statement_end(line, close_index + 1) is not None and _asm_statement_context(prefix):
+            if _line_starts_declaration_asm_label(line) and _can_continue_declaration(
+                previous_significant_line
+            ):
+                index = close_index + 1
+                continue
+            return True
+        index = close_index + 1
+
+
+def _line_starts_declaration_asm_label(line: str) -> bool:
+    return _ASM_PREFIX_RE.match(line) is not None
+
+
+def _can_continue_declaration(previous_line: str) -> bool:
+    if not previous_line.endswith(")"):
+        return False
+    word_match = re.match(r"[A-Za-z_]\w*", previous_line)
+    if word_match is None:
+        return True
+    return word_match.group(0) not in _CONTROL_STATEMENT_PREFIXES
 
 
 def _reject_gnu_asm_statements(

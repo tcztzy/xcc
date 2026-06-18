@@ -1,7 +1,7 @@
 # XCC Frontend Benchmark
 
 This page records the benchmark setup used for the interpreter and compiled
-frontend comparison on 2026-06-11.
+frontend comparison. The latest retest in this file was run on 2026-06-18.
 
 The benchmark measures XCC frontend throughput by running `xcc.main()` over
 configured CPython C source files. Each measured run starts a fresh Python
@@ -56,6 +56,12 @@ The compiled variants run on CPython 3.11:
 | `cython` | `build/cython/lib`, Cython extension modules named `*.cpython-311-darwin.so` |
 | `mypyc` | `build/mypyc/lib`, mypyc extension modules named `*.cpython-311-darwin.so` |
 
+For toolchain performance comparisons, the XCC number must use the `mypyc`
+compiled import tree. Pure-Python XCC timings are still useful for development
+diagnostics, but they are not the representative XCC-vs-GCC-vs-Clang number.
+On this macOS host, `/usr/bin/gcc` is an Apple Clang wrapper; use
+`/opt/homebrew/bin/gcc-15` when a real GCC comparison is required.
+
 ## Benchmark Commands
 
 The measured sample was a single configured CPython source file:
@@ -93,6 +99,89 @@ sample:
 
 ## Results
 
+### 2026-06-17 Profile-Guided Frontend Optimization
+
+This run used a profiling -> optimizing -> profiling loop on the configured
+CPython tree at `../cpython`. The stable cProfile sample was
+`Python/getcompiler.c`, which is small as a source file but still pulls in the
+real CPython header stack. Larger `Objects/listobject.c` runs were attempted,
+but the subprocess benchmark became too slow and noisy for iteration on this
+machine, so the completed before/after comparison below uses the smaller real
+CPython translation unit.
+
+Commands:
+
+```bash
+PYTHONPATH=src uv run python - <<'PY'
+import cProfile
+from xcc import main
+
+argv = [
+    "--frontend", "-std=gnu11", "-DPy_BUILD_CORE",
+    "-I", "../cpython", "-I", "../cpython/Include", "-I", "../cpython/Include/internal",
+    "../cpython/Python/getcompiler.c",
+]
+prof = cProfile.Profile()
+prof.enable()
+code = main(argv)
+prof.disable()
+if code != 0:
+    raise SystemExit(code)
+prof.dump_stats("build/profile/optimized-getcompiler.prof")
+PY
+```
+
+Profile comparison:
+
+| Metric | Baseline | Optimized | Change |
+| --- | ---: | ---: | ---: |
+| cProfile total time | 49.608 s | 17.690 s | 2.80x faster |
+| Function calls | 47,746,647 | 37,295,989 | 21.9% fewer |
+| `preprocess_source` cumulative | 25.420 s | 12.177 s | 2.09x faster |
+| `lex_pp` cumulative | 17.296 s | 3.521 s | 4.91x faster |
+| `Lexer.tokenize` cumulative | 19.390 s | 5.964 s | 3.25x faster |
+
+The accepted changes were deliberately small:
+
+- `FrontendResult.pp_tokens` is now materialized lazily, so ordinary compile
+  paths no longer re-lex the full preprocessed translation unit unless a caller
+  asks for preprocessor tokens.
+- `_Preprocessor._line_needs_macro_expansion()` now uses a cheap identifier
+  candidate scan before calling the full preprocessor lexer. To preserve legacy
+  output formatting, lines containing ordinary identifiers still take the old
+  token-rendering path once non-predefined macros exist; the shortcut applies
+  only where it cannot change visible spacing.
+
+One attempted parser micro-optimization was reverted. Replacing
+`any(parser._check_punct(...))` with direct token checks passed focused parser
+tests, but did not produce a reliable win on the CPython benchmark loop and
+made the profiling signal harder to interpret. The profiling loop kept the
+change out of the final patch.
+
+Integration and toolchain checks:
+
+| Check | Result |
+| --- | --- |
+| `XCC_LLC=/opt/homebrew/opt/llvm/bin/llc uv run xcc --target=llvm -c ... Python/getcompiler.c` | passed; wrote `build/benchmark/getcompiler-xcc.o` |
+| `/opt/homebrew/bin/gcc-15 -fsyntax-only` on `Objects/listobject.c` | passed; median 0.181 s over 3 measured runs |
+| `/opt/homebrew/opt/llvm/bin/clang -fsyntax-only` on `Objects/listobject.c` | passed; median 0.140 s over 3 measured runs |
+| clean CPython out-of-tree `configure && make -j1` with `CC=/Users/tcztzy/GitHub/xcc/.venv/bin/xcc` and `XCC_LLC=/opt/homebrew/opt/llvm/bin/llc` | passed in `build/cpython-xcc-final-20260618-post-gnu-return`; checked 116 modules: 37 built-in, 78 shared, 1 missing `_gdbm` local dependency, 0 failed imports |
+
+The repeated issue in this optimization cycle was mistaking local hot-looking
+code for the true workload bottleneck. CPython-scale frontend time was dominated
+by repeated preprocessing tokenization and cold include/configuration work, not
+by a single parser punctuation branch. Optimizations that bypass tokenization
+also have to respect the preprocessor's token-rendered spacing behavior, which
+is observable in existing tests.
+
+The 2026-06-18 clean CPython retest also showed why partial verification is not
+enough. Three-object smoke checks missed later failures in `_ssl.c` and
+`_testcapimodule.c`: OpenSSL macros pass `const char **` through `void *`, and
+CPython uses GNU `__extension__ __alignof__(expr)` while compiling as C11.
+Both cases matched GCC/Clang behavior after minimization, so the fixes were
+made as generic C/GNU compatibility changes and then validated by a fresh
+full build.
+
 Single-file `Objects/listobject.c`, three measured runs after one warmup:
 
 | Variant | Times (s) | Median (s) | Min (s) | Speed vs `py311` |
@@ -106,6 +195,19 @@ Single-file `Objects/listobject.c`, three measured runs after one warmup:
 | `graalpy312` | 20.629, 28.695, 27.986 | 27.986 | 20.629 | 0.33x |
 | `cython` | 6.123, 5.817, 5.793 | 5.817 | 5.793 | 1.58x |
 | `mypyc` | 4.349, 4.362, 3.988 | 4.349 | 3.988 | 2.11x |
+
+2026-06-18 retest after rebuilding the mypyc import tree:
+
+| Tool | Workload | Times (s) | Median (s) | Min (s) |
+| --- | --- | ---: | ---: | ---: |
+| `xcc` via `bench-mypyc` | frontend on `Objects/listobject.c` | 4.608, 4.592, 4.510 | 4.592 | 4.510 |
+| `gcc-15` | `-fsyntax-only Objects/listobject.c` | 0.187, 0.176, 0.181 | 0.181 | 0.176 |
+| Homebrew `clang` | `-fsyntax-only Objects/listobject.c` | 0.140, 0.118, 0.140 | 0.140 | 0.118 |
+
+This table is a frontend/syntax benchmark, not a full object-code throughput
+comparison. XCC is measured through the mypyc-precompiled frontend; GCC and
+Clang are measured through syntax-only checks on the same configured CPython
+source file.
 
 ## Interpretation
 

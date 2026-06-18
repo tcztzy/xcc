@@ -317,7 +317,7 @@ def parse_array_declarator(
         if message is not None:
             raise ParserError(message, size_token)
     size = p._eval_array_size_expr(size_expr)
-    if size is not None and (size < 0 or (size == 0 and p._std == "c11")):
+    if size is not None and size < 0:
         raise ParserError("Array size must be positive", size_token)
     if allow_parameter_arrays and (qualifiers or has_static_bound):
         return ArrayDecl(size_expr, tuple(qualifiers), has_static_bound)

@@ -1266,6 +1266,8 @@ class _X86_64AsmGen:
         return self._gpr_target(target)
 
     def _emit_identifier(self, expr: Identifier, target: str) -> _Value:
+        if expr.name == "__func__" and self._func is not None:
+            return self._emit_func_name_literal(expr, target)
         enum_symbol = self._lookup_enum_const(expr.name)
         if enum_symbol is not None:
             info = self._scalar_info(enum_symbol.type_)
@@ -1336,6 +1338,12 @@ class _X86_64AsmGen:
                 self._emit_load_from_address(info, load_target, f"[{address_target}]")
                 return _Value(symbol.type_, info, load_target)
         raise self._error(f"Unknown identifier: {expr.name}")
+
+    def _emit_func_name_literal(self, expr: Identifier, target: str) -> _Value:
+        assert self._func is not None
+        label = self._string_literal_label(StringLiteral(f'"{self._func.name}"'))
+        self._emit(f"lea {target}, [rip + {label}]")
+        return _Value(self._expr_type(expr), _ScalarInfo(8, 8, False), target)
 
     def _emit_call(
         self, expr: CallExpr, target: str, aggregate_return_address: str | None = None

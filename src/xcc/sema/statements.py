@@ -142,9 +142,9 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
                 raise SemaError("Non-void function must return a value")
             return
         if return_type is VOID:
-            if getattr(a, "_std", "c11") != "gnu11":
+            value_type = a._decay_array_value(a._analyze_expr(stmt.value, scope))
+            if value_type != VOID and getattr(a, "_std", "c11") != "gnu11":
                 raise SemaError("Void function should not return a value")
-            a._analyze_expr(stmt.value, scope)
             return
         value_type = a._decay_array_value(a._analyze_expr(stmt.value, scope))
         # Allow type mismatch for generic-return builtins (params=None

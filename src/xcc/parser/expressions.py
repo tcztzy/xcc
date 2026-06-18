@@ -202,13 +202,14 @@ def parse_sizeof_expr(parser: object) -> SizeofExpr:
 
 def parse_alignof_expr(parser: object) -> AlignofExpr:
     token = parser._advance()  # type: ignore
+    is_gnu = token.lexeme == "__alignof__"
     if parser._is_parenthesized_type_name_start():  # type: ignore
         type_spec = parser._parse_parenthesized_type_name()  # type: ignore
-        return AlignofExpr(None, type_spec)
-    if parser._std == "c11":  # type: ignore
+        return AlignofExpr(None, type_spec, is_gnu)
+    if parser._std == "c11" and not is_gnu:  # type: ignore
         raise parser._make_error("Invalid alignof operand", token)  # type: ignore
     operand = parser._parse_unary()  # type: ignore
-    return AlignofExpr(operand, None)
+    return AlignofExpr(operand, None, is_gnu)
 
 
 def parse_typeof_type_spec(parser: object) -> TypeSpec:

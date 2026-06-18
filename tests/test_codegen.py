@@ -89,6 +89,16 @@ class CodegenTests(unittest.TestCase):
         self.assertNotIn("ret i32", ir)
         self.assertNotIn("alloca [0 x i8]", ir)
 
+    def test_c11_func_identifier_emits_function_name_string(self) -> None:
+        result = compile_source(
+            "const char *name(void) { return __func__; }\n",
+            filename="func_name.c",
+            options=FrontendOptions(std="c11"),
+        )
+        ir = generate_llvm_ir(result)
+        self.assertIn('c"name\\00"', ir)
+        self.assertIn("ret ptr", ir)
+
     def test_bool_conversion_uses_nonzero_not_low_bit_truncation(self) -> None:
         self.assertProgramReturns(
             "int main(void) { _Bool b = 0x1000000; return b ? 0 : 1; }",
@@ -896,6 +906,23 @@ int main(void)
 
         self.assertNotIn("@__builtin_", ir)
         self.assertNotIn("@assert", ir)
+        self.assertProgramReturns(source, 0)
+
+    def test_aarch64_stack_pointer_asm_rewrites_to_live_address(self) -> None:
+        source = """
+unsigned long current_stack_address(void)
+{
+  unsigned long result = 0;
+  __asm__ ("mov %0, sp" : "=r" (result));
+  return result;
+}
+
+int main(void)
+{
+  return current_stack_address() == 0 ? 1 : 0;
+}
+"""
+
         self.assertProgramReturns(source, 0)
 
     def test_cpython_cast_helpers_parse_as_casts(self) -> None:
