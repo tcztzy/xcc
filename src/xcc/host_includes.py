@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 from functools import cache
@@ -14,9 +15,13 @@ def _is_pathlike(value: str) -> bool:
 
 
 def _xcrun_stdout(*args: str) -> str | None:
+    return _command_stdout(("xcrun", *args))
+
+
+def _command_stdout(command: tuple[str, ...]) -> str | None:
     try:
         proc = subprocess.run(
-            ("xcrun", *args),
+            command,
             check=True,
             capture_output=True,
             text=True,
@@ -26,6 +31,16 @@ def _xcrun_stdout(*args: str) -> str | None:
         return None
     stdout = proc.stdout.strip()
     return stdout or None
+
+
+def _tool_path_from_env(name: str) -> Path | None:
+    value = os.environ.get(name)
+    if not value:
+        return None
+    if _is_pathlike(value):
+        return Path(value)
+    resolved = shutil.which(value)
+    return Path(resolved) if resolved is not None else None
 
 
 def _dedupe_in_order(items: list[str]) -> tuple[str, ...]:
@@ -43,6 +58,13 @@ def _macos_sdk(sdkroot: str) -> tuple[str, Path | None]:
 
 
 def _macos_clang_resource_include_dir(sdk: str) -> str | None:
+    xcc_llc = _tool_path_from_env("XCC_LLC")
+    if xcc_llc is not None:
+        sibling_clang = xcc_llc.with_name("clang")
+        if sibling_clang.is_file():
+            resource_dir = _command_stdout((str(sibling_clang), "-print-resource-dir"))
+            if resource_dir is not None:
+                return str(Path(resource_dir) / "include")
     resource_dir = _xcrun_stdout("--sdk", sdk, "clang", "-print-resource-dir")
     if resource_dir is None:
         return None

@@ -23,6 +23,7 @@ class FrontendTests(unittest.TestCase):
         self.assertEqual(result.filename, "sample.c")
         self.assertEqual(result.preprocessed_source, "int main(){return 0;}")
         self.assertEqual(result.pp_tokens[-1].kind, TokenKind.EOF)
+        self.assertIs(result.pp_tokens, result.pp_tokens)
         self.assertEqual(result.tokens[-1].kind, TokenKind.EOF)
         self.assertEqual(result.unit.functions[0].name, "main")
         self.assertIn("main", result.sema.functions)

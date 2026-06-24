@@ -378,7 +378,7 @@ class _X86_64AsmGen:
                 if type_spec.record_tag is not None:
                     tag_scopes[-1][(type_spec.name, type_spec.record_tag)] = name
                 return
-            if type_spec.record_tag is None:
+            if type_spec.record_tag is None:  # pragma: no cover - guarded above
                 return
             key = (type_spec.name, type_spec.record_tag)
             for scope in reversed(tag_scopes):
@@ -3046,7 +3046,7 @@ class _X86_64AsmGen:
             nonlocal offset
             if active_bit_type is None:
                 return
-            if active_bit_base > offset:
+            if active_bit_base > offset:  # pragma: no cover - bitfield base tracks offset
                 self._lines.append(f"    .zero {active_bit_base - offset}")
             self._emit_global_int_constant(self._scalar_info(active_bit_type), active_bit_value)
             offset = active_bit_base + active_bit_size
@@ -3055,13 +3055,12 @@ class _X86_64AsmGen:
             active_bit_value = 0
 
         for index, member in enumerate(members):
-            member_align = self._type_align(member.type_)
+            member_align = self._member_align(member)
             member_size = self._type_size(member.type_)
-            if (
-                member_size is None
-                and self._is_flexible_array_member(member.type_)
-                and index == len(members) - 1
-            ):
+            is_flexible_tail = (
+                self._is_flexible_array_member(member.type_) and index == len(members) - 1
+            )
+            if member_size is None and is_flexible_tail:
                 member_size = 0
             if member_align is None or member_size is None:
                 raise self._error(f"x86_64 target cannot size record member {member.name}")
@@ -3105,6 +3104,14 @@ class _X86_64AsmGen:
             if access_offset > offset:
                 self._lines.append(f"    .zero {access_offset - offset}")
             member_item = items_by_index.get(index)
+            if is_flexible_tail:
+                if member_item is not None and not (
+                    isinstance(member_item.initializer, Expr)
+                    and self._is_zero_initializer(member_item.initializer)
+                ):
+                    self._emit_global_initializer(member.type_, member_item.initializer)
+                offset = access_offset
+                continue
             if member_item is None:
                 if member_size:
                     self._emit_global_zero(member.type_)
@@ -3202,7 +3209,7 @@ class _X86_64AsmGen:
         active_bit_type: Type | None = None
         for index, current in enumerate(members):
             member_size = self._type_size(current.type_)
-            member_align = self._type_align(current.type_)
+            member_align = self._member_align(current)
             if (
                 member_size is None
                 and self._is_flexible_array_member(current.type_)
@@ -3272,9 +3279,11 @@ class _X86_64AsmGen:
         for item in init.items:
             member_name = self._record_init_first_member_designator_name(item)
             if member_name is None:
-                if positional_index >= len(members):
+                member_index = self._record_initializer_next_positional_index(
+                    members, positional_index
+                )
+                if member_index >= len(members):
                     raise self._error("x86_64 target found too many record initializers")
-                member_index = positional_index
                 items_by_index[member_index] = item
                 nested_items_by_index.pop(member_index, None)
             else:
@@ -3293,6 +3302,17 @@ class _X86_64AsmGen:
                     items_by_index[member_index] = InitItem((), InitList(tuple(nested_items)))
             positional_index = member_index + 1
         return items_by_index
+
+    @staticmethod
+    def _record_initializer_next_positional_index(
+        members: tuple[RecordMemberInfo, ...], positional_index: int
+    ) -> int:
+        while positional_index < len(members):
+            member = members[positional_index]
+            if member.name is not None or member.bit_width is None:
+                return positional_index
+            positional_index += 1
+        return positional_index
 
     @staticmethod
     def _record_init_first_member_designator_name(item: InitItem) -> str | None:
@@ -3610,7 +3630,7 @@ class _X86_64AsmGen:
         active_bit_type: Type | None = None
         for index, member in enumerate(members):
             member_size = self._type_size(member.type_)
-            member_align = self._type_align(member.type_)
+            member_align = self._member_align(member)
             if (
                 member_size is None
                 and self._is_flexible_array_member(member.type_)
@@ -3854,7 +3874,7 @@ class _X86_64AsmGen:
             chunk_size = min(8, size - offset)
             info = fp_chunks.get(offset)
             if info is None:
-                if chunk_size < 1 or chunk_size > 8:
+                if chunk_size < 1 or chunk_size > 8:  # pragma: no cover - range/min invariant
                     raise self._error(
                         f"x86_64 target cannot pass {chunk_size}-byte aggregate chunk"
                     )
@@ -3955,7 +3975,7 @@ class _X86_64AsmGen:
         active_bit_type: Type | None = None
         for index, member in enumerate(members):
             member_size = self._type_size(member.type_)
-            member_align = self._type_align(member.type_)
+            member_align = self._member_align(member)
             if (
                 member_size is None
                 and self._is_flexible_array_member(member.type_)
@@ -4085,13 +4105,19 @@ class _X86_64AsmGen:
             return None
         largest = 1
         for member in members:
-            align = self._type_align(member.type_)
+            align = self._member_align(member)
             if align is None:
                 return None
-            if member.alignment is not None and member.alignment > align:
-                align = member.alignment
             largest = max(largest, align)
         return largest
+
+    def _member_align(self, member: RecordMemberInfo) -> int | None:
+        align = self._type_align(member.type_)
+        if align is None:
+            return None
+        if member.alignment is not None and member.alignment > align:
+            return member.alignment
+        return align
 
     def _record_size(self, type_: Type) -> int | None:
         members = self._sema.record_definitions.get(type_.name)
@@ -4113,7 +4139,7 @@ class _X86_64AsmGen:
         max_align = 1
         for index, member in enumerate(members):
             size = self._type_size(member.type_)
-            member_align = self._type_align(member.type_)
+            member_align = self._member_align(member)
             if (
                 size is None
                 and self._is_flexible_array_member(member.type_)

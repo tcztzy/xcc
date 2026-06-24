@@ -162,10 +162,6 @@ def _llvm_config_bindir(llvm_config: str) -> str | None:
 def _llc_candidates() -> tuple[str, ...]:
     candidates: list[str] = []
 
-    explicit = os.environ.get("XCC_LLC")
-    if explicit:
-        candidates.append(explicit)
-
     llvm_config = os.environ.get("LLVM_CONFIG") or shutil.which("llvm-config")
     if llvm_config:
         bindir = _llvm_config_bindir(llvm_config)
@@ -195,6 +191,10 @@ def _is_llvm_llc(path: str) -> bool:
 
 
 def _find_llc() -> str:
+    explicit = os.environ.get("XCC_LLC")
+    if explicit:
+        return explicit
+
     for candidate in _llc_candidates():
         if _is_llvm_llc(candidate):
             return candidate

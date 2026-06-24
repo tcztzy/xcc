@@ -267,7 +267,7 @@ class _LLVMGen:
             if self._is_unsigned_integer_c_type(source_type):
                 return c.BuildZExt(self._builder, value, target_type, name)
             return c.BuildSExt(self._builder, value, target_type, name)
-        return value
+        return value  # pragma: no cover - LLVM integer types are uniqued by width.
 
     def _gep_index_value(
         self,
@@ -409,7 +409,7 @@ class _LLVMGen:
                 members = self._sema.record_definitions.get(t.name)
                 if not members:
                     return 1
-                return max((self._type_align(member.type_) for member in members), default=1)
+                return max((self._member_align(member) for member in members), default=1)
             return min(_BASE_SIZES.get(t.name, 4), 8)
         kind, _ = t.declarator_ops[0]
         if kind == "ptr":
@@ -501,13 +501,14 @@ class _LLVMGen:
                 isinstance(array_length, ArrayDecl) and array_length.length is None
             )
             if unspecified and isinstance(decl.init, InitList):
-                inferred = self._infer_array_init_length(decl.init)
+                inferred = self._infer_array_init_length(decl.init, t)
                 new_ops = (("arr", inferred),) + t.declarator_ops[1:]
                 t = Type(t.name, declarator_ops=new_ops, qualifiers=t.qualifiers)
-            if unspecified and isinstance(decl.init, StringLiteral) and self._is_char_array_type(t):
-                inferred = len(self._string_literal_bytes(decl.init))
-                new_ops = (("arr", inferred),) + t.declarator_ops[1:]
-                t = Type(t.name, declarator_ops=new_ops, qualifiers=t.qualifiers)
+            if unspecified and isinstance(decl.init, StringLiteral):
+                string_inferred = self._string_array_initializer_length(decl.init, t)
+                if string_inferred is not None:
+                    new_ops = (("arr", string_inferred),) + t.declarator_ops[1:]
+                    t = Type(t.name, declarator_ops=new_ops, qualifiers=t.qualifiers)
         flexible_members: dict[int, Type] | None = None
         lt = self._type_to_llvm(t)
         if isinstance(decl.init, InitList):
@@ -788,9 +789,15 @@ class _LLVMGen:
             return
         c = llvm()
         target_type = self._decl_type(stmt)
-        if isinstance(stmt.init, StringLiteral) and self._is_char_array_type(target_type):
+        if isinstance(stmt.init, StringLiteral) and self._is_string_array_initializer(
+            stmt.init,
+            target_type,
+        ):
             val = self._string_array_initializer(stmt.init, target_type)
             c.BuildStore(self._builder, val, addr)
+            return
+        if self._is_aggregate_type(target_type):
+            self._emit_initializer_to_addr(addr, target_type, (), stmt.init)
             return
         val = self._emit_expr(stmt.init)
         target_lt = self._type_to_llvm(target_type)
@@ -826,7 +833,9 @@ class _LLVMGen:
             return False
         length = max(length_value, 0)
         next_index = 0
-        for item in init.items:
+        item_index = 0
+        while item_index < len(init.items):
+            item = init.items[item_index]
             if item.designators:
                 kind, value = item.designators[0]
                 if kind != "index" or not isinstance(value, Expr):
@@ -843,12 +852,28 @@ class _LLVMGen:
                         item.initializer,
                     )
                 next_index = index + 1
+                item_index += 1
                 continue
             if next_index >= length:
+                item_index += 1
                 continue
             elem_ptr = self._array_element_ptr(addr, target_type, next_index)
-            self._emit_initializer_to_addr(elem_ptr, elem_type, (), item.initializer)
+            if self._is_single_aggregate_initializer(elem_type, item.initializer):
+                self._emit_initializer_to_addr(elem_ptr, elem_type, (), item.initializer)
+                next_index += 1
+                item_index += 1
+                continue
+            consumed = self._emit_unbraced_aggregate_items_to_addr(
+                elem_ptr,
+                elem_type,
+                init.items,
+                item_index,
+            )
+            if consumed == 0:
+                self._emit_initializer_to_addr(elem_ptr, elem_type, (), item.initializer)
+                consumed = 1
             next_index += 1
+            item_index += consumed
         return True
 
     def _emit_record_init_list_to_addr(self, addr: int, target_type: Type, init: InitList) -> bool:
@@ -858,7 +883,9 @@ class _LLVMGen:
         next_member = 0
         initialized_union = False
         is_union = target_type.name.startswith("union ")
-        for item in init.items:
+        item_index = 0
+        while item_index < len(init.items):
+            item = init.items[item_index]
             if item.designators:
                 kind, value = item.designators[0]
                 if kind != "member" or not isinstance(value, str):
@@ -877,21 +904,166 @@ class _LLVMGen:
                     initialized_union = True
                 else:
                     next_member = path[0][1] + 1
+                item_index += 1
                 continue
             if is_union:
                 if initialized_union:
+                    item_index += 1
                     continue
                 member_index = 0
                 initialized_union = True
             else:
                 if next_member >= len(members):
+                    item_index += 1
                     continue
                 member_index = next_member
                 next_member += 1
             member = members[member_index]
             field_ptr = self._record_path_ptr(addr, [(target_type.name, member_index, member)])
-            self._emit_initializer_to_addr(field_ptr, member.type_, (), item.initializer)
+            if self._is_single_aggregate_initializer(member.type_, item.initializer):
+                self._emit_initializer_to_addr(field_ptr, member.type_, (), item.initializer)
+                item_index += 1
+                continue
+            consumed = self._emit_unbraced_aggregate_items_to_addr(
+                field_ptr,
+                member.type_,
+                init.items,
+                item_index,
+            )
+            if consumed == 0:
+                self._emit_initializer_to_addr(field_ptr, member.type_, (), item.initializer)
+                consumed = 1
+            item_index += consumed
         return True
+
+    def _is_aggregate_type(self, type_: Type) -> bool:
+        return type_.is_array() or self._is_record_type(type_)
+
+    def _is_single_aggregate_initializer(
+        self,
+        target_type: Type,
+        initializer: Expr | InitList,
+    ) -> bool:
+        if isinstance(initializer, InitList):
+            return True
+        if not self._is_aggregate_type(target_type):
+            return True
+        if isinstance(initializer, StringLiteral) and self._is_string_array_initializer(
+            initializer,
+            target_type,
+        ):
+            return True
+        initializer_type = self._type_map.get(initializer)
+        return (
+            initializer_type is not None
+            and initializer_type.name == target_type.name
+            and initializer_type.declarator_ops == target_type.declarator_ops
+        )
+
+    def _is_whole_aggregate_value_initializer(
+        self,
+        target_type: Type,
+        initializer: Expr,
+    ) -> bool:
+        if not self._is_aggregate_type(target_type):
+            return True
+        if isinstance(initializer, StringLiteral) and self._is_string_array_initializer(
+            initializer,
+            target_type,
+        ):
+            return True
+        initializer_type = self._type_map.get(initializer)
+        if (
+            initializer_type is None
+            or initializer_type.name != target_type.name
+            or initializer_type.declarator_ops != target_type.declarator_ops
+        ):
+            return False
+        if isinstance(
+            initializer,
+            (Identifier, MemberExpr, SubscriptExpr, CallExpr, CompoundLiteralExpr, StatementExpr),
+        ):
+            return True
+        if isinstance(initializer, UnaryExpr) and initializer.op == "*":
+            return True
+        if isinstance(initializer, CommaExpr):
+            return self._is_whole_aggregate_value_initializer(target_type, initializer.right)
+        if isinstance(initializer, ConditionalExpr):
+            return self._is_whole_aggregate_value_initializer(
+                target_type,
+                initializer.then_expr,
+            ) and self._is_whole_aggregate_value_initializer(target_type, initializer.else_expr)
+        return False
+
+    def _emit_unbraced_aggregate_items_to_addr(
+        self,
+        addr: int,
+        target_type: Type,
+        items: tuple[InitItem, ...],
+        start: int,
+    ) -> int:
+        if start >= len(items):
+            return 0
+        c = llvm()
+        c.BuildStore(self._builder, c.ConstNull(self._type_to_llvm(target_type)), addr)
+        if target_type.is_array():
+            elem_type = target_type.element_type()
+            length_value = target_type.declarator_ops[0][1]
+            if elem_type is None or not isinstance(length_value, int):
+                return 0
+            index = start
+            for elem_index in range(max(length_value, 0)):
+                if index >= len(items) or items[index].designators:
+                    break
+                elem_ptr = self._array_element_ptr(addr, target_type, elem_index)
+                consumed = self._emit_unbraced_initializer_item_to_addr(
+                    elem_ptr,
+                    elem_type,
+                    items,
+                    index,
+                )
+                if consumed == 0:
+                    break
+                index += consumed
+            return index - start
+        if self._is_record_type(target_type):
+            members = self._sema.record_definitions.get(target_type.name)
+            if members is None:
+                return 0
+            is_union = target_type.name.startswith("union ")
+            index = start
+            for member_index, member in enumerate(members):
+                if index >= len(items) or items[index].designators:
+                    break
+                field_ptr = self._record_path_ptr(addr, [(target_type.name, member_index, member)])
+                consumed = self._emit_unbraced_initializer_item_to_addr(
+                    field_ptr,
+                    member.type_,
+                    items,
+                    index,
+                )
+                if consumed == 0:
+                    break
+                index += consumed
+                if is_union:
+                    break
+            return index - start
+        return 0
+
+    def _emit_unbraced_initializer_item_to_addr(
+        self,
+        addr: int,
+        target_type: Type,
+        items: tuple[InitItem, ...],
+        index: int,
+    ) -> int:
+        item = items[index]
+        if item.designators:
+            return 0
+        if self._is_single_aggregate_initializer(target_type, item.initializer):
+            self._emit_initializer_to_addr(addr, target_type, (), item.initializer)
+            return 1
+        return self._emit_unbraced_aggregate_items_to_addr(addr, target_type, items, index)
 
     def _emit_initializer_to_addr(
         self,
@@ -933,7 +1105,10 @@ class _LLVMGen:
         if isinstance(initializer, InitList):
             self._emit_init_list_to_addr(addr, target_type, initializer)
             return
-        if isinstance(initializer, StringLiteral) and self._is_char_array_type(target_type):
+        if isinstance(initializer, StringLiteral) and self._is_string_array_initializer(
+            initializer,
+            target_type,
+        ):
             val = self._string_array_initializer(initializer, target_type)
             c.BuildStore(self._builder, val, addr)
             return
@@ -942,6 +1117,7 @@ class _LLVMGen:
             initializer_type is not None
             and initializer_type.name == target_type.name
             and initializer_type.declarator_ops == target_type.declarator_ops
+            and self._is_whole_aggregate_value_initializer(target_type, initializer)
         ):
             val = self._emit_expr(initializer)
             target_lt = self._type_to_llvm(target_type)
@@ -953,6 +1129,7 @@ class _LLVMGen:
             members = self._sema.record_definitions.get(target_type.name)
             if not members:
                 return
+            c.BuildStore(self._builder, c.ConstNull(self._type_to_llvm(target_type)), addr)
             first = members[0]
             field_ptr = self._record_path_ptr(addr, [(target_type.name, 0, first)])
             self._emit_initializer_to_addr(field_ptr, first.type_, (), initializer)
@@ -1055,7 +1232,7 @@ class _LLVMGen:
         else:
             c.PositionBuilderAtEnd(self._builder, entry_bb)
         alloca = c.BuildAlloca(self._builder, llvm_type, name.encode())
-        if current_bb:
+        if current_bb:  # pragma: no branch
             c.PositionBuilderAtEnd(self._builder, current_bb)
         return alloca
 
@@ -1067,14 +1244,15 @@ class _LLVMGen:
                 isinstance(val, ArrayDecl) and val.length is None
             )
             if unspecified and isinstance(stmt.init, InitList):
-                new_ops = (("arr", self._infer_array_init_length(stmt.init)),) + t.declarator_ops[
-                    1:
-                ]
+                new_ops = (
+                    ("arr", self._infer_array_init_length(stmt.init, t)),
+                ) + t.declarator_ops[1:]
                 return Type(t.name, declarator_ops=new_ops, qualifiers=t.qualifiers)
-            if unspecified and isinstance(stmt.init, StringLiteral) and self._is_char_array_type(t):
-                new_ops = (("arr", len(self._string_literal_bytes(stmt.init))),) + t.declarator_ops[
-                    1:
-                ]
+            if unspecified and isinstance(stmt.init, StringLiteral):
+                inferred = self._string_array_initializer_length(stmt.init, t)
+                if inferred is None:
+                    return t
+                new_ops = (("arr", inferred),) + t.declarator_ops[1:]
                 return Type(t.name, declarator_ops=new_ops, qualifiers=t.qualifiers)
         return t
 
@@ -1430,26 +1608,77 @@ class _LLVMGen:
         units.append(0)
         return b"".join(unit.to_bytes(width, "little", signed=False) for unit in units)
 
-    def _is_char_array_type(self, type_: Type) -> bool:
+    @staticmethod
+    def _string_literal_prefix(expr: StringLiteral) -> str:
+        qpos = expr.value.find('"')
+        return expr.value[:qpos] if qpos >= 0 else ""
+
+    def _string_literal_units(self, expr: StringLiteral) -> list[int]:
+        raw = expr.value
+        qpos = raw.find('"')
+        body = self._decode_string(raw[qpos + 1 : -1] if qpos >= 0 else raw)
+        units = [ord(ch) for ch in body]
+        units.append(0)
+        return units
+
+    def _string_array_element_width(self, type_: Type) -> int | None:
         if not type_.is_array():
-            return False
+            return None
         elem_type = type_.element_type()
-        return (
-            elem_type is not None
-            and not elem_type.declarator_ops
-            and elem_type.name in {"char", "unsigned char"}
-        )
+        if elem_type is None or elem_type.declarator_ops:
+            return None
+        widths = {
+            "char": 1,
+            "signed char": 1,
+            "unsigned char": 1,
+            "short": 2,
+            "unsigned short": 2,
+            "int": 4,
+            "unsigned int": 4,
+        }
+        return widths.get(elem_type.name)
+
+    def _is_string_array_initializer(self, expr: StringLiteral, target_type: Type) -> bool:
+        width = self._string_array_element_width(target_type)
+        prefix = self._string_literal_prefix(expr)
+        if prefix == "u":
+            return width == 2
+        if prefix in {"L", "U"}:
+            return width == 4
+        return width == 1
+
+    def _string_array_initializer_length(
+        self,
+        expr: StringLiteral,
+        target_type: Type,
+    ) -> int | None:
+        if not self._is_string_array_initializer(expr, target_type):
+            return None
+        if self._string_array_element_width(target_type) == 1:
+            return len(self._string_literal_bytes(expr))
+        return len(self._string_literal_units(expr))
 
     def _string_array_initializer(self, expr: StringLiteral, target_type: Type) -> int:
         c = llvm()
         length = target_type.declarator_ops[0][1]
         assert isinstance(length, int)
-        data = self._string_literal_bytes(expr)
-        if len(data) < length:
-            data += b"\x00" * (length - len(data))
+        width = self._string_array_element_width(target_type)
+        if width == 1:
+            data = self._string_literal_bytes(expr)
+            if len(data) < length:
+                data += b"\x00" * (length - len(data))
+            else:
+                data = data[:length]
+            return c.ConstString(data, length, True)
+        elem_type = target_type.element_type()
+        assert elem_type is not None
+        elem_lt = self._type_to_llvm(elem_type)
+        units = self._string_literal_units(expr)
+        if len(units) < length:
+            units += [0] * (length - len(units))
         else:
-            data = data[:length]
-        return c.ConstString(data, length, True)
+            units = units[:length]
+        return self._const_array(elem_lt, [c.ConstInt(elem_lt, unit, False) for unit in units])
 
     # ── identifier ───────────────────────────────────────────
 
@@ -1491,7 +1720,9 @@ class _LLVMGen:
                 return c.ConstInt(c.Int32Type(), file_symbol.value, True)
         lt = self._type_to_llvm(val_type)
         # Function type → reference the existing function declaration.
-        if c.GetTypeKind(lt) == LLVMTypeKind.FUNCTION:
+        if (
+            c.GetTypeKind(lt) == LLVMTypeKind.FUNCTION
+        ):  # pragma: no cover - function designators return above.
             fn = c.GetNamedFunction(self._mod, name.encode())
             if fn:
                 return fn
@@ -1555,7 +1786,7 @@ class _LLVMGen:
             return None
         if pointer_type.is_array():
             pointee = pointer_type.element_type()
-            if pointee is None:
+            if pointee is None:  # pragma: no cover - Type.is_array() guarantees an element type.
                 return None
             return pointee
         pointee = pointer_type.pointee()
@@ -1870,7 +2101,7 @@ class _LLVMGen:
                     rw = c.GetIntTypeWidth(rt)
                     if lw > rw:
                         right = self._cast_integer_value(right, lt, right_c_type, b"cmp.cast")
-                    elif rw > lw:
+                    elif rw > lw:  # pragma: no branch
                         left = self._cast_integer_value(left, rt, left_c_type, b"cmp.cast")
             signed_preds = {"==": 32, "!=": 33, "<": 40, ">": 38, "<=": 41, ">=": 39}
             unsigned_preds = {"==": 32, "!=": 33, "<": 36, ">": 34, "<=": 37, ">=": 35}
@@ -1954,7 +2185,7 @@ class _LLVMGen:
         if is_float and vt != lt:
             if vk == LLVMTypeKind.INTEGER:
                 val = c.BuildSIToFP(self._builder, val, lt, b"cmpd.cast")
-            elif self._is_float_kind(vk):
+            elif self._is_float_kind(vk):  # pragma: no branch
                 val = c.BuildFPCast(self._builder, val, lt, b"cmpd.cast")
 
         if is_float:
@@ -2373,7 +2604,7 @@ class _LLVMGen:
             return c.BuildZExt(self._builder, value, target_t, b"builtin.ext")
         if value_width > width:
             return c.BuildTrunc(self._builder, value, target_t, b"builtin.trunc")
-        return value
+        return value  # pragma: no cover - LLVM integer types are uniqued by width.
 
     def _result_type_ref(self, expr: CallExpr, fallback: int) -> int:
         result_type = self._type_map.get(expr)
@@ -2501,14 +2732,17 @@ class _LLVMGen:
             )
             return self._coerce_builtin_result(value, expr)
 
-        return None
+        return None  # pragma: no cover - supported names are exhausted above.
 
     def _float_intrinsic_type(self, value: int, expr: CallExpr) -> int:
         c = llvm()
         value_t = c.TypeOf(value)
         if self._is_float_kind(c.GetTypeKind(value_t)):
             return value_t
-        return self._result_type_ref(expr, c.DoubleType())
+        result_t = self._result_type_ref(expr, c.DoubleType())
+        if self._is_float_kind(c.GetTypeKind(result_t)):
+            return result_t
+        return c.DoubleType()
 
     def _floating_builtin(self, callee_name: str, expr: CallExpr) -> int | None:
         c = llvm()
@@ -2645,6 +2879,7 @@ class _LLVMGen:
                 if len(args) >= 3:
                     dst = self._emit_expr(args[0])
                     val = self._emit_expr(args[1])
+                    val = self._build_cast(val, c.Int8Type(), self._type_map.get(args[1]))
                     ln = self._emit_expr(args[2])
                 elif len(args) == 2:
                     dst = self._emit_expr(args[0])
@@ -2847,7 +3082,7 @@ class _LLVMGen:
             return self._cast_integer_value(op, lt, operand_type, b"cast")
         try:
             return c.BuildSExt(self._builder, op, lt, b"cast")
-        except Exception:
+        except Exception:  # pragma: no cover - current LLVM accepts the fallback extension path.
             return c.BuildBitCast(self._builder, op, lt, b"cast")
 
     def _va_arg(self, expr: BuiltinVaArgExpr) -> int:
@@ -3042,7 +3277,9 @@ class _LLVMGen:
             return self._to_bool(val)
         if fk == tk and fk != LLVMTypeKind.INTEGER:
             if self._is_float_kind(fk) and self._is_float_kind(tk):
-                return c.BuildFPCast(self._builder, val, to_type, b"cast")
+                return c.BuildFPCast(  # pragma: no cover - float types are uniqued by kind.
+                    self._builder, val, to_type, b"cast"
+                )
             return val  # Same non-integer kind: no cast needed
         if fk == LLVMTypeKind.ARRAY:
             # Array decay: returns pointer to first element.
@@ -3173,8 +3410,12 @@ class _LLVMGen:
         else:
             assert expr.expr is not None
             result_t = self._type_map.require(expr.expr)
-        size = self._type_size(result_t)
-        return c.ConstInt(c.Int64Type(), size, False)
+        value = (
+            self._type_align(result_t)
+            if isinstance(expr, AlignofExpr)
+            else self._type_size(result_t)
+        )
+        return c.ConstInt(c.Int64Type(), value, False)
 
     def _offsetof_expr(self, expr: BuiltinOffsetofExpr) -> int:
         c = llvm()
@@ -3355,7 +3596,7 @@ class _LLVMGen:
             if len(init.items) == 1 and not init.items[0].designators:
                 return self._eval_init(init.items[0].initializer, var_type)
             return None
-        if isinstance(init, StringLiteral) and self._is_char_array_type(var_type):
+        if isinstance(init, StringLiteral) and self._is_string_array_initializer(init, var_type):
             return self._string_array_initializer(init, var_type)
         if self._is_record_type(var_type):
             return self._eval_scalar_record_init(init, var_type)
@@ -3378,10 +3619,13 @@ class _LLVMGen:
     def _is_record_type(type_: Type) -> bool:
         return not type_.declarator_ops and type_.name.startswith(("struct ", "union "))
 
-    def _infer_array_init_length(self, init: InitList) -> int:
+    def _infer_array_init_length(self, init: InitList, array_type: Type | None = None) -> int:
+        element_type = array_type.element_type() if array_type is not None else None
         max_index = 0
         next_index = 0
-        for item in init.items:
+        item_index = 0
+        while item_index < len(init.items):
+            item = init.items[item_index]
             if item.designators:
                 kind, value = item.designators[0]
                 if kind == "index" and isinstance(value, Expr):
@@ -3392,7 +3636,21 @@ class _LLVMGen:
                     next_index = 0 if high is None else high + 1
                 else:
                     next_index += 1
+                item_index += 1
             else:
+                consumed = 1
+                if element_type is not None and not self._is_single_aggregate_initializer(
+                    element_type,
+                    item.initializer,
+                ):
+                    consumed, _ = self._eval_unbraced_aggregate_initializer_items(
+                        element_type,
+                        init.items,
+                        item_index,
+                    )
+                    if consumed == 0:
+                        consumed = 1
+                item_index += consumed
                 next_index += 1
             max_index = max(max_index, next_index)
         return max_index
@@ -3466,9 +3724,11 @@ class _LLVMGen:
         array_type: Type,
     ) -> int:
         if isinstance(init, InitList):
-            return self._infer_array_init_length(init)
-        if isinstance(init, StringLiteral) and self._is_char_array_type(array_type):
-            return len(self._string_literal_bytes(init))
+            return self._infer_array_init_length(init, array_type)
+        if isinstance(init, StringLiteral):
+            inferred = self._string_array_initializer_length(init, array_type)
+            if inferred is not None:
+                return inferred
         return 1
 
     def _struct_type_with_member_overrides(
@@ -3498,7 +3758,9 @@ class _LLVMGen:
         elem_lt = self._type_to_llvm(elem_type)
         elems = [c.ConstNull(elem_lt) for _ in range(length)]
         next_index = 0
-        for item in init.items:
+        item_index = 0
+        while item_index < len(init.items):
+            item = init.items[item_index]
             if item.designators:
                 kind, value = item.designators[0]
                 if kind == "range":
@@ -3519,6 +3781,7 @@ class _LLVMGen:
                                 continue
                             elems[index] = val
                     next_index = high + 1
+                    item_index += 1
                     continue
                 if kind != "index" or not isinstance(value, Expr):
                     return None
@@ -3532,18 +3795,35 @@ class _LLVMGen:
                         item.initializer,
                     )
                     if val is None:
+                        next_index = designated_index + 1
+                        item_index += 1
                         continue
                     elems[designated_index] = val
                 next_index = designated_index + 1
+                item_index += 1
                 continue
             if next_index >= length:
+                item_index += 1
                 continue
-            val = self._eval_init(item.initializer, elem_type)
+            if self._is_single_aggregate_initializer(elem_type, item.initializer):
+                val = self._eval_init(item.initializer, elem_type)
+                consumed = 1
+            else:
+                consumed, val = self._eval_unbraced_aggregate_initializer_items(
+                    elem_type,
+                    init.items,
+                    item_index,
+                )
+                if consumed == 0:
+                    val = self._eval_init(item.initializer, elem_type)
+                    consumed = 1
             if val is None:
                 next_index += 1
+                item_index += consumed
                 continue
             elems[next_index] = val
             next_index += 1
+            item_index += consumed
         return self._const_array(elem_lt, elems)
 
     def _eval_record_init(
@@ -3576,7 +3856,9 @@ class _LLVMGen:
         )
         nested_items: dict[int, list[InitItem]] = {}
         nested_order: list[int] = []
-        for item in init.items:
+        item_index = 0
+        while item_index < len(init.items):
+            item = init.items[item_index]
             if item.designators:
                 kind, value = item.designators[0]
                 if kind != "member" or not isinstance(value, str):
@@ -3600,14 +3882,17 @@ class _LLVMGen:
                         initialized_union = True
                     else:
                         next_member = member_index + 1
+                    item_index += 1
                     continue
-                if len(path) > 1:
+                if len(path) > 1:  # pragma: no cover - anonymous paths are nested above.
                     val = self._eval_record_path_init(
                         path[1:],
                         item.designators[1:],
                         item.initializer,
                     )
-                elif item.designators[1:]:
+                elif item.designators[
+                    1:
+                ]:  # pragma: no cover - handled above as remaining_designators.
                     val = self._eval_init(
                         InitList((InitItem(item.designators[1:], item.initializer),)),
                         member_type(path[0][1]),
@@ -3615,6 +3900,7 @@ class _LLVMGen:
                 else:
                     val = self._eval_init(item.initializer, member_type(path[0][1]))
                 if val is None:
+                    item_index += 1
                     continue
                 if is_union:
                     union_member = path[0][2]
@@ -3623,25 +3909,45 @@ class _LLVMGen:
                 else:
                     fields[path[0][1]] = val
                     next_member = path[0][1] + 1
+                item_index += 1
                 continue
             if is_union:
                 if initialized_union:
+                    item_index += 1
                     continue
                 member_index = 0
                 initialized_union = True
             else:
                 if next_member >= len(members):
+                    item_index += 1
                     continue
                 member_index = next_member
                 next_member += 1
-            val = self._eval_init(item.initializer, member_type(member_index))
+            current_member_type = member_type(member_index)
+            if self._is_single_aggregate_initializer(
+                current_member_type,
+                item.initializer,
+            ):
+                val = self._eval_init(item.initializer, current_member_type)
+                consumed = 1
+            else:
+                consumed, val = self._eval_unbraced_aggregate_initializer_items(
+                    current_member_type,
+                    init.items,
+                    item_index,
+                )
+                if consumed == 0:
+                    val = self._eval_init(item.initializer, current_member_type)
+                    consumed = 1
             if val is None:
+                item_index += consumed
                 continue
             if is_union:
                 union_member = members[member_index]
                 union_value = val
             else:
                 fields[member_index] = val
+            item_index += consumed
         for member_index in nested_order:
             member = members[member_index]
             val = self._eval_init(
@@ -3660,6 +3966,92 @@ class _LLVMGen:
                 return c.ConstNull(self._type_to_llvm(record_type))
             return self._const_union(record_type, union_member, union_value)
         return self._const_struct(record_type, fields, record_lt)
+
+    def _eval_unbraced_aggregate_initializer_items(
+        self,
+        target_type: Type,
+        items: tuple[InitItem, ...],
+        start: int,
+    ) -> tuple[int, int | None]:
+        c = llvm()
+        if start >= len(items):
+            return 0, None
+        if target_type.is_array():
+            elem_type = target_type.element_type()
+            if elem_type is None:  # pragma: no cover - Type.is_array() guarantees an element type.
+                return 0, None
+            length_value = target_type.declarator_ops[0][1]
+            if not isinstance(length_value, int) or length_value < 0:
+                return 0, None
+            elem_lt = self._type_to_llvm(elem_type)
+            elems = [c.ConstNull(elem_lt) for _ in range(length_value)]
+            item_index = start
+            for elem_index in range(length_value):
+                if item_index >= len(items) or items[item_index].designators:
+                    break
+                consumed, val = self._eval_unbraced_initializer_item(
+                    elem_type,
+                    items,
+                    item_index,
+                )
+                if consumed == 0:
+                    break
+                if val is not None:
+                    elems[elem_index] = val
+                item_index += consumed
+            return item_index - start, self._const_array(elem_lt, elems)
+        if not self._is_record_type(target_type):
+            return 0, None
+        members = self._sema.record_definitions.get(target_type.name)
+        if members is None:
+            return 0, None
+        is_union = target_type.name.startswith("union ")
+        item_index = start
+        union_member: RecordMemberInfo | None = None
+        union_value: int | None = None
+        fields = (
+            []
+            if is_union
+            else [c.ConstNull(self._type_to_llvm(member.type_)) for member in members]
+        )
+        for member_index, member in enumerate(members):
+            if item_index >= len(items) or items[item_index].designators:
+                break
+            consumed, val = self._eval_unbraced_initializer_item(
+                member.type_,
+                items,
+                item_index,
+            )
+            if consumed == 0:
+                break
+            if val is not None:
+                if is_union:
+                    union_member = member
+                    union_value = val
+                else:
+                    fields[member_index] = val
+            item_index += consumed
+            if is_union:
+                break
+        consumed_total = item_index - start
+        if is_union:
+            if union_member is None or union_value is None:
+                return consumed_total, c.ConstNull(self._type_to_llvm(target_type))
+            return consumed_total, self._const_union(target_type, union_member, union_value)
+        return consumed_total, self._const_struct(target_type, fields)
+
+    def _eval_unbraced_initializer_item(
+        self,
+        target_type: Type,
+        items: tuple[InitItem, ...],
+        index: int,
+    ) -> tuple[int, int | None]:
+        item = items[index]
+        if item.designators:
+            return 0, None
+        if self._is_single_aggregate_initializer(target_type, item.initializer):
+            return 1, self._eval_init(item.initializer, target_type)
+        return self._eval_unbraced_aggregate_initializer_items(target_type, items, index)
 
     def _eval_scalar_record_init(self, init: Expr, record_type: Type) -> int | None:
         c = llvm()
@@ -3719,6 +4111,15 @@ class _LLVMGen:
         for index, value in enumerate(values):
             arr[index] = value
         return c.ConstArray(elem_lt, arr, len(values))
+
+    def _const_aggregate_element(self, value: int, index: int, fallback_type: int) -> int:
+        c = llvm()
+        if index < c.GetNumOperands(value):
+            return c.GetOperand(value, index)
+        aggregate_element = c.GetAggregateElement(value, index)
+        if aggregate_element:
+            return aggregate_element
+        return c.ConstNull(fallback_type)
 
     def _const_struct(
         self,
@@ -3802,21 +4203,18 @@ class _LLVMGen:
         if value_type.declarator_ops:
             kind, length_value = value_type.declarator_ops[0]
             if kind == "arr":
-                if not isinstance(length_value, int):
+                if not isinstance(
+                    length_value, int
+                ):  # pragma: no cover - _type_size rejects it first.
                     return None
                 elem_type = value_type.element_type()
-                if elem_type is None:
+                if elem_type is None:  # pragma: no cover - array ops always have elements.
                     return None
                 elem_size = self._type_size(elem_type)
                 chunks: list[bytes] = []
-                operand_count = c.GetNumOperands(value)
                 elem_lt = self._type_to_llvm(elem_type)
                 for index in range(max(length_value, 0)):
-                    elem_value = (
-                        c.GetOperand(value, index)
-                        if index < operand_count
-                        else c.ConstNull(elem_lt)
-                    )
+                    elem_value = self._const_aggregate_element(value, index, elem_lt)
                     elem_data = self._const_value_bytes(elem_value, elem_type)
                     if elem_data is None:
                         return None
@@ -3834,21 +4232,19 @@ class _LLVMGen:
         return None
 
     def _const_struct_bytes(self, value: int, record_name: str) -> bytes | None:
-        c = llvm()
         members = self._sema.record_definitions.get(record_name)
         if members is None:
             return None
         data = bytearray(self._record_size(record_name))
-        operand_count = c.GetNumOperands(value)
         offset = 0
         for index, member in enumerate(members):
             member_align = self._member_align(member)
             offset = self._align_to(offset, member_align)
             member_size = self._type_size(member.type_)
-            member_value = (
-                c.GetOperand(value, index)
-                if index < operand_count
-                else c.ConstNull(self._record_member_llvm_type(member))
+            member_value = self._const_aggregate_element(
+                value,
+                index,
+                self._record_member_llvm_type(member),
             )
             member_data = self._const_value_bytes(member_value, member.type_)
             if member_data is None:
@@ -3861,17 +4257,15 @@ class _LLVMGen:
         return bytes(data)
 
     def _const_union_bytes(self, value: int, record_name: str) -> bytes | None:
-        c = llvm()
         members = self._sema.record_definitions.get(record_name)
         if not members:
             return bytes(self._union_size(record_name))
         storage_member = self._union_storage_member(members)
         storage_size = self._type_size(storage_member.type_)
-        operand_count = c.GetNumOperands(value)
-        storage_value = (
-            c.GetOperand(value, 0)
-            if operand_count
-            else c.ConstNull(self._record_member_llvm_type(storage_member))
+        storage_value = self._const_aggregate_element(
+            value,
+            0,
+            self._record_member_llvm_type(storage_member),
         )
         storage_data = self._const_value_bytes(storage_value, storage_member.type_)
         if storage_data is None:
@@ -3890,10 +4284,12 @@ class _LLVMGen:
         if target_type.declarator_ops:
             kind, length_value = target_type.declarator_ops[0]
             if kind == "arr":
-                if not isinstance(length_value, int):
+                if not isinstance(
+                    length_value, int
+                ):  # pragma: no cover - _type_size rejects it first.
                     return None
                 elem_type = target_type.element_type()
-                if elem_type is None:
+                if elem_type is None:  # pragma: no cover - array ops always have elements.
                     return None
                 elem_size = self._type_size(elem_type)
                 elem_lt = self._type_to_llvm(elem_type)
@@ -4101,7 +4497,7 @@ class _LLVMGen:
             length_value = literal_type.declarator_ops[0][1]
             if isinstance(length_value, int) and length_value <= 0:
                 inferred = (
-                    self._infer_array_init_length(expr.initializer)
+                    self._infer_array_init_length(expr.initializer, literal_type)
                     if isinstance(expr.initializer, InitList)
                     else 1
                 )
@@ -4193,7 +4589,9 @@ class _LLVMGen:
         if to_kind == LLVMTypeKind.VOID:
             return value
         if from_kind == LLVMTypeKind.POINTER and to_kind == LLVMTypeKind.POINTER:
-            return c.ConstPointerCast(value, to_type)
+            return c.ConstPointerCast(
+                value, to_type
+            )  # pragma: no cover - opaque pointers compare equal first.
         if from_kind == LLVMTypeKind.POINTER and to_kind == LLVMTypeKind.INTEGER:
             return c.ConstPtrToInt(value, to_type)
         if from_kind == LLVMTypeKind.INTEGER and to_kind == LLVMTypeKind.POINTER:
@@ -4368,6 +4766,12 @@ class _LLVMGen:
                 return -self._eval_case_val(expr.operand)
             if expr.op == "+":
                 return self._eval_case_val(expr.operand)
+            if expr.op == "!":
+                return int(self._eval_case_val(expr.operand) == 0)
+            if expr.op == "~":
+                return ~self._eval_case_val(expr.operand)
+        if isinstance(expr, CommaExpr):
+            return self._eval_case_val(expr.right)
         if isinstance(expr, Identifier):
             # Check function locals first, then file scope.
             if self._func_sym:
@@ -4402,6 +4806,22 @@ class _LLVMGen:
                 return left & right
             if expr.op == "^":
                 return left ^ right
+            if expr.op == "==":
+                return int(left == right)
+            if expr.op == "!=":
+                return int(left != right)
+            if expr.op == "<":
+                return int(left < right)
+            if expr.op == ">":
+                return int(left > right)
+            if expr.op == "<=":
+                return int(left <= right)
+            if expr.op == ">=":
+                return int(left >= right)
+            if expr.op == "&&":
+                return int(left != 0 and right != 0)
+            if expr.op == "||":
+                return int(left != 0 or right != 0)
             return 0
         if isinstance(expr, ConditionalExpr):
             condition = self._eval_case_val(expr.condition)

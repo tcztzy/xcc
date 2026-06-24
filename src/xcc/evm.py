@@ -238,12 +238,12 @@ def keccak256(data: bytes) -> bytes:
 
     output = bytearray()
     while len(output) < 32:
-        for lane in state[: rate // 8]:
+        for lane in state[: rate // 8]:  # pragma: no branch - digest breaks before exhaustion.
             output.extend(lane.to_bytes(8, "little"))
             if len(output) >= 32:
                 break
         if len(output) < 32:
-            _keccak_f1600(state)
+            _keccak_f1600(state)  # pragma: no cover - 32-byte digest fits first squeeze.
     return bytes(output[:32])
 
 
@@ -1289,7 +1289,10 @@ class _EvmGen:
             if index == member_index:
                 return offset
             offset += self._record_member_slots(member)
-        raise evm_backend_error(self._result.filename, "unknown EVM record member index")
+        raise evm_backend_error(  # pragma: no cover - in-range tuple indexes return above.
+            self._result.filename,
+            "unknown EVM record member index",
+        )
 
     def _prepare_function_context(self, function: FunctionDef, return_mode: str) -> None:
         layout = self._function_layouts[function.name]
@@ -3210,7 +3213,7 @@ class _EvmGen:
                         "EVM aggregate function pointer dispatch type mismatch",
                     )
                     continue
-                raise evm_backend_error(
+                raise evm_backend_error(  # pragma: no cover - argument validation rejects earlier.
                     self._result.filename,
                     f"unsupported EVM function pointer dispatch type: {param_type}",
                 )
@@ -3673,7 +3676,7 @@ class _EvmGen:
                 )
             element_type = type_.element_type()
             if element_type is None:
-                raise evm_backend_error(
+                raise evm_backend_error(  # pragma: no cover - Type array ops always have elements.
                     self._result.filename,
                     f"EVM target cannot size array type: {type_}",
                 )
@@ -4038,7 +4041,7 @@ class _EvmGen:
                 and not self._is_anonymous_record_member(member)
                 and not self._is_unnamed_bit_field(member)
             ):
-                raise evm_backend_error(
+                raise evm_backend_error(  # pragma: no cover - slot sizing rejects this first.
                     self._result.filename,
                     "EVM target does not support anonymous storage members",
                 )
@@ -4169,7 +4172,7 @@ class _EvmGen:
             return value & ((1 << 256) - 1)
         bits = self._integer_type_bits(type_)
         if bits is None:
-            return value & ((1 << 256) - 1)
+            return value & ((1 << 256) - 1)  # pragma: no cover - canonical ints have widths.
         if self._is_bool_type(type_):
             return int(value != 0)
         if bits >= 256:

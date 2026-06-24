@@ -42,8 +42,8 @@ jobs:
       - name: Run compiler validation harness
         run: uv run python scripts/validate_compiler.py
 
-      - name: Run unit tests
-        run: uv run python -m unittest discover -v
+      - name: Run test gates
+        run: uv run tox -e py311,mypyc
 
       - name: Run lint gate
         run: uv run tox -e lint

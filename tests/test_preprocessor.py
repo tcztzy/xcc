@@ -10,6 +10,7 @@ import xcc.preprocessor.macro_expansion as preprocessor_macro_expansion
 import xcc.preprocessor.conditionals as preprocessor_conditionals
 import xcc.preprocessor.process as preprocessor_process
 import xcc.preprocessor.probes as preprocessor_probes
+import xcc.preprocessor.text as preprocessor_text
 from tests import _bootstrap  # noqa: F401
 from xcc.lexer import TokenKind
 from xcc.options import FrontendOptions
@@ -37,11 +38,14 @@ from xcc.preprocessor import (
     _parse_pp_integer_literal,
     _paste_token_pair,
     _Preprocessor,
+    _reject_gnu_asm_extensions,
     _safe_eval_int_expr,
     _safe_eval_pp_expr,
     _SourceLocation,
+    _split_unclosed_block_comment_tail,
     _strip_gnu_asm_extensions,
     _tokenize_expr,
+    _tokenize_macro_text,
     _tokenize_macro_replacement,
     _translate_expr_to_python,
     _validate_defined_syntax,
@@ -105,6 +109,108 @@ class PreprocessorTests(unittest.TestCase):
     def test_preprocess_empty_source(self) -> None:
         result = preprocess_source("", filename="empty.c")
         self.assertEqual(result.source, "")
+
+    def test_gnu_asm_strip_handles_incomplete_or_non_operand_asm_keywords(self) -> None:
+        self.assertEqual(
+            preprocessor_text._strip_inline_asm_segments("int asm;\n"),
+            "int ;\n",
+        )
+        self.assertEqual(
+            preprocessor_text._strip_inline_asm_segments('asm("unterminated;\n'),
+            '("unterminated;\n',
+        )
+        self.assertEqual(
+            preprocessor_text._strip_inline_asm_segments('asm volatile ("nop");\n'),
+            ";\n",
+        )
+
+    def test_gnu_asm_strip_rewrites_aarch64_stack_pointer_statement(self) -> None:
+        self.assertEqual(
+            preprocessor_text._strip_inline_asm_segments('asm("mov %0, sp" : "=r"(sp));\n'),
+            "sp = (unsigned long)&sp;\n",
+        )
+
+    def test_gnu_asm_paren_scanner_ignores_escaped_string_delimiters(self) -> None:
+        line = r'asm("quoted \" ) still string");'
+        open_index = line.index("(")
+
+        self.assertEqual(preprocessor_text._find_matching_paren(line, open_index), len(line) - 2)
+
+    def test_gnu_asm_rejection_allows_declaration_labels_and_other_files(self) -> None:
+        source = 'int f(void)\n__asm("_f");\nasm("nop");\n'
+        line_map = (("main.c", 1), ("main.c", 2), ("header.h", 7))
+
+        preprocessor_text._reject_gnu_asm_extensions(
+            source,
+            line_map,
+            code="XCC-PP-ASM",
+            primary_filename="main.c",
+        )
+
+    def test_gnu_asm_rejection_keeps_context_after_skipped_header_line(self) -> None:
+        source = 'asm("skip");\nasm("bad");\n'
+        line_map = (("header.h", 5), ("main.c", 9))
+
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocessor_text._reject_gnu_asm_extensions(
+                source,
+                line_map,
+                code="XCC-PP-ASM",
+                primary_filename="main.c",
+            )
+
+        self.assertEqual(ctx.exception.filename, "main.c")
+        self.assertEqual(ctx.exception.line, 9)
+
+    def test_gnu_asm_rejection_reports_primary_file_statement_location(self) -> None:
+        source = 'int f(void);\nasm("nop");\n'
+        line_map = (("main.c", 1), ("main.c", 42))
+
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocessor_text._reject_gnu_asm_extensions(
+                source,
+                line_map,
+                code="XCC-PP-ASM",
+                primary_filename="main.c",
+            )
+
+        self.assertEqual(ctx.exception.filename, "main.c")
+        self.assertEqual(ctx.exception.line, 42)
+        self.assertEqual(ctx.exception.code, "XCC-PP-ASM")
+
+    def test_package_gnu_asm_rejection_uses_default_code(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            _reject_gnu_asm_extensions('asm("nop");\n', (("main.c", 7),))
+
+        self.assertEqual(ctx.exception.code, "XCC-PP-0105")
+        self.assertEqual(ctx.exception.line, 7)
+
+    def test_gnu_asm_statement_detector_handles_incomplete_operands(self) -> None:
+        self.assertFalse(preprocessor_text._contains_gnu_asm_statement("int asm;"))
+        self.assertTrue(preprocessor_text._contains_gnu_asm_statement('asm("unterminated'))
+        self.assertFalse(
+            preprocessor_text._contains_gnu_asm_statement('int x asm("unterminated')
+        )
+        self.assertFalse(preprocessor_text._contains_gnu_asm_statement('asm("nop") + 1'))
+
+    def test_gnu_asm_declaration_continuation_without_leading_word_is_allowed(self) -> None:
+        self.assertTrue(preprocessor_text._can_continue_declaration("(int (*f)(void))"))
+
+    def test_gnu_asm_rejection_tracks_non_asm_significant_lines(self) -> None:
+        preprocessor_text._reject_gnu_asm_extensions(
+            "\nint x;\n\nint y;\n",
+            (("main.c", 1), ("main.c", 2), ("main.c", 3), ("main.c", 4)),
+            code="XCC-PP-ASM",
+            primary_filename="main.c",
+        )
+
+    def test_gnu_asm_statement_rejection_ignores_other_files(self) -> None:
+        preprocessor_text._reject_gnu_asm_statements(
+            'asm("nop");\n',
+            (("header.h", 5),),
+            code="XCC-PP-ASM",
+            primary_filename="main.c",
+        )
 
     def test_host_arch_predefined_macros_can_define_arm64(self) -> None:
         with patch("xcc.preprocessor.platform.machine", return_value="arm64"):
@@ -1161,6 +1267,17 @@ A(0)
         self.assertNotIn("y = 1", before_function)
         self.assertIn("y = 1", function_body)
         self.assertNotIn("tail */", result.source)
+
+    def test_macro_invocation_with_unclosed_continuation_block_comment_reports_error(
+        self,
+    ) -> None:
+        source = "#define M(x) x\nM(1, /* comment \\\nstill comment"
+
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source(source, filename="macro_comment.c")
+
+        self.assertEqual(ctx.exception.code, "XCC-PP-0202")
+        self.assertIn("Unterminated macro invocation", str(ctx.exception))
 
     def test_macro_before_unclosed_trailing_block_comment_expands(self) -> None:
         result = preprocess_source(
@@ -3375,14 +3492,47 @@ A(0)
         self.assertEqual(_parse_directive("int x;\n"), None)
         self.assertEqual(_parse_directive("# 1\n"), None)
         self.assertEqual(_parse_directive("#define X 1\n"), ("define", " X 1"))
+        self.assertEqual(_parse_directive("#define X 1"), ("define", " X 1"))
         self.assertEqual(_tokenize_macro_replacement(""), [])
+        self.assertIsNone(_split_unclosed_block_comment_tail("int x; // no block tail"))
+        self.assertEqual(
+            _split_unclosed_block_comment_tail('char *s = "/*"; /* tail'),
+            ('char *s = "/*"; ', "/* tail"),
+        )
+        self.assertIsNone(_split_unclosed_block_comment_tail("int x; /* closed */ int y;"))
+        self.assertEqual(
+            preprocessor_process._strip_block_comments("int x; /* unterminated"),
+            "int x; /* unterminated",
+        )
+        self.assertEqual(
+            preprocessor_process._update_comment_state(
+                False,
+                False,
+                directive_lines=["#define X 1 /* open\n"],
+            ),
+            (True, True),
+        )
         self.assertEqual(_expand_object_like_macros("A B", {"A": "1", "B": "2"}), "1 2")
         self.assertEqual(_expand_object_like_macros("A B", {}), "A B")
         self.assertEqual(_parse_macro_parameters(""), ([], False))
         self.assertEqual(_parse_macro_parameters("x, ..."), (["x"], True))
         self.assertIsNone(_parse_macro_parameters("x, ..., y"))
         self.assertIsNone(_parse_macro_parameters("x, x"))
+        self.assertEqual(
+            _tokenize_macro_replacement("1 /* unfinished"),
+            [_MacroToken(TokenKind.PP_NUMBER, "1")],
+        )
         self.assertEqual(len(_tokenize_macro_replacement("@")), 1)
+        self.assertIsNone(_tokenize_macro_text('"unterminated'))
+        self.assertEqual(
+            _paste_token_pair(
+                _MacroToken(TokenKind.IDENT, "prefix"),
+                _MacroToken(TokenKind.IDENT, ""),
+                std="c11",
+                line_no=1,
+            ),
+            [_MacroToken(TokenKind.IDENT, "prefix")],
+        )
         with self.assertRaises(PreprocessorError):
             _paste_token_pair(
                 _tokenize_macro_replacement("x")[0],

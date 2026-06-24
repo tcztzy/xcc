@@ -2,6 +2,681 @@
 
 ## Current
 
+- Raised the project coverage ratchet to 100.00% after closing remaining
+  statement and branch gaps in AArch64, generic codegen, and x86_64 helper
+  coverage. The full parallel `tox -e py311` gate now reports 25,250
+  statements, 12,070 branches, and 100% total coverage under
+  `fail_under = 100.00`. Re-ran `tox -e lint`, `tox -e type`, and the mypyc
+  test gate successfully. Re-ran the real CPython validation gate against a
+  fresh temporary clone at `/private/tmp/cpython-xcc-clean.rLwzau` because the
+  default CPython checkout contained ignored in-source build artifacts; the
+  isolated `configure && make -j8` completed in 3106.59s, checked 116 modules,
+  built 37 built-ins and 78 shared modules, reported only optional `_gdbm`
+  missing from local dependencies, and had 0 failed imports.
+- Closed AArch64 backend missing-line coverage with fast helper probes for
+  direct and indirect variadic calls, by-value aggregate stack arguments,
+  inconsistent indirect-record result guards, atomic compare/swap register
+  conflicts, Darwin variadic aggregate sizing, fallback record-name lookup,
+  unknown flexible-array layout, bitfield/flexible diagnostic guards, nested
+  `offsetof` fallback lookup, typedef record-name recursion, and large-offset
+  address materialization. Marked two AArch64 invariant-only defensive
+  branches as excluded with targeted coverage pragmas. Full `tox -e py311`
+  passes with 0 missed statements across `src/`; combined branch coverage is
+  still 99.57% with 162 partial branches, so project-wide 100% coverage
+  remains in progress. The fresh real CPython gate passed on
+  `build/cpython-src-clean` with the mypyc import tree:
+  `configure && make -j8` checked 116 modules, built 37 built-ins and 78
+  shared modules, reported only `_gdbm` missing from local dependencies, and
+  had 0 failed imports.
+- Closed x86_64 backend missing-line coverage with fast helper probes for
+  global-data collection skips, compound-literal data emission, local array
+  aggregate diagnostics, pointer bit-field update scaling, cast array-decay
+  guards, `typeof` type resolution, record/union layout failure paths,
+  aggregate return-register overflow diagnostics, constant folding edges,
+  string-unit bounds, static-local marker guards, and pointer/function helper
+  fallbacks. Marked three x86_64 invariant-only defensive branches as excluded
+  with targeted coverage pragmas. Full py311 measured 98.00959039888558%
+  total coverage with 334 missing lines, codegen 100.0% line coverage/0
+  missing lines, aarch64 90.88977047322187%/334, and x86_64 100.0% line
+  coverage/0 missing lines. Ratchet 98.00%.
+- Added fast AArch64 coverage for `__func__` string-literal lowering plus
+  direct record-layout helper edges for signed bitfield extraction, 64-bit
+  bitfield stores, fallback `offsetof` lookup, bitfield storage rollover,
+  flexible-array sizing guards, HFA rejection guards, small-record return
+  fallback classification, and invalid short-circuit operators. Full py311
+  measured 97.68388357833294% total coverage with 397 missing lines, codegen
+  100.0% line coverage/0 missing lines, aarch64 90.88977047322187%/334, and
+  x86_64 97.17105263157895%/63. Ratchet 97.68%.
+- Added fast AArch64 helper coverage for variadic builtin arity guards,
+  no-argument compiler builtins, `__builtin_expect` side-effect evaluation,
+  no-argument `alloca`/`fabs`/integer-bit builtins, 64-bit and 32-bit
+  bit-builtin variants, atomic pointer fallback/rejection, signed byte/short
+  atomic loads, stores, exclusive operations, unsupported atomic ops, and
+  short-argument atomic builtin fallbacks. Full py311 measured
+  97.55000401638686% total coverage with 427 missing lines, codegen 100.0%
+  line coverage/0 missing lines, aarch64 90.18135449135733%/364, and x86_64
+  97.17105263157895%/63. Ratchet 97.55%.
+- Added fast x86_64 helper coverage for global record initializer padding,
+  bit-field and flexible-array guards, compound record initializer diagnostics,
+  record/array designator validation, global string/floating/scalar emission
+  edges, pointer-offset rejection with unsized pointees, sizeof/member
+  fallbacks, and local array bound completion. Full py311 measured
+  97.37863817709588% total coverage with 463 missing lines, codegen 100.0%
+  line coverage/0 missing lines, aarch64 89.2745820345707%/400, and x86_64
+  97.17105263157895%/63. Ratchet 97.37%.
+- Added fast x86_64 helper coverage for aggregate `va_arg` rejection, unnamed
+  fixed-parameter skipping in `va_start` state, and direct floating binary
+  helper edges for unconvertible operands, non-floating operands, non-default
+  result registers, comparison result registers, and unsupported operators.
+  Full py311 measured 97.06803759338099% total coverage with 525 missing
+  lines, codegen 100.0% line coverage/0 missing lines, aarch64
+  89.2745820345707%/400, and x86_64 95.26315789473684%/125. Ratchet 97.07%.
+- Closed the remaining `codegen.py` missing-line coverage with focused helper
+  tests for anonymous-member record initializer paths and the defensive cast
+  fallback, plus targeted coverage exclusions for LLVM/Type invariant guards
+  that are unreachable under opaque pointers and canonical `Type` array ops.
+  Full py311 measured 97.0305513160361% total coverage with 532 missing lines,
+  codegen 100.0% line coverage/0 missing lines, aarch64
+  89.2745820345707%/400, and x86_64 95.03289473684211%/132. Ratchet 97.03%.
+- Refreshed the real CPython validation gate on `build/cpython-src-clean`
+  at `0f1f7c78898` using the mypyc import tree and
+  `/opt/homebrew/opt/llvm/bin/llc`. `uv run tox -e cpython-build --
+  build/cpython-src-clean` completed `configure && make -j8` in 1081.00s,
+  checked 116 modules, built 37 built-ins and 78 shared modules, reported only
+  `_gdbm` missing from local dependencies, and had 0 failed imports.
+- Added fast AArch64 helper coverage for global data emission, global array
+  length inference, record/union initializer diagnostics, bit-field and
+  flexible-array error guards, scalar float/`offsetof` data emission, array
+  completion fallbacks, and global lvalue/pointer initializer rejection
+  branches. Full py311 measured 96.92887498997675% total coverage with 555
+  missing lines, aarch64 89.2745820345707%/400, codegen
+  98.35225192237276%/23, and x86_64 95.03289473684211%/132. Ratchet 96.92%.
+- Added fast AArch64 helper coverage for address formation, indirect record
+  call-result slots, `sizeof`/`alignof`/`offsetof` diagnostics, local
+  array/string initializer guards, global array/record/string/scalar
+  initializer guards, and nonconstant pointer-initializer rejection. Full py311
+  measured 96.75513858819127% total coverage with 590 missing lines, aarch64
+  88.35364125814678%/435, codegen 98.35225192237276%/23, and x86_64
+  95.03289473684211%/132. Ratchet 96.75%.
+- Added fast x86_64 helper coverage for address formation, `sizeof`/`alignof`/
+  `offsetof` diagnostics, local array and string initializer guards, and global
+  initializer guard branches. Full py311 measured 96.52794483201026% total
+  coverage with 636 missing lines, aarch64 87.14933408897704%/481, codegen
+  98.35225192237276%/23, and x86_64 95.03289473684211%/132. Ratchet 96.52%.
+- Added fast x86_64 helper coverage for array initializer size/out-of-range
+  and aggregate/scalar initializer branches, synthetic declaration slot guards,
+  unsupported expression diagnostics, indirect aggregate call-result address
+  diagnostics, scalar and floating call return register moves, short-circuit
+  result moves, unsupported pointer binary diagnostics, aggregate assignment
+  sizing, bitfield assignment register moves, pointer and floating compound
+  assignment edges, and aggregate subscript/member access. Full py311 measured
+  96.37291850426323% total coverage with 667 missing lines, aarch64
+  87.14933408897704%/481, codegen 98.35225192237276%/23, and x86_64
+  94.07894736842105%/163. Ratchet 96.37%.
+- Added fast x86_64 helper coverage for aggregate return and aggregate
+  call-argument edges, including missing aggregate sizes, missing sret slots,
+  indirect aggregate call returns, impossible aggregate return register chunks,
+  aggregate initializer size mismatches, scalar compound initializer guards,
+  array initializer guard normalization, aggregate call-result argument
+  diagnostics, conditional aggregate argument stack mismatch, and aggregate
+  chunk loads from addresses. Full py311 measured 96.23927511827439% total
+  coverage with 692 missing lines, aarch64 87.14933408897704%/481, codegen
+  98.35225192237276%/23, and x86_64 93.25657894736842%/188. Ratchet 96.23%.
+- Added fast x86_64 helper coverage for alloca and integer-bit builtin
+  argument guards, non-default builtin result registers, atomic fetch and
+  compare-exchange register coercion, record/non-pointer unary dereference
+  edges, unary plus/float negation/unsupported unary diagnostics, unsigned
+  division, shifts, unsupported binary diagnostics, and unconvertible operand
+  diagnostics. Full py311 measured 96.10295886456579% total coverage with 721
+  missing lines, aarch64 87.14933408897704%/481, codegen
+  98.35225192237276%/23, and x86_64 92.41776315789474%/217. Ratchet 96.10%.
+- Added fast native backend helper coverage for AArch64 constant/scratch
+  analysis, record layout and return classification edges, plus x86_64 scalar
+  coercion, byte memory helpers, bitfield helpers, constant/string helpers,
+  symbol-address helpers, aggregate ABI classification, backend guard/state
+  edges, statement-expression and compound-literal guards, identifier lookup
+  variants, variadic builtin guards, call-argument classification, and atomic
+  pointer validation. Added more fast LLVM codegen helper coverage for whole
+  aggregate initializer casts, va-list casts, struct cast fallbacks,
+  record-initializer fallbacks, and non-constant integer const-cast fallback.
+  Full py311 measured 95.95595113997808% total coverage with 753 missing
+  lines, aarch64 87.14933408897704%/481, codegen 98.35225192237276%/23,
+  and x86_64 91.51315789473684%/249. Ratchet 95.95%.
+- Added fast LLVM codegen helper coverage for null cast-operand diagnostics,
+  integer-width compare normalization without C type metadata, file-scope-less
+  type resolution, unbraced aggregate child-refusal, nested/anonymous record
+  initializer fallbacks, pointer-union byte rejection, aggregate-element
+  fallback, and constant pointer/int/bit casts. Full py311 measured
+  95.15409082404511% total coverage with 918 missing lines, aarch64
+  85.88835364125815%/528, codegen 98.04101061882095%/32, and x86_64
+  88.32236842105263%/358. Ratchet 95.15%.
+- Added fast x86_64 helper coverage for control-flow statement guards,
+  unnamed parameter spill/frame preparation, missing parameter diagnostics,
+  default-label validation, variadic register save-slot diagnostics, nested
+  switch collection, and indirect-goto statement-expression local slot
+  collection. Full py311 measured 94.98837302541897% total coverage with 950
+  missing lines, aarch64 85.88835364125815%/528, codegen
+  96.90589527645551%/64, and x86_64 88.32236842105263%/358. Ratchet 94.98%.
+  The fresh real CPython gate passed on `build/cpython-src-clean` with
+  `configure && make -j8`: 116 modules checked, 37 built-in, 78 shared,
+  `_gdbm` missing only from local dependencies, and 0 failed imports.
+- Added another fast LLVM codegen helper sweep for switch case/default
+  terminator edges, array operand decay in binary/compare helpers, fallback
+  function declarator lowering, direct cast helpers, pointer-byte rejection,
+  and anonymous record name matching/mismatch paths. Full py311 samples now
+  measure 94.91620559698501%-94.92155133242456% total coverage with 963-964
+  missing lines, aarch64 85.88835364125815%/528, codegen
+  96.86927865250824%-96.90589527645551%/64-65, cc_driver 100.0%/0, evm
+  100.0%/0, host_includes 100.0%/0, and x86_64 87.91118421052632%/371.
+  Ratchet 94.90%.
+- Added a fast LLVM codegen helper sweep for remaining direct edges around
+  symbol-discovered indirect calls, record-value member access, scalar compound
+  literal storage, typedef qualifier merging, cast/va fallbacks, constant
+  record/member/subscript address paths, offsetof failures, and case constant
+  operators. Full py311/pre-commit samples now measure
+  94.84403816855104%-94.86542111030926% total coverage with 977-982 missing
+  lines, aarch64 85.88835364125815%/528, codegen
+  96.37495422922007%-96.52142072500915%/78-83, cc_driver 100.0%/0, evm
+  100.0%/0, host_includes 100.0%/0, and x86_64 87.91118421052632%/371.
+  Ratchet 94.83%.
+- Closed the remaining `cc_driver.py` and `host_includes.py` coverage gaps to
+  100% line/branch coverage with fast tests for empty `llvm-config --bindir`,
+  missing `PATH` `llc`, and Darwin `XCC_LLC` sibling-`clang` fallback paths.
+  Full py311 measured 94.57942426429317% total coverage with 1035 missing
+  lines, aarch64 85.88835364125815%/528, codegen 94.5624313438301%/136,
+  cc_driver 100.0%/0, evm 100.0%/0, host_includes 100.0%/0, and x86_64
+  87.91118421052632%/371. Ratchet 94.57%.
+- Stabilized the real CPython `make -j8` gate by making Darwin resource include
+  discovery prefer the `clang` next to an explicit `XCC_LLC`, and by trusting an
+  explicit `XCC_LLC` path directly instead of spawning `llc --help` in every
+  compiler process. Non-explicit `LLVM_CONFIG`/`PATH` candidates remain
+  help-output verified. Added host-include and driver regression coverage for
+  both behaviors. The fresh `cpython-build` gate passes on
+  `build/cpython-src-clean` with `configure && make -j8`: 116 modules checked,
+  37 built-in, 78 shared, `_gdbm` missing only from local dependencies, and 0
+  failed imports.
+- Added AArch64 native backend helper coverage for `sizeof`/`alignof` operand
+  type recovery when TypeMap entries are missing, including function locals,
+  file-scope globals, direct member access through pointers, nested member
+  chains, nested pointer roots, and unresolved member diagnostics. Added
+  x86_64 native backend coverage for float-class builtin variants and global
+  pointer initializer folding/rejection, including float
+  `isfinite`/`isinf`/`isnormal`/`signbit`, integer-argument coercion,
+  empty-argument fallback, helper-only non-`rax` result targets, extern/static
+  symbol addresses, compound literal addresses, function designators, commuted
+  array offsets, and nonconstant helper rejection paths.
+  Added more fast LLVM codegen helper coverage for function-definition setup,
+  duplicate pre-collected allocas, void parameter filtering, runtime unbraced
+  aggregate initializer fallbacks, empty-struct record constants, enum constant
+  evaluation, constant byte conversion fallbacks, untyped address/assignment
+  fallback paths, and function-local/file-scope symbol type lookups. Full py311
+  measured 94.55804132253495% total coverage with 1037 missing lines, aarch64
+  85.88835364125815%/528, codegen 94.52581471988283%/137, host_includes
+  98.2905982905983%/0, cc_driver 99.42028985507247%/1, evm 100.0%/0, and
+  x86_64 87.91118421052632%/371. Ratchet 94.53%.
+- Added fast LLVM codegen helper coverage for control-flow traversal, direct
+  and indirect call coercions, expression statement values, pointer/float
+  updates, `typeof` resolution diagnostics, compound literal storage, flexible
+  array initializer sizing, union storage byte coercions, and aggregate
+  constant byte fallbacks. Full py311 samples now measure
+  93.92804600775712%-93.98956800855959% total coverage with 1158-1172 missing
+  lines, aarch64 84.92490790592235%/569, codegen
+  93.11607469791285%-93.53716587330648%/164-178, evm 100.0%/0, and x86_64
+  86.34868421052632%/425. Ratchet 93.92%. The fresh `cpython-build` gate
+  passes on the clean CPython worktree with `configure && make -j8`: 116
+  modules checked, 37 built-in, 78 shared, `_gdbm` missing only from local
+  dependencies, and 0 failed imports.
+- Closed EVM backend coverage to 100% line and branch coverage by exercising
+  storage/static collection de-duplication, for-loop layout and emission
+  variants, ABI parameter guards, local type fallbacks, memory initializer
+  edges, void expression/cast paths, and malformed compound literal/lvalue
+  diagnostics. Only provably unreachable duplicate defensive guards are
+  excluded with targeted coverage pragmas. Full py311/pre-commit samples now
+  measure 93.64450983014578%-93.64985956934599% total coverage with
+  1230-1231 missing lines, aarch64 84.92490790592235%/569, codegen
+  91.17539362870744%-91.21201025265471%/236-237, evm 100.0%/0, and x86_64
+  86.34868421052632%/425. Ratchet 93.64%.
+- Added fast LLVM codegen helper coverage for function parameter filtering,
+  unspecified global array length inference, declaration-initializer fallbacks,
+  call argument ABI coercions, casts, direct and indirect void calls, va-list
+  intrinsics, aggregate lvalue addresses, and atomic helper edges. Full py311
+  now measures 93.5272573114956% total coverage with 1239 missing lines,
+  aarch64 84.92490790592235%/569, codegen 91.21200980392157%/236, evm
+  98.94429469901168%/9, and x86_64 86.34868421052632%/425. Ratchet 93.49%.
+- Added fast EVM coverage for backend-only builtin arity guards, function
+  layout de-duplication, missing string-literal type maps, file-scope function
+  prototypes, record member lookup diagnostics, type-spec edge resolution, and
+  storage function-label fallbacks. Full py311 now measures
+  93.24385744459% total coverage with 1300 missing lines in the strict
+  pre-commit gate, aarch64 84.92490790592235%/569, codegen
+  89.27132918344928%/297, evm 98.94429469901168%/9, and x86_64
+  86.34868421052632%/425. Ratchet 93.24%.
+- Fixed x86_64 global record initialization for a tail flexible array member
+  explicitly initialized with zero, matching the AArch64 behavior of emitting
+  only the record prefix and required padding instead of trying to size the
+  incomplete array. Added public-path AArch64 and x86_64 assembly coverage for
+  flexible array no-tail/zero-tail initializers plus padded bit-field record
+  layouts. Full py311 now measures 92.94976338796353% total coverage with
+  1353 missing lines, aarch64 84.92490790592235%/569, codegen
+  89.54595386305382%/288, evm 96.13656783468105%/71, and x86_64
+  86.34868421052632%/425. Ratchet 92.95%.
+- Added native backend public-path coverage for global integer constant
+  expression initializers on AArch64 and x86_64, including enum/character
+  constants, unary operators, casts, comma/conditional expressions, binary
+  arithmetic, comparisons, bitwise/logical operators, `sizeof`, `_Alignof`, and
+  `__builtin_offsetof`. Full py311 now measures 92.9050891878159% total
+  coverage with 1361 missing lines, aarch64 84.74071975063758%/575, codegen
+  89.54595386305382%/288, evm 96.13656783468105%/71, and x86_64
+  86.27677100494233%/427. Ratchet 92.90%.
+- Added fast EVM helper coverage for internal return/layout guards, switch
+  misuse, expression and lvalue diagnostics, aggregate assignment mismatch
+  paths, casts, statement/comma expressions, and direct/indirect function-call
+  layout errors. Pre-commit py311 coverage refreshes have measured
+  92.60556788703768%-92.61091648169443% total coverage with 1418-1419 missing
+  lines, aarch64 83.93312553131199%/605, codegen
+  89.50933723910656%-89.54595386305382%/288-289, evm
+  96.13656783468105%/71, x86_64 85.40362438220758%/454. Ratchet 92.60%.
+- Added fast EVM helper coverage for memory/storage initializer designator
+  diagnostics, array range/index bounds, string-local initializer targets,
+  `_Generic` selection failures, `sizeof` operand type failures, array
+  alignment, and pointer-stride helpers. The pre-commit py311 gate measures
+  92.35150964084187% total coverage with 1467 missing lines, aarch64
+  83.93312553131199%/605, codegen 89.45441230318565%/291, evm
+  94.07008086253369%/117, x86_64 85.40362438220758%/454. Ratchet 92.35%.
+- Added another fast EVM helper sweep for constant-expression fallbacks,
+  initcode size checks, PUSH operand bounds, bit-field truncation, storage
+  stores, and local memory initializer diagnostics. Full py311 now measures
+  92.19907469312439% total coverage with 1495 missing lines, aarch64
+  83.93312553131199%/605, codegen 89.54595386305382%/288, evm
+  92.6774483378257%/148, x86_64 85.40362438220758%/454. Ratchet 92.19%.
+- Added fast EVM backend helper coverage for assembler PUSH0/negative values,
+  function-shape guards, ABI type diagnostics, record lookup/layout edges,
+  control-flow diagnostics, type-spec resolution, storage function labels, and
+  storage initializer string/list diagnostics. Full py311 now measures
+  92.01722247479475% total coverage with 1532 missing lines, aarch64
+  83.93312553131199%/605, codegen 89.54595386305382%/288, evm
+  91.15004492362984%/185, x86_64 85.40362438220758%/454. Ratchet 92.01%.
+- Added more low-cost LLVM backend helper coverage for unary/address/call,
+  builtin, constant-initializer, and constant-expression fallback edges that
+  are hard to drive through valid source fixtures. Full py311 now measures
+  91.7337469579868% total coverage with 1588 missing lines, aarch64
+  83.93312553131199%/605, codegen 89.54595386305382%/288, evm
+  88.76909254267744%/241, x86_64 85.40362438220758%/454. Ratchet 91.72%.
+  The fresh `cpython-build` gate passes on the clean CPython worktree with
+  `configure && make -j8`: 116 modules checked, 37 built-in, 78 shared,
+  `_gdbm` missing only from local dependencies, and 0 failed imports.
+- Added low-cost LLVM backend helper coverage for codegen fallback edges that
+  are hard to reach from valid C source, including malformed initializer
+  designators, duplicate static-local global lookup, no-insertion-block checks,
+  record lookup errors, string aggregate checks, and pointer arithmetic
+  fallbacks. Full py311 now measures 90.8378573529805% total coverage with
+  1775 missing lines, aarch64 83.93312553131199%/605, codegen
+  83.41266935188575%/475, evm 88.76909254267744%/241, x86_64
+  85.40362438220758%/454. Ratchet 90.83%.
+- Added x86_64 public-path assembly coverage for GNU statement-expression void
+  forms, scalar compound literal values, SysV `va_start` fixed aggregate/float
+  parameter classification, right-hand pointer addition, void and array casts,
+  function/static-local addresses, and unordered floating `!=`. Full py311 now
+  measures 90.52763886288878% total coverage with 1836 missing lines, aarch64
+  83.93312553131199%/605, codegen 81.28890516294398%/536, evm
+  88.76909254267744%/241, x86_64 85.40362438220758%/454. Ratchet 90.52%.
+- Fixed native record position initializers so unnamed bit-fields do not
+  consume initializer slots in x86_64 and AArch64 lowering. Added regression
+  coverage for x86_64 compound literals plus executable AArch64 global and
+  local compound initializers with unnamed zero-width bit-fields. Full py311 now
+  measures 90.41264407776856% total coverage with 1862 missing lines, aarch64
+  83.93312553131199%/605, codegen 81.28890516294398%/536, evm
+  88.76909254267744%/241, x86_64 84.69522240527183%/480. Ratchet 90.41%.
+- Added x86_64 assembly coverage for SysV aggregate return classification when
+  bit-fields force an integer chunk next to a floating chunk. Added executable
+  LLVM coverage for global nested designators over named and anonymous
+  aggregate members. Full py311 now measures 90.40087775636908% total coverage
+  with 1865 missing lines, aarch64 83.90347764371894%/605, codegen
+  81.28890516294398%/536, evm 88.76909254267744%/241, x86_64
+  84.63189171343677%/483. Ratchet 90.40%.
+- Added executable LLVM coverage for flattened local nested aggregate
+  initializers, mixed integer/float arithmetic promotion and compound
+  assignment lowering, global designator constant indexes, and switch case
+  unary/conditional/comma constants. Fixed switch case constant evaluation for
+  logical-not, bitwise-not, and comma expressions. Full py311 now measures
+  90.352708199529% total coverage with 1879 missing lines, aarch64
+  83.90347764371894%/605, codegen 81.28890516294398%/536, evm
+  88.76909254267744%/241, x86_64 84.33476394849785%/497. Ratchet 90.35%.
+- Extended EVM initcode storage constant-expression coverage for nested
+  conditional expressions, pointer/array/anonymous-record `sizeof`, pointer and
+  scalar `_Alignof`, `__builtin_offsetof`, `__builtin_types_compatible_p`,
+  `_Generic`, and boolean plus narrow unsigned casts. Added EVM runtime coverage
+  for anonymous record sizing and member access. Full py311 now measures
+  90.20237712817219% total coverage with 1911 missing lines, aarch64
+  83.90347764371894%/605, codegen 80.23853211009174%/568, evm
+  88.76909254267744%/241, x86_64 84.33476394849785%/497. Ratchet 90.20%.
+- Added EVM execution coverage for binary comparison/bitwise variants,
+  pointer subtraction assignment, string-literal expressions, and scalar plus
+  fixed-array compound literals. Added executable LLVM coverage for comma and
+  conditional whole-aggregate initializers. Full py311 now measures
+  90.08994539029875% total coverage with 1933 missing lines, aarch64
+  83.90347764371894%/605, codegen 80.23853211009174%/568, evm
+  87.82569631626235%/263, x86_64 84.33476394849785%/497. Ratchet 90.09%.
+- Added AArch64 assembly coverage for global initializer variants including
+  single-item braced scalar initializers, incomplete array index designators,
+  compound-literal aggregate initialization, global `offsetof`, and global
+  floating constants. Added x86_64 assembly coverage for mixed floating/integer
+  aggregate return and call-argument chunks, plus C11 `__func__` and static
+  aggregate identifier lowering. The full `py311` gate now measures
+  90.04979119820109% total coverage with 1942 missing lines,
+  `aarch64_asm.py` is up to 83.90347764371894% with 605 missing lines,
+  `x86_64_asm.py` is up to 84.33476394849785% with 497 missing lines,
+  `codegen.py` remains at 80.20183486238533% with 569 missing lines, and
+  `evm.py` remains at 87.53369272237197% with 271 missing lines. The ratchet
+  is tightened to 90.05%.
+- Added executable LLVM coverage for global range designators, text-level
+  x86_64 coverage for extended common GCC builtins, text-level AArch64
+  coverage for float-class, bit, and narrow atomic builtin variants, and EVM
+  initcode/runtime coverage for storage `_Generic`,
+  `__builtin_types_compatible_p`, multi-character constants, and cast
+  function-pointer labels. The full `py311` gate now measures
+  89.97215976014563% total coverage with 1962 missing lines,
+  `aarch64_asm.py` is up to 83.77572746628815% with 611 missing lines,
+  `codegen.py` is up to 80.20183486238533% with 569 missing lines,
+  `evm.py` is up to 87.53369272237197% with 271 missing lines, and
+  `x86_64_asm.py` is up to 84.00462198745461% with 511 missing lines. The
+  ratchet is tightened to 89.97%.
+- Fixed LLVM lowering for local aggregate declarations with scalar
+  initializers so sema-typed aggregate expressions no longer become invalid
+  scalar-to-record bitcasts and omitted record members are zero-initialized
+  before first-member initialization. Added executable LLVM coverage for
+  `__builtin_va_copy` and scalar aggregate initializers, plus x86_64 assembly
+  coverage for `__builtin_isnan` and global floating constant initializer
+  forms. The clean real-project `cpython-build` gate passes
+  `configure && make -j8` with 116 modules checked, 37 built-in, 78 shared,
+  `_gdbm` missing only from local dependencies, and 0 failed imports. The full
+  `py311` gate now measures 89.68304957704251% total coverage with
+  2035 missing lines, `codegen.py` is up to 79.85321100917432% with
+  581 missing lines, `x86_64_asm.py` is up to 83.72400132056785% with
+  522 missing lines, `aarch64_asm.py` remains at 83.02342086586232% with
+  650 missing lines, and `evm.py` remains at 87.10691823899371% with
+  282 missing lines. The ratchet is tightened to 89.68%, and the `mypyc`,
+  lint, type, and pre-commit gates pass after the update.
+- Added x86_64 assembly coverage for unordered floating condition branches,
+  pointer subtraction scaling by element size, and member access on aggregate
+  call results that must spill to temporary storage before applying member
+  offsets. Added executable LLVM coverage for small/direct and large/indirect
+  aggregate call-result member reads. The full `py311` gate now measures
+  89.44773439802782% total coverage with 2089 missing lines, `codegen.py` is
+  up to 79.10585627193792% with 605 missing lines, `x86_64_asm.py` is up to
+  82.88213931990757% with 552 missing lines, `aarch64_asm.py` remains at
+  83.02342086586232% with 650 missing lines, and `evm.py` remains at
+  87.10691823899371% with 282 missing lines. The ratchet is tightened to
+  89.44%.
+- Added x86_64 assembly coverage for floating logical-not lowering, 32-bit
+  signed division/remainder, bitwise-not lowering, and bit-field postfix
+  updates that preserve the old result. Added executable LLVM coverage for
+  string initializers targeting `char[]` record members. The full `py311` gate
+  now measures 89.34590959028912% total coverage with 2118 missing lines,
+  `codegen.py` is up to 78.88416774431923% with 613 missing lines,
+  `x86_64_asm.py` is up to 82.45295477055134% with 573 missing lines,
+  `aarch64_asm.py` remains at 83.02342086586232% with 650 missing lines, and
+  `evm.py` remains at 87.10691823899371% with 282 missing lines. The ratchet
+  is tightened to 89.34%.
+- Added executable Darwin AArch64 coverage for CPython version-pack global
+  initializers, global union padding, zero-width bit-field storage, flexible
+  array global initialization, and aggregate zero-initializer edges. Added
+  x86_64 assembly coverage for else-body slot collection, expression-form
+  `for` initializers/updates, and function-local `_Static_assert`, plus
+  executable LLVM coverage for union tail padding caused by member alignment.
+  The full `py311` gate now measures 89.27623998499423% total coverage with
+  2137 missing lines, `aarch64_asm.py` is up to 83.02342086586232% with
+  650 missing lines, `codegen.py` is up to 78.81027156844634% with
+  616 missing lines, `evm.py` remains at 87.10691823899371% with
+  282 missing lines, and `x86_64_asm.py` is up to 82.08979861340376% with
+  589 missing lines. The ratchet is tightened to 89.27%.
+- Added executable LLVM coverage for block-scope `extern` scalar and array
+  reads, void expression returns, nested scalar brace initializers, forward
+  `goto`, endless `for` loops with `break`, post-return alloca insertion, and
+  unprototyped function-pointer initializers. The full `py311` gate now
+  measures 89.04847396768402% total coverage with 2194 missing lines,
+  `codegen.py` is up to 78.73637539257344% with 618 missing lines,
+  `aarch64_asm.py` remains at 82.05819730305181% with 698 missing lines,
+  `evm.py` remains at 87.10691823899371% with 282 missing lines, and
+  `x86_64_asm.py` remains at 81.87520633872565% with 596 missing lines. The
+  ratchet is tightened to 89.04%.
+- Added x86_64 native backend coverage for unused inline body suppression,
+  referenced inline function designators, and stack-passed aggregate parameter
+  chunks, plus Darwin AArch64 coverage for global pointer initializers that
+  reference extern object symbols. The full `py311` gate now measures
+  89.00292076422198% total coverage with 2203 missing lines,
+  `x86_64_asm.py` is up to 81.87520633872565% with 596 missing lines,
+  `aarch64_asm.py` is up to 82.05819730305181% with 698 missing lines,
+  `codegen.py` remains at 78.42231664511361% with 627 missing lines, and
+  `evm.py` remains at 87.10691823899371% with 282 missing lines. The ratchet
+  is tightened to 89.00%.
+- Added native backend coverage for x86_64 sparse array designators,
+  incomplete local array initializer storage, and nested `offsetof` member
+  paths, plus Darwin AArch64 execution coverage for chained member `sizeof`
+  and nested `offsetof`. The full `py311` gate now measures
+  88.9225327581125% total coverage with 2221 missing lines,
+  `x86_64_asm.py` is up to 81.49554308352592% with 610 missing lines,
+  `aarch64_asm.py` is up to 81.95883605393897% with 702 missing lines,
+  `codegen.py` remains at 78.42231664511361% with 627 missing lines, and
+  `evm.py` remains at 87.10691823899371% with 282 missing lines. The ratchet
+  is tightened to 88.92%.
+- Added native backend coverage for x86_64 global union padding, global
+  bit-field storage-unit initializers, record compound literal bit-field and
+  array-member initialization, bit-field compound assignment, and bit-field
+  prefix/postfix updates. Added Darwin AArch64 execution coverage for record
+  compound literals that initialize scalar array members and arrays of record
+  members. The full `py311` gate now measures 88.72424234304242% total
+  coverage with 2269 missing lines, `x86_64_asm.py` is up to
+  80.30703202377022% with 657 missing lines, and `aarch64_asm.py` is up to
+  81.930447125621% with 703 missing lines. The ratchet is tightened to
+  88.72%.
+- Added executable LLVM coverage for local initializer/control-flow edges and
+  native backend coverage for grouped globals plus grouped static locals in
+  both x86_64 and Darwin AArch64 assembly output. The full `py311` gate now
+  measures 88.23655510597818% total coverage with 2399 missing lines,
+  `codegen.py` is up to 78.42231664511361% with 627 missing lines,
+  `x86_64_asm.py` is up to 78.06206668867613% with 756 missing lines, and
+  `aarch64_asm.py` is up to 81.27750177430802% with 734 missing lines. The
+  ratchet is tightened to 88.23%.
+- Added LLVM execution coverage for default zero returns of pointer, floating,
+  and record-returning functions, plus grouped file-scope declarations that
+  lower multiple global objects from one declaration. The full `py311` gate now
+  measures 87.91500308154023% total coverage with 2464 missing lines,
+  `codegen.py` is up to 78.14520598559025% with 635 missing lines, and the
+  ratchet is tightened to 87.91%.
+- Added EVM backend coverage for explicit `return;` in exported void
+  functions plus source-level EVM ABI and function-pointer diagnostics for
+  variadic functions, unsupported internal parameters, pointer returns, record
+  ABI parameters, `__builtin_evm_return_array` arity, unsupported indirect-call
+  parameter types, missing local function-pointer targets, unsupported local
+  object types, and scalar initialization of aggregate locals. The full
+  `py311` gate now measures 87.8855274793001% total coverage with 2469 missing
+  lines, `evm.py` is up to 87.10691823899371% with 282 missing lines, and the
+  ratchet is tightened to 87.88%.
+- Added EVM execution coverage for nested local and storage initializer
+  designators that recurse through arrays of records. The full `py311` gate now
+  measures 87.8372946756344% total coverage with 2477 missing lines, `evm.py`
+  is up to 86.7026055705301% with 290 missing lines, and the ratchet is
+  tightened to 87.84%.
+- Added executable Darwin AArch64 coverage for global pointer initializers
+  involving compound literals, string literals, null pointers, array decay,
+  pointer-left addition, pointer-minus-integer, subobject/member addresses, and
+  small/direct plus large/indirect record-return paths. Fixed AArch64 aggregate
+  `__builtin_va_arg` initialization so variadic functions compiled by XCC can
+  copy both inline and by-reference Darwin aggregate varargs into local records.
+  The full `py311` gate now measures 87.8265762748198% total coverage with 2479
+  missing lines, `aarch64_asm.py` is up to 80.62455642299503% with 758 missing
+  lines, and the ratchet is tightened to 87.83%.
+- Added LLVM execution coverage for local enum constants, function pointer
+  dereference, pointer pre/post updates, pointer difference scaling, mixed
+  float comparisons, pointer/integer comparisons, and floating compound
+  assignments. The full `py311` gate now measures 87.72889353601973% total
+  coverage with 2501 missing lines, `codegen.py` is up to
+  77.94199150193977% with 640 missing lines, and the ratchet is tightened to
+  87.73%.
+- Fixed LLVM codegen for local and global UTF-16, UTF-32, and wide string array
+  initializers so they emit typed integer array constants instead of invalid
+  pointer-to-array bitcasts. Added executable coverage for local and global
+  `u""`, `U""`, and `L""` array initialization plus GNU multi-character
+  literal lowering. The full `py311` gate now measures 87.65650553634146%
+  total coverage with 2519 missing lines, `codegen.py` is up to
+  77.44319231479771% with 658 missing lines, and the ratchet is tightened to
+  87.66%.
+- Added executable Darwin AArch64 coverage for generic GNU atomic load, store,
+  exchange, compare-exchange, lock-free queries, fences, RMW variants, and
+  `__sync_*compare_and_swap` lowering. The full `py311` gate now measures
+  87.65140324963072% total coverage with 2517 missing lines, `aarch64_asm.py`
+  is up to 80.08540925266904% with 780 missing lines, and the ratchet is
+  tightened to 87.65%. The real `cpython-build` gate still completes
+  `configure && make -j8` with 116 modules checked, 37 built-in, 78 shared,
+  `_gdbm` missing from local dependencies, and 0 failed imports.
+- Added EVM backend execution and diagnostic coverage for grouped storage
+  declarations, initialized static locals, pointer-left addition, prefix
+  pointer updates, signed bit-field updates, statement expressions without
+  values, member access through record pointers, missing external call bodies,
+  unprototyped function pointer calls, and initcode/local initializer
+  diagnostics. The full `py311` gate now measures 87.35061098428898% total
+  coverage with 2601 missing lines, `evm.py` is up to 86.61275831087151% with
+  292 missing lines, and the ratchet is tightened to 87.35%. The
+  `mypy c`/lint/type gate still passes through the compiled import tree, and
+  the real `cpython-build` gate still completes `configure && make -j8` with
+  116 modules checked, 37 built-in, 78 shared, `_gdbm` missing from local
+  dependencies, and 0 failed imports.
+- Fixed LLVM lowering for `__builtin_memset` so its fill argument is narrowed
+  to the `i8` type required by the LLVM memset intrinsic, registered
+  `__builtin___memcpy_chk` with sema to match the existing codegen lowering,
+  and fixed floating classification builtins such as `__builtin_isinf(1)` so
+  integer arguments are converted through a floating operand type instead of
+  forming invalid integer `fcmp` IR. Added executable LLVM coverage for
+  pointer-form GNU atomics, lock-free queries, memory builtins,
+  `__builtin_expect`, `__builtin_ffs*`, and `__builtin_copysign*`. The full
+  `py311` gate now measures 87.07398952598362% total coverage with 2657
+  missing lines, and the ratchet is tightened to 87.07%. The real
+  `cpython-build` gate still completes `configure && make -j8` with 116 modules
+  checked and 0 failed imports.
+- Fixed LLVM global constant initialization for union members whose active
+  constant is stored as an LLVM aggregate with no visible operands, such as a
+  nested union initialized through an `unsigned char[]` member and copied into
+  larger array storage. Added an LLVM-C `GetAggregateElement` binding and
+  executable coverage for nested union byte storage plus GNU
+  `__sync_*compare_and_swap` lowering. The full `py311` gate now measures
+  86.83284536248624% total coverage with 2719 missing lines, and the ratchet is
+  tightened to 86.83%. The real `cpython-build` gate still completes
+  `configure && make -j8` with 116 modules checked and 0 failed imports.
+- Fixed LLVM switch case constant folding for logical and comparison operators,
+  after an executable regression showed those case labels falling through as
+  zero. Added execution coverage for switch case integer constant expressions
+  and extended character string escape decoding. The full `py311` gate now
+  measures 86.60164960640499% total coverage with 2778 missing lines, and the
+  ratchet is tightened to 86.60%. The real `cpython-build` gate still completes
+  `configure && make -j8` with 116 modules checked and 0 failed imports.
+- Added LLVM codegen execution coverage for switch case integer constant
+  expressions using division, remainder, shifts, bitwise operators, and a
+  conditional expression. The full `py311` gate now measures
+  86.51751862109764% total coverage with 2795 missing lines, and the ratchet is
+  tightened to 86.51%.
+- Added LLVM codegen execution coverage for global integer constant
+  expressions and global float/pointer constant casts, covering bitwise,
+  shift, logical, comparison, `ptrtoint`, `inttoptr`, null pointer, and negative
+  floating initializer paths. The full `py311` gate now measures
+  86.46373927774341% total coverage with 2805 missing lines, and the ratchet is
+  tightened to 86.46%.
+- Fixed AArch64 and x86_64 record layout so explicit member `_Alignas`
+  contributes to record alignment, `sizeof`, member offsets, HFA offsets, and
+  global initializer padding. Added native backend regressions for explicitly
+  aligned members, and tightened the coverage ratchet to 86.24% after the full
+  `py311` gate measured 86.24593293715884% total coverage with 2850 missing
+  lines. The real `cpython-build` gate still completes `configure && make -j8`
+  with 116 modules checked and 0 failed imports.
+- Fixed LLVM codegen for `_Alignof` so constant expressions return the target
+  type's alignment instead of its size, and record/union alignment now honors
+  explicit member `_Alignas` requirements. Added execution tests for natural
+  record alignment and explicitly aligned members. The refreshed full `py311`
+  gate measures 86.21775039681472% total coverage with 2857 missing lines, and
+  the real `cpython-build` gate still completes `configure && make -j8` with
+  116 modules checked and 0 failed imports.
+- Fixed the parallel coverage runner so each `--coverage` invocation uses an
+  isolated per-run `COVERAGE_FILE` before combining data, preventing stale
+  `.coverage.*` files from contaminating the ratchet. The isolated full
+  `py311` gate now measures 86.20698931963089% total coverage with 2859 missing
+  lines, and `sema/initializers.py` is back to 100%.
+- Fixed unbraced flattened aggregate initializer consumption across sema,
+  incomplete-array length inference, LLVM local initialization, and LLVM global
+  constant initialization. Added execution tests for nested records, arrays of
+  records, multidimensional arrays, and nested char-array string initializers so
+  `struct Pair pairs[2] = {1, 2, 3, 4}` and `int a[2][3] = {1, 2, 3, 4, 5, 6}`
+  initialize subobjects like C expects instead of treating each scalar as a
+  top-level element.
+- Added a stdlib-only parallel unittest runner that shards test modules across
+  subprocesses, merges coverage data, and is now the shared tox test gate with
+  the default coverage ratchet raised from 0% to the current 86.2%.
+- Promoted mypyc from benchmark-only tooling to an explicit tox gate that
+  rebuilds the compiled import tree and runs the test suite against it.
+- Added a `cpython-build` tox gate and `scripts/validate_cpython_build.py` so a
+  clean CPython `configure && make` build has a reproducible entry separate
+  from frontend file benchmarks; the gate now rebuilds and injects the mypyc
+  import tree before invoking `CC=xcc`.
+- Verified the real CPython build path through the `cpython-build` tox gate
+  against the isolated `build/cpython-src-clean` worktree with the mypyc import
+  tree injected; CPython completed `configure && make -j8`, checked 116 modules
+  with 37 built-in, 78 shared, `_gdbm` missing from local dependencies, and
+  0 failed imports.
+- Wired local pre-commit and CI test gates through tox so test, lint, and type
+  checks use the same commands before handoff.
+- Added focused branch-coverage tests for GNU asm preprocessing, host include
+  fallback discovery, parser GNU attribute handling, array-size/type-specifier
+  edges, preprocessor macro/comment helpers, frontend token caching, and
+  semantic scope/record helpers; `host_includes.py`,
+  `parser/extensions.py`, `parser/array_sizes.py`, `parser/statements.py`,
+  `parser/type_specs.py`, `preprocessor/macros.py`,
+  `preprocessor/macro_expansion.py`, `preprocessor/process.py`,
+  `frontend.py`, `sema/records.py`, and `sema/symbols.py` now report 100%
+  coverage under the full gate, leaving the remaining global coverage debt
+  concentrated in backend code paths.
+- Added another coverage sweep for cc-driver argument/error paths, LLVM loader
+  caching, GNU asm text helpers, enum constant evaluation, string literal
+  typing, and sema initializer fallbacks. The full `py311` gate now measures
+  84.49500585145469% total coverage with 3234 missing lines; `cc_driver.py`
+  reports 98%, while `llvm_api.py`, `sema/expressions.py`,
+  `sema/initializers.py`, and `sema/type_resolution.py` report 100%.
+- Added focused backend coverage tests for LLVM constant pointer subscript
+  initializers, GNU statement-expression variants, GNU atomic
+  `__atomic_*_fetch` new-value lowering, and AArch64 global builtin float
+  constant emission. The full `py311` gate now measures
+  84.8869172359361% total coverage with 3145 missing lines, and the coverage
+  ratchet is tightened to 84.8%.
+- Cleared the remaining small non-backend coverage gaps in `cc_driver.py`,
+  `preprocessor/text.py`, `sema/__init__.py`, `sema/constants.py`,
+  `sema/declarations.py`, and `sema/statements.py`; those modules now report
+  100% coverage. The full `py311` gate now measures 84.94936846689896% total
+  coverage with 3134 missing lines, leaving only `aarch64_asm.py`,
+  `x86_64_asm.py`, `codegen.py`, and `evm.py` below 100%, and the ratchet is
+  tightened to 84.9%.
+- Added backend coverage tests for AArch64 local array initializer execution,
+  x86_64 inline lowering of atomic load/store/exchange/fence/bitwise fetch
+  operations, EVM initcode storage constant-expression operators, and LLVM
+  local aggregate initializer stores. The full `py311` gate now measures
+  85.43118466898954% total coverage with 3018 missing lines, and the ratchet is
+  tightened to 85.4% with two-decimal coverage report precision.
+- Added backend coverage tests for LLVM loop/switch/goto control-flow paths,
+  x86_64 integer compound-assignment lowering, and EVM Keccak multi-rate-block
+  absorption. The full `py311` gate now measures 85.665287456446% total
+  coverage with 2956 missing lines, and the ratchet is tightened to 85.6%.
+- Added backend coverage tests for x86_64 loop/switch/goto statement lowering,
+  x86_64 scalar and array compound-literal storage initialization, and EVM
+  nested static-local collection through control-flow statements. The full
+  `py311` gate now measures 85.98649825783973% total coverage with 2873
+  missing lines, and the ratchet is tightened to 85.9%.
+- Added backend coverage tests for AArch64 loop/switch/goto statement lowering,
+  AArch64 scalar and array compound-literal storage initialization, and EVM
+  compound-assignment and runtime unary operator lowering. The full `py311`
+  gate now measures 86.17704703832753% total coverage with 2832 missing lines,
+  and the ratchet is tightened to 86.1%.
+- Added EVM backend coverage tests for expression-form `for` initializers and
+  `void` post expressions, static-local discovery through nested expression
+  trees, and `void` function-pointer dispatch returns. The full `py311` gate
+  now measures 86.22060104529616% total coverage with 2823 missing lines, and
+  the ratchet is tightened to 86.2%.
 - Optimized CPython-scale frontend throughput by making `FrontendResult.pp_tokens`
   lazy and adding a guarded preprocessor macro-candidate scan; on
   `Python/getcompiler.c`, cProfile total time dropped from 49.608 s to

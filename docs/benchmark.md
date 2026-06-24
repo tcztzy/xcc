@@ -97,6 +97,17 @@ sample:
 - `Parser/parser.c`
 - `Modules/_json.c`
 
+This frontend benchmark is deliberately separate from real-project build
+validation. For a clean CPython `configure && make` check with XCC as `CC`, run:
+
+```bash
+uv run tox -e cpython-build -- /path/to/cpython
+```
+
+That tox gate rebuilds `build/mypyc/lib` and prepends it to `PYTHONPATH` before
+running CPython's configure/make path, so the real-project check uses the
+first-tier mypyc import tree instead of the pure-Python frontend.
+
 ## Results
 
 ### 2026-06-17 Profile-Guided Frontend Optimization

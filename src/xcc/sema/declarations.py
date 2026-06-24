@@ -40,7 +40,10 @@ class _FileScopeAnalyzer(Protocol):
     def _extern_initializer_message(self, scope_label: str) -> str: ...
 
     def _infer_array_size_from_init(
-        self, initializer: Expr | InitList, scope: Scope
+        self,
+        initializer: Expr | InitList,
+        scope: Scope,
+        target_type: Type | None = None,
     ) -> int | None: ...
 
     def _invalid_alignment_message(
@@ -220,7 +223,11 @@ def analyze_file_scope_decl(analyzer: _FileScopeAnalyzer, declaration: Stmt) -> 
                     symbol._init_expr = declaration.init
             array_bound = var_type.declarator_ops[0][1] if var_type.is_array() else None
             if isinstance(array_bound, int) and array_bound < 0:
-                inferred = a._infer_array_size_from_init(declaration.init, a._file_scope)
+                inferred = a._infer_array_size_from_init(
+                    declaration.init,
+                    a._file_scope,
+                    var_type,
+                )
                 if inferred is not None:
                     new_ops = (("arr", inferred),) + var_type.declarator_ops[1:]
                     new_type = Type(

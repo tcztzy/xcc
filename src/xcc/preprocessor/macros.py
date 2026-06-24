@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from typing import cast
 
 from xcc.lexer import LexerError, TokenKind, lex_pp
 
@@ -93,11 +94,9 @@ def _tokenize_macro_text(text: str) -> list[_MacroToken] | None:
     for token in tokens:
         if token.kind == TokenKind.EOF:
             continue
-        if not isinstance(token.kind, TokenKind):
-            return None
         lexeme = token.lexeme
         assert lexeme is not None
-        out.append(_MacroToken(token.kind, lexeme))
+        out.append(_MacroToken(cast(TokenKind, token.kind), lexeme))
     return out
 
 

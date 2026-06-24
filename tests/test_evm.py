@@ -4,12 +4,52 @@ from pathlib import Path
 
 import xcc.evm as evm
 from tests import _bootstrap  # noqa: F401
+from xcc.ast import (
+    AssignExpr,
+    BinaryExpr,
+    BreakStmt,
+    CallExpr,
+    CaseStmt,
+    CastExpr,
+    CommaExpr,
+    CompoundLiteralExpr,
+    CompoundStmt,
+    ConditionalExpr,
+    ContinueStmt,
+    DefaultStmt,
+    DeclStmt,
+    DesignatorRange,
+    ExprStmt,
+    ForStmt,
+    FunctionDef,
+    GenericExpr,
+    Identifier,
+    InitItem,
+    InitList,
+    IntLiteral,
+    MemberExpr,
+    Param,
+    RecordMemberDecl,
+    ReturnStmt,
+    SizeofExpr,
+    StatementExpr,
+    Stmt,
+    StringLiteral,
+    SubscriptExpr,
+    SwitchStmt,
+    TypeSpec,
+    UnaryExpr,
+    UpdateExpr,
+)
 from xcc.evm import (
     evm_selector,
     generate_evm_asm,
     generate_evm_bytecode,
+    keccak256,
 )
 from xcc.frontend import FrontendOptions, compile_source
+from xcc.sema.symbols import FunctionSymbol, RecordMemberInfo, VarSymbol
+from xcc.types import CHAR, UINT, Type
 
 
 class _MiniEvm:
@@ -606,9 +646,1311 @@ class EvmTargetTests(unittest.TestCase):
             options=FrontendOptions(std="gnu11", hosted=False),
         )
 
+    def _assert_evm_diagnostic(self, source: str, message: str) -> None:
+        result = self._compile(source)
+
+        with self.assertRaises(Exception) as error:
+            generate_evm_bytecode(result)
+
+        self.assertEqual(error.exception.diagnostic.code, "XCC-EVM-0001")
+        self.assertEqual(error.exception.diagnostic.message, message)
+
+    def _assert_evm_initcode_diagnostic(self, source: str, message: str) -> None:
+        result = self._compile(source)
+
+        with self.assertRaises(Exception) as error:
+            evm.generate_evm_initcode(result)
+
+        self.assertEqual(error.exception.diagnostic.code, "XCC-EVM-0001")
+        self.assertEqual(error.exception.diagnostic.message, message)
+
+    def _helper_generator(self):
+        return evm._EvmGen(
+            self._compile(
+                """
+typedef __evm_uint256 uint256;
+uint256 get(void) { return 1; }
+"""
+            )
+        )
+
+    def _assert_evm_helper_diagnostic(self, action, message: str) -> None:
+        with self.assertRaises(Exception) as error:
+            action()
+
+        self.assertEqual(error.exception.diagnostic.code, "XCC-EVM-0001")
+        self.assertEqual(error.exception.diagnostic.message, message)
+
     def test_keccak_selector_uses_ethereum_abi_hash(self) -> None:
         self.assertEqual(evm_selector("get()"), 0x6D4CE63C)
         self.assertEqual(evm_selector("set(uint32)"), 0x58E3CA1C)
+
+    def test_keccak256_absorbs_full_rate_blocks(self) -> None:
+        self.assertEqual(
+            keccak256(b"a" * 136).hex(),
+            "a6c4d403279fe3e0af03729caada8374b5ca54d8065329a3ebcaeb4b60aa386e",
+        )
+        self.assertEqual(
+            keccak256(b"a" * 200).hex(),
+            "96ea54061def936c4be90b518992fdc6f12f535068a256229aca54267b4d084d",
+        )
+
+    def test_evm_assembler_encodes_negative_values_and_push0(self) -> None:
+        assembler = evm._Assembler()
+
+        assembler.push(-1)
+        assembler.push(0)
+
+        self.assertEqual(assembler.to_bytes(), bytes.fromhex("7f" + "ff" * 32 + "5f"))
+        self.assertIn("PUSH32 0x" + "ff" * 32, assembler.to_asm())
+        self.assertIn("PUSH0", assembler.to_asm())
+
+    def test_evm_helper_function_shape_edges(self) -> None:
+        gen = self._helper_generator()
+        function = gen._unit.functions[0]
+        symbol = gen._sema.functions[function.name]
+        function_pointer = Type("__evm_uint256").function_of((Type("__evm_uint256"),)).pointer_to()
+
+        symbol.locals["local_fp"] = VarSymbol("local_fp", function_pointer)
+        self.assertIsNotNone(gen._callable_signature_for_expr(Identifier("local_fp"), symbol))
+        file_scope = gen._sema.file_scope
+        self.assertIsNotNone(file_scope)
+        assert file_scope is not None
+        file_scope.define(VarSymbol("global_fp", function_pointer))
+        self.assertIsNotNone(gen._callable_signature_for_expr(Identifier("global_fp")))
+
+        missing = FunctionDef(TypeSpec("unsigned int"), "missing_symbol", [], None)
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._validate_function(missing),
+            "missing function symbol: missing_symbol",
+        )
+        unnamed = FunctionDef(
+            function.return_type,
+            function.name,
+            [Param(TypeSpec("unsigned int"), None)],
+            function.body,
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._validate_function(unnamed),
+            "EVM target requires named parameters",
+        )
+
+        gen._functions_by_name = {function.name: function}
+        self.assertEqual(gen._function_pointer_targets((Type("__evm_uint256"), (None, False))), ())
+        self.assertEqual(
+            gen._function_pointer_targets(
+                (Type("__evm_uint256"), ((Type("__evm_uint256"),), True))
+            ),
+            (),
+        )
+        self.assertTrue(gen._is_function_pointer_type(function_pointer))
+        self.assertFalse(gen._is_function_pointer_type(Type("__evm_uint256").pointer_to()))
+
+    def test_evm_helper_abi_and_record_diagnostics(self) -> None:
+        gen = self._helper_generator()
+
+        abi_cases = (
+            (
+                Type("struct Pair").pointer_to(),
+                "unsupported EVM ABI array element type: struct Pair",
+            ),
+            (Type("__evm_uint256").array_of(2), "EVM ABI only supports scalar integers"),
+            (Type("double"), "unsupported EVM ABI type: double"),
+        )
+        for type_, message in abi_cases:
+            with self.subTest(message=message):
+                self._assert_evm_helper_diagnostic(
+                    lambda type_=type_: gen._abi_type(type_),
+                    message,
+                )
+
+        records = gen._sema.record_definitions
+        records["struct Inner"] = (RecordMemberInfo("value", Type("__evm_uint256")),)
+        records["struct Outer"] = (RecordMemberInfo(None, Type("struct Inner")),)
+        records["struct Bad"] = (RecordMemberInfo(None, Type("__evm_uint256")),)
+
+        self.assertEqual(gen._record_member_index(Type("struct Outer"), "value"), 0)
+        self.assertEqual(gen._record_member_access(Type("struct Outer"), "value").slot_offset, 0)
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._record_slots_for_type(Type("struct Missing")),
+            "unknown EVM record type: struct Missing",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._record_slots_for_type(Type("struct Bad")),
+            "EVM target does not support anonymous storage members",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._record_member_access(Type("struct Inner"), "missing"),
+            "unknown EVM record member: missing",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._find_record_member_access(Type("struct Missing"), "value"),
+            "unknown EVM record type: struct Missing",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._require_evm_abi_param_type(Type("struct Pair").pointer_to()),
+            "unsupported EVM scalar type: struct Pair*",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._record_member_slot_offset_by_index(Type("struct Missing"), 0),
+            "unknown EVM record type: struct Missing",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._record_member_slot_offset_by_index(Type("struct Inner"), -1),
+            "unknown EVM record member index",
+        )
+
+    def test_evm_helper_control_layout_and_type_edges(self) -> None:
+        gen = self._helper_generator()
+
+        self.assertIsNone(gen._lookup_static_local("cached"))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._user_label("done"),
+            "EVM label outside function",
+        )
+
+        local = gen._alloc_local("scratch", Type("__evm_uint256"))
+        self.assertEqual(local.type_, Type("__evm_uint256"))
+        gen._current_layout = evm._FunctionLayout(0x80, 0xA0, {}, {}, {}, {}, 0xC0)
+        self.assertEqual(gen._alloc_local("fresh", Type("__evm_uint256")).offset, 0x60)
+        gen._current_layout = None
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_dynamic_array_param(0, 32, evm._Local(0, Type("__evm_uint256"), 1)),
+            "EVM dynamic ABI parameter needs a pointer local: __evm_uint256",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_stmt(BreakStmt()),
+            "break not within loop or switch",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_stmt(ContinueStmt()),
+            "continue not within loop",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_stmt(Stmt()),
+            "unsupported EVM statement: Stmt",
+        )
+
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._sizeof_type(Type("__evm_uint256").function_of(())),
+            "EVM target cannot size function type: __evm_uint256(void)",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._sizeof_type(Type("__evm_uint256").array_of(-1)),
+            "EVM target needs a complete sized type: __evm_uint256[-1]",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._sizeof_type(Type("double")),
+            "EVM target cannot size type: double",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._alignof_type(Type("__evm_uint256").function_of(())),
+            "EVM target cannot align function type: __evm_uint256(void)",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._alignof_type(Type("double")),
+            "EVM target cannot align type: double",
+        )
+
+    def test_evm_helper_function_layout_collection_edges(self) -> None:
+        gen = self._helper_generator()
+        original_file_scope = gen._sema.file_scope
+        object.__setattr__(gen._sema, "file_scope", None)
+        try:
+            gen._collect_storage_globals()
+        finally:
+            object.__setattr__(gen._sema, "file_scope", original_file_scope)
+
+        file_scope = gen._sema.file_scope
+        self.assertIsNotNone(file_scope)
+        assert file_scope is not None
+        file_scope.define(VarSymbol("externish", UINT, is_extern=True))
+        gen._unit.declarations.append(DeclStmt(TypeSpec("unsigned int"), "externish", None))
+        gen._collect_storage_globals()
+        file_scope.define(VarSymbol("storage_word", UINT))
+        gen._unit.declarations.append(DeclStmt(TypeSpec("unsigned int"), "storage_word", None))
+        gen._collect_storage_globals()
+        gen._collect_storage_globals()
+
+        compound = CompoundLiteralExpr(
+            TypeSpec("unsigned int"),
+            InitList((InitItem((), IntLiteral("1")),)),
+        )
+        string = StringLiteral('"x"')
+        call = CallExpr(Identifier("fp"), [])
+        function = FunctionDef(
+            TypeSpec("unsigned int"),
+            "layout_edges",
+            [
+                Param(TypeSpec("__evm_uint256"), "x"),
+                Param(TypeSpec("__evm_uint256"), "x"),
+                Param(TypeSpec("__evm_uint256"), "fp"),
+            ],
+            CompoundStmt(
+                [
+                    DeclStmt(TypeSpec("__evm_uint256"), "once", None, storage_class="static"),
+                    ForStmt(
+                        DeclStmt(TypeSpec("__evm_uint256"), "loop_local", None),
+                        IntLiteral("1"),
+                        IntLiteral("2"),
+                        CompoundStmt([]),
+                    ),
+                    ForStmt(IntLiteral("1"), None, None, CompoundStmt([])),
+                    ForStmt(None, IntLiteral("1"), None, CompoundStmt([])),
+                    ExprStmt(BinaryExpr("+", compound, compound)),
+                    ExprStmt(BinaryExpr("+", string, string)),
+                    ExprStmt(BinaryExpr("+", call, call)),
+                ]
+            ),
+        )
+        function_pointer = Type("__evm_uint256").function_of(()).pointer_to()
+        gen._sema.functions[function.name] = FunctionSymbol(
+            function.name,
+            UINT,
+            {
+                "x": VarSymbol("x", Type("__evm_uint256")),
+                "fp": VarSymbol("fp", function_pointer),
+            },
+        )
+        gen._type_map.set(string, CHAR.array_of(2))
+        gen._unit.functions.append(function)
+        gen._collect_storage_globals()
+        gen._collect_storage_globals()
+
+        gen._plan_function_layouts([function])
+
+        layout = gen._function_layouts[function.name]
+        self.assertIn("x", layout.locals)
+        self.assertIn("loop_local", layout.locals)
+        self.assertIn("fp", layout.locals)
+        self.assertIn(id(compound), layout.compound_literals)
+        self.assertIn(id(string), layout.string_literals)
+        self.assertIn(id(call), layout.indirect_calls)
+
+        missing_string_type = StringLiteral('"missing"')
+        bad_function = FunctionDef(
+            TypeSpec("unsigned int"),
+            "bad_layout",
+            [],
+            CompoundStmt([ExprStmt(missing_string_type)]),
+        )
+        gen._sema.functions[bad_function.name] = FunctionSymbol(bad_function.name, UINT, {})
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._plan_function_layouts([bad_function]),
+            "EVM target cannot resolve string literal type",
+        )
+
+    def test_evm_helper_type_spec_and_storage_initializer_edges(self) -> None:
+        gen = self._helper_generator()
+        file_scope = gen._sema.file_scope
+        self.assertIsNotNone(file_scope)
+        assert file_scope is not None
+        file_scope.define_typedef("word", Type("__evm_uint256"))
+
+        self.assertEqual(gen._resolve_type_spec(TypeSpec("word")), Type("__evm_uint256"))
+        self.assertEqual(gen._resolve_type_spec(TypeSpec("enum")), Type("int"))
+        self.assertEqual(gen._resolve_type_spec(TypeSpec("bool")), Type("_Bool"))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._resolve_type_spec(
+                TypeSpec("unsigned int", declarator_ops=(("fn", ((), False)),))
+            ),
+            "EVM target does not support local function declarators",
+        )
+
+        records = gen._sema.record_definitions
+        records["struct <anon:1>"] = (RecordMemberInfo("value", UINT),)
+        records["struct Box <scope:1>"] = (RecordMemberInfo("value", UINT),)
+        records["union Other"] = (RecordMemberInfo("value", UINT),)
+        scoped_spec = TypeSpec(
+            "struct",
+            record_tag="Box",
+            record_members=(RecordMemberDecl(TypeSpec("unsigned int"), "value"),),
+        )
+        unmatched_tagged_spec = TypeSpec(
+            "struct",
+            record_tag="Fresh",
+            record_members=(RecordMemberDecl(TypeSpec("unsigned int"), "value"),),
+        )
+        anon_spec = TypeSpec(
+            "struct",
+            record_members=(RecordMemberDecl(TypeSpec("unsigned int"), "value"),),
+        )
+        unmatched_anon_spec = TypeSpec(
+            "struct",
+            record_members=(RecordMemberDecl(TypeSpec("unsigned int"), "missing"),),
+        )
+        self.assertEqual(gen._record_name_for_type_spec(scoped_spec), "struct Box <scope:1>")
+        self.assertEqual(gen._record_name_for_type_spec(unmatched_tagged_spec), "struct Fresh")
+        self.assertEqual(gen._record_name_for_type_spec(anon_spec), "struct <anon:1>")
+        self.assertEqual(gen._record_name_for_type_spec(unmatched_anon_spec), "struct")
+        self.assertFalse(gen._record_members_match_type_spec("struct Missing", anon_spec))
+        self.assertFalse(
+            gen._record_members_match_type_spec(
+                "struct <anon:1>",
+                TypeSpec(
+                    "struct",
+                    record_members=(RecordMemberDecl(TypeSpec("unsigned int"), "other"),),
+                ),
+            )
+        )
+        self.assertFalse(
+            gen._record_members_match_type_spec(
+                "struct <anon:1>",
+                TypeSpec(
+                    "struct",
+                    record_members=(RecordMemberDecl(TypeSpec("unsigned long"), "value"),),
+                ),
+            )
+        )
+
+        function = gen._unit.functions[0]
+        gen._functions_by_name = {function.name: function}
+        function_type = Type("__evm_uint256").function_of(())
+        conditional = ConditionalExpr(Identifier("dynamic"), Identifier("get"), Identifier("get"))
+        constant_conditional = ConditionalExpr(
+            IntLiteral("1"), Identifier("get"), Identifier("missing")
+        )
+        self.assertIsNone(gen._eval_storage_word_initializer(Type("__evm_uint256"), conditional))
+        self.assertIsNone(gen._eval_storage_function_label(function_type, conditional))
+        self.assertEqual(
+            gen._eval_storage_function_label(function_type, constant_conditional),
+            "internal_get",
+        )
+        self.assertIsNone(gen._eval_storage_function_label(function_type, Identifier("missing")))
+        self.assertIsNone(gen._eval_storage_function_label(function_type, IntLiteral("0")))
+        self.assertIsNone(
+            gen._eval_storage_function_label(
+                function_type,
+                CastExpr(TypeSpec("__evm_uint256"), Identifier("missing")),
+            )
+        )
+        cast_label = gen._eval_storage_function_label(
+            function_type,
+            CastExpr(TypeSpec("__evm_uint256"), UnaryExpr("&", Identifier("get"))),
+        )
+        self.assertEqual(cast_label, "internal_get")
+
+        self.assertEqual(
+            gen._eval_storage_string_literal(CHAR.array_of(3), StringLiteral('"A"')),
+            (65, 0, 0),
+        )
+        storage_string_cases = (
+            (
+                Type("__evm_uint256"),
+                StringLiteral('"A"'),
+                "EVM string literal cannot initialize storage __evm_uint256",
+            ),
+            (
+                Type("__evm_uint256").array_of(2),
+                StringLiteral('"A"'),
+                (
+                    "EVM string literal storage initializer needs a char array target: "
+                    "__evm_uint256[2]"
+                ),
+            ),
+            (
+                CHAR.array_of(-1),
+                StringLiteral('"A"'),
+                "EVM string literal storage initializer needs a complete array target: char[-1]",
+            ),
+            (
+                CHAR.array_of(1),
+                StringLiteral('"AB"'),
+                "EVM string literal storage initializer too long",
+            ),
+        )
+        for type_, init, message in storage_string_cases:
+            with self.subTest(message=message):
+                self._assert_evm_helper_diagnostic(
+                    lambda type_=type_, init=init: gen._eval_storage_string_literal(type_, init),
+                    message,
+                )
+
+        one_item = InitList((InitItem((), IntLiteral("7")),))
+        two_items = InitList((InitItem((), IntLiteral("1")), InitItem((), IntLiteral("2"))))
+        self.assertEqual(gen._eval_storage_init_list(Type("__evm_uint256"), one_item), (7,))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._eval_storage_init_list(Type("__evm_uint256"), two_items),
+            "EVM scalar storage initializer list requires one element",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._eval_storage_init_list(Type("double"), InitList(())),
+            "unsupported EVM storage initializer target: double",
+        )
+
+    def test_evm_helper_constant_expression_and_initcode_edges(self) -> None:
+        gen = self._helper_generator()
+
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._eval_case_value(Identifier("missing")),
+            "EVM target cannot evaluate case value",
+        )
+        self.assertIsNone(gen._eval_const_expr(UnaryExpr("+", Identifier("missing"))))
+        self.assertIsNone(gen._eval_const_expr(UnaryExpr("unsupported", IntLiteral("1"))))
+        self.assertIsNone(
+            gen._eval_const_expr(BinaryExpr("+", Identifier("missing"), IntLiteral("1")))
+        )
+        self.assertEqual(gen._eval_const_expr(BinaryExpr("-", IntLiteral("7"), IntLiteral("4"))), 3)
+        self.assertIsNone(
+            gen._eval_const_expr(
+                ConditionalExpr(Identifier("missing"), IntLiteral("1"), IntLiteral("2"))
+            )
+        )
+        self.assertEqual(
+            gen._eval_const_expr(CastExpr(TypeSpec("unsigned int"), IntLiteral("9"))),
+            9,
+        )
+        self.assertEqual(gen._parse_int("0b1010ULL"), 10)
+        self.assertEqual(gen._char_value("'AB'"), 0x4142)
+        self.assertEqual(gen._normalize_integer_constant(-1, Type("double")), (1 << 256) - 1)
+        self.assertEqual(gen._normalize_integer_constant(255, CHAR), (1 << 256) - 1)
+        self.assertEqual(gen._truncate_bit_field_constant(123, 0), 0)
+        self.assertEqual(gen._truncate_bit_field_constant(-1, 256), (1 << 256) - 1)
+        original_file_scope = gen._sema.file_scope
+        object.__setattr__(gen._sema, "file_scope", None)
+        try:
+            self.assertIsNone(gen._lookup_enum_constant("missing"))
+            self.assertEqual(gen._resolve_type_spec(TypeSpec("unsigned int")), UINT)
+        finally:
+            object.__setattr__(gen._sema, "file_scope", original_file_scope)
+        self.assertEqual(gen._record_name_for_type_spec(TypeSpec("struct")), "struct")
+        self.assertEqual(
+            gen._lookup_local_type(DeclStmt(TypeSpec("unsigned int"), "fallback", None)),
+            UINT,
+        )
+        self.assertIsNone(
+            gen._eval_storage_function_label(
+                Type("__evm_uint256").function_of(()),
+                UnaryExpr("&", Identifier("missing")),
+            )
+        )
+        self.assertIsNone(gen._eval_const_expr(BinaryExpr("???", IntLiteral("1"), IntLiteral("2"))))
+
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._resolve_storage_initializer_value("missing_label", {}),
+            "unknown EVM storage initializer label: missing_label",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._build_initcode(b"\x00" * 0x10000, ()),
+            "EVM runtime is too large for initcode",
+        )
+        large_stores = tuple((slot, 0) for slot in range(16000))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._build_initcode(b"", large_stores),
+            "EVM initcode prefix is too large",
+        )
+        out = bytearray()
+        gen._append_push(out, -1, size=32)
+        self.assertEqual(bytes(out), bytes.fromhex("7f" + "ff" * 32))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._append_push(bytearray(), 0, size=0),
+            "EVM PUSH operand is out of range",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._string_literal_units(StringLiteral("not-a-string")),
+            "EVM target cannot decode string literal",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._alignof_type(
+                Type("__evm_uint256", declarator_ops=(("bad", ((), False)),))
+            ),
+            "EVM target cannot align array type: __evm_uint256(void)",
+        )
+
+        gen._emit_bit_field_truncation(0)
+        gen._store_storage_global(evm._StorageGlobal(5, Type("__evm_uint256"), 1))
+        helper_asm = gen._asm.to_asm()
+        self.assertIn("AND", helper_asm)
+        self.assertIn("SSTORE", helper_asm)
+
+    def test_evm_helper_memory_initializer_diagnostics(self) -> None:
+        gen = self._helper_generator()
+        one = InitItem((), IntLiteral("1"))
+        two = InitItem((), IntLiteral("2"))
+        three = InitItem((), IntLiteral("3"))
+
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_init_list_to_memory(
+                0,
+                Type("__evm_uint256"),
+                InitList((one, two)),
+            ),
+            "EVM scalar initializer list requires one element",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_array_init_list_to_memory(
+                0,
+                Type("__evm_uint256").array_of(-1),
+                InitList(()),
+            ),
+            "EVM initializer list needs a complete array type: __evm_uint256[-1]",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_array_init_list_to_memory(
+                0,
+                Type("__evm_uint256").array_of(2),
+                InitList((one, two, three)),
+            ),
+            "EVM array initializer too long",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_array_init_list_to_memory(
+                0,
+                Type("__evm_uint256").array_of(2),
+                InitList((InitItem((("index", IntLiteral("1")),), IntLiteral("8")), one)),
+            ),
+            "EVM array initializer too long",
+        )
+        gen._emit_array_init_list_to_memory(
+            0,
+            Type("__evm_uint256").array_of(2),
+            InitList(
+                (
+                    one,
+                    InitItem((("index", IntLiteral("0")),), IntLiteral("8")),
+                    InitItem((("index", IntLiteral("1")),), IntLiteral("9")),
+                )
+            ),
+        )
+        original_zero_memory_object = gen._zero_memory_object
+        try:
+            gen._zero_memory_object = lambda offset, type_: None
+            self._assert_evm_helper_diagnostic(
+                lambda: gen._emit_init_list_to_memory(0, Type("double"), InitList(())),
+                "unsupported EVM initializer list target: double",
+            )
+        finally:
+            gen._zero_memory_object = original_zero_memory_object
+
+        gen._sema.record_definitions["struct Rec"] = (RecordMemberInfo("a", Type("__evm_uint256")),)
+        gen._sema.record_definitions["struct Anonymous"] = (
+            RecordMemberInfo(None, Type("__evm_uint256")),
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_record_init_list_to_memory(0, Type("struct Missing"), InitList(())),
+            "unknown EVM record type: struct Missing",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_record_init_list_to_memory(
+                0,
+                Type("struct Rec"),
+                InitList((InitItem((("index", IntLiteral("0")),), IntLiteral("1")),)),
+            ),
+            "EVM record initializer designator must use member",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_record_init_list_to_memory(
+                0,
+                Type("struct Anonymous"),
+                InitList((one,)),
+            ),
+            "EVM target does not support anonymous storage members",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_initializer_to_memory(0, Type("struct Rec"), IntLiteral("1")),
+            "EVM aggregate initializer for struct Rec needs braces",
+        )
+
+    def test_evm_helper_designator_and_storage_initializer_edges(self) -> None:
+        gen = self._helper_generator()
+        array_type = Type("__evm_uint256").array_of(2)
+        range_ = DesignatorRange(IntLiteral("0"), IntLiteral("1"))
+        bad_range = DesignatorRange(IntLiteral("1"), IntLiteral("0"))
+        high_range = DesignatorRange(IntLiteral("0"), IntLiteral("3"))
+
+        gen._sema.record_definitions["struct Bits"] = (
+            RecordMemberInfo("flag", Type("__evm_uint256"), bit_width=1),
+        )
+        gen._sema.record_definitions["struct Rec"] = (RecordMemberInfo("a", Type("__evm_uint256")),)
+        gen._sema.record_definitions["struct Anonymous"] = (
+            RecordMemberInfo(None, Type("__evm_uint256")),
+        )
+
+        designator_cases = (
+            (
+                lambda: gen._memory_designator_targets(
+                    0,
+                    Type("__evm_uint256"),
+                    (("index", IntLiteral("0")),),
+                ),
+                "EVM array initializer designator must use index",
+            ),
+            (
+                lambda: gen._memory_designator_targets(
+                    0,
+                    Type("__evm_uint256"),
+                    (("range", range_),),
+                ),
+                "EVM array initializer designator must use index",
+            ),
+            (
+                lambda: gen._memory_designator_targets(
+                    0,
+                    Type("struct Bits"),
+                    (("member", "flag"), ("index", IntLiteral("0"))),
+                ),
+                "EVM bit-field initializer designator cannot have subdesignators",
+            ),
+            (
+                lambda: gen._memory_designator_targets(0, array_type, (("bad", IntLiteral("0")),)),
+                "EVM initializer designator does not match aggregate type",
+            ),
+            (
+                lambda: gen._storage_designator_targets(
+                    0,
+                    Type("__evm_uint256"),
+                    (("index", IntLiteral("0")),),
+                ),
+                "EVM storage array initializer designator must use index",
+            ),
+            (
+                lambda: gen._storage_designator_targets(
+                    0,
+                    Type("__evm_uint256"),
+                    (("range", range_),),
+                ),
+                "EVM storage array initializer designator must use index",
+            ),
+            (
+                lambda: gen._storage_designator_targets(
+                    0,
+                    Type("struct Bits"),
+                    (("member", "flag"), ("index", IntLiteral("0"))),
+                ),
+                "EVM storage bit-field initializer designator cannot have subdesignators",
+            ),
+            (
+                lambda: gen._storage_designator_targets(0, array_type, (("bad", IntLiteral("0")),)),
+                "EVM storage initializer designator does not match aggregate type",
+            ),
+            (
+                lambda: gen._eval_initializer_designator_index(Identifier("missing")),
+                "EVM initializer designator index must be constant",
+            ),
+            (
+                lambda: gen._eval_initializer_designator_range(array_type, bad_range),
+                "EVM initializer range is empty",
+            ),
+            (
+                lambda: gen._check_array_initializer_index(Type("__evm_uint256").array_of(-1), 0),
+                "EVM initializer needs a complete array type: __evm_uint256[-1]",
+            ),
+            (
+                lambda: gen._check_array_initializer_index(array_type, 2),
+                "EVM initializer index out of range",
+            ),
+            (
+                lambda: gen._next_array_initializer_index("index", IntLiteral("2"), 2),
+                "EVM initializer index out of range",
+            ),
+            (
+                lambda: gen._next_array_initializer_index("range", high_range, 2),
+                "EVM initializer index out of range",
+            ),
+            (
+                lambda: gen._next_array_initializer_index("member", "field", 2),
+                "EVM array initializer designator must use index",
+            ),
+            (
+                lambda: gen._emit_string_literal_to_local(
+                    evm._Local(0, Type("__evm_uint256"), 1),
+                    StringLiteral('"A"'),
+                ),
+                "EVM string literal cannot initialize __evm_uint256",
+            ),
+            (
+                lambda: gen._emit_string_literal_to_local(
+                    evm._Local(0, CHAR.array_of(-1), 1),
+                    StringLiteral('"A"'),
+                ),
+                "EVM string literal needs a complete array target: char[-1]",
+            ),
+            (
+                lambda: gen._eval_storage_array_init_list(
+                    Type("__evm_uint256").array_of(-1),
+                    InitList(()),
+                ),
+                "EVM storage initializer needs a complete array type: __evm_uint256[-1]",
+            ),
+            (
+                lambda: gen._eval_storage_array_init_list(
+                    array_type,
+                    InitList(
+                        (
+                            InitItem((), IntLiteral("1")),
+                            InitItem((), IntLiteral("2")),
+                            InitItem((), IntLiteral("3")),
+                        )
+                    ),
+                ),
+                "EVM storage array initializer too long",
+            ),
+            (
+                lambda: gen._eval_storage_record_init_list(Type("struct Missing"), InitList(())),
+                "unknown EVM record type: struct Missing",
+            ),
+            (
+                lambda: gen._record_member_index(Type("struct Missing"), "field"),
+                "unknown EVM record type: struct Missing",
+            ),
+            (
+                lambda: gen._record_member_index(Type("struct Rec"), "missing"),
+                "unknown EVM record member: missing",
+            ),
+            (
+                lambda: gen._eval_storage_record_init_list(
+                    Type("struct Rec"),
+                    InitList((InitItem((("index", IntLiteral("0")),), IntLiteral("1")),)),
+                ),
+                "EVM storage record initializer designator must use member",
+            ),
+            (
+                lambda: gen._eval_storage_record_init_list(
+                    Type("struct Rec"),
+                    InitList((InitItem((), IntLiteral("1")), InitItem((), IntLiteral("2")))),
+                ),
+                "EVM storage record initializer too long",
+            ),
+            (
+                lambda: gen._eval_storage_record_init_list(
+                    Type("struct Anonymous"),
+                    InitList((InitItem((), IntLiteral("1")),)),
+                ),
+                "EVM target does not support anonymous storage members",
+            ),
+            (
+                lambda: gen._write_storage_initializer_values(
+                    [0],
+                    0,
+                    CHAR.array_of(2),
+                    StringLiteral('"A"'),
+                    bit_width=1,
+                ),
+                "EVM bit-field storage initializer must be an integer word",
+            ),
+            (
+                lambda: gen._write_storage_initializer_values(
+                    [0],
+                    1,
+                    Type("__evm_uint256"),
+                    IntLiteral("1"),
+                ),
+                "EVM storage initializer writes outside aggregate",
+            ),
+        )
+        for action, message in designator_cases:
+            with self.subTest(message=message):
+                self._assert_evm_helper_diagnostic(action, message)
+
+        control = Identifier("control")
+        generic = GenericExpr(control, ((TypeSpec("unsigned int"), IntLiteral("1")),))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._select_generic_expr(generic),
+            "EVM target cannot resolve _Generic control type",
+        )
+        gen._type_map.set(control, Type("unsigned long"))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._select_generic_expr(generic),
+            "EVM target cannot select _Generic association",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._sizeof_operand_type(SizeofExpr(Identifier("missing"), None)),
+            "EVM target cannot resolve sizeof operand type",
+        )
+        self.assertIsNone(gen._decay_array_type(None))
+        self.assertEqual(gen._pointer_stride_bytes(Type("__evm_uint256")), 1)
+        self.assertEqual(gen._alignof_type(array_type), 32)
+        self.assertIsNone(gen._integer_type_bits(Type("__evm_uint256").pointer_to()))
+        gen._emit_bit_field_truncation(256)
+
+    def test_evm_helper_return_switch_and_conversion_edges(self) -> None:
+        gen = self._helper_generator()
+        gen._sema.record_definitions["struct Rec"] = (
+            RecordMemberInfo("value", Type("__evm_uint256")),
+        )
+
+        layout = evm._FunctionLayout(0x80, 0xA0, {}, {}, {}, {}, 0xC0)
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_internal_default_return(Type("struct Rec")),
+            "missing EVM internal return layout",
+        )
+        gen._return_mode = "internal"
+        gen._func_sym = FunctionSymbol("get", Type("struct Rec"), {})
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_return(ReturnStmt(Identifier("value"))),
+            "missing EVM internal return layout",
+        )
+
+        gen._func_sym = FunctionSymbol("get", CHAR, {})
+        gen._current_layout = layout
+        gen._emit_return(ReturnStmt(IntLiteral("257")))
+        self.assertIn("SIGNEXTEND", gen._asm.to_asm())
+
+        gen._return_mode = "abi"
+        gen._emit_return(ReturnStmt(IntLiteral("257")))
+        self.assertIn("RETURN", gen._asm.to_asm())
+
+        gen._func_sym = None
+        gen._return_mode = "internal"
+        gen._current_layout = layout
+        gen._emit_return(ReturnStmt(IntLiteral("5")))
+        gen._return_mode = "abi"
+        gen._emit_return(ReturnStmt(IntLiteral("6")))
+
+        gen._current_layout = None
+        self._assert_evm_helper_diagnostic(
+            gen._store_internal_return_value,
+            "missing EVM internal return layout",
+        )
+        self._assert_evm_helper_diagnostic(
+            gen._jump_to_internal_return_pc,
+            "missing EVM internal return layout",
+        )
+
+        nested_case = CaseStmt(IntLiteral("1"), BreakStmt())
+        nested_switch = SwitchStmt(IntLiteral("0"), CompoundStmt([nested_case]))
+        outer_case = CaseStmt(IntLiteral("2"), BreakStmt())
+        outer_default = DefaultStmt(BreakStmt())
+        cases, default = gen._collect_switch_cases(
+            CompoundStmt([nested_switch, outer_case, outer_default])
+        )
+        self.assertEqual(cases, [outer_case])
+        self.assertEqual(default, outer_default)
+
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_case(outer_case),
+            "case not within switch",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_default(outer_default),
+            "default not within switch",
+        )
+        gen._switch_stack.append(({}, None))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_default(outer_default),
+            "default label missing",
+        )
+        gen._switch_stack.pop()
+
+        init = IntLiteral("1")
+        post = IntLiteral("2")
+        gen._emit_for(ForStmt(init, IntLiteral("3"), post, CompoundStmt([])))
+        void_init = CastExpr(TypeSpec("void"), IntLiteral("4"))
+        void_post = CastExpr(TypeSpec("void"), IntLiteral("5"))
+        gen._type_map.set(void_init, Type("void"))
+        gen._type_map.set(void_init.expr, UINT)
+        gen._type_map.set(void_post, Type("void"))
+        gen._type_map.set(void_post.expr, UINT)
+        gen._emit_for(ForStmt(void_init, None, void_post, CompoundStmt([])))
+        gen._emit_for(ForStmt(None, None, None, CompoundStmt([])))
+        gen._emit_for(
+            ForStmt(
+                DeclStmt(TypeSpec("__evm_uint256"), "for_local", None),
+                None,
+                None,
+                CompoundStmt([]),
+            )
+        )
+        asm = gen._asm.to_asm()
+        self.assertIn("for_test_", asm)
+        self.assertGreaterEqual(asm.count("POP"), 2)
+
+    def test_evm_helper_expression_assignment_and_lvalue_edges(self) -> None:
+        gen = self._helper_generator()
+        gen._func_sym = FunctionSymbol("get", UINT, {})
+        gen._sema.record_definitions["struct Rec"] = (
+            RecordMemberInfo("value", Type("__evm_uint256")),
+        )
+        gen._sema.record_definitions["struct Big"] = (
+            RecordMemberInfo("first", Type("__evm_uint256")),
+            RecordMemberInfo("second", Type("__evm_uint256")),
+        )
+        gen._locals["word"] = evm._Local(0x80, UINT, 1)
+        gen._locals["rec"] = evm._Local(0xA0, Type("struct Rec"), 1)
+        gen._locals["big"] = evm._Local(0xC0, Type("struct Big"), 2)
+        gen._static_locals["get"] = {
+            "cached": evm._StorageGlobal(1, Type("struct Rec"), 1),
+        }
+        gen._storage_globals["global_rec"] = evm._StorageGlobal(2, Type("struct Rec"), 1)
+        bad_deref_operand = IntLiteral("1")
+        gen._type_map.set(bad_deref_operand, UINT)
+        bad_deref = UnaryExpr("*", bad_deref_operand)
+
+        diagnostic_cases = (
+            (
+                lambda: gen._emit_expr(Identifier("cached")),
+                "EVM aggregate static object needs member access: cached",
+            ),
+            (
+                lambda: gen._emit_expr(Identifier("global_rec")),
+                "EVM aggregate storage object needs member access: global_rec",
+            ),
+            (
+                lambda: gen._emit_expr(Identifier("missing")),
+                "unknown EVM identifier: missing",
+            ),
+            (
+                lambda: gen._emit_expr(Stmt()),
+                "unsupported EVM expression: Stmt",
+            ),
+            (
+                lambda: gen._emit_binary(BinaryExpr("**", IntLiteral("2"), IntLiteral("3"))),
+                "unsupported EVM binary operator: **",
+            ),
+            (
+                lambda: gen._emit_pointer_binary(
+                    self._typed_binary(
+                        gen,
+                        "-",
+                        Type("__evm_uint256").pointer_to(),
+                        Type("struct Big").pointer_to(),
+                    )
+                ),
+                "EVM pointer subtraction needs matching element storage size",
+            ),
+            (
+                lambda: gen._emit_assign(AssignExpr("+=", Identifier("rec"), Identifier("rec"))),
+                "unsupported EVM aggregate assignment: +=",
+            ),
+            (
+                lambda: gen._emit_assign(AssignExpr("??=", Identifier("word"), IntLiteral("1"))),
+                "unsupported EVM assignment: ??=",
+            ),
+            (
+                lambda: gen._emit_assign(AssignExpr("=", Identifier("rec"), Identifier("big"))),
+                "EVM aggregate assignment type mismatch: struct Big to struct Rec",
+            ),
+            (
+                lambda: gen._emit_aggregate_copy_to_memory(
+                    0,
+                    Type("struct Rec"),
+                    Identifier("big"),
+                    "EVM aggregate return type mismatch",
+                ),
+                "EVM aggregate return type mismatch: struct Big to struct Rec",
+            ),
+            (
+                lambda: gen._emit_aggregate_memory_copy(
+                    0,
+                    Type("struct Rec"),
+                    0x100,
+                    Type("struct Big"),
+                    "EVM aggregate memory copy mismatch",
+                ),
+                "EVM aggregate memory copy mismatch: struct Big to struct Rec",
+            ),
+            (
+                lambda: gen._emit_assignment_operator("??=", UINT),
+                "unsupported EVM assignment: ??=",
+            ),
+            (
+                lambda: gen._emit_unary(UnaryExpr("sizeof", IntLiteral("1"))),
+                "unsupported EVM unary operator: sizeof",
+            ),
+            (
+                lambda: gen._emit_update(UpdateExpr("??", Identifier("word"), False)),
+                "unsupported EVM update: ??",
+            ),
+            (
+                lambda: gen._emit_lvalue_address(bad_deref),
+                "EVM dereference needs a pointer",
+            ),
+            (
+                lambda: gen._emit_lvalue_address(IntLiteral("1")),
+                "unsupported EVM lvalue: IntLiteral",
+            ),
+            (
+                lambda: gen._load_addressed(evm._LValue("memory", Type("struct Rec"))),
+                "EVM cannot load aggregate value directly: struct Rec",
+            ),
+            (
+                lambda: gen._store_addressed(evm._LValue("memory", Type("struct Rec"))),
+                "EVM cannot store aggregate value directly: struct Rec",
+            ),
+            (
+                lambda: gen._store_addressed_without_result(
+                    evm._LValue("memory", Type("struct Rec"))
+                ),
+                "EVM cannot store aggregate value directly: struct Rec",
+            ),
+        )
+        for action, message in diagnostic_cases:
+            with self.subTest(message=message):
+                self._assert_evm_helper_diagnostic(action, message)
+
+        self.assertFalse(
+            gen._binary_uses_signed_opcode(BinaryExpr("/", IntLiteral("1"), IntLiteral("2")))
+        )
+        self.assertFalse(
+            gen._shift_uses_signed_opcode(BinaryExpr(">>", IntLiteral("1"), IntLiteral("2")))
+        )
+
+        gen._emit_comma_expr(CommaExpr(IntLiteral("1"), IntLiteral("2")))
+        void_left = CastExpr(TypeSpec("void"), IntLiteral("1"))
+        gen._type_map.set(void_left, Type("void"))
+        gen._type_map.set(void_left.expr, UINT)
+        gen._emit_comma_expr(CommaExpr(void_left, IntLiteral("2")))
+        statement_value = IntLiteral("7")
+        statement_expr = StatementExpr(CompoundStmt([ExprStmt(statement_value)]))
+        gen._type_map.set(statement_value, CHAR)
+        gen._type_map.set(statement_expr, CHAR)
+        gen._emit_statement_expr(statement_expr)
+        statement_void = CastExpr(TypeSpec("void"), IntLiteral("8"))
+        statement_void_expr = StatementExpr(CompoundStmt([ExprStmt(statement_void)]))
+        gen._type_map.set(statement_void, Type("void"))
+        gen._type_map.set(statement_void.expr, UINT)
+        gen._type_map.set(statement_void_expr, Type("void"))
+        gen._emit_statement_expr(statement_void_expr)
+
+        cast_without_type = CastExpr(TypeSpec("unsigned int"), IntLiteral("1"))
+        gen._emit_cast(cast_without_type)
+        fresh_gen = self._helper_generator()
+        fresh_gen._emit_cast(CastExpr(TypeSpec("unsigned int"), IntLiteral("2")))
+        void_cast = CastExpr(TypeSpec("void"), IntLiteral("1"))
+        gen._type_map.set(void_cast, Type("void"))
+        gen._type_map.set(void_cast.expr, UINT)
+        gen._emit_cast(void_cast)
+        void_source_cast = CastExpr(TypeSpec("void"), StatementExpr(CompoundStmt([])))
+        gen._type_map.set(void_source_cast, Type("void"))
+        gen._type_map.set(void_source_cast.expr, Type("void"))
+        gen._emit_cast(void_source_cast)
+        gen._emit_integer_conversion_to_expr_type(IntLiteral("3"))
+        typed_literal = IntLiteral("511")
+        gen._type_map.set(typed_literal, CHAR)
+        gen._emit_expr(typed_literal)
+        gen._emit_integer_conversion_to_expr_type(typed_literal)
+        self.assertIn("POP", gen._asm.to_asm())
+
+        compound = CompoundLiteralExpr(TypeSpec("unsigned int"), InitList(()))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._compound_literal_local(compound),
+            "missing EVM function layout",
+        )
+        gen._current_layout = evm._FunctionLayout(0x80, 0xA0, {}, {}, {}, {}, 0xC0)
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._compound_literal_local(compound),
+            "missing EVM compound literal storage",
+        )
+        malformed_compound = CompoundLiteralExpr(TypeSpec("double"), InitList(()))
+        gen._current_layout = evm._FunctionLayout(
+            0x80,
+            0xA0,
+            {},
+            {id(malformed_compound): evm._Local(0x100, Type("double"), 1)},
+            {},
+            {},
+            0xC0,
+        )
+        original_compound_init = gen._emit_compound_literal_init
+        try:
+            gen._emit_compound_literal_init = lambda local, init: None
+            self._assert_evm_helper_diagnostic(
+                lambda: gen._emit_compound_literal(malformed_compound),
+                "EVM cannot load compound literal type: double",
+            )
+        finally:
+            gen._emit_compound_literal_init = original_compound_init
+        string = StringLiteral('"x"')
+        gen._current_layout = None
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._string_literal_local(string),
+            "missing EVM function layout",
+        )
+        gen._current_layout = evm._FunctionLayout(0x80, 0xA0, {}, {}, {}, {}, 0xC0)
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._string_literal_local(string),
+            "missing EVM string literal storage",
+        )
+
+        rec_base = Identifier("rec")
+        rec_subscript = SubscriptExpr(rec_base, IntLiteral("0"))
+        gen._type_map.set(rec_base, Type("struct Rec"))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_subscript_lvalue_address(rec_subscript),
+            "EVM subscript base is not an array: struct Rec",
+        )
+        word_base = Identifier("word")
+        gen._type_map.set(word_base, UINT)
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_subscript_lvalue_address(SubscriptExpr(word_base, IntLiteral("0"))),
+            "EVM subscript needs a pointer",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_member_lvalue_address(MemberExpr(word_base, "value", True)),
+            "EVM member pointer needs a record",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_lvalue_address(CallExpr(Identifier("get"), [])),
+            "unsupported EVM lvalue: CallExpr",
+        )
+        self.assertIsNone(evm._EvmGen._evm_log_data_topic_count("__builtin_evm_log5_data"))
+
+    def test_evm_helper_call_layout_edges(self) -> None:
+        gen = self._helper_generator()
+        layout = evm._FunctionLayout(0x80, 0xA0, {}, {}, {}, {}, 0xC0)
+        call = CallExpr(Identifier("fp"), [])
+
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_indirect_function_call(call),
+            "missing EVM function layout",
+        )
+        gen._current_layout = layout
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_indirect_function_call(call),
+            "missing EVM function pointer call layout",
+        )
+        gen._current_layout = evm._FunctionLayout(
+            0x80,
+            0xA0,
+            {},
+            {},
+            {},
+            {id(call): evm._IndirectCallLayout(0x100, ())},
+            0xC0,
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_indirect_function_call(call),
+            "EVM target does not support function pointers",
+        )
+
+        gen._type_map.set(call.callee, Type("__evm_uint256").function_of(None).pointer_to())
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_indirect_function_call(call),
+            "EVM function pointer calls need a fixed prototype",
+        )
+
+        no_target_call = CallExpr(Identifier("fp_no_target"), [])
+        gen._current_layout = evm._FunctionLayout(
+            0x80,
+            0xA0,
+            {},
+            {},
+            {},
+            {id(no_target_call): evm._IndirectCallLayout(0x100, ())},
+            0xC0,
+        )
+        gen._type_map.set(
+            no_target_call.callee,
+            UINT.function_of(()).pointer_to(),
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_indirect_function_call(no_target_call),
+            "EVM function pointer call has no local target with matching prototype",
+        )
+
+        one_arg_call = CallExpr(Identifier("fp2"), [])
+        gen._current_layout = evm._FunctionLayout(
+            0x80,
+            0xA0,
+            {},
+            {},
+            {},
+            {id(one_arg_call): evm._IndirectCallLayout(0x100, ())},
+            0xC0,
+        )
+        gen._type_map.set(
+            one_arg_call.callee,
+            Type("__evm_uint256").function_of((UINT,)).pointer_to(),
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_indirect_function_call(one_arg_call),
+            "EVM function pointer argument count mismatch",
+        )
+
+        double_arg = IntLiteral("1")
+        double_call = CallExpr(Identifier("fp3"), [double_arg])
+        gen._current_layout = evm._FunctionLayout(
+            0x80,
+            0xA0,
+            {},
+            {},
+            {},
+            {id(double_call): evm._IndirectCallLayout(0x100, (0x120,))},
+            0xC0,
+        )
+        gen._type_map.set(
+            double_call.callee,
+            UINT.function_of((Type("double"),)).pointer_to(),
+        )
+        gen._locals["fp3"] = evm._Local(
+            0x140,
+            UINT.function_of((Type("double"),)).pointer_to(),
+            1,
+        )
+        target = FunctionDef(
+            TypeSpec("unsigned int"),
+            "fp_target",
+            [Param(TypeSpec("double"), "x")],
+            CompoundStmt([]),
+        )
+        gen._functions_by_name[target.name] = target
+        gen._sema.functions[target.name] = FunctionSymbol(
+            target.name,
+            UINT,
+            {"x": VarSymbol("x", Type("double"))},
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_indirect_function_call(double_call),
+            "unsupported EVM function pointer argument type: double",
+        )
+
+        direct = FunctionDef(TypeSpec("unsigned int"), "direct", [], CompoundStmt([]))
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_direct_function_call(direct, CallExpr(Identifier("direct"), [])),
+            "missing EVM function layout: direct",
+        )
+        direct_with_arg = FunctionDef(
+            TypeSpec("unsigned int"),
+            "direct_arg",
+            [Param(TypeSpec("unsigned int"), "x")],
+            CompoundStmt([]),
+        )
+        gen._sema.functions[direct_with_arg.name] = FunctionSymbol(
+            direct_with_arg.name,
+            UINT,
+            {"x": VarSymbol("x", UINT)},
+        )
+        gen._function_layouts[direct_with_arg.name] = evm._FunctionLayout(
+            0x80,
+            0xA0,
+            {"x": evm._Local(0xC0, UINT, 1)},
+            {},
+            {},
+            {},
+            0xE0,
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_direct_function_call(
+                direct_with_arg,
+                CallExpr(Identifier("direct_arg"), []),
+            ),
+            "EVM call argument count mismatch for direct_arg",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_direct_call_argument(
+                IntLiteral("1"),
+                evm._Local(0, Type("double"), 1),
+            ),
+            "unsupported EVM call argument type: double",
+        )
+        self._assert_evm_helper_diagnostic(
+            lambda: gen._emit_call(CallExpr(IntLiteral("1"), [])),
+            "EVM target does not support function pointers",
+        )
+
+    def _typed_binary(
+        self,
+        gen,
+        op: str,
+        left_type: Type,
+        right_type: Type,
+    ) -> BinaryExpr:
+        left = Identifier("left")
+        right = Identifier("right")
+        expr = BinaryExpr(op, left, right)
+        gen._type_map.set(left, left_type)
+        gen._type_map.set(right, right_type)
+        return expr
 
     def test_generates_dispatcher_for_no_arg_return_function(self) -> None:
         result = self._compile("unsigned int get(void) { return 7; }\n")
@@ -698,6 +2040,55 @@ unsigned int sub_assign(unsigned int a, unsigned int b) { a -= b; return a; }
         self.assertEqual(int.from_bytes(returned, "big"), 5)
         self.assertEqual(int.from_bytes(assigned, "big"), 5)
 
+    def test_compound_assignment_ops_use_evm_arithmetic_bitwise_and_shift_opcodes(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+uint256 unsigned_ops(uint256 value)
+{
+  value *= 3;
+  value /= 2;
+  value %= 7;
+  value &= 6;
+  value |= 8;
+  value ^= 2;
+  value <<= 3;
+  value >>= 1;
+  return value;
+}
+
+int signed_ops(int value)
+{
+  value /= 3;
+  value %= 3;
+  value >>= 1;
+  return value;
+}
+"""
+        result = self._compile(source)
+        asm = generate_evm_asm(result)
+        bytecode = generate_evm_bytecode(result)
+
+        unsigned_returned = _MiniEvm(bytecode, _calldata("unsigned_ops(uint256)", 10)).run()
+        signed_returned = _MiniEvm(bytecode, _calldata("signed_ops(int32)", _word(-16))).run()
+
+        self.assertEqual(int.from_bytes(unsigned_returned, "big"), 40)
+        self.assertEqual(_signed_word_value(signed_returned), -1)
+        for opcode in (
+            "MUL",
+            "DIV",
+            "MOD",
+            "AND",
+            "OR",
+            "XOR",
+            "SHL",
+            "SHR",
+            "SDIV",
+            "SMOD",
+            "SAR",
+        ):
+            self.assertIn(opcode, asm)
+
     def test_signed_integer_ops_use_signed_evm_opcodes(self) -> None:
         source = """
 int less(int a, int b) { return a < b; }
@@ -726,6 +2117,100 @@ int sar(int a) { return a >> 1; }
         self.assertIn("SDIV", asm)
         self.assertIn("SMOD", asm)
         self.assertIn("SAR", asm)
+
+    def test_runtime_binary_literal_and_pointer_variants_execute(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+uint256 compare_bits(uint256 a, uint256 b)
+{
+  uint256 result = 0;
+  if (a != b) result += 1;
+  if (a <= b) result += 2;
+  if (a >= b) result += 4;
+  result += (a | b) * 10;
+  result += (a ^ b) * 100;
+  return result;
+}
+
+int signed_compare(int a, int b)
+{
+  int result = 0;
+  if (a <= b) result += 1;
+  if (a >= b) result += 2;
+  return result;
+}
+
+uint256 pointer_right_sub(void)
+{
+  uint256 values[4] = {3, 5, 7, 11};
+  uint256 *ptr = &values[2];
+  ptr = ptr - 1;
+  return *ptr;
+}
+
+uint256 string_expr(void)
+{
+  char *p = "AZ";
+  return ((uint256)p[0]) * 100 + (uint256)p[1];
+}
+
+uint256 scalar_compound(void) { return (uint256){9}; }
+
+uint256 array_compound(void)
+{
+  uint256 *p = (uint256[2]){4, 5};
+  return p[0] * 10 + p[1];
+}
+"""
+        result = self._compile(source)
+        asm = generate_evm_asm(result)
+        bytecode = generate_evm_bytecode(result)
+
+        compared = _MiniEvm(bytecode, _calldata("compare_bits(uint256,uint256)", 3, 5)).run()
+        signed = _MiniEvm(bytecode, _calldata("signed_compare(int32,int32)", _word(-2), 1)).run()
+        pointer = _MiniEvm(bytecode, _calldata("pointer_right_sub()")).run()
+        string = _MiniEvm(bytecode, _calldata("string_expr()")).run()
+        scalar = _MiniEvm(bytecode, _calldata("scalar_compound()")).run()
+        array = _MiniEvm(bytecode, _calldata("array_compound()")).run()
+
+        self.assertEqual(int.from_bytes(compared, "big"), 673)
+        self.assertEqual(_signed_word_value(signed), 1)
+        self.assertEqual(int.from_bytes(pointer, "big"), 5)
+        self.assertEqual(int.from_bytes(string, "big"), 6590)
+        self.assertEqual(int.from_bytes(scalar, "big"), 9)
+        self.assertEqual(int.from_bytes(array, "big"), 45)
+        for opcode in ("EQ", "GT", "LT", "ISZERO", "OR", "XOR", "SUB"):
+            self.assertIn(opcode, asm)
+
+    def test_runtime_unary_ops_emit_value_pop_and_bitwise_paths(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+uint256 unsigned_unary(uint256 value)
+{
+  return +value + (!value) * 100 + ((~value) & 255);
+}
+
+int signed_negate(int value)
+{
+  return -value;
+}
+"""
+        result = self._compile(source)
+        asm = generate_evm_asm(result)
+        bytecode = generate_evm_bytecode(result)
+
+        zero = _MiniEvm(bytecode, _calldata("unsigned_unary(uint256)", 0)).run()
+        nonzero = _MiniEvm(bytecode, _calldata("unsigned_unary(uint256)", 0xF0)).run()
+        negated = _MiniEvm(bytecode, _calldata("signed_negate(int32)", 7)).run()
+
+        self.assertEqual(int.from_bytes(zero, "big"), 355)
+        self.assertEqual(int.from_bytes(nonzero, "big"), 255)
+        self.assertEqual(_signed_word_value(negated), -7)
+        self.assertIn("ISZERO", asm)
+        self.assertIn("NOT", asm)
+        self.assertIn("SUB", asm)
 
     def test_integer_conversions_truncate_sign_extend_and_normalize_bool(self) -> None:
         source = """
@@ -813,6 +2298,32 @@ uint256 use_helper(uint256 value)
 
         self.assertEqual(int.from_bytes(returned, "big"), 13)
 
+    def test_file_scope_function_prototype_does_not_allocate_storage_slot(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+uint256 helper(uint256 value);
+
+uint256 helper(uint256 value)
+{
+  return value + 2;
+}
+
+uint256 use_helper(uint256 value)
+{
+  return helper(value);
+}
+"""
+        result = self._compile(source)
+
+        asm = generate_evm_asm(result)
+        bytecode = generate_evm_bytecode(result)
+        returned = _MiniEvm(bytecode, _calldata("use_helper(uint256)", 7)).run()
+
+        self.assertEqual(int.from_bytes(returned, "big"), 9)
+        self.assertIn("internal_helper", asm)
+        self.assertNotIn("SSTORE", asm)
+
     def test_internal_helper_can_return_word_pointer(self) -> None:
         source = """
 typedef __evm_uint256 uint256;
@@ -867,6 +2378,17 @@ uint256 sizes(void)
          _Alignof(unsigned int) + sizeof(marker = 99) + marker;
 }
 
+uint256 anonymous_record_size(void)
+{
+  return sizeof(struct { uint256 left; uint256 right; });
+}
+
+uint256 anonymous_record_value(void)
+{
+  struct { uint256 left; uint256 right; } value = {2, 3};
+  return value.left * 10 + value.right;
+}
+
 uint256 get_marker(void) { return marker; }
 """
         result = self._compile(source)
@@ -874,9 +2396,13 @@ uint256 get_marker(void) { return marker; }
         bytecode = generate_evm_bytecode(result)
         storage: dict[int, int] = {}
         returned = _MiniEvm(bytecode, _calldata("sizes()"), storage).run()
+        anonymous_size = _MiniEvm(bytecode, _calldata("anonymous_record_size()"), storage).run()
+        anonymous_value = _MiniEvm(bytecode, _calldata("anonymous_record_value()"), storage).run()
         marker = _MiniEvm(bytecode, _calldata("get_marker()"), storage).run()
 
         self.assertEqual(int.from_bytes(returned, "big"), 231)
+        self.assertEqual(int.from_bytes(anonymous_size, "big"), 64)
+        self.assertEqual(int.from_bytes(anonymous_value, "big"), 23)
         self.assertEqual(int.from_bytes(marker, "big"), 7)
 
     def test_builtin_offsetof_uses_evm_word_object_layout(self) -> None:
@@ -1366,6 +2892,11 @@ struct Pair {
   uint256 right;
 };
 
+struct Box {
+  struct Pair items[2];
+  uint256 tail;
+};
+
 uint256 local_designators(void)
 {
   uint256 local[4] = {[3] = 8, [1] = 4};
@@ -1378,15 +2909,27 @@ uint256 range_and_continuation(void)
   uint256 values[5] = {[1 ... 2] = 3, 7, [0] = 1};
   return values[0] + values[1] * 10 + values[2] * 100 + values[3] * 1000;
 }
+
+uint256 nested_designators(void)
+{
+  struct Box box = {.items[1].right = 9, .items[0].left = 2, .tail = 7};
+  return box.items[0].left +
+         box.items[0].right * 10 +
+         box.items[1].left * 100 +
+         box.items[1].right * 1000 +
+         box.tail * 10000;
+}
 """
         result = self._compile(source)
         bytecode = generate_evm_bytecode(result)
 
         returned = _MiniEvm(bytecode, _calldata("local_designators()")).run()
         ranged = _MiniEvm(bytecode, _calldata("range_and_continuation()")).run()
+        nested = _MiniEvm(bytecode, _calldata("nested_designators()")).run()
 
         self.assertEqual(int.from_bytes(returned, "big"), 7684)
         self.assertEqual(int.from_bytes(ranged, "big"), 7331)
+        self.assertEqual(int.from_bytes(nested, "big"), 79002)
 
     def test_record_assignment_copies_word_storage_slots(self) -> None:
         source = """
@@ -1555,6 +3098,44 @@ uint256 dispatch(uint256 flag, uint256 value)
 
         self.assertEqual(int.from_bytes(selected_first, "big"), 8)
         self.assertEqual(int.from_bytes(selected_second, "big"), 21)
+
+    def test_void_function_pointer_call_returns_to_dispatch_join(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+typedef void (*Action)(uint256 *);
+
+static void inc(uint256 *p)
+{
+  *p += 1;
+}
+
+static void add_two(uint256 *p)
+{
+  *p += 2;
+}
+
+static void apply(Action fn, uint256 *p)
+{
+  fn(p);
+}
+
+uint256 dispatch(uint256 flag)
+{
+  uint256 value = 10;
+  Action fn = flag ? inc : add_two;
+  apply(fn, &value);
+  fn(&value);
+  return value;
+}
+"""
+        result = self._compile(source)
+        bytecode = generate_evm_bytecode(result)
+
+        selected_first = _MiniEvm(bytecode, _calldata("dispatch(uint256)", 1)).run()
+        selected_second = _MiniEvm(bytecode, _calldata("dispatch(uint256)", 0)).run()
+
+        self.assertEqual(int.from_bytes(selected_first, "big"), 12)
+        self.assertEqual(int.from_bytes(selected_second, "big"), 14)
 
     def test_function_pointer_call_copies_record_parameter_by_value(self) -> None:
         source = """
@@ -1779,6 +3360,27 @@ unsigned int at_least_once(unsigned int n)
 
         self.assertEqual(int.from_bytes(sum_returned, "big"), 10)
         self.assertEqual(int.from_bytes(once_returned, "big"), 1)
+
+    def test_for_expression_init_and_void_post_execute_correctly(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+uint256 sum_expr_for(uint256 n)
+{
+  uint256 i;
+  uint256 acc;
+  for (i = 0, acc = 0; i < n; (void)(i += 1)) {
+    acc += i;
+  }
+  return acc;
+}
+"""
+        result = self._compile(source)
+        bytecode = generate_evm_bytecode(result)
+
+        returned = _MiniEvm(bytecode, _calldata("sum_expr_for(uint256)", 5)).run()
+
+        self.assertEqual(int.from_bytes(returned, "big"), 10)
 
     def test_environment_revert_and_log_builtins(self) -> None:
         source = """
@@ -2162,6 +3764,11 @@ void halt(void)
   __builtin_evm_stop();
 }
 
+void early_return(void)
+{
+  return;
+}
+
 void trap(void)
 {
   __builtin_evm_invalid();
@@ -2173,9 +3780,11 @@ void trap(void)
 
         returned = _MiniEvm(bytecode, _calldata("raw_return()")).run()
         halted = _MiniEvm(bytecode, _calldata("halt()")).run()
+        early = _MiniEvm(bytecode, _calldata("early_return()")).run()
 
         self.assertEqual(int.from_bytes(returned, "big"), 0x123)
         self.assertEqual(halted, b"")
+        self.assertEqual(early, b"")
         with self.assertRaisesRegex(AssertionError, "invalid opcode"):
             _MiniEvm(bytecode, _calldata("trap()")).run()
         self.assertIn("RETURN", asm)
@@ -2770,6 +4379,108 @@ uint256 add_two(void)
         self.assertEqual(storage[0], 3)
         self.assertEqual(storage[1], 4)
 
+    def test_nested_static_locals_are_collected_before_runtime_dispatch(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+uint256 nested(uint256 n)
+{
+  uint256 total = 0;
+  uint256 i;
+  if (n) {
+    static uint256 if_value = 3;
+    total += if_value;
+  } else {
+    static uint256 else_value = 5;
+    total += else_value;
+  }
+  switch (n) {
+    case 1: {
+      static uint256 case_value = 7;
+      total += case_value;
+      break;
+    }
+    default: {
+      static uint256 default_value = 11;
+      total += default_value;
+      break;
+    }
+  }
+  i = 0;
+  while (i < 1) {
+    static uint256 while_value = 13;
+    total += while_value;
+    i++;
+  }
+  do {
+    static uint256 do_value = 17;
+    total += do_value;
+  } while (0);
+  for (i = 0; i < 1; i++) {
+    static uint256 for_value = 19;
+    total += for_value;
+  }
+  return total;
+}
+"""
+        result = self._compile(source)
+
+        initcode = evm.generate_evm_initcode(result)
+        storage: dict[int, int] = {}
+        runtime = _MiniEvm(initcode, b"", storage).run()
+        selected = _MiniEvm(runtime.hex(), _calldata("nested(uint256)", 1), storage).run()
+        defaulted = _MiniEvm(runtime.hex(), _calldata("nested(uint256)", 0), storage).run()
+
+        self.assertEqual(tuple(storage[index] for index in range(7)), (3, 5, 7, 11, 13, 17, 19))
+        self.assertEqual(int.from_bytes(selected, "big"), 59)
+        self.assertEqual(int.from_bytes(defaulted, "big"), 65)
+
+    def test_static_locals_inside_expression_trees_are_collected_before_initcode(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+struct Box { uint256 value; };
+
+uint256 identity(uint256 value) { return value; }
+
+uint256 nested_expr(uint256 selector)
+{
+  uint256 values[2] = {0, 0};
+  struct Box box = {0};
+  uint256 total = 0;
+  values[({ static uint256 index_value = 1; index_value; })] =
+    ({ static uint256 subscript_value = 3; subscript_value; });
+  box.value = ({ static uint256 member_value = 5; member_value; });
+  total += (({ static uint256 left = 7; left; }) +
+            ({ static uint256 right = 11; right; }));
+  total += (selector ? ({ static uint256 then_value = 13; then_value; })
+                     : ({ static uint256 else_value = 17; else_value; }));
+  total += (({ static uint256 comma_left = 19; comma_left; }),
+            ({ static uint256 comma_right = 23; comma_right; }));
+  total += +({ static uint256 unary_value = 29; unary_value; });
+  total += (uint256)({ static uint256 cast_value = 31; cast_value; });
+  total += identity(({ static uint256 call_value = 37; call_value; }));
+  total += _Generic(({ static uint256 generic_control = 41; generic_control; }),
+                    uint256: ({ static uint256 generic_selected = 43; generic_selected; }),
+                    default: 47);
+  return total + values[1] + box.value;
+}
+"""
+        result = self._compile(source)
+
+        initcode = evm.generate_evm_initcode(result)
+        storage: dict[int, int] = {}
+        runtime = _MiniEvm(initcode, b"", storage).run()
+        defaulted = _MiniEvm(runtime.hex(), _calldata("nested_expr(uint256)", 0), storage).run()
+        selected = _MiniEvm(runtime.hex(), _calldata("nested_expr(uint256)", 1), storage).run()
+
+        self.assertEqual(
+            tuple(storage[index] for index in range(len(storage))),
+            (1, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 43),
+        )
+        self.assertEqual(int.from_bytes(defaulted, "big"), 206)
+        self.assertEqual(int.from_bytes(selected, "big"), 202)
+
     def test_initcode_initializes_designated_storage_globals(self) -> None:
         source = """
 typedef __evm_uint256 uint256;
@@ -2779,8 +4490,14 @@ struct Pair {
   uint256 right;
 };
 
+struct Box {
+  struct Pair items[2];
+  uint256 tail;
+};
+
 uint256 values[5] = {[1 ... 2] = 4, 8, [0] = 3};
 struct Pair saved = {.right = 5, .left = 2};
+struct Box nested = {.items[1].right = 9, .items[0].left = 2, .tail = 7};
 
 uint256 get(void)
 {
@@ -2791,6 +4508,15 @@ uint256 get(void)
        + saved.left * 10000
        + saved.right * 100000;
 }
+
+uint256 get_nested(void)
+{
+  return nested.items[0].left
+       + nested.items[0].right * 10
+       + nested.items[1].left * 100
+       + nested.items[1].right * 1000
+       + nested.tail * 10000;
+}
 """
         result = self._compile(source)
 
@@ -2798,6 +4524,7 @@ uint256 get(void)
         storage: dict[int, int] = {}
         runtime = _MiniEvm(initcode, b"", storage).run()
         returned = _MiniEvm(runtime.hex(), _calldata("get()"), storage).run()
+        nested = _MiniEvm(runtime.hex(), _calldata("get_nested()"), storage).run()
 
         self.assertEqual(storage[0], 3)
         self.assertEqual(storage[1], 4)
@@ -2806,7 +4533,107 @@ uint256 get(void)
         self.assertEqual(storage[4], 0)
         self.assertEqual(storage[5], 2)
         self.assertEqual(storage[6], 5)
+        self.assertEqual(storage[7], 2)
+        self.assertEqual(storage[8], 0)
+        self.assertEqual(storage[9], 0)
+        self.assertEqual(storage[10], 9)
+        self.assertEqual(storage[11], 7)
         self.assertEqual(int.from_bytes(returned, "big"), 528443)
+        self.assertEqual(int.from_bytes(nested, "big"), 79002)
+
+    def test_initcode_evaluates_storage_constant_expression_operators(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+struct Pair {
+  uint256 left;
+  uint256 right;
+};
+
+uint256 values[32] = {
+  +7,
+  -1,
+  !0,
+  ~0,
+  6 * 7,
+  7 / 0,
+  7 % 0,
+  1 << 5,
+  32 >> 2,
+  6 & 3,
+  4 | 1,
+  7 ^ 3,
+  1 == 1,
+  1 != 2,
+  1 < 2,
+  2 <= 2,
+  3 > 2,
+  3 >= 3,
+  0 ? 91 : 19,
+  (unsigned char)257,
+  1 + (1 ? 29 : 31),
+  sizeof(struct Pair),
+  sizeof(uint256 *),
+  sizeof(uint256[2]),
+  _Alignof(uint256 *),
+  _Alignof(unsigned int),
+  __builtin_offsetof(struct Pair, right),
+  __builtin_types_compatible_p(uint256, __evm_uint256),
+  _Generic((uint256)0, uint256: 23, default: 99),
+  _Generic((unsigned int)0, uint256: 23, default: 99),
+  (_Bool)2,
+  (unsigned short)-1
+};
+
+uint256 get(uint256 index)
+{
+  return values[index];
+}
+"""
+        result = self._compile(source)
+
+        initcode = evm.generate_evm_initcode(result)
+        storage: dict[int, int] = {}
+        runtime = _MiniEvm(initcode, b"", storage).run()
+
+        expected = (
+            7,
+            _word(-1),
+            1,
+            _word(~0),
+            42,
+            0,
+            0,
+            32,
+            8,
+            2,
+            5,
+            4,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            19,
+            1,
+            30,
+            64,
+            32,
+            64,
+            32,
+            32,
+            32,
+            1,
+            23,
+            99,
+            1,
+            65535,
+        )
+        self.assertEqual(tuple(storage[index] for index in range(len(expected))), expected)
+        for index, value in enumerate(expected):
+            returned = _MiniEvm(runtime.hex(), _calldata("get(uint256)", index), storage).run()
+            self.assertEqual(int.from_bytes(returned, "big"), value)
 
     def test_initcode_initializes_storage_record_bit_fields_with_masks(self) -> None:
         source = """
@@ -2950,6 +4777,66 @@ uint256 dispatch(uint256 value)
         self.assertNotEqual(storage[0], 0)
         self.assertEqual(int.from_bytes(returned, "big"), 21)
 
+    def test_initcode_evaluates_generic_types_chars_and_cast_function_labels(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+typedef uint256 (*Fn)(uint256);
+
+uint256 plus_two(uint256 value)
+{
+  return value + 2;
+}
+
+uint256 times_four(uint256 value)
+{
+  return value * 4;
+}
+
+uint256 type_value = __builtin_types_compatible_p(uint256, __evm_uint256);
+uint256 generic_value = _Generic((uint256)0, uint256: 11, default: 22);
+uint256 char_value = 'AZ';
+uint256 octal_value = 010;
+Fn saved = (Fn)plus_two;
+Fn selected = 1 ? (Fn)times_four : (Fn)plus_two;
+
+uint256 get(void)
+{
+  return type_value * 100000 + generic_value * 1000 + char_value + octal_value;
+}
+
+uint256 dispatch_saved(uint256 value)
+{
+  return saved(value);
+}
+
+uint256 dispatch_selected(uint256 value)
+{
+  return selected(value);
+}
+"""
+        result = self._compile(source)
+
+        initcode = evm.generate_evm_initcode(result)
+        storage: dict[int, int] = {}
+        runtime = _MiniEvm(initcode, b"", storage).run()
+        value = _MiniEvm(runtime.hex(), _calldata("get()"), storage).run()
+        saved = _MiniEvm(runtime.hex(), _calldata("dispatch_saved(uint256)", 7), storage).run()
+        selected = _MiniEvm(
+            runtime.hex(),
+            _calldata("dispatch_selected(uint256)", 7),
+            storage,
+        ).run()
+
+        self.assertEqual(storage[0], 1)
+        self.assertEqual(storage[1], 11)
+        self.assertEqual(storage[2], (ord("A") << 8) | ord("Z"))
+        self.assertEqual(storage[3], 8)
+        self.assertNotEqual(storage[4], 0)
+        self.assertNotEqual(storage[5], 0)
+        self.assertEqual(int.from_bytes(value, "big"), 127738)
+        self.assertEqual(int.from_bytes(saved, "big"), 9)
+        self.assertEqual(int.from_bytes(selected, "big"), 28)
+
     def test_struct_storage_members_use_deterministic_slots(self) -> None:
         source = """
 typedef __evm_uint256 uint256;
@@ -3052,3 +4939,540 @@ uint256 sequence(void)
         self.assertEqual(int.from_bytes(selected_true, "big"), 11)
         self.assertEqual(int.from_bytes(selected_false, "big"), 13)
         self.assertEqual(int.from_bytes(comma_result, "big"), 12)
+
+    def test_pointer_left_addition_prefix_updates_and_signed_bitfield_update(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+struct Flags {
+  signed int low : 4;
+  uint256 value;
+};
+
+uint256 pointer_left_addition(void)
+{
+  uint256 values[4] = {3, 5, 7, 11};
+  uint256 *ptr = 1 + values;
+  --ptr;
+  ++ptr;
+  return *ptr;
+}
+
+uint256 signed_bitfield_update(uint256 input)
+{
+  struct Flags flags = {0};
+  flags.low = input;
+  int before = flags.low++;
+  --flags.low;
+  return (uint256)(before + 16) * 100 + (uint256)(flags.low + 16);
+}
+"""
+        result = self._compile(source)
+        bytecode = generate_evm_bytecode(result)
+
+        pointer = _MiniEvm(bytecode, _calldata("pointer_left_addition()")).run()
+        bitfield = _MiniEvm(bytecode, _calldata("signed_bitfield_update(uint256)", 0xF)).run()
+
+        self.assertEqual(int.from_bytes(pointer, "big"), 5)
+        self.assertEqual(int.from_bytes(bitfield, "big"), 1515)
+
+    def test_grouped_storage_declarations_and_static_locals_use_slots(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+extern uint256 ignored;
+uint256 first, second;
+
+uint256 grouped(void)
+{
+  uint256 local_a = 1, local_b = 2;
+  static uint256 static_a = 3, static_b = 5;
+  first = local_a;
+  second = local_b;
+  static_a += 1;
+  static_b += 2;
+  return first * 1000 + second * 100 + static_a * 10 + static_b;
+}
+"""
+        result = self._compile(source)
+        initcode = evm.generate_evm_initcode(result)
+        storage: dict[int, int] = {}
+        runtime = _MiniEvm(initcode, b"", storage).run()
+
+        returned = _MiniEvm(runtime.hex(), _calldata("grouped()"), storage).run()
+
+        self.assertEqual(int.from_bytes(returned, "big"), 1247)
+        self.assertEqual(storage, {0: 1, 1: 2, 2: 4, 3: 7})
+
+    def test_initialized_static_local_requires_initcode_generation(self) -> None:
+        self._assert_evm_diagnostic(
+            """
+typedef __evm_uint256 uint256;
+
+uint256 get(void)
+{
+  static uint256 value = 1;
+  return value;
+}
+""",
+            "EVM target does not support initialized storage globals",
+        )
+
+    def test_statement_expression_without_value_and_member_pointer_access(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+struct Pair {
+  uint256 left;
+  uint256 right;
+};
+
+uint256 member_pointer(void)
+{
+  struct Pair pair = {4, 9};
+  struct Pair *ptr = &pair;
+  ({ if (ptr->right) { ptr->right += 1; } });
+  ({});
+  return ptr->left * 10 + ptr->right;
+}
+"""
+        result = self._compile(source)
+        bytecode = generate_evm_bytecode(result)
+
+        returned = _MiniEvm(bytecode, _calldata("member_pointer()")).run()
+
+        self.assertEqual(int.from_bytes(returned, "big"), 50)
+
+    def test_unavailable_external_call_reports_evm_diagnostic(self) -> None:
+        self._assert_evm_diagnostic(
+            """
+typedef __evm_uint256 uint256;
+
+uint256 helper(uint256 value);
+
+uint256 entry(uint256 value)
+{
+  return helper(value);
+}
+""",
+            "unsupported EVM call: helper",
+        )
+
+    def test_unprototyped_function_pointer_call_reports_evm_diagnostic(self) -> None:
+        self._assert_evm_diagnostic(
+            """
+typedef __evm_uint256 uint256;
+typedef uint256 (*Fn)();
+
+uint256 target(void) { return 1; }
+
+uint256 entry(void)
+{
+  Fn fn = target;
+  return fn();
+}
+""",
+            "EVM function pointer calls need a fixed prototype",
+        )
+
+    def test_backend_abi_and_function_pointer_diagnostics(self) -> None:
+        cases = (
+            (
+                """
+typedef __evm_uint256 uint256;
+
+uint256 bad(uint256 first, ...)
+{
+  return first;
+}
+""",
+                "EVM target does not support variadic functions",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+
+static uint256 helper(double value)
+{
+  return 1;
+}
+
+uint256 entry(void)
+{
+  return helper(1.0);
+}
+""",
+                "unsupported EVM parameter type: double",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+
+uint256 value;
+
+uint256 *bad(void)
+{
+  return &value;
+}
+""",
+                "EVM ABI does not support pointer return types",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+
+struct Pair {
+  uint256 left;
+};
+
+uint256 bad(struct Pair value)
+{
+  return value.left;
+}
+""",
+                "unsupported EVM scalar type: struct Pair",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+
+void bad(uint256 *values)
+{
+  __builtin_evm_return_array(values);
+}
+""",
+                "__builtin_evm_return_array expects two arguments",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+typedef uint256 (*Fn)(double);
+
+static uint256 apply(Fn fn)
+{
+  return fn(1.0);
+}
+
+uint256 entry(void)
+{
+  return apply((Fn)0);
+}
+""",
+                "unsupported EVM function pointer parameter type: double",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+typedef uint256 (*Fn)(uint256, uint256);
+
+static uint256 apply(Fn fn)
+{
+  return fn(1, 2);
+}
+
+uint256 entry(void)
+{
+  return apply((Fn)0);
+}
+""",
+                "EVM function pointer call has no local target with matching prototype",
+            ),
+        )
+
+        for source, message in cases:
+            with self.subTest(message=message):
+                self._assert_evm_diagnostic(source, message)
+
+    def test_evm_helper_builtin_arity_diagnostics(self) -> None:
+        cases = (
+            ("__builtin_evm_addmod", (1, 2), "__builtin_evm_addmod expects three arguments"),
+            ("__builtin_evm_mulmod", (1, 2), "__builtin_evm_mulmod expects three arguments"),
+            ("__builtin_evm_exp", (2,), "__builtin_evm_exp expects two arguments"),
+            ("__builtin_evm_byte", (0,), "__builtin_evm_byte expects two arguments"),
+            (
+                "__builtin_evm_signextend",
+                (0,),
+                "__builtin_evm_signextend expects two arguments",
+            ),
+            ("__builtin_evm_sload", (0, 1), "__builtin_evm_sload expects one argument"),
+            ("__builtin_evm_sstore", (0,), "__builtin_evm_sstore expects two arguments"),
+            ("__builtin_evm_tload", (0, 1), "__builtin_evm_tload expects one argument"),
+            ("__builtin_evm_tstore", (0,), "__builtin_evm_tstore expects two arguments"),
+            ("__builtin_evm_caller", (1,), "__builtin_evm_caller expects no arguments"),
+            ("__builtin_evm_callvalue", (1,), "__builtin_evm_callvalue expects no arguments"),
+            ("__builtin_evm_address", (1,), "__builtin_evm_address expects no arguments"),
+            ("__builtin_evm_balance", (), "__builtin_evm_balance expects one argument"),
+            ("__builtin_evm_blobhash", (), "__builtin_evm_blobhash expects one argument"),
+            (
+                "__builtin_evm_calldatasize",
+                (1,),
+                "__builtin_evm_calldatasize expects no arguments",
+            ),
+            (
+                "__builtin_evm_calldataload",
+                (),
+                "__builtin_evm_calldataload expects one argument",
+            ),
+            (
+                "__builtin_evm_calldatacopy",
+                (0, 0),
+                "__builtin_evm_calldatacopy expects three arguments",
+            ),
+            ("__builtin_evm_codesize", (1,), "__builtin_evm_codesize expects no arguments"),
+            ("__builtin_evm_codecopy", (0, 0), "__builtin_evm_codecopy expects three arguments"),
+            ("__builtin_evm_mload", (), "__builtin_evm_mload expects one argument"),
+            ("__builtin_evm_mstore", (0,), "__builtin_evm_mstore expects two arguments"),
+            ("__builtin_evm_mcopy", (0, 0), "__builtin_evm_mcopy expects three arguments"),
+            ("__builtin_evm_mstore8", (0,), "__builtin_evm_mstore8 expects two arguments"),
+            ("__builtin_evm_msize", (1,), "__builtin_evm_msize expects no arguments"),
+            ("__builtin_evm_pc", (1,), "__builtin_evm_pc expects no arguments"),
+            (
+                "__builtin_evm_extcodecopy",
+                (0, 0, 0),
+                "__builtin_evm_extcodecopy expects four arguments",
+            ),
+            (
+                "__builtin_evm_returndatasize",
+                (1,),
+                "__builtin_evm_returndatasize expects no arguments",
+            ),
+            (
+                "__builtin_evm_returndatacopy",
+                (0, 0),
+                "__builtin_evm_returndatacopy expects three arguments",
+            ),
+            ("__builtin_evm_create", (0, 0), "__builtin_evm_create expects three arguments"),
+            ("__builtin_evm_create2", (0, 0, 0), "__builtin_evm_create2 expects four arguments"),
+            ("__builtin_evm_call", (0, 0, 0), "__builtin_evm_call expects seven arguments"),
+            (
+                "__builtin_evm_callcode",
+                (0, 0, 0),
+                "__builtin_evm_callcode expects seven arguments",
+            ),
+            (
+                "__builtin_evm_staticcall",
+                (0, 0, 0),
+                "__builtin_evm_staticcall expects six arguments",
+            ),
+            (
+                "__builtin_evm_delegatecall",
+                (0, 0, 0),
+                "__builtin_evm_delegatecall expects six arguments",
+            ),
+            ("__builtin_evm_revert", (0,), "__builtin_evm_revert expects no arguments"),
+            (
+                "__builtin_evm_revert_data",
+                (0,),
+                "__builtin_evm_revert_data expects two arguments",
+            ),
+            ("__builtin_evm_return", (0,), "__builtin_evm_return expects two arguments"),
+            ("__builtin_evm_stop", (0,), "__builtin_evm_stop expects no arguments"),
+            ("__builtin_evm_invalid", (0,), "__builtin_evm_invalid expects no arguments"),
+            (
+                "__builtin_evm_selfdestruct",
+                (),
+                "__builtin_evm_selfdestruct expects one argument",
+            ),
+            (
+                "__builtin_evm_keccak256",
+                (0,),
+                "__builtin_evm_keccak256 expects two arguments",
+            ),
+            ("__builtin_evm_log0", (), "__builtin_evm_log0 expects 1 arguments"),
+            ("__builtin_evm_log2", (1, 2), "__builtin_evm_log2 expects 3 arguments"),
+            (
+                "__builtin_evm_log0_data",
+                (0,),
+                "__builtin_evm_log0_data expects 2 arguments",
+            ),
+            (
+                "__builtin_evm_log4_data",
+                (1, 2, 3, 4, 0),
+                "__builtin_evm_log4_data expects 6 arguments",
+            ),
+        )
+
+        gen = self._helper_generator()
+        for name, args, message in cases:
+            call = CallExpr(Identifier(name), tuple(IntLiteral(str(arg)) for arg in args))
+            with self.subTest(name=name):
+                self._assert_evm_helper_diagnostic(lambda call=call: gen._emit_call(call), message)
+
+    def test_storage_initializer_diagnostics_are_reported_by_initcode(self) -> None:
+        cases = (
+            (
+                """
+typedef __evm_uint256 uint256;
+struct Pair { uint256 left; uint256 right; };
+struct Pair pair = 1;
+uint256 get(void) { return pair.left; }
+""",
+                "EVM aggregate storage initializer for struct Pair needs braces",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+uint256 seed(void) { return 1; }
+uint256 value = seed();
+uint256 get(void) { return value; }
+""",
+                "EVM initcode requires constant storage initializers",
+            ),
+            (
+                """
+char text[2] = "abc";
+int get(void) { return text[0]; }
+""",
+                "EVM string literal storage initializer too long",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+uint256 text[2] = "a";
+uint256 get(void) { return text[0]; }
+""",
+                (
+                    "EVM string literal storage initializer needs a char array target: "
+                    "__evm_uint256[2]"
+                ),
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+struct Pair { uint256 left; };
+struct Pair pair = {1, 2};
+uint256 get(void) { return pair.left; }
+""",
+                "EVM storage record initializer too long",
+            ),
+            (
+                """
+char text[0] = "";
+int get(void) { return 0; }
+""",
+                "EVM target needs a complete array type: char[0]",
+            ),
+        )
+
+        for source, message in cases:
+            with self.subTest(message=message):
+                self._assert_evm_initcode_diagnostic(source, message)
+
+    def test_local_initializer_and_lvalue_diagnostics_are_reported_by_bytecode(self) -> None:
+        cases = (
+            (
+                """
+typedef __evm_uint256 uint256;
+struct Pair { uint256 left; };
+uint256 get(void)
+{
+  struct Pair pair = {1, 2};
+  return pair.left;
+}
+""",
+                "EVM record initializer too long",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+uint256 get(void)
+{
+  char text[2] = "abc";
+  return text[0];
+}
+""",
+                "EVM string literal initializer too long",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+uint256 get(void)
+{
+  uint256 text[2] = "a";
+  return text[0];
+}
+""",
+                "EVM string literal needs a char array target: __evm_uint256[2]",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+uint256 get(void)
+{
+  double local;
+  return 0;
+}
+""",
+                "unsupported EVM object type: double",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+uint256 get(void)
+{
+  uint256 values[2] = 1;
+  return values[0];
+}
+""",
+                "EVM scalar initializer cannot initialize __evm_uint256[2]",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+extern uint256 missing;
+uint256 get(void)
+{
+  missing = 1;
+  return 0;
+}
+""",
+                "unknown EVM lvalue: missing",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+uint256 global;
+uint256 get(void)
+{
+  uint256 *ptr = &global;
+  return ptr == 0;
+}
+""",
+                "EVM target only supports addresses of memory objects",
+            ),
+        )
+
+        for source, message in cases:
+            with self.subTest(message=message):
+                self._assert_evm_diagnostic(source, message)
+
+    def test_exported_function_shape_diagnostics(self) -> None:
+        cases = (
+            (
+                """
+typedef __evm_uint256 uint256;
+static uint256 hidden(void) { return 1; }
+""",
+                "EVM target needs one exported function",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+uint256 variadic(uint256 first, ...) { return first; }
+""",
+                "EVM target does not support variadic functions",
+            ),
+            (
+                """
+typedef __evm_uint256 uint256;
+struct Pair { uint256 left; uint256 right; };
+static double helper(void) { return 1.0; }
+uint256 entry(void) { return 1; }
+""",
+                "unsupported EVM scalar type: double",
+            ),
+        )
+
+        for source, message in cases:
+            with self.subTest(message=message):
+                self._assert_evm_diagnostic(source, message)

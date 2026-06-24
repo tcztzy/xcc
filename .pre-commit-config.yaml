@@ -12,3 +12,23 @@ repos:
       - id: mypy
         pass_filenames: false
         files: ^src/.*\.py$
+  - repo: local
+    hooks:
+      - id: xcc-test-gate
+        name: xcc test gate
+        entry: uv run tox -e py311
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: xcc-lint-gate
+        name: xcc lint gate
+        entry: uv run tox -e lint
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: xcc-type-gate
+        name: xcc type gate
+        entry: uv run tox -e type
+        language: system
+        pass_filenames: false
+        always_run: true

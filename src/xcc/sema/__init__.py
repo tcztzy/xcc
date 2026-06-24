@@ -324,6 +324,7 @@ class Analyzer:
             "__builtin_malloc",
             "__builtin_calloc",
             "__builtin_memcpy",
+            "__builtin___memcpy_chk",
             "__builtin_memmove",
             "__builtin_memset",
         )
@@ -1272,9 +1273,6 @@ class Analyzer:
             return True
         if self._std != "gnu11":
             return False
-        # In GNU mode, void* can hold function pointers (POSIX requires this).
-        if is_void_pointer_type(target_type) and value_type.pointee() is not None:
-            return True
         # In GNU mode, allow cross-pointer assignment (e.g. char* to wchar_t*),
         # matching GCC -fpermissive behavior used by CPython.
         t_ptr = target_type.declarator_ops and target_type.declarator_ops[0][0] == "ptr"
@@ -1562,9 +1560,14 @@ class Analyzer:
     def _is_const_qualified(self, type_: Type) -> bool:
         return is_const_qualified(type_)
 
-    def _infer_array_size_from_init(self, initializer: Expr | InitList, scope: Scope) -> int | None:
+    def _infer_array_size_from_init(
+        self,
+        initializer: Expr | InitList,
+        scope: Scope,
+        target_type: Type | None = None,
+    ) -> int | None:
         if isinstance(initializer, InitList):
-            return infer_incomplete_array_length(self, initializer, scope)
+            return infer_incomplete_array_length(self, initializer, scope, target_type)
         if isinstance(initializer, StringLiteral):
             return self._string_literal_required_length(initializer.value)
         return None

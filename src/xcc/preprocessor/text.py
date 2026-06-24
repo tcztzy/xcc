@@ -319,8 +319,7 @@ def _reject_gnu_asm_extensions(
                 else ("<input>", line_number)
             )
             if primary_filename is not None and mapped_filename != primary_filename:
-                if line.strip():
-                    previous_significant_line = line.strip()
+                previous_significant_line = line.strip()
                 continue
             raise PreprocessorError(
                 "GNU asm extension is not allowed in c11",

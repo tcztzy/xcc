@@ -20,6 +20,20 @@ class HostIncludesTests(unittest.TestCase):
     def test_dedupe_in_order(self) -> None:
         self.assertEqual(host_includes._dedupe_in_order(["a", "a", "b", "a"]), ("a", "b"))
 
+    def test_tool_path_from_env_resolves_pathless_names(self) -> None:
+        with (
+            patch.dict("os.environ", {"XCC_LLC": "llc"}, clear=True),
+            patch("xcc.host_includes.shutil.which", return_value="/tools/llc") as which,
+        ):
+            self.assertEqual(host_includes._tool_path_from_env("XCC_LLC"), Path("/tools/llc"))
+        which.assert_called_once_with("llc")
+
+        with (
+            patch.dict("os.environ", {"XCC_LLC": "llc"}, clear=True),
+            patch("xcc.host_includes.shutil.which", return_value=None),
+        ):
+            self.assertIsNone(host_includes._tool_path_from_env("XCC_LLC"))
+
     def test_xcrun_stdout_returns_none_for_empty_output(self) -> None:
         completed = subprocess.CompletedProcess(("xcrun",), 0, stdout=" \n", stderr="")
         with patch("xcc.host_includes.subprocess.run", return_value=completed):
@@ -57,6 +71,27 @@ End of search list.
             )
         run.assert_called_once()
 
+    def test_host_system_include_dirs_linux_falls_back_when_cc_fails(self) -> None:
+        with (
+            patch("xcc.host_includes.sys.platform", "linux"),
+            patch("xcc.host_includes.subprocess.run", side_effect=OSError("cc missing")),
+        ):
+            self.assertEqual(
+                host_includes.host_system_include_dirs(),
+                ("/usr/local/include", "/usr/include"),
+            )
+
+    def test_host_system_include_dirs_linux_falls_back_without_search_list(self) -> None:
+        completed = subprocess.CompletedProcess(("cc",), 0, stdout="", stderr="cc verbose")
+        with (
+            patch("xcc.host_includes.sys.platform", "linux"),
+            patch("xcc.host_includes.subprocess.run", return_value=completed),
+        ):
+            self.assertEqual(
+                host_includes.host_system_include_dirs(),
+                ("/usr/local/include", "/usr/include"),
+            )
+
     def test_host_system_include_dirs_darwin_uses_sdkroot_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             sdk_root = Path(tmp) / "MacOSX.sdk"
@@ -73,15 +108,147 @@ End of search list.
                 )
                 return subprocess.CompletedProcess(cmd, 0, stdout="/RES\n", stderr="")
 
-            with patch("xcc.host_includes.sys.platform", "darwin"):
-                with patch.dict("os.environ", {"SDKROOT": str(sdk_root)}, clear=False):
-                    with patch("xcc.host_includes.subprocess.run", side_effect=fake_run):
-                        dirs = host_includes.host_system_include_dirs()
+            with (
+                patch("xcc.host_includes.sys.platform", "darwin"),
+                patch.dict("os.environ", {"SDKROOT": str(sdk_root)}, clear=True),
+                patch("xcc.host_includes.subprocess.run", side_effect=fake_run),
+            ):
+                dirs = host_includes.host_system_include_dirs()
         self.assertEqual(
             dirs,
             ("/RES/include", str(sdk_root / "usr" / "include"), "/usr/include"),
         )
         self.assertEqual(len(calls), 1)
+
+    def test_host_system_include_dirs_darwin_prefers_xcc_llc_sibling_clang(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sdk_root = root / "MacOSX.sdk"
+            bin_dir = root / "bin"
+            sdk_root.mkdir()
+            bin_dir.mkdir()
+            llc = bin_dir / "llc"
+            clang = bin_dir / "clang"
+            llc.touch()
+            clang.touch()
+            calls: list[tuple[str, ...]] = []
+
+            def fake_run(
+                cmd: tuple[str, ...], **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
+                calls.append(cmd)
+                if cmd == (str(clang), "-print-resource-dir"):
+                    return subprocess.CompletedProcess(cmd, 0, stdout="/LLVM_RES\n", stderr="")
+                raise AssertionError(f"Unexpected resource probe: {cmd!r}")
+
+            with (
+                patch("xcc.host_includes.sys.platform", "darwin"),
+                patch.dict(
+                    "os.environ",
+                    {"SDKROOT": str(sdk_root), "XCC_LLC": str(llc)},
+                    clear=True,
+                ),
+                patch("xcc.host_includes.subprocess.run", side_effect=fake_run),
+            ):
+                dirs = host_includes.host_system_include_dirs()
+
+        self.assertEqual(
+            dirs,
+            (
+                "/LLVM_RES/include",
+                str(sdk_root / "usr" / "include"),
+                "/usr/include",
+            ),
+        )
+        self.assertEqual(calls, [(str(clang), "-print-resource-dir")])
+
+    def test_host_system_include_dirs_darwin_xcc_llc_without_sibling_clang_uses_xcrun(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sdk_root = root / "MacOSX.sdk"
+            bin_dir = root / "bin"
+            sdk_root.mkdir()
+            bin_dir.mkdir()
+            llc = bin_dir / "llc"
+            llc.touch()
+            calls: list[tuple[str, ...]] = []
+
+            def fake_run(
+                cmd: tuple[str, ...], **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
+                calls.append(cmd)
+                self.assertEqual(
+                    cmd,
+                    ("xcrun", "--sdk", "macosx", "clang", "-print-resource-dir"),
+                )
+                return subprocess.CompletedProcess(cmd, 0, stdout="/RES\n", stderr="")
+
+            with (
+                patch("xcc.host_includes.sys.platform", "darwin"),
+                patch.dict(
+                    "os.environ",
+                    {"SDKROOT": str(sdk_root), "XCC_LLC": str(llc)},
+                    clear=True,
+                ),
+                patch("xcc.host_includes.subprocess.run", side_effect=fake_run),
+            ):
+                dirs = host_includes.host_system_include_dirs()
+
+        self.assertEqual(
+            dirs,
+            ("/RES/include", str(sdk_root / "usr" / "include"), "/usr/include"),
+        )
+        self.assertEqual(calls, [("xcrun", "--sdk", "macosx", "clang", "-print-resource-dir")])
+
+    def test_host_system_include_dirs_darwin_empty_sibling_clang_output_uses_xcrun(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sdk_root = root / "MacOSX.sdk"
+            bin_dir = root / "bin"
+            sdk_root.mkdir()
+            bin_dir.mkdir()
+            llc = bin_dir / "llc"
+            clang = bin_dir / "clang"
+            llc.touch()
+            clang.touch()
+            calls: list[tuple[str, ...]] = []
+
+            def fake_run(
+                cmd: tuple[str, ...], **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
+                calls.append(cmd)
+                if cmd == (str(clang), "-print-resource-dir"):
+                    return subprocess.CompletedProcess(cmd, 0, stdout=" \n", stderr="")
+                if cmd == ("xcrun", "--sdk", "macosx", "clang", "-print-resource-dir"):
+                    return subprocess.CompletedProcess(cmd, 0, stdout="/RES\n", stderr="")
+                raise AssertionError(f"Unexpected resource probe: {cmd!r}")
+
+            with (
+                patch("xcc.host_includes.sys.platform", "darwin"),
+                patch.dict(
+                    "os.environ",
+                    {"SDKROOT": str(sdk_root), "XCC_LLC": str(llc)},
+                    clear=True,
+                ),
+                patch("xcc.host_includes.subprocess.run", side_effect=fake_run),
+            ):
+                dirs = host_includes.host_system_include_dirs()
+
+        self.assertEqual(
+            dirs,
+            ("/RES/include", str(sdk_root / "usr" / "include"), "/usr/include"),
+        )
+        self.assertEqual(
+            calls,
+            [
+                (str(clang), "-print-resource-dir"),
+                ("xcrun", "--sdk", "macosx", "clang", "-print-resource-dir"),
+            ],
+        )
 
     def test_host_system_include_dirs_darwin_uses_xcrun_for_sdk_name(self) -> None:
         calls: list[tuple[str, ...]] = []
@@ -94,10 +261,12 @@ End of search list.
                 return subprocess.CompletedProcess(cmd, 0, stdout="/RES\n", stderr="")
             raise AssertionError(f"Unexpected xcrun invocation: {cmd!r}")
 
-        with patch("xcc.host_includes.sys.platform", "darwin"):
-            with patch.dict("os.environ", {"SDKROOT": "macosx"}, clear=False):
-                with patch("xcc.host_includes.subprocess.run", side_effect=fake_run):
-                    dirs = host_includes.host_system_include_dirs()
+        with (
+            patch("xcc.host_includes.sys.platform", "darwin"),
+            patch.dict("os.environ", {"SDKROOT": "macosx"}, clear=True),
+            patch("xcc.host_includes.subprocess.run", side_effect=fake_run),
+        ):
+            dirs = host_includes.host_system_include_dirs()
         self.assertEqual(dirs, ("/RES/include", "/SDK/usr/include", "/usr/include"))
         self.assertEqual(
             calls,
@@ -111,7 +280,9 @@ End of search list.
         def fail_run(*args: object, **kwargs: object) -> None:
             raise OSError("xcrun missing")
 
-        with patch("xcc.host_includes.sys.platform", "darwin"):
-            with patch.dict("os.environ", {}, clear=True):
-                with patch("xcc.host_includes.subprocess.run", side_effect=fail_run):
-                    self.assertEqual(host_includes.host_system_include_dirs(), ("/usr/include",))
+        with (
+            patch("xcc.host_includes.sys.platform", "darwin"),
+            patch.dict("os.environ", {}, clear=True),
+            patch("xcc.host_includes.subprocess.run", side_effect=fail_run),
+        ):
+            self.assertEqual(host_includes.host_system_include_dirs(), ("/usr/include",))

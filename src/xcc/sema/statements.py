@@ -109,7 +109,7 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
                 raise SemaError(a._extern_initializer_message("block-scope"))
             a._analyze_initializer(var_type, stmt.init, scope)
             if var_type.is_array() and var_type.declarator_ops[0][1] < 0:
-                inferred = a._infer_array_size_from_init(stmt.init, scope)
+                inferred = a._infer_array_size_from_init(stmt.init, scope, var_type)
                 if inferred is not None:
                     new_ops = (("arr", inferred),) + var_type.declarator_ops[1:]
                     new_type = Type(

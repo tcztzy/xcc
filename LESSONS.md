@@ -1,10 +1,418 @@
 # Lessons
 
+- Treat the real CPython build gate as an isolation problem as well as a
+  compiler problem. If the default CPython checkout has ignored in-source
+  artifacts, do not clean or reuse it for validation; clone a fresh temporary
+  tree and run the same `configure && make -j8` gate there so the result is
+  repeatable and does not modify the user's working copy.
+- Treat 100% line coverage and 100% branch coverage as separate gates when
+  `coverage.run.branch = true`. After AArch64 line closure, `tox -e py311`
+  reported 0 missed statements but still only 99.57% combined coverage because
+  branch partials remain in AArch64, generic LLVM codegen, and x86_64. Do not
+  call the coverage goal complete until both statement misses and branch
+  partials are closed or explicitly justified.
+- x86_64 backend missing-line closure is fastest when each unreachable-looking
+  line is first challenged with a real helper probe. Use narrowly scoped
+  synthetic `Type` subclasses and monkeypatches to cover valid defensive
+  behavior, but prefer a targeted `# pragma: no cover` only after the local
+  invariant proves the branch cannot fire, such as mutually exclusive
+  `TypeSpec` guards or range/min chunk-size bounds.
+- AArch64 record-layout and ABI-classification coverage moves fastest when
+  public lowering tests cover real syntax like `__func__`, while direct helper
+  probes cover impossible or diagnostic-only branches such as unsized
+  bitfields, HFA rejection, flexible-array fallbacks, and invalid
+  short-circuit operators. Always compare JSON missing-line deltas before
+  raising the ratchet, because some helper probes also cover shared layout
+  fallbacks such as `_member_align`.
+- AArch64 builtin and atomic coverage should pair public-path inline-lowering
+  tests with direct helper probes for arity and diagnostic branches. The public
+  tests prove the compiler emits real Darwin AArch64 text without external
+  symbols, while helper probes cheaply cover signed-width atomic variants and
+  fallback returns that valid source rarely exercises.
+- x86_64 global-initializer coverage is most efficient as a compact helper
+  sweep over real record definitions plus narrowly scoped monkeypatches for
+  impossible sizing failures. Keep public source tests for normal lowering, but
+  use direct helper probes for diagnostic-only branches and verify the exact
+  missing-line drop before raising the total ratchet.
+- x86_64 variadic and floating-binary helper coverage can stay under a few
+  milliseconds by using a real frontend fixture for sema state, then direct
+  AST probes for guard-only paths. Check the coverage JSON for the exact
+  missing-line deltas before moving the ratchet, because public source tests
+  may already cover the successful lowering paths but miss target-register and
+  diagnostic branches.
+- LLVM codegen can reach 100% line coverage only by separating real helper
+  behavior from invariant guards. Cover reachable paths with existing
+  without-`llc` helper fixtures, but exclude only guards proven unreachable by
+  LLVM opaque pointers, uniqued integer/float types, or `Type.is_array()`
+  element guarantees.
+- Refresh the real CPython build gate after backend coverage-only sweeps.
+  Helper probes and single-object benchmarks can prove local branches quickly,
+  but only the isolated `build/cpython-src-clean` `configure && make -j8` gate
+  verifies CPython-wide configure, compile, link, freeze, and extension import
+  behavior with the mypyc import tree.
+- AArch64 global initializer helper coverage can close many branches quickly
+  by combining a real sema fixture with narrowly scoped `_type_size`,
+  `_member_align`, and `_eval_int_constant` stubs. Keep each stub active only
+  for the exact negative probe so later pointer/lvalue checks still use real
+  record layout and file-scope symbols.
+- Direct AArch64 helper probes that exercise aggregate address or initializer
+  paths must seed frame scratch state, not only TypeMap entries and slots.
+  `_emit_local_array_initializer` and record-call address materialization use
+  `_emit_scratch_*`, so set a realistic `_frame_size`/`_scratch_size` before
+  probing those branches.
+- Direct x86_64 address and initializer helper probes need both sema-visible
+  declarations and explicit TypeMap entries for synthesized identifiers, calls,
+  and compound literals. Register aggregate result slots by object id and
+  restore any temporary `_emit_*` stubs immediately after the exact probe.
+- Direct x86_64 `_emit_decl` helper probes need declaration slots keyed by the
+  exact `DeclStmt` object id. Scope entries alone are insufficient because
+  `_require_decl_slot` reads `_decl_slots[id(stmt)]`; register and clean up the
+  synthetic slot around the probe.
+- x86_64 array-initializer guard coverage must account for helper
+  normalization. `_emit_array_initializer_to_address` calls
+  `_complete_array_initializer_type` before validating length, so tests for
+  impossible post-normalization lengths need a tightly scoped stub and an
+  immediate restore.
+- x86_64 helper coverage for register-sensitive branches should use a real
+  frontend fixture for sema and record layout, then temporarily replace
+  `_emit_expr` only around the exact helper under test. Restore the original
+  method immediately so later probes do not inherit synthetic registers or
+  types.
+- Native backend coverage can advance quickly without replacing real CPython
+  gates by separating helper contracts from executable source tests. For
+  direct helper probes, seed the same backend state real lowering expects
+  (`_func`, `_func_sym`, record definitions, and labels), then require a fresh
+  full py311 coverage sample before moving the ratchet.
+- x86_64 backend helper sweeps can cover guard-heavy branches cheaply by
+  pairing a real frontend fixture with synthetic AST nodes. When mutating
+  private backend state such as `file_scope`, `_func`, or parameter slots,
+  restore or reset it before the next probe so the coverage test does not
+  depend on leaked state.
+- LLVM helper coverage needs line-level verification after each probe. LLVM
+  can fold builder expressions into constants or canonicalize opaque pointer
+  casts, so a passing assertion can still miss the intended branch; compare the
+  coverage JSON before raising the ratchet.
+- LLVM opaque pointers collapse many pointer-to-pointer casts to the same LLVM
+  type. Before claiming a helper branch is covered, check the target coverage
+  JSON: typed-pointer fallback branches may remain unreachable, and tests
+  should document the current helper contract instead of forcing invalid
+  preconditions for a coverage bump.
+- Direct native backend helper tests need the same function state that real
+  lowering would seed. Set `_func_sym`, build a realistic frame/parameter
+  fixture, and then probe guard branches directly so the coverage gain stays
+  fast without bypassing backend invariants.
+- Switch and array-decay codegen helper coverage needs fresh LLVM insertion
+  blocks after each terminator-producing probe. Reusing a terminated block can
+  hide the branch under test or create invalid IR, while fresh blocks keep the
+  helper sweep fast and deterministic.
+- Codegen ratchet work should separate fast helper-edge sweeps from executable
+  IR tests. Direct helper probes can close dozens of branch/line gaps quickly,
+  but every ratchet move still needs a fresh full py311 sample because only the
+  full parallel gate proves the project-wide denominator and remaining backend
+  gaps.
+- Before adding slower backend cases, close cheap utility-module branch gaps
+  with targeted tests. A focused `cc_driver`/`host_includes` run can prove 100%
+  line/branch coverage in under a second, then the full py311 gate can decide
+  the ratchet.
+- AArch64 TypeMap-recovery fallback coverage can stay fast by compiling a
+  small real source fixture for sema symbols and record layouts, then removing
+  only the synthetic `sizeof`/`alignof` AST nodes from the TypeMap. Cover both
+  direct member and nested member chains, including pointer roots, before
+  moving the ratchet.
+- Parallel CPython `make -j8` turns per-process external tool probes into a
+  reliability and speed problem. When the gate sets an explicit tool path such
+  as `XCC_LLC`, trust that path and let the real invocation fail if it is wrong;
+  keep expensive `--help` verification only for discovered `LLVM_CONFIG`/`PATH`
+  candidates.
+- Native global pointer initializer coverage should use valid source first for
+  label/offset folding, such as extern symbols, static locals, compound
+  literals, function designators, and commuted array offsets. Reserve direct
+  helper probes for nonconstant rejection branches, and clear `TypeMap` entries
+  for freshly constructed negative AST nodes that must behave as untyped.
+- With branch coverage enabled, "100% for a module" means both missing lines
+  and missing branches must be zero. Compact helper tests should cover
+  executable branch alternatives first; reserve `no cover`/`no branch` for
+  invariants such as fixed-output Keccak squeezing or duplicated guards that an
+  earlier validation branch always rejects.
+- Direct LLVM initializer helper tests can use GNU empty structs to reach
+  runtime unbraced-aggregate fallback branches deterministically. Keep the
+  fixture source valid, reset the builder back to the probe block after calling
+  `_define_func`, and measure the full py311 gate before moving the ratchet.
+- Direct AST helper tests that share a `TypeMap` should guard negative lookups
+  against Python object id reuse. Before asserting unknown `typeof`,
+  address-of, assignment-target, or other fallback behavior for a freshly
+  constructed node, remove `id(node)` from the map so the test cannot
+  accidentally inherit a type from an earlier temporary AST object.
+- Native backend coverage should prefer public C source tests until the missing
+  path depends on an internal register/slot choice that source cannot
+  deterministically request. For those cases, instantiate the real backend
+  generator and call the helper with typed AST nodes so the test still exercises
+  real lowering code.
+- Set coverage ratchets below the exact measured total, not at the rounded
+  display value. Parallel full py311 samples can differ by a few covered lines;
+  for example 93.92804600775712%-93.98956800855959% supports a 93.92% ratchet,
+  while 93.99% would depend on the higher sample.
+- LLVM helper coverage can safely target source-unreachable defensive branches
+  when the fixture mirrors real builder state: create an insertion block, seed
+  locals/type maps, and exercise ABI-sensitive helpers such as call coercion,
+  casts, va intrinsics, and atomic promotion directly. Keep these tests fast,
+  then verify both module missing-line reduction and a fresh full py311 gate
+  before moving the ratchet.
+- When sema already rejects invalid builtin calls, public-path tests should
+  assert that frontend diagnostic separately if needed; backend duplicate arity
+  guards need compact helper tests with synthetic AST calls, otherwise the test
+  never reaches the branch it claims to cover.
+- Coverage ratchets must be set from a strict gate sample, not the best recent
+  JSON run. Parallel module coverage can shift a few lines in long backend
+  files, so ratchet to the observed stable lower bound and record the exact
+  gate evidence.
+- When AArch64 and x86_64 share a native backend feature, a passing test on one
+  target is not proof for the other. Tail flexible array members need explicit
+  zero-initializer regression coverage per backend because x86_64 can otherwise
+  fall through to ordinary aggregate zeroing and try to size `int[-1]`.
+- Native backend constant-expression coverage should use frontend-reachable
+  global/static initializer source instead of direct evaluator calls. One
+  compact initializer matrix can cover many AArch64 and x86_64 evaluator
+  branches while still proving emitted object data labels and keeping the
+  parallel gate efficient.
+- EVM helper tests for internal backend branches need enough synthetic frame,
+  symbol, and local state to reach the intended guard. For function-pointer
+  calls, a matching target signature is required before unsupported argument
+  diagnostics run; for integer conversions, `char` follows the signed
+  `SIGNEXTEND` path rather than an unsigned mask.
+- For EVM initializer designator coverage, direct helper tests should exercise
+  both memory and storage paths because they have separate diagnostics and slot
+  arithmetic. Keep the cases table-driven, with exact messages, so defensive
+  branches are covered without adding invalid C source fixtures.
+- EVM constant-expression coverage needs to follow canonical project types:
+  `char` is the signed 8-bit integer path, while `signed char` is not currently
+  in the canonical integer map. Use small direct helper assertions to lock that
+  behavior down instead of assuming C spelling aliases are normalized.
+- EVM helper tests are valuable for backend-only defensive branches, but the
+  helper fixture must initialize the same state that contract generation would
+  initialize, such as `_functions_by_name`, before probing function-label or
+  function-pointer paths. Keep these tests short and verify exact diagnostics so
+  they complement, not replace, source-level EVM execution tests.
+- Real CPython build validation needs a clean source tree, not just a clean git
+  status. If the default checkout has ignored build artifacts, use a clean git
+  worktree under ignored `build/` for `cpython-build`; do not clean the user's
+  CPython checkout just to make the gate pass.
+- Direct LLVM helper tests are efficient for defensive and constant-expression
+  fallback paths, but assertions must follow traced helper semantics. For
+  example, `_infer_array_init_length` with nonconstant designators falls back to
+  sequential length `1`, not the syntactic high designator.
+- Some LLVM backend defensive branches are intentionally unreachable from valid
+  source after sema validation. Cover those with direct helper tests instead of
+  adding invalid C fixtures or slow link/run cases; keep the helper tests small
+  and measure missing-line reduction before raising the ratchet.
+- Coverage additions should be measured at the target module before keeping
+  them. A plausible x86_64 aggregate-expression test did not reduce missing
+  lines because returns used address-based aggregate initialization instead of
+  `_emit_subscript`/`_emit_member`; removing no-gain tests keeps the parallel
+  gate efficient while the ratchet moves from measured coverage only.
+- Unnamed bit-fields do not participate in record initialization. Native
+  backend initializer mapping must skip them before assigning positional
+  initializers, while record access/layout code still sees them for padding and
+  alignment. Cover both designators and positional compound literals when a
+  bit-field ABI test includes zero-width separators.
+- Switch `case` constants and array designator indexes use separate codegen
+  evaluators, so coverage for one does not prove the other. When extending
+  integer constant-expression support, exercise both public paths. Union
+  first-member aggregate initializer shapes may still be rejected in sema, so
+  keep LLVM aggregate coverage focused on frontend-reachable record and array
+  cases unless sema is being changed too.
+- EVM builtin arity diagnostics are sema-owned for source-level tests because
+  builtin signatures are registered before backend lowering; backend arity
+  checks are defensive and should not drive coverage tests. Also, `_Alignof`
+  accepts some type names such as pointer/scalar forms but rejects array
+  type-names in sema, so EVM constant-expression coverage should probe the
+  supported frontend paths instead of forcing backend-only branches.
+- For backend coverage, prefer frontend-reachable behavior. EVM `break` and
+  `continue` outside loops are rejected by sema before the backend, so
+  backend-only error lines should not drive invalid C tests. EVM array compound
+  literals need explicit bounds like `(uint256[2]){...}`; incomplete forms
+  remain diagnostic.
+- Tests for function-scope `__func__` must compile in strict C mode. The
+  default GNU compatibility path defines `__func__`/`__PRETTY_FUNCTION__` as
+  preprocessor compatibility macros, so a native backend test that wants the
+  semantic function-name object should pass `FrontendOptions(std="c11", ...)`.
+- Coverage progress should keep mixing executable semantic tests with cheap
+  target-text probes. LLVM global range designators and EVM initcode storage
+  initializers need real execution because they prove constant initialization
+  behavior, while x86_64/AArch64 builtin variants are efficient assembly
+  assertions for host-independent lowering branches. When adding AArch64 text
+  assertions, match stable opcode/label prefixes instead of generated numeric
+  suffixes.
+- LLVM local declaration initialization must route aggregate targets through
+  initializer-to-address lowering even when the initializer is not braced.
+  Sema can type scalar aggregate initializers as the destination aggregate, so
+  a same-type direct store is only safe for a real whole-aggregate value. For C
+  scalar aggregate initialization, zero the destination first and then
+  initialize the first member so omitted members keep C's zero-initialization
+  semantics. Real CPython validation should run against a clean source
+  worktree; dirty source checkouts and single-object substitutes are not
+  acceptable evidence for the project gate.
+- Aggregate call-result member access needs both executable LLVM coverage and
+  target-specific native text coverage. Small register-return records and
+  large indirect records take different storage paths; x86_64 assertions should
+  prove the call result is materialized before member offsets are applied,
+  while the LLVM test should still link and execute the same semantic shape.
+  Pointer-difference scaling and unordered floating branches are cheap adjacent
+  native checks that raise coverage without replacing real execution tests.
+- Backend coverage should include small text-level native tests for target-only
+  lowering branches that cannot execute on every host. x86_64 floating
+  logical-not, 32-bit `cdq` division, and bit-field postfix old-result
+  preservation are cheap assembly assertions; pair them with executable LLVM
+  tests when the same source shape has semantic risk, such as string
+  initialization of `char[]` record members.
+- Backend coverage probes should distinguish unreachable fallback branches from
+  public compiler behavior. The EVM unnamed-parameter backend diagnostic is
+  parser-blocked, so it is not a useful test target; better targets are
+  executable global initializers, native slot-collection shapes, and LLVM
+  layout cases such as alignment-driven union tail padding.
+- LLVM codegen coverage should bundle small control-flow and declaration-edge
+  programs only when they execute through `llc` and the platform linker. One
+  compact executable source can cover block-scope `extern` scalar/array reads,
+  void expression returns, nested scalar brace initialization, forward `goto`,
+  endless `for` with `break`, and alloca insertion after a terminated block
+  without weakening the real compiler path.
+- Inline-function coverage should check both absence and forced local
+  emission. A fast assembly test can prove unused inline bodies stay out of
+  native output while referenced inline designators are emitted as non-global
+  local functions. For ABI coverage, text-level x86_64 tests can cheaply reach
+  SysV stack-passed aggregate chunks that are skipped by native execution on
+  non-Linux hosts.
+- Host-skipped native execution paths still need public compiler coverage.
+  Text-level x86_64 assembly tests are effective for sparse designators,
+  local incomplete array storage, and nested `offsetof` constants, while
+  AArch64 should keep corresponding `sizeof` and member-chain cases executable
+  when the Darwin runner can link and run the generated assembly.
+- Native backend coverage should include text-level tests for branches that
+  are otherwise hidden behind host-specific execution skips. On non-Linux
+  hosts, x86_64 bit-field compound assignment and update execution tests do
+  not run, so small assembly assertions are needed to keep mask/load/store
+  lowering covered. For AArch64, one executable compound-literal test can cover
+  both scalar array members and arrays of record members without adding another
+  slow module.
+- Grouped declaration coverage is high leverage across backends. One small
+  source with grouped file-scope globals and grouped static locals exercises
+  collection, symbol naming, and data emission in both x86_64 and AArch64
+  without adding slow execution work; pair those text checks with executable
+  LLVM tests for semantic behavior such as comma expressions, string literal
+  caching, wide string expressions, and explicit `return;`.
+- LLVM codegen coverage should favor small executable programs that hit real
+  fallback lowering, such as implicit zero returns and grouped file-scope
+  declaration emission. Probe call-coercion branches before testing them:
+  several are intentionally blocked or normalized by sema and explicit casts
+  before `_coerce_call_args`, so source-level tests cannot naturally reach them.
+- EVM backend diagnostic coverage should start with a source-level reachability
+  probe. Builtin arity mistakes are sema-owned and do not reach EVM codegen,
+  while ABI shape checks, unsupported internal parameter types, return-array
+  arity, function-pointer target validation, unsupported local object types,
+  and aggregate locals with scalar initializers are reachable through ordinary
+  `compile_source` plus `generate_evm_bytecode`.
+- EVM initializer coverage is more efficient when nested designators are folded
+  into existing local bytecode and storage initcode tests. A single source can
+  exercise recursive designator descent through arrays of records in both
+  memory and persistent storage without adding another slow module-level test.
+- AArch64 backend coverage can stay executable while still reaching data-layout
+  and ABI branches. Global pointer initializers are cheap run tests for compound
+  literals, string/null pointers, array decay, pointer arithmetic, and subobject
+  addresses; record-return tests should cover both small register returns and
+  large indirect returns in one linked program. For Darwin aggregate varargs,
+  small records are copied inline from the current `va_list` stack pointer while
+  larger records are passed by reference, and XCC-owned variadic callees need
+  execution tests just like XCC-owned callers.
+- Dense LLVM coverage tests should still execute real C behavior. One small
+  source program can cover local enum lookup, function-pointer dereference,
+  pointer updates, pointer differences, mixed float comparisons, and compound
+  floating assignment while proving the generated IR links and returns the
+  expected status.
+- Wide string array initializers need element-count and element-width handling,
+  not byte-count handling. `u""` maps to 16-bit elements, while `U""` and `L""`
+  map to 32-bit elements; using the ordinary string literal pointer path can
+  produce invalid LLVM pointer-to-array bitcasts for local arrays.
+- AArch64 atomic coverage is most efficient as executable clusters that verify
+  both the generated inline lowering and runtime value transitions. Generic
+  `__atomic_*` forms, lock-free probes, fences, old-value/new-value RMW
+  variants, and `__sync_*compare_and_swap` share the same lowering machinery,
+  so one small run test can cover many branches without introducing a slow
+  object-file-only benchmark.
+- EVM coverage work needs a reachability probe before adding tests. Builtin
+  arity mistakes are sema-owned diagnostics, so codegen arity fallbacks are not
+  useful source-level coverage targets; grouped declarations, storage
+  initializer initcode, pointer/member lowering, and backend-only diagnostics
+  produce better coverage without bypassing the public compiler path.
+- LLVM intrinsic signatures are stricter than C builtin call syntax. For
+  `__builtin_memset`, the C fill argument is an `int`, but LLVM's memset
+  intrinsic requires an `i8`; always coerce builtin operands to intrinsic
+  parameter types before building the call. Floating classification builtins
+  have the opposite trap: the result is `int`, but non-floating arguments must
+  be converted to a floating operand type before emitting `fcmp`.
+- Test entrypoints drift unless tox, CI, pre-commit, and README all name the
+  same commands. Keep one parallel coverage runner as the default test path,
+  and keep full CPython build validation as a separate real-project gate from
+  frontend file benchmarks. Ratchet actual coverage upward from measured
+  reality; do not claim 100% coverage until the report proves it. Keep the
+  CPython gate mypyc-accelerated so real-project validation stays useful during
+  normal iteration.
+- Parallel coverage must isolate data per run. `coverage erase` does not remove
+  arbitrary stale `.coverage.*` files, while `coverage combine` scans the data
+  directory by default; use a per-run `COVERAGE_FILE` so ratchets are based on
+  the current worker set only.
+- Unbraced aggregate initializers need one shared consumption model across sema
+  and codegen. Distinguish complete aggregate initializers, such as char-array
+  strings and same-type aggregate expressions, from flattened subobject items;
+  otherwise arrays of records and multidimensional arrays either reject valid C
+  or store values in the wrong subobject.
+- `sizeof` and `_Alignof` can share parsing and type-resolution paths, but the
+  backend constant lowering must branch on the expression kind. Record alignment
+  also has to use member storage alignment, including `_Alignas`, not just the
+  member's base type alignment.
+- Record layout helpers must use a single member-storage-alignment path across
+  record alignment, size calculation, member access, ABI classification, and
+  global initializer padding. Fixing only `__alignof__` leaves `sizeof` and
+  offsets vulnerable to the same `_Alignas` drift in other backends.
+- Case-label constant folding is executable control flow, not just parser
+  bookkeeping. Unsupported integer operators silently collapse to zero in the
+  backend and redirect `switch` dispatch, so logical and comparison operators
+  need source-level execution regressions just like arithmetic case labels.
+- LLVM constant arrays can be `ConstantDataArray` values with zero operands.
+  Constant-initializer byte extraction must use aggregate-element lookup before
+  falling back to null elements, or union members initialized through byte
+  arrays silently become zero in global storage.
+- Coverage debt should be paid with focused, cheap unit tests before leaning on
+  CPython builds. A real-project build proves integration, but it does not
+  replace branch tests for parser, preprocessor, host-discovery, and semantic
+  helper edges.
+- Coverage-directed tests should prefer real source-level behavior when it is
+  reachable, but direct helper tests are acceptable for defensive fallbacks
+  that production syntax cannot naturally trigger. Keep those tests narrow and
+  paired with full tox gates so coverage work does not mask integration risk.
+- Coverage ratchets should move only after a fresh full-gate coverage run, and
+  the config contract test should pin the exact new threshold. Record the exact
+  JSON total and missing-line count separately from the rounded report column.
+- Backend coverage should not chase branches that production source cannot
+  reach because sema owns the diagnostic first. EVM builtin arity errors are
+  mostly rejected before codegen, so spend backend tests on executable lowering
+  behavior unless a backend-only fallback is genuinely reachable.
+- Moving the total coverage ratchet requires backend coverage work, not only
+  parser/preprocessor polishing. Keep making cheap helper modules 100%, but
+  plan larger backend test slices separately so the global number can approach
+  100% without making every edit wait on CPython builds.
+- Do not assume backend label syntax carries across targets. x86_64 uses
+  dotted `.L.<function>.*` labels while AArch64 currently emits `L_<kind>_*`
+  labels and underscored globals, so coverage assertions should follow the
+  target's actual ABI and assembly style.
 - Partial object-file smoke tests are useful for fast localization, but they
   are not integration evidence. A full clean CPython `configure && make -j1`
   later exposed `_ssl.c` and `_testcapimodule.c` failures that three selected
   files missed. Treat per-file rebuilds as debugging aids and require a fresh
   build directory for the final CPython claim.
+- CPython out-of-tree builds require source cleanliness beyond `git status`;
+  ignored build artifacts can trip `check-clean-src`. Use an isolated clean
+  worktree for real CPython build gates instead of cleaning the user's primary
+  CPython checkout.
 - Compiler-compatibility bugs often hide in macro-expanded system-header
   shapes, not in the visible source line. OpenSSL's `SSL_ctrl` macros pass
   `const char **` through `void *`, and CPython's tests use GNU

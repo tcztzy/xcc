@@ -27,6 +27,7 @@ V11: LLVM null pointer checks ! handle `None` and `0`.
 V12: `LLVMPositionBuilderAtEnd` on terminated block ⊥ unless caller proves insertion-before-terminator intended.
 V19: ∀ `target=llvm` object path → `llc` command includes explicit optimization/filetype args expected by driver tests.
 V288: LLVM `llc` resolution ! target=llvm object/link paths discover candidates through `XCC_LLC`, `LLVM_CONFIG`, or `PATH` and accept only executables whose `--help` stdout contains LLVM `llc` markers; a single hardcoded path or unverified same-name executable ⊥.
+V366: LLVM local and static aggregate scalar initializers ! zero the destination aggregate and initialize the first member; casting a scalar value to the whole record/union type ⊥.
 
 ## §T TASKS
 id|status|task|cites
@@ -35,3 +36,4 @@ T3|x|implement LLVM IR backend through libLLVM-C + `llc`|V9,V288,I.file
 ## §B BUGS
 id|date|cause|fix
 B264|2026-06-04|LLVM target object lowering hardcoded Homebrew `llc` and did not verify that a found same-name executable was LLVM `llc` before compiling IR|V288
+B267|2026-06-19|LLVM local aggregate declarations with scalar initializers bypassed initializer-to-address lowering, generated scalar-to-record bitcasts, and failed to zero omitted members|V366

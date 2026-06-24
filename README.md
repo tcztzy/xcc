@@ -138,8 +138,8 @@ The control loop is deliberately concrete:
    deterministic diagnostic text, or a real build command.
 4. Verify both sides of the boundary: valid programs should compile and run;
    invalid or unsupported inputs should fail clearly.
-5. Run the handoff gates: `uv run python -m unittest discover -v`,
-   `uv run tox -e lint`, and `uv run tox -e type`.
+5. Run the handoff gates: `uv run tox -e py311`, `uv run tox -e lint`,
+   and `uv run tox -e type`.
 
 That loop is how the project keeps agents from "helpfully" doing the wrong
 thing. A patch that passes a toy example but adds a CPython-specific shortcut,
@@ -152,10 +152,18 @@ behavior change is not progress here.
 - CPython build: `CC="xcc" ./configure && make`
 - CPython with explicit target:
   `CC="xcc --target=aarch64-apple-darwin" ./configure && make`
+- CPython build validation:
+  `uv run tox -e cpython-build -- /path/to/cpython`
+  This gate rebuilds the mypyc import tree first and then uses it through
+  `PYTHONPATH` while CPython runs `CC=xcc`.
 - Validation: `uv run python scripts/validate_compiler.py`
 - Lint: `uv run tox -e lint`
 - Type check: `uv run tox -e type`
-- Test: `uv run python -m unittest discover -v`
+- Test: `uv run tox -e py311`
+- Test with fixed worker count: `XCC_TEST_JOBS=1 uv run tox -e py311`
+- Strict 100% coverage check:
+  `uv run python scripts/run_tests.py --coverage --fail-under 100`
+- mypyc import-tree test: `uv run tox -e mypyc`
 
 ## Performance Benchmark
 
@@ -163,6 +171,11 @@ Cython and mypyc are optional benchmark tooling, not XCC runtime dependencies.
 The unified benchmark runs XCC frontend compilation on a default CPython sample:
 `Objects/listobject.c`, `Objects/dictobject.c`, `Python/compile.c`,
 `Parser/parser.c`, and `Modules/_json.c`.
+
+Frontend benchmarks are not full-project validation. Use
+`uv run tox -e cpython-build -- /path/to/cpython` when the claim is that XCC can
+serve as `CC` for a real CPython `configure && make` build; that gate is
+mypyc-accelerated and separate from single-file timing loops.
 
 Run the interpreter matrix through tox-uv:
 

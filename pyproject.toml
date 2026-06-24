@@ -70,15 +70,17 @@ source = ["src"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 0
+fail_under = 100.00
+precision = 2
 
 [tool.tox]
 requires = ["tox>=4.54.0", "tox-uv>=1.35.2"]
-env_list = ["py311", "py312", "py313", "py313t", "py314", "py314t", "pypy311", "lint", "type"]
+env_list = ["py311", "py312", "py313", "py313t", "py314", "py314t", "pypy311", "mypyc", "lint", "type"]
 skip_missing_interpreters = true
 
 [tool.tox.env_run_base]
-commands = [["coverage", "run", "-m", "unittest", "discover", "-v"], ["coverage", "report"]]
+dependency_groups = ["dev"]
+commands = [["python", "scripts/run_tests.py", "--coverage"]]
 
 [tool.tox.env.lint]
 runner = "uv-venv-lock-runner"
@@ -91,6 +93,18 @@ runner = "uv-venv-lock-runner"
 dependency_groups = ["dev"]
 package = "skip"
 commands = [["ty", "check", "src"], ["mypy"]]
+
+[tool.tox.env.mypyc]
+runner = "uv-venv-lock-runner"
+dependency_groups = ["dev"]
+package = "skip"
+base_python = ["python3.11"]
+commands = [["python", "scripts/mypycize_xcc.py", "--build-root", "build/mypyc", "--clean", "--force"], ["python", "scripts/run_tests.py", "--pythonpath", "build/mypyc/lib"]]
+
+[tool.tox.env.cpython-build]
+runner = "uv-venv-lock-runner"
+dependency_groups = ["dev"]
+commands = [["python", "scripts/mypycize_xcc.py", "--build-root", "build/mypyc", "--clean", "--force"], ["python", "scripts/validate_cpython_build.py", "--clean", "--pythonpath", "build/mypyc/lib", "--cpython", "{posargs:../cpython}"]]
 
 [tool.tox.env.bench-py311]
 runner = "uv-venv-lock-runner"

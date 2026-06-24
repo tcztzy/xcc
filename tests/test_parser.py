@@ -1,5 +1,6 @@
 import unittest
 from enum import Enum, auto
+from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 import xcc.parser.array_sizes as parser_array_sizes
@@ -1387,6 +1388,27 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(stmt.type_spec, TypeSpec("int"))
         self.assertEqual(stmt.name, "value")
 
+    def test_declspec_identifier_start_is_declaration_start(self) -> None:
+        class DeclspecProbe:
+            _index = 0
+
+            def _check_keyword(self, keyword: str) -> bool:
+                return False
+
+            def _skip_decl_attributes(self) -> bool:
+                return False
+
+            def _current(self) -> Token:
+                return Token(TokenKind.IDENT, "__declspec", 1, 1)
+
+            def _peek_punct(self, punctuator: str) -> bool:
+                return punctuator == "("
+
+            def _is_typedef_name(self, name: str) -> bool:
+                raise AssertionError(name)
+
+        self.assertTrue(parser_statements.is_declaration_start(DeclspecProbe()))
+
     def test_gnu_attribute_block_scope_function_declaration_is_ignored(self) -> None:
         source = 'int main(){__attribute__((visibility("default"))) int helper(int); return 0;}'
         unit = parse(list(lex(source)))
@@ -2242,6 +2264,33 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(declaration.name, "aligned_global")
         self.assertIsNotNone(declaration.init)
 
+    def test_gnu_aligned_attribute_accepts_empty_argument(self) -> None:
+        unit = parse(list(lex("int empty_align __attribute__((aligned()));")), std="gnu11")
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertIsNone(declaration.alignment)
+
+    def test_gnu_aligned_attribute_keeps_largest_alignment(self) -> None:
+        unit = parse(
+            list(lex("__attribute__((aligned(64), aligned(8))) int high_align;")),
+            std="gnu11",
+        )
+        declaration = unit.declarations[0]
+        self.assertIsInstance(declaration, DeclStmt)
+        self.assertEqual(declaration.alignment, 64)
+
+    def test_gnu_aligned_attribute_rejects_non_constant_argument(self) -> None:
+        with self.assertRaisesRegex(ParserError, "integer constant expression"):
+            parse(list(lex("int bad_align __attribute__((aligned(name)));")), std="gnu11")
+
+    def test_gnu_aligned_attribute_rejects_non_positive_argument(self) -> None:
+        with self.assertRaisesRegex(ParserError, "must be positive"):
+            parse(list(lex("int bad_align __attribute__((aligned(0)));")), std="gnu11")
+
+    def test_gnu_aligned_attribute_rejects_non_power_of_two_argument(self) -> None:
+        with self.assertRaisesRegex(ParserError, "power of two"):
+            parse(list(lex("int bad_align __attribute__((aligned(3)));")), std="gnu11")
+
     def test_declspec_before_function_name_is_ignored(self) -> None:
         unit = parse(
             list(lex("void __declspec(dllimport) __declspec(dllexport) precedence1B(void) {}"))
@@ -2338,6 +2387,10 @@ class ParserTests(unittest.TestCase):
     def test_unterminated_declspec_reports_parser_error(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int __declspec(guard(nocf) value;")))
+
+    def test_unterminated_availability_attribute_reports_parser_error(self) -> None:
+        with self.assertRaises(ParserError):
+            parse(list(lex("int x API_AVAILABLE(macos(10.14);")), std="gnu11")
 
     def test_atomic_keyword_requires_following_type(self) -> None:
         with self.assertRaises(ParserError):
@@ -2946,10 +2999,21 @@ class ParserTests(unittest.TestCase):
 
     def test_array_size_helpers_cover_error_paths(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
+        with (
+            patch.object(parser_array_sizes, "array_size_literal_error", return_value=None),
+            patch.object(parser_array_sizes, "parse_int_literal_value", return_value=-1),
+            self.assertRaisesRegex(ParserError, "Array size must be positive"),
+        ):
+            parser._parse_array_size(Token(TokenKind.INT_CONST, "1", 1, 1))
         with self.assertRaisesRegex(
             ParserError, "Array size identifier 'n' is not an integer constant expression"
         ):
             parser._parse_array_size_expr(Identifier("n"), Token(TokenKind.IDENT, "n", 1, 1))
+        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
+            parser._parse_array_size_expr(
+                UnaryExpr("-", IntLiteral("1")),
+                Token(TokenKind.PUNCTUATOR, "-", 1, 1),
+            )
         with self.assertRaisesRegex(
             ParserError,
             "Array size unary operator '\\+' is not an integer constant expression",
@@ -3015,6 +3079,11 @@ class ParserTests(unittest.TestCase):
             ),
             -1,
         )
+        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
+            parser._parse_array_size_expr_or_vla(
+                UnaryExpr("-", IntLiteral("1")),
+                Token(TokenKind.PUNCTUATOR, "-", 1, 1),
+            )
 
     def test_zero_length_array_allowed(self) -> None:
         parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
@@ -4802,6 +4871,12 @@ class ParserTests(unittest.TestCase):
             std="c11",
         )
         self.assertEqual(unit.declarations[0].name, "x")
+
+    def test_skip_type_qualifiers_consumes_constexpr_before_identifier(self) -> None:
+        parser = Parser(list(lex("constexpr x")), std="c11")
+
+        self.assertTrue(parser._skip_type_qualifiers())
+        self.assertEqual(parser._current().lexeme, "x")
 
     def test_multi_line_compound_literal_in_return(self) -> None:
         """Multi-line compound literal after multi-line function signature."""

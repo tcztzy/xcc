@@ -55,6 +55,21 @@ class BenchmarkToxConfigTests(unittest.TestCase):
                 self.assertEqual(command[command.index("--variant") + 1], variant)
                 self.assertEqual(command[command.index("--label") + 1], label)
 
+    def test_tox_defines_first_tier_mypyc_test_gate(self) -> None:
+        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
+        env = config["tool"]["tox"]["env"]["mypyc"]
+
+        self.assertEqual(env["runner"], "uv-venv-lock-runner")
+        self.assertEqual(env["dependency_groups"], ["dev"])
+        self.assertEqual(env["package"], "skip")
+        self.assertEqual(env["base_python"], ["python3.11"])
+        self.assertIn("scripts/mypycize_xcc.py", env["commands"][0])
+        self.assertIn("--clean", env["commands"][0])
+        self.assertIn("--force", env["commands"][0])
+        self.assertIn("scripts/run_tests.py", env["commands"][1])
+        self.assertIn("--pythonpath", env["commands"][1])
+        self.assertIn("build/mypyc/lib", env["commands"][1])
+
 
 class BenchmarkScriptTests(unittest.TestCase):
     def test_main_writes_labeled_pure_json_without_building_extensions(self) -> None:

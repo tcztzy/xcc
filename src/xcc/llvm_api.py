@@ -706,6 +706,9 @@ class _LLVMC:
         )
         self.GetNumOperands = self._bind("LLVMGetNumOperands", _c_uint, _LLVMValueRef)
         self.GetOperand = self._bind("LLVMGetOperand", _LLVMValueRef, _LLVMValueRef, _c_uint)
+        self.GetAggregateElement = self._bind(
+            "LLVMGetAggregateElement", _LLVMValueRef, _LLVMValueRef, _c_uint
+        )
 
 
 _api: _LLVMC | None = None

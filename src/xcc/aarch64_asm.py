@@ -533,7 +533,7 @@ class _AArch64AsmGen:
             nonlocal offset
             if active_bit_type is None:
                 return
-            if active_bit_base > offset:
+            if active_bit_base > offset:  # pragma: no cover - bitfield flush keeps offset in sync.
                 self._lines.append(f"    .zero {active_bit_base - offset}")
             self._emit_global_int_constant(self._scalar_info(active_bit_type), active_bit_value)
             offset = active_bit_base + active_bit_size
@@ -543,7 +543,7 @@ class _AArch64AsmGen:
 
         for index, member in enumerate(members):
             if member.bit_width is not None:
-                member_align = self._type_align(member.type_)
+                member_align = self._member_align(member)
                 member_size = self._type_size(member.type_)
                 if member_align is None or member_size is None:
                     raise self._error(f"AArch64 target cannot size bit-field member {member.name}")
@@ -582,7 +582,7 @@ class _AArch64AsmGen:
                 active_bit_used += member.bit_width
                 continue
             flush_bitfield_unit()
-            member_align = self._type_align(member.type_)
+            member_align = self._member_align(member)
             if member_align is None:
                 raise self._error(f"AArch64 target cannot align record member {member.name}")
             access_offset = self._align_to(offset, member_align)
@@ -643,9 +643,11 @@ class _AArch64AsmGen:
         for item in init.items:
             member_name = self._record_init_first_member_designator_name(item)
             if member_name is None:
-                if positional_index >= len(members):
+                member_index = self._record_initializer_next_positional_index(
+                    members, positional_index
+                )
+                if member_index >= len(members):
                     raise self._error("AArch64 target found too many record initializers")
-                member_index = positional_index
                 items_by_index[member_index] = item
                 nested_items_by_index.pop(member_index, None)
             else:
@@ -664,6 +666,17 @@ class _AArch64AsmGen:
                     items_by_index[member_index] = InitItem((), InitList(tuple(nested_items)))
             positional_index = member_index + 1
         return items_by_index
+
+    @staticmethod
+    def _record_initializer_next_positional_index(
+        members: tuple[RecordMemberInfo, ...], positional_index: int
+    ) -> int:
+        while positional_index < len(members):
+            member = members[positional_index]
+            if member.name is not None or member.bit_width is None:
+                return positional_index
+            positional_index += 1
+        return positional_index
 
     @staticmethod
     def _record_init_first_member_designator_name(item: InitItem) -> str | None:
@@ -2416,7 +2429,7 @@ class _AArch64AsmGen:
                 _Value(result_type, op_info, target), result_type, result_info, target
             )
             return _Value(result_type, result_info, target)
-        return None
+        return None  # pragma: no cover - every supported bit builtin matches a handled operation.
 
     @staticmethod
     def _bit_builtin_width(callee_name: str) -> int:
@@ -3202,7 +3215,7 @@ class _AArch64AsmGen:
         active_bit_used = 0
         active_bit_type: Type | None = None
         for index, member in enumerate(members):
-            member_align = self._type_align(member.type_)
+            member_align = self._member_align(member)
             member_size = self._type_size(member.type_)
             is_flexible = self._is_trailing_flexible_array_member(members, index)
             if member_align is None or (member_size is None and not is_flexible):
@@ -3292,7 +3305,7 @@ class _AArch64AsmGen:
             member_type = member.type_
             if unqualified_type(member_type) != DOUBLE:
                 return None
-            member_align = self._type_align(member_type)
+            member_align = self._member_align(member)
             member_size = self._type_size(member_type)
             if member_align is None or member_size is None:
                 return None
@@ -4008,10 +4021,13 @@ class _AArch64AsmGen:
         for item in init.items:
             member_name = self._record_init_designator_name(item)
             if member_name is None:
-                if positional_index >= len(members):
+                member_index = self._record_initializer_next_positional_index(
+                    members, positional_index
+                )
+                if member_index >= len(members):
                     raise self._error("AArch64 target found too many record initializers")
-                member = members[positional_index]
-                positional_index += 1
+                member = members[member_index]
+                positional_index = member_index + 1
                 member_name = member.name
             if member_name is None:
                 if self._is_record_type(member.type_) or member.type_.is_array():
@@ -4161,6 +4177,9 @@ class _AArch64AsmGen:
         if self._is_zero_initializer(expr):
             self._emit_zero_memory(address_reg, size)
             return
+        if isinstance(expr, BuiltinVaArgExpr):
+            self._emit_aggregate_va_arg_to_address(expr, address_reg, size)
+            return
         value_size = self._type_size(self._expr_type(expr))
         if value_size is None or value_size != size:
             raise self._error("AArch64 target cannot initialize aggregate local")
@@ -4168,6 +4187,26 @@ class _AArch64AsmGen:
         self._emit_address(expr, 12)
         self._emit_scratch_load_reg(f"x{address_reg}", 8, scratch_reg=13)
         self._emit_copy_memory(address_reg, 12, size)
+
+    def _emit_aggregate_va_arg_to_address(
+        self,
+        expr: BuiltinVaArgExpr,
+        address_reg: int,
+        size: int,
+    ) -> None:
+        self._emit_scratch_store_reg(f"x{address_reg}", 8)
+        self._emit_address(expr.ap, 11)
+        self._emit("ldr x12, [x11]")
+        if size > 16:
+            self._emit("ldr x13, [x12]")
+            advance = 8
+        else:
+            self._emit("mov x13, x12")
+            advance = self._align_to(size, 8)
+        self._emit(f"add x12, x12, #{advance}")
+        self._emit("str x12, [x11]")
+        self._emit_scratch_load_reg(f"x{address_reg}", 8, scratch_reg=12)
+        self._emit_copy_memory(address_reg, 13, size)
 
     def _emit_compound_literal_to_slot(self, expr: CompoundLiteralExpr) -> _Slot:
         slot = self._compound_literal_slots.get(id(expr))
@@ -4716,7 +4755,7 @@ class _AArch64AsmGen:
         for key in self._sema.record_definitions:
             if key.endswith(" " + base.name) or key == base.name:
                 return key
-        if not base.name.startswith(("struct ", "union ")):
+        if not base.name.startswith(("struct ", "union ")):  # pragma: no branch
             for key in self._sema.record_definitions:
                 if key.startswith("struct ") or key.startswith("union "):
                     return key
@@ -5014,9 +5053,17 @@ class _AArch64AsmGen:
         members = self._sema.record_definitions.get(type_.name)
         if members is None:
             return None
-        alignments = [self._type_align(member.type_) for member in members]
+        alignments = [self._member_align(member) for member in members]
         valid_alignments = [alignment for alignment in alignments if alignment is not None]
         return max(valid_alignments, default=1)
+
+    def _member_align(self, member: RecordMemberInfo) -> int | None:
+        align = self._type_align(member.type_)
+        if align is None:
+            return None
+        if member.alignment is not None and member.alignment > align:
+            return member.alignment
+        return align
 
     def _record_size(self, type_: Type) -> int | None:
         record_name = self._record_name_from_type(type_)
@@ -5040,7 +5087,7 @@ class _AArch64AsmGen:
         active_bit_type: Type | None = None
         for index, member in enumerate(members):
             member_size = self._type_size(member.type_)
-            member_align = self._type_align(member.type_)
+            member_align = self._member_align(member)
             is_flexible = self._is_trailing_flexible_array_member(members, index)
             if member_align is None or (member_size is None and not is_flexible):
                 return None
