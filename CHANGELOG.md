@@ -2,6 +2,10 @@
 
 ## Current
 
+- Added Milestone 4 AOT lexer slice support for `ast.py` and `lexer.py`,
+  including annotation admission, enum/list/dataclass-default shims, native
+  `translate_source` and lexer token/error oracle fixtures, and focused tests
+  that compare CPython behavior with native binaries.
 - Added Milestone 4 native coverage for `xcc.lexer.lex_pp(..., header_names=True)`
   and a deterministic lexer error path. The AOT runtime now emits native
   summary helpers for the `<stdio.h>` header-name fixture and the

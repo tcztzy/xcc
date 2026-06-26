@@ -739,7 +739,7 @@ git commit -m "feat: validate AOT lexer header and error fixtures"
 - Modify: `CHANGELOG.md`
 - Modify: `LESSONS.md` only if a new reusable lesson was discovered while implementing.
 
-- [ ] **Step 1: Update changelog**
+- [x] **Step 1: Update changelog**
 
 Add this bullet at the top of `## Current` in `CHANGELOG.md`:
 
@@ -750,7 +750,7 @@ Add this bullet at the top of `## Current` in `CHANGELOG.md`:
   that compare CPython behavior with native binaries.
 ```
 
-- [ ] **Step 2: Run focused AOT tests**
+- [x] **Step 2: Run focused AOT tests**
 
 Run:
 
@@ -760,7 +760,7 @@ uv run python -m unittest tests.test_aot tests.test_aot_ir tests.test_aot_llvm t
 
 Expected: all focused AOT tests pass; optional real native tests skip only if `llc` is unavailable.
 
-- [ ] **Step 3: Run relevant existing module tests**
+- [x] **Step 3: Run relevant existing module tests**
 
 Run:
 
@@ -770,7 +770,7 @@ uv run python -m unittest tests.test_lexer tests.test_frontend -v
 
 Expected: existing CPython behavior remains unchanged.
 
-- [ ] **Step 4: Run full py311 gate**
+- [x] **Step 4: Run full py311 gate**
 
 Run:
 
@@ -780,7 +780,7 @@ uv run tox -e py311
 
 Expected: full test suite passes with 100.00% coverage.
 
-- [ ] **Step 5: Run handoff gates**
+- [x] **Step 5: Run handoff gates**
 
 Run:
 
@@ -791,7 +791,7 @@ uv run tox -e type
 
 Expected: lint and type gates pass.
 
-- [ ] **Step 6: Commit Milestone 4 status**
+- [x] **Step 6: Commit Milestone 4 status**
 
 Run:
 
