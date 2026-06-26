@@ -1,7 +1,7 @@
 import ast
 from dataclasses import dataclass
 
-_BUILTIN_TYPES = {"bool", "int", "None", "object", "str", "ValueError"}
+_BUILTIN_TYPES = {"Enum", "NoReturn", "bool", "int", "None", "object", "str", "ValueError"}
 _WIDTH_ALIASES = {
     "int8": (8, True),
     "int16": (16, True),

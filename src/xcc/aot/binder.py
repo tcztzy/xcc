@@ -150,4 +150,20 @@ def _is_annotation_alias_value(node: ast.expr) -> bool:
 
 
 def _is_supported_composite_annotation(name: str) -> bool:
-    return name.startswith(("tuple[", "Literal[")) or " | " in name
+    return (
+        name.startswith(("tuple[", "Literal["))
+        or _is_supported_list_annotation(name)
+        or " | " in name
+        or _is_project_type_reference(name)
+    )
+
+
+def _is_supported_list_annotation(name: str) -> bool:
+    if not name.startswith("list[") or not name.endswith("]"):
+        return False
+    element = name[5:-1].strip("\"'")
+    return _is_project_type_reference(element)
+
+
+def _is_project_type_reference(name: str) -> bool:
+    return name[:1].isupper()

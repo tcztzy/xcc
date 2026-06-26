@@ -150,20 +150,28 @@ _BUILTIN_TYPES = {
 
 Keep existing width aliases unchanged.
 
-- [ ] **Step 4: Accept list and direct class annotations**
+- [ ] **Step 4: Accept project-list and direct class annotations**
 
 Modify `_is_supported_composite_annotation()` in `src/xcc/aot/binder.py`:
 
 ```python
 def _is_supported_composite_annotation(name: str) -> bool:
     return (
-        name.startswith(("list[", "tuple[", "Literal["))
+        name.startswith(("tuple[", "Literal["))
+        or _is_supported_list_annotation(name)
         or " | " in name
         or name[:1].isupper()
     )
+
+
+def _is_supported_list_annotation(name: str) -> bool:
+    if not name.startswith("list[") or not name.endswith("]"):
+        return False
+    element = name[5:-1].strip("\"'")
+    return element[:1].isupper()
 ```
 
-This deliberately admits forward-reference class names such as `TypeSpec` and `StringLiteral` for binding metadata only. Runtime lowering still has to reject unsupported object operations.
+This deliberately admits forward-reference class names such as `TypeSpec` and `StringLiteral`, plus project-object lists such as `list[Token]` and `list['Stmt']`, for binding metadata only. It must continue rejecting broad builtin lists such as `list[int]`; runtime lowering still has to reject unsupported object operations.
 
 - [ ] **Step 5: Record enum-like classes without fields**
 
