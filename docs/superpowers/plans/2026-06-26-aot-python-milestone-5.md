@@ -201,7 +201,7 @@ git commit -m "feat: admit AOT parser sema signatures"
 - Modify: `src/xcc/aot/lower.py`
 - Modify: `src/xcc/aot/slice.py`
 
-- [ ] **Step 1: Write failing cross-module lowering test**
+- [x] **Step 1: Write failing cross-module lowering test**
 
 Append to `tests/test_aot_milestone5.py`:
 
@@ -230,7 +230,7 @@ class AotMilestone5SliceTests(unittest.TestCase):
         self.assertEqual(function.return_type.__class__.__name__, "IrBoolType")
 ```
 
-- [ ] **Step 2: Run test and verify red**
+- [x] **Step 2: Run test and verify red**
 
 Run:
 
@@ -240,7 +240,7 @@ uv run python -m unittest tests.test_aot_milestone5.AotMilestone5SliceTests.test
 
 Expected before implementation: `XCC-AOT-LOWER-0002: Unsupported lowered annotation: Type`.
 
-- [ ] **Step 3: Add cross-module class table**
+- [x] **Step 3: Add cross-module class table**
 
 Modify `src/xcc/aot/lower.py`:
 
@@ -254,7 +254,7 @@ Modify `src/xcc/aot/slice.py`:
 - build a combined class table from every module's `analysis.types.classes`;
 - pass that table as `extra_classes` when lowering a selected module.
 
-- [ ] **Step 4: Run cross-module lowering tests**
+- [x] **Step 4: Run cross-module lowering tests**
 
 Run:
 
@@ -264,12 +264,12 @@ uv run python -m unittest tests.test_aot_milestone5.AotMilestone5SliceTests -v
 
 Expected: the imported `Type` annotation lowers to `IrRecordType("Type")`.
 
-- [ ] **Step 5: Commit cross-module lowering**
+- [x] **Step 5: Commit cross-module lowering**
 
 Run:
 
 ```bash
-git add tests/test_aot_milestone5.py src/xcc/aot/lower.py src/xcc/aot/slice.py
+git add CHANGELOG.md docs/superpowers/plans/2026-06-26-aot-python-milestone-5.md tests/test_aot_milestone5.py src/xcc/aot/lower.py src/xcc/aot/slice.py
 git commit -m "feat: resolve AOT imported record annotations"
 ```
 

@@ -2,13 +2,17 @@ import unittest
 from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
-from xcc.aot import analyze_path
+from xcc.aot import IrRecordType, analyze_path, lower_core_slice
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PARSER_INIT_PATH = ROOT / "src/xcc/parser/__init__.py"
 SEMA_SYMBOLS_PATH = ROOT / "src/xcc/sema/symbols.py"
 SEMA_TYPE_HELPERS_PATH = ROOT / "src/xcc/sema/type_helpers.py"
+TYPE_HELPER_SLICE = (
+    ROOT / "src/xcc/types.py",
+    ROOT / "src/xcc/sema/type_helpers.py",
+)
 
 
 class AotMilestone5AdmissionTests(unittest.TestCase):
@@ -45,6 +49,21 @@ class AotMilestone5AdmissionTests(unittest.TestCase):
         function = analysis.types.functions["Scope.symbols"]
         self.assertEqual(function.parameters, (("self", "Scope"),))
         self.assertEqual(function.return_type.name, "dict[str, VarSymbol | EnumConstSymbol]")
+
+
+class AotMilestone5SliceTests(unittest.TestCase):
+    def test_lowers_sema_type_helper_signature_with_imported_type_record(self) -> None:
+        module = lower_core_slice(
+            TYPE_HELPER_SLICE,
+            root_targets=("xcc.sema.type_helpers.is_integer_type",),
+            required_records=("Type",),
+        )
+        records = {record.name for record in module.records}
+        functions = {function.name: function for function in module.functions}
+        self.assertIn("Type", records)
+        function = functions["xcc.sema.type_helpers.is_integer_type"]
+        self.assertEqual(function.params[0].type, IrRecordType("Type"))
+        self.assertEqual(function.return_type.__class__.__name__, "IrBoolType")
 
 
 if __name__ == "__main__":

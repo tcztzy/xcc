@@ -63,11 +63,14 @@ def lower_source_to_ir(
     include_records: set[str] | frozenset[str] | None = None,
     include_functions: set[str] | frozenset[str] | None = None,
     bodyless_functions: set[str] | frozenset[str] | None = None,
+    extra_classes: dict[str, AotClassInfo] | None = None,
 ) -> IrModule:
     analysis = analyze_source(source, filename=filename)
+    class_types = dict(extra_classes or {})
+    class_types.update(analysis.types.classes)
     lowerer = _Lowerer(
         filename,
-        analysis.types.classes,
+        class_types,
         analysis.types.aliases,
         _collect_global_names(analysis.module.tree),
     )

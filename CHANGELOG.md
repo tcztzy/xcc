@@ -2,6 +2,9 @@
 
 ## Current
 
+- Added cross-module AOT record type resolution for the parser/sema slice so
+  `sema/type_helpers.py` can lower imported `Type` annotations to
+  `IrRecordType("Type")` and pull the record definition from `types.py`.
 - Began Milestone 5 AOT parser/sema expansion by admitting parser and sema entry
   modules, binding class method signatures with receiver and keyword-only
   parameters, and accepting nested `dict[...]`/`set[...]` annotation shapes used

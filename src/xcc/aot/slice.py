@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
+from xcc.aot.analysis import analyze_source
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.ir import (
     IrAssign,
@@ -37,6 +38,7 @@ from xcc.aot.ir import (
     IrTupleType,
 )
 from xcc.aot.lower import lower_source_to_ir
+from xcc.aot.types import AotClassInfo
 
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.lexer._aot_error_summary_for_source",
@@ -105,11 +107,20 @@ def lower_core_entry_slice(paths: tuple[Path, ...], wrapper: IrFunction) -> IrMo
 
 
 def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
+    module_inputs = collect_slice_inputs(paths)
+    source_cache = {
+        module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
+    }
+    class_types, _ = _slice_class_tables(module_inputs, source_cache)
     records: list[IrRecord] = []
     functions: list[IrFunction] = []
-    for module_input in collect_slice_inputs(paths):
-        source = module_input.path.read_text(encoding="utf-8")
-        module = lower_source_to_ir(source, filename=str(module_input.path))
+    for module_input in module_inputs:
+        source = source_cache[module_input.name]
+        module = lower_source_to_ir(
+            source,
+            filename=str(module_input.path),
+            extra_classes=class_types,
+        )
         records.extend(module.records)
         prefix = module_input.name
         rename_map = _module_rename_map(prefix, source)
@@ -135,6 +146,7 @@ def _lower_core_slice_from_roots(
     source_cache = {
         module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
     }
+    class_types, class_modules = _slice_class_tables(module_inputs, source_cache)
     rename_maps = {
         module.name: _module_rename_map(module.name, source_cache[module.name])
         for module in module_inputs
@@ -163,6 +175,7 @@ def _lower_core_slice_from_roots(
             include_records=include_records,
             include_functions={local_name},
             bodyless_functions=bodyless,
+            extra_classes=class_types,
         )
         for record in module.records:
             records_by_name.setdefault(record.name, record)
@@ -181,16 +194,59 @@ def _lower_core_slice_from_roots(
                 record_names.update(discovered_records)
                 missing_records = discovered_records.difference(records_by_name)
                 if missing_records:
-                    records_module = lower_source_to_ir(
-                        source_cache[module_name],
-                        filename=str(module_input.path),
-                        include_records=missing_records,
-                        include_functions=frozenset(),
+                    _add_missing_records(
+                        missing_records,
+                        records_by_name,
+                        class_modules,
+                        inputs_by_name,
+                        source_cache,
+                        class_types,
                     )
-                    for record in records_module.records:
-                        records_by_name.setdefault(record.name, record)
                 pending.extend(_function_call_targets(lowered))
     return IrModule("<core-slice>", tuple(records_by_name.values()), tuple(functions.values()))
+
+
+def _slice_class_tables(
+    module_inputs: tuple[AotSliceInput, ...],
+    source_cache: dict[str, str],
+) -> tuple[dict[str, AotClassInfo], dict[str, str]]:
+    class_types: dict[str, AotClassInfo] = {}
+    class_modules: dict[str, str] = {}
+    for module_input in module_inputs:
+        analysis = analyze_source(
+            source_cache[module_input.name],
+            filename=str(module_input.path),
+        )
+        for class_name, class_info in analysis.types.classes.items():
+            class_types.setdefault(class_name, class_info)
+            class_modules.setdefault(class_name, module_input.name)
+    return class_types, class_modules
+
+
+def _add_missing_records(
+    missing_records: set[str],
+    records_by_name: dict[str, IrRecord],
+    class_modules: dict[str, str],
+    inputs_by_name: dict[str, AotSliceInput],
+    source_cache: dict[str, str],
+    class_types: dict[str, AotClassInfo],
+) -> None:
+    for record_name in sorted(missing_records):
+        if record_name in records_by_name:
+            continue
+        module_name = class_modules.get(record_name)
+        if module_name is None:
+            continue
+        module_input = inputs_by_name[module_name]
+        records_module = lower_source_to_ir(
+            source_cache[module_name],
+            filename=str(module_input.path),
+            include_records={record_name},
+            include_functions=frozenset(),
+            extra_classes=class_types,
+        )
+        for record in records_module.records:
+            records_by_name.setdefault(record.name, record)
 
 
 def _module_rename_map(module_name: str, source: str) -> dict[str, str]:
