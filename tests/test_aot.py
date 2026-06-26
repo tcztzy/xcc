@@ -1,7 +1,7 @@
 import unittest
 
 from tests import _bootstrap  # noqa: F401
-from xcc.aot import AotDiagnostic, AotError, parse_source
+from xcc.aot import AotDiagnostic, AotError, check_subset, parse_source
 
 
 class AotDiagnosticTests(unittest.TestCase):
@@ -57,6 +57,51 @@ class AotModuleParseTests(unittest.TestCase):
         self.assertEqual(diagnostic.line, 1)
         self.assertIsNotNone(diagnostic.column)
         self.assertIn("invalid syntax", diagnostic.message)
+
+
+class AotSubsetCheckerTests(unittest.TestCase):
+    def test_accepts_dataclass_and_typed_function(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Point:\n"
+            "    x: int\n"
+            "    y: int\n"
+            "def add(point: Point) -> int:\n"
+            "    return point.x + point.y\n"
+        )
+        summary = check_subset(parse_source(source, filename="point.py"))
+        self.assertEqual(summary.filename, "point.py")
+        self.assertEqual(summary.imports, ("dataclasses",))
+        self.assertEqual(summary.classes, ("Point",))
+        self.assertEqual(summary.functions, ("add",))
+
+    def test_rejects_lambda_expression(self) -> None:
+        module = parse_source("value = lambda x: x\n", filename="bad.py")
+        with self.assertRaises(AotError) as ctx:
+            check_subset(module)
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-SUBSET-0001")
+        self.assertEqual(diagnostic.message, "Unsupported Python syntax: Lambda")
+        self.assertEqual((diagnostic.line, diagnostic.column), (1, 8))
+
+    def test_rejects_custom_decorator(self) -> None:
+        source = "def marker(fn):\n    return fn\n@marker\ndef f() -> int:\n    return 1\n"
+        module = parse_source(source, filename="decorator.py")
+        with self.assertRaises(AotError) as ctx:
+            check_subset(module)
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-SUBSET-0002")
+        self.assertEqual(diagnostic.message, "Unsupported decorator: marker")
+
+    def test_rejects_dynamic_reflection_call(self) -> None:
+        source = "def f(value: object) -> object:\n    return getattr(value, 'x')\n"
+        module = parse_source(source, filename="bad.py")
+        with self.assertRaises(AotError) as ctx:
+            check_subset(module)
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-SUBSET-0003")
+        self.assertEqual(diagnostic.message, "Unsupported dynamic call: getattr")
 
 
 if __name__ == "__main__":
