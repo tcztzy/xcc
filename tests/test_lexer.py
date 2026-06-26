@@ -4,6 +4,8 @@ from tests import _bootstrap  # noqa: F401
 from xcc.lexer import (
     Lexer,
     LexerError,
+    _aot_error_summary_for_source,
+    _aot_header_summary_for_source,
     TokenKind,
     _aot_token_summary_for_source,
     lex,
@@ -58,6 +60,17 @@ class LexerTokenTests(unittest.TestCase):
             "PUNCTUATOR:;:1:22|PUNCTUATOR:}:1:24|EOF:None:1:25",
         )
         self.assertEqual(_aot_token_summary_for_source(source), summarize_tokens(lex(source)))
+
+    def test_aot_header_and_error_summary_helpers(self) -> None:
+        self.assertEqual(
+            _aot_header_summary_for_source("<stdio.h>"),
+            "HEADER_NAME:<stdio.h>:1:1|EOF:None:1:10",
+        )
+        self.assertEqual(
+            _aot_error_summary_for_source('"'),
+            "Unterminated string literal at 1:2",
+        )
+        self.assertEqual(_aot_error_summary_for_source("int"), "")
 
     def test_keyword_vs_identifier(self) -> None:
         tokens = list(lex("_Alignas alignas"))

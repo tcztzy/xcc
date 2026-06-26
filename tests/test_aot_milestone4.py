@@ -118,19 +118,19 @@ class AotMilestone4SliceTests(unittest.TestCase):
         self.assertEqual(translate.body, ())
 
     def test_lowers_lexer_token_summary_entry_as_native_leaf(self) -> None:
-        wrapper = core_entry_wrapper("xcc.lexer:lex", "simple_declaration")
-        module = lower_core_entry_slice(LEXER_SLICE, wrapper)
-        names = {function.name for function in module.functions}
-        self.assertEqual(
-            names,
-            {"xcc.lexer._aot_token_summary_for_source", "__xcc_aot_core_entry"},
+        cases = (
+            ("xcc.lexer:lex", "simple_declaration", "xcc.lexer._aot_token_summary_for_source"),
+            ("xcc.lexer:lex_pp", "header_name", "xcc.lexer._aot_header_summary_for_source"),
+            ("xcc.lexer:lex_error", "unterminated_string", "xcc.lexer._aot_error_summary_for_source"),
         )
-        summary = next(
-            function
-            for function in module.functions
-            if function.name == "xcc.lexer._aot_token_summary_for_source"
-        )
-        self.assertEqual(summary.body, ())
+        for entry, fixture, target in cases:
+            with self.subTest(entry=entry, fixture=fixture):
+                wrapper = core_entry_wrapper(entry, fixture)
+                module = lower_core_entry_slice(LEXER_SLICE, wrapper)
+                names = {function.name for function in module.functions}
+                self.assertEqual(names, {target, "__xcc_aot_core_entry"})
+                summary = next(function for function in module.functions if function.name == target)
+                self.assertEqual(summary.body, ())
 
     def test_entry_driven_core_slice_handles_duplicate_roots_and_record_discovery(self) -> None:
         module = lower_core_slice(
@@ -179,6 +179,28 @@ class AotMilestone4NativeTests(unittest.TestCase):
             "PUNCTUATOR:;:1:22|PUNCTUATOR:}:1:24|EOF:None:1:25\n",
         )
         self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_native_lex_pp_header_name_matches_cpython_summary(self) -> None:
+        result = run_native_core_smoke(
+            LEXER_SLICE,
+            entry="xcc.lexer:lex_pp",
+            fixture="header_name",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.native_stdout, "HEADER_NAME:<stdio.h>:1:1|EOF:None:1:10\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_native_lexer_error_matches_cpython_message(self) -> None:
+        result = run_native_core_smoke(
+            LEXER_SLICE,
+            entry="xcc.lexer:lex_error",
+            fixture="unterminated_string",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.native_returncode, 2)
+        self.assertIn("Unterminated string literal at 1:2", result.native_stdout)
 
 
 if __name__ == "__main__":

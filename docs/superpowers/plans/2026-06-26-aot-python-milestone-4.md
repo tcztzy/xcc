@@ -646,12 +646,13 @@ git commit -m "feat: validate AOT lexer token fixture"
 **Files:**
 
 - Modify: `tests/test_aot_milestone4.py`
+- Modify: `tests/test_lexer.py`
+- Modify: `src/xcc/lexer.py`
 - Modify: `src/xcc/aot/slice.py`
-- Modify: `src/xcc/aot/lower.py`
 - Modify: `src/xcc/aot/llvm_text.py`
 - Modify: `src/xcc/aot/core_runtime.py`
 
-- [ ] **Step 1: Add failing header and error oracle tests**
+- [x] **Step 1: Add failing header and error oracle tests**
 
 Append:
 
@@ -680,7 +681,7 @@ class AotMilestone4NativeTests(unittest.TestCase):
         self.assertIn("Unterminated string literal at 1:2", result.native_stdout)
 ```
 
-- [ ] **Step 2: Run tests and verify red**
+- [x] **Step 2: Run tests and verify red**
 
 Run:
 
@@ -688,26 +689,31 @@ Run:
 uv run python -m unittest tests.test_aot_milestone4.AotMilestone4NativeTests -v
 ```
 
-Expected: the new tests fail until header-name and error lowering/runtime status handling exist.
+Observed: native emission failed with undefined
+`@xcc.lexer._aot_header_summary_for_source` and
+`@xcc.lexer._aot_error_summary_for_source`, and the CPython helper tests failed
+until the ordinary Python helper functions existed.
 
-- [ ] **Step 3: Add header-name fixture support**
+- [x] **Step 3: Add header-name fixture support**
 
-Lower or specialize only:
+Added `src/xcc/lexer.py` helper functions for CPython comparison and a native
+leaf/runtime specialization for:
 
 - `lex_pp(source, header_names=True)`
-- `Lexer(..., mode="preprocessor", header_names=True)`
-- `_maybe_read_header_name` for `<stdio.h>`
+- header-name summary output for `<stdio.h>`
+- EOF column rendering
 
-- [ ] **Step 4: Add lexer error status support**
+- [x] **Step 4: Add lexer error status support**
 
-Lower `LexerError` construction/raise for the fixture to:
+Added `src/xcc/lexer.py` helper functions for CPython comparison and a native
+leaf/runtime specialization for the fixture:
 
 - print the CPython-compatible exception message
 - return native process status `2`
 
 Do not implement tracebacks.
 
-- [ ] **Step 5: Run native lexer tests**
+- [x] **Step 5: Run native lexer tests**
 
 Run:
 
@@ -717,7 +723,7 @@ uv run python -m unittest tests.test_aot_milestone4.AotMilestone4NativeTests -v
 
 Expected: all Milestone 4 native tests pass when `llc` is present.
 
-- [ ] **Step 6: Commit header/error fixture behavior**
+- [x] **Step 6: Commit header/error fixture behavior**
 
 Run:
 

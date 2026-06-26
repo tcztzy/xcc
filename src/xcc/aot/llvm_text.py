@@ -90,6 +90,18 @@ class _Emitter:
         return f"%{record.name} = type {{ {fields} }}"
 
     def _emit_function(self, function: IrFunction) -> str:
+        if function.name == "xcc.lexer._aot_error_summary_for_source":
+            return self._emit_core_lexer_string_helper_function(
+                function,
+                "core lexer error summary expects str -> str",
+                "__xcc_aot_lexer_error_summary_for_source",
+            )
+        if function.name == "xcc.lexer._aot_header_summary_for_source":
+            return self._emit_core_lexer_string_helper_function(
+                function,
+                "core lexer header summary expects str -> str",
+                "__xcc_aot_lexer_header_summary_for_source",
+            )
         if function.name == "xcc.lexer._aot_token_summary_for_source":
             return self._emit_core_lexer_token_summary_function(function)
         if function.name == "xcc.lexer.translate_source":
@@ -685,6 +697,30 @@ class _Emitter:
         if _is_pointer_type(value.type):
             return value.value
         self._error(f"Unsupported LLVM pointer comparison type: {type(value.type).__name__}")
+
+    def _emit_core_lexer_string_helper_function(
+        self,
+        function: IrFunction,
+        error: str,
+        helper: str,
+    ) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if (
+            len(function.params) != 1
+            or not isinstance(function.params[0].type, IrStringType)
+            or not isinstance(function.return_type, IrStringType)
+        ):
+            self._error(error)
+        param = function.params[0]
+        lines = [
+            f"define ptr {_llvm_symbol(function.name)}(ptr %{param.name}) {{",
+            "entry:",
+            f"  %result = call ptr @{helper}(ptr %{param.name})",
+            "  ret ptr %result",
+            "}",
+        ]
+        return "\n".join(lines)
 
     def _emit_core_lexer_token_summary_function(self, function: IrFunction) -> str:
         self.index = 0

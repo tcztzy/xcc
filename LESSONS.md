@@ -1,5 +1,9 @@
 # Lessons
 
+- Native AOT error fixtures should return a deterministic message/status pair,
+  not try to mimic Python tracebacks. For early self-hosting oracles, a normal
+  Python helper that returns `str(exc)` plus a native wrapper status code is a
+  stable comparison surface while exception lowering is still out of scope.
 - For AOT oracle fixtures, prefer ordinary CPython helper functions as stable
   comparison surfaces before adding native-specialized leaves. A helper such
   as `summarize_tokens()` keeps the project useful as plain Python while the

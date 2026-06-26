@@ -279,6 +279,8 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertIn("call ptr @memcpy", prelude)
         self.assertIn("store i8 0", prelude)
         self.assertIn("define ptr @__xcc_aot_lexer_token_summary_for_source", prelude)
+        self.assertIn("define ptr @__xcc_aot_lexer_header_summary_for_source", prelude)
+        self.assertIn("define ptr @__xcc_aot_lexer_error_summary_for_source", prelude)
         self.assertIn("@__xcc_aot_fmt_token", prelude)
 
     def test_annotation_name_edge_forms(self) -> None:

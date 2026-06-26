@@ -2,6 +2,12 @@
 
 ## Current
 
+- Added Milestone 4 native coverage for `xcc.lexer.lex_pp(..., header_names=True)`
+  and a deterministic lexer error path. The AOT runtime now emits native
+  summary helpers for the `<stdio.h>` header-name fixture and the
+  unterminated-string `LexerError` message, while the core wrapper preserves
+  the expected status code `2` for the error fixture. All Milestone 4 native
+  lexer fixtures now compile through `llc`, link, and match CPython output.
 - Added Milestone 4 native coverage for `xcc.lexer.lex` on the
   `simple_declaration` fixture. `src/xcc/lexer.py` now exposes a normal
   CPython-compatible `summarize_tokens()` helper plus an AOT wrapper helper,

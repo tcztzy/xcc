@@ -72,6 +72,14 @@ class AotLlvmTextTests(unittest.TestCase):
     def test_emits_core_lexer_translate_source_leaf(self) -> None:
         cases = (
             (
+                "xcc.lexer._aot_error_summary_for_source",
+                "@__xcc_aot_lexer_error_summary_for_source",
+            ),
+            (
+                "xcc.lexer._aot_header_summary_for_source",
+                "@__xcc_aot_lexer_header_summary_for_source",
+            ),
+            (
                 "xcc.lexer.translate_source",
                 "@__xcc_aot_lexer_translate_source",
             ),
@@ -479,6 +487,18 @@ class AotLlvmTextTests(unittest.TestCase):
                 (
                     IrFunction(
                         "xcc.lexer.translate_source",
+                        (),
+                        IrStringType(),
+                        (IrReturn(IrConstString("")),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "xcc.lexer._aot_header_summary_for_source",
                         (),
                         IrStringType(),
                         (IrReturn(IrConstString("")),),

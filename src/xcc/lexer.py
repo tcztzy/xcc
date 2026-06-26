@@ -269,6 +269,18 @@ def _aot_token_summary_for_source(source: str) -> str:
     return summarize_tokens(lex(source))
 
 
+def _aot_header_summary_for_source(source: str) -> str:
+    return summarize_tokens(lex_pp(source, header_names=True))
+
+
+def _aot_error_summary_for_source(source: str) -> str:
+    try:
+        lex(source)
+    except LexerError as exc:
+        return str(exc)
+    return ""
+
+
 class Lexer:
     def __init__(
         self, source: str, *, mode: str = "translation", header_names: bool = False
