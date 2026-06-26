@@ -1,3 +1,4 @@
+import ast
 import unittest
 from dataclasses import FrozenInstanceError
 
@@ -12,9 +13,13 @@ from xcc.aot import (
     IrModule,
     IrName,
     IrParam,
+    IrRecordType,
     IrReturn,
+    IrStringType,
     lower_source_to_ir,
 )
+from xcc.aot.lower import _Lowerer
+from xcc.aot.types import AotClassInfo, AotType
 
 
 class AotIrModelTests(unittest.TestCase):
@@ -78,6 +83,26 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(returned.op, "+")
         self.assertEqual(returned.left, IrName("left", function.params[0].type))
 
+    def test_lowers_plain_int_uint_subtract_and_multiply(self) -> None:
+        module = lower_source_to_ir(
+            "uint32 = int\n"
+            "usize = int\n"
+            "def plain() -> int:\n"
+            "    return 7\n"
+            "def sub(left: uint32, right: uint32) -> uint32:\n"
+            "    return left - right\n"
+            "def mul(left: uint32, right: uint32) -> uint32:\n"
+            "    return left * right\n"
+            "def size() -> usize:\n"
+            "    return 1\n",
+            filename="ops.py",
+        )
+        self.assertEqual(module.functions[0].return_type, IrIntType(64, signed=True))
+        self.assertEqual(module.functions[1].return_type, IrIntType(32, signed=False))
+        self.assertEqual(module.functions[1].body[0].value.op, "-")
+        self.assertEqual(module.functions[2].body[0].value.op, "*")
+        self.assertEqual(module.functions[3].return_type, IrIntType(64, signed=False))
+
     def test_rejects_unsupported_expression(self) -> None:
         with self.assertRaises(AotError) as ctx:
             lower_source_to_ir(
@@ -86,6 +111,85 @@ class AotScalarLoweringTests(unittest.TestCase):
                 entry="f",
             )
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
+
+    def test_rejects_unknown_name_call_target_and_field_access(self) -> None:
+        cases = (
+            ("def f() -> int:\n    return missing\n", "XCC-AOT-LOWER-0002"),
+            ("def f() -> int:\n    return 1.5\n", "XCC-AOT-LOWER-0002"),
+            ("def f() -> int:\n    return helper()\n", "XCC-AOT-LOWER-0003"),
+            ("def f(value: int) -> int:\n    return value.real\n", "XCC-AOT-LOWER-0002"),
+            (
+                "from dataclasses import dataclass\n"
+                "@dataclass(frozen=True)\n"
+                "class Pair:\n"
+                "    value: int\n"
+                "def f(pair: Pair) -> int:\n"
+                "    return pair.missing\n",
+                "XCC-AOT-LOWER-0002",
+            ),
+        )
+        for source, code in cases:
+            with self.subTest(source=source):
+                with self.assertRaises(AotError) as ctx:
+                    lower_source_to_ir(source, filename="bad.py", entry="f")
+                self.assertEqual(ctx.exception.diagnostics[0].code, code)
+
+    def test_direct_lowerer_reports_missing_and_unsupported_forms(self) -> None:
+        lowerer = _Lowerer("direct.py", {})
+        missing_param = ast.parse("def f(value) -> int:\n    return 1\n").body[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer.lower_function(missing_param, owner=None)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
+
+        missing_return = ast.parse("def f():\n    return 1\n").body[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer.lower_function(missing_return, owner=None)
+        self.assertEqual(ctx.exception.diagnostics[0].message, "Missing lowered annotation")
+
+        unsupported_return = ast.parse("def f() -> float:\n    return 1\n").body[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer.lower_function(unsupported_return, owner=None)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
+
+        unsupported_string_return = ast.parse('def f() -> "int":\n    return 1\n').body[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer.lower_function(unsupported_string_return, owner=None)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
+
+        unsupported_call = ast.parse("def f(value: int) -> int:\n    return value.bits()\n").body[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer.lower_function(unsupported_call, owner=None)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
+
+        unsupported_statement = ast.parse("def f() -> int:\n    pass\n").body[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer.lower_function(unsupported_statement, owner=None)
+        self.assertEqual(
+            ctx.exception.diagnostics[0].message,
+            "Unsupported lowered statement: Pass",
+        )
+
+    def test_direct_lowerer_maps_string_int_and_record_field_types(self) -> None:
+        lowerer = _Lowerer(
+            "record.py",
+            {
+                "Node": AotClassInfo(
+                    "Node",
+                    {
+                        "name": AotType("str"),
+                        "count": AotType("int"),
+                        "next": AotType("Node"),
+                    },
+                )
+            },
+        )
+        record = lowerer.lower_record(ast.parse("class Node:\n    pass\n").body[0])
+        self.assertEqual(record.fields[0].type, IrStringType())
+        self.assertEqual(record.fields[1].type, IrIntType(64, signed=True))
+        self.assertEqual(record.fields[2].type, IrRecordType("Node"))
+        with self.assertRaises(AotError) as ctx:
+            lowerer._aot_type_to_ir_type(AotType("object"))
+        self.assertEqual(ctx.exception.diagnostics[0].message, "Unsupported lowered type: object")
 
     def test_lowers_dataclass_record_layout_and_field_read(self) -> None:
         source = (

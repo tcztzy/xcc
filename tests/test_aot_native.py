@@ -53,6 +53,11 @@ class AotNativeHarnessTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-NATIVE-0001")
 
+    def test_native_smoke_rejects_non_callable_python_entry(self) -> None:
+        with self.assertRaises(TypeError) as ctx:
+            run_native_smoke("answer = 42\n", entry="answer", llc="/tool/llc")
+        self.assertEqual(str(ctx.exception), "answer is not callable")
+
 
 def _real_llc() -> str | None:
     path = os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"

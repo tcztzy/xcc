@@ -1,7 +1,27 @@
 import unittest
 
 from tests import _bootstrap  # noqa: F401
-from xcc.aot import emit_llvm_text, lower_source_to_ir
+from xcc.aot import (
+    AotError,
+    IrAssign,
+    IrBinary,
+    IrConstInt,
+    IrConstructRecord,
+    IrConstString,
+    IrField,
+    IrFunction,
+    IrGetField,
+    IrIntType,
+    IrModule,
+    IrName,
+    IrParam,
+    IrRecord,
+    IrRecordType,
+    IrReturn,
+    IrStringType,
+    emit_llvm_text,
+    lower_source_to_ir,
+)
 
 
 class AotLlvmTextTests(unittest.TestCase):
@@ -47,6 +67,147 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("%Pair = type { i64, i64 }", llvm_ir)
         self.assertIn("define i64 @Pair.total(ptr %self)", llvm_ir)
         self.assertIn("call i64 @Pair.total(ptr %pair)", llvm_ir)
+
+    def test_emits_module_without_entry_and_scalar_assignment(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "assign.py",
+            (),
+            (
+                IrFunction(
+                    "value",
+                    (),
+                    int64,
+                    (
+                        IrAssign("local", IrConstInt(7, int64)),
+                        IrReturn(IrName("local", int64)),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertNotIn("define i32 @main()", llvm_ir)
+        self.assertIn("ret i64 7", llvm_ir)
+
+    def test_emits_scalar_parameter_function(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "param.py",
+            (),
+            (
+                IrFunction(
+                    "identity",
+                    (IrParam("value", int64),),
+                    int64,
+                    (IrReturn(IrName("value", int64)),),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define i64 @identity(i64 %value)", llvm_ir)
+        self.assertIn("ret i64 %value", llvm_ir)
+
+    def test_emits_record_constructor_expression_and_escaped_string(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        record_type = IrRecordType("Box")
+        record = IrRecord("Box", (IrField("value", int64),))
+        module = IrModule(
+            "literal.py",
+            (record,),
+            (
+                IrFunction(
+                    "box",
+                    (),
+                    record_type,
+                    (IrReturn(IrConstructRecord("Box", (IrConstInt(1, int64),), record_type)),),
+                ),
+                IrFunction(
+                    "message",
+                    (),
+                    IrStringType(),
+                    (IrReturn(IrConstString('"\\\n')),),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("%box1 = alloca %Box", llvm_ir)
+        self.assertIn("\\22\\5C\\0A\\00", llvm_ir)
+
+    def test_reports_unsupported_llvm_shapes(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        record = IrRecord("Box", (IrField("value", int64),))
+        cases = (
+            IrModule(
+                "bad.py",
+                (),
+                (IrFunction("f", (), object(), (IrReturn(IrConstInt(1, int64)),)),),
+            ),
+            IrModule("bad.py", (), (IrFunction("f", (), int64, (object(),)),)),
+            IrModule("bad.py", (), (IrFunction("f", (), int64, (IrReturn(object()),)),)),
+            IrModule("bad.py", (), (IrFunction("f", (), int64, (IrReturn(IrName("x", int64)),)),)),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrBinary("/", IrConstInt(1, int64), IrConstInt(2, int64), int64)
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (IrReturn(IrGetField(IrConstInt(1, int64), "value", int64)),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (record,),
+                (
+                    IrFunction(
+                        "f",
+                        (IrParam("box", IrRecordType("Box")),),
+                        int64,
+                        (
+                            IrReturn(
+                                IrGetField(IrName("box", IrRecordType("Box")), "missing", int64)
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (IrRecord("Box", ()),),
+                (
+                    IrFunction(
+                        "box",
+                        (),
+                        IrRecordType("Box"),
+                        (IrReturn(IrConstructRecord("Box", (), IrRecordType("Box"))),),
+                    ),
+                ),
+                entry="box",
+            ),
+        )
+        for module in cases:
+            with self.subTest(module=module):
+                with self.assertRaises(AotError) as ctx:
+                    emit_llvm_text(module)  # type: ignore[arg-type]
+                self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
 
 
 if __name__ == "__main__":
