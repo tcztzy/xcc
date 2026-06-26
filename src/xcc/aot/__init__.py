@@ -23,6 +23,7 @@ from xcc.aot.ir import (
     IrStringType,
     IrType,
 )
+from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
 from xcc.aot.module import AotModule, parse_path, parse_source
 from xcc.aot.subset import AotModuleSummary, check_subset
@@ -62,6 +63,7 @@ __all__ = (
     "analyze_source",
     "bind_types",
     "check_subset",
+    "emit_llvm_text",
     "lower_source_to_ir",
     "parse_path",
     "parse_source",
