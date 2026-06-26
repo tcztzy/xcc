@@ -258,6 +258,17 @@ def lex_pp(source: str, *, header_names: bool = False) -> list[Token]:
     return Lexer(source, mode="preprocessor", header_names=header_names).tokenize()
 
 
+def summarize_tokens(tokens: list[Token]) -> str:
+    parts: list[str] = []
+    for token in tokens:
+        parts.append(f"{token.kind.name}:{token.lexeme}:{token.line}:{token.column}")
+    return "|".join(parts)
+
+
+def _aot_token_summary_for_source(source: str) -> str:
+    return summarize_tokens(lex(source))
+
+
 class Lexer:
     def __init__(
         self, source: str, *, mode: str = "translation", header_names: bool = False

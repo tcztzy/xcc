@@ -1,7 +1,16 @@
 import unittest
 
 from tests import _bootstrap  # noqa: F401
-from xcc.lexer import Lexer, LexerError, TokenKind, lex, lex_pp, translate_source
+from xcc.lexer import (
+    Lexer,
+    LexerError,
+    TokenKind,
+    _aot_token_summary_for_source,
+    lex,
+    lex_pp,
+    summarize_tokens,
+    translate_source,
+)
 
 
 class TranslateTests(unittest.TestCase):
@@ -38,6 +47,17 @@ class LexerTokenTests(unittest.TestCase):
             lexemes,
             ["int", "main", "(", ")", "{", "return", "42", ";", "}", None],
         )
+
+    def test_token_summary_helper(self) -> None:
+        source = "int main() { return 0; }"
+        self.assertEqual(summarize_tokens([]), "")
+        self.assertEqual(
+            summarize_tokens(lex(source)),
+            "KEYWORD:int:1:1|IDENT:main:1:5|PUNCTUATOR:(:1:9|PUNCTUATOR:):1:10|"
+            "PUNCTUATOR:{:1:12|KEYWORD:return:1:14|INT_CONST:0:1:21|"
+            "PUNCTUATOR:;:1:22|PUNCTUATOR:}:1:24|EOF:None:1:25",
+        )
+        self.assertEqual(_aot_token_summary_for_source(source), summarize_tokens(lex(source)))
 
     def test_keyword_vs_identifier(self) -> None:
         tokens = list(lex("_Alignas alignas"))

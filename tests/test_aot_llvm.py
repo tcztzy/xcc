@@ -70,23 +70,35 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("%printed = call i32 @puts(ptr %result)", llvm_ir)
 
     def test_emits_core_lexer_translate_source_leaf(self) -> None:
-        module = IrModule(
-            "core.py",
-            (),
+        cases = (
             (
-                IrFunction(
-                    "xcc.lexer.translate_source",
-                    (IrParam("source", IrStringType()),),
-                    IrStringType(),
-                    (),
-                ),
+                "xcc.lexer.translate_source",
+                "@__xcc_aot_lexer_translate_source",
             ),
-            entry="xcc.lexer.translate_source",
+            (
+                "xcc.lexer._aot_token_summary_for_source",
+                "@__xcc_aot_lexer_token_summary_for_source",
+            ),
         )
-        llvm_ir = emit_llvm_text(module)
-        self.assertIn("define ptr @xcc.lexer.translate_source(ptr %source)", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_lexer_translate_source(ptr %source)", llvm_ir)
-        self.assertIn("define ptr @__xcc_aot_lexer_translate_source", llvm_ir)
+        for function_name, helper_name in cases:
+            with self.subTest(function_name=function_name):
+                module = IrModule(
+                    "core.py",
+                    (),
+                    (
+                        IrFunction(
+                            function_name,
+                            (IrParam("source", IrStringType()),),
+                            IrStringType(),
+                            (),
+                        ),
+                    ),
+                    entry=function_name,
+                )
+                llvm_ir = emit_llvm_text(module)
+                self.assertIn(f"define ptr @{function_name}(ptr %source)", llvm_ir)
+                self.assertIn(f"call ptr {helper_name}(ptr %source)", llvm_ir)
+                self.assertIn("define ptr @__xcc_aot_lexer_translate_source", llvm_ir)
 
     def test_emits_record_type_and_method_call(self) -> None:
         source = (
@@ -467,6 +479,18 @@ class AotLlvmTextTests(unittest.TestCase):
                 (
                     IrFunction(
                         "xcc.lexer.translate_source",
+                        (),
+                        IrStringType(),
+                        (IrReturn(IrConstString("")),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "xcc.lexer._aot_token_summary_for_source",
                         (),
                         IrStringType(),
                         (IrReturn(IrConstString("")),),

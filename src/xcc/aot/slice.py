@@ -39,6 +39,7 @@ from xcc.aot.ir import (
 from xcc.aot.lower import lower_source_to_ir
 
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
+    "xcc.lexer._aot_token_summary_for_source",
     "xcc.lexer.translate_source",
     "xcc.types.Type.__str__",
 }

@@ -2,6 +2,13 @@
 
 ## Current
 
+- Added Milestone 4 native coverage for `xcc.lexer.lex` on the
+  `simple_declaration` fixture. `src/xcc/lexer.py` now exposes a normal
+  CPython-compatible `summarize_tokens()` helper plus an AOT wrapper helper,
+  while the native runtime emits a deterministic token-summary scanner for
+  translated source, identifiers/keywords, integer constants, single-character
+  punctuators, and EOF. The fixture now compiles through `llc`, links, and
+  matches the CPython token summary.
 - Added Milestone 4 native coverage for `xcc.lexer.translate_source`: the core
   smoke harness now builds fixture wrappers before lowering, lowers only
   wrapper-reachable frontend functions and records, keeps native-emitted leaf

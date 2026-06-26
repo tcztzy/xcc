@@ -1,5 +1,10 @@
 # Lessons
 
+- For AOT oracle fixtures, prefer ordinary CPython helper functions as stable
+  comparison surfaces before adding native-specialized leaves. A helper such
+  as `summarize_tokens()` keeps the project useful as plain Python while the
+  AOT runtime incrementally learns just enough scanning/rendering behavior for
+  the next native fixture.
 - Entry-driven AOT lowering has to filter both functions and records. Skipping
   unrelated function bodies avoids unsupported statements, but unrelated record
   layouts can still fail lowering, as with lexer-only smoke tests that need

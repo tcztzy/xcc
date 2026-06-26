@@ -278,6 +278,8 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertIn("call ptr @malloc", prelude)
         self.assertIn("call ptr @memcpy", prelude)
         self.assertIn("store i8 0", prelude)
+        self.assertIn("define ptr @__xcc_aot_lexer_token_summary_for_source", prelude)
+        self.assertIn("@__xcc_aot_fmt_token", prelude)
 
     def test_annotation_name_edge_forms(self) -> None:
         string_annotation = ast.parse('def f() -> "Type | None":\n    pass\n').body[0].returns
