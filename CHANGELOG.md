@@ -2,6 +2,10 @@
 
 ## Current
 
+- Began Milestone 5 AOT parser/sema expansion by admitting parser and sema entry
+  modules, binding class method signatures with receiver and keyword-only
+  parameters, and accepting nested `dict[...]`/`set[...]` annotation shapes used
+  by sema symbols.
 - Added Milestone 4 AOT lexer slice support for `ast.py` and `lexer.py`,
   including annotation admission, enum/list/dataclass-default shims, native
   `translate_source` and lexer token/error oracle fixtures, and focused tests

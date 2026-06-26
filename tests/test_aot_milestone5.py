@@ -1,0 +1,51 @@
+import unittest
+from pathlib import Path
+
+from tests import _bootstrap  # noqa: F401
+from xcc.aot import analyze_path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PARSER_INIT_PATH = ROOT / "src/xcc/parser/__init__.py"
+SEMA_SYMBOLS_PATH = ROOT / "src/xcc/sema/symbols.py"
+SEMA_TYPE_HELPERS_PATH = ROOT / "src/xcc/sema/type_helpers.py"
+
+
+class AotMilestone5AdmissionTests(unittest.TestCase):
+    def test_analyzes_parser_and_sema_entry_modules(self) -> None:
+        for path in (PARSER_INIT_PATH, SEMA_SYMBOLS_PATH, SEMA_TYPE_HELPERS_PATH):
+            with self.subTest(path=path.name):
+                analysis = analyze_path(path)
+                self.assertGreater(len(analysis.summary.functions), 0)
+                self.assertGreater(len(analysis.types.functions), 0)
+
+    def test_binds_parser_methods_with_receiver_and_keyword_only_parameters(self) -> None:
+        analysis = analyze_path(PARSER_INIT_PATH)
+        functions = analysis.types.functions
+        self.assertIn("Parser.__init__", functions)
+        self.assertIn("Parser._lookup_typedef", functions)
+        self.assertEqual(
+            functions["Parser.__init__"].parameters,
+            (("self", "Parser"), ("tokens", "list[Token]"), ("std", "StdMode")),
+        )
+        self.assertEqual(functions["Parser._lookup_typedef"].return_type.name, "TypeSpec | None")
+
+    def test_binds_nested_dict_and_set_annotations_from_sema_symbols(self) -> None:
+        analysis = analyze_path(SEMA_SYMBOLS_PATH)
+        fields = analysis.types.classes["SemaUnit"].fields
+        self.assertEqual(fields["functions"].name, "dict[str, FunctionSymbol]")
+        self.assertEqual(
+            fields["record_definitions"].name,
+            "dict[str, tuple[RecordMemberInfo, ...]]",
+        )
+        self.assertEqual(fields["transparent_union_types"].name, "set[str]")
+
+    def test_accepts_property_getter_as_method_signature(self) -> None:
+        analysis = analyze_path(SEMA_SYMBOLS_PATH)
+        function = analysis.types.functions["Scope.symbols"]
+        self.assertEqual(function.parameters, (("self", "Scope"),))
+        self.assertEqual(function.return_type.name, "dict[str, VarSymbol | EnumConstSymbol]")
+
+
+if __name__ == "__main__":
+    unittest.main()

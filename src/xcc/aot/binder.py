@@ -90,33 +90,62 @@ class _TypeBinder:
 
     def _collect_functions(self) -> None:
         for statement in self.module.tree.body:
-            if not isinstance(statement, ast.FunctionDef):
+            if isinstance(statement, ast.FunctionDef):
+                self._collect_function(statement, owner=None)
+        for statement in self.module.tree.body:
+            if not isinstance(statement, ast.ClassDef):
                 continue
-            parameters: list[tuple[str, str]] = []
-            for arg in statement.args.posonlyargs + statement.args.args:
-                if arg.annotation is None:
-                    self._add_error(
-                        "XCC-AOT-TYPE-0001",
-                        f"Missing annotation for parameter: {statement.name}.{arg.arg}",
-                        statement,
-                    )
-                    continue
-                parameters.append((arg.arg, annotation_name(arg.annotation)))
-                self._resolve_annotation(arg.annotation, arg)
-            if statement.returns is None:
+            for child in statement.body:
+                if isinstance(child, ast.FunctionDef):
+                    self._collect_function(child, owner=statement.name)
+
+    def _collect_function(self, statement: ast.FunctionDef, owner: str | None) -> None:
+        function_name = f"{owner}.{statement.name}" if owner is not None else statement.name
+        parameters: list[tuple[str, str]] = []
+        positional_args = statement.args.posonlyargs + statement.args.args
+        for index, arg in enumerate(positional_args):
+            annotation = arg.annotation
+            if (
+                owner is not None
+                and index == 0
+                and annotation is None
+                and arg.arg in {"self", "cls"}
+            ):
+                parameters.append((arg.arg, owner))
+                continue
+            if annotation is None:
                 self._add_error(
                     "XCC-AOT-TYPE-0001",
-                    f"Missing return annotation for function: {statement.name}",
+                    f"Missing annotation for parameter: {function_name}.{arg.arg}",
                     statement,
                 )
-                return_type = AotType("None")
-            else:
-                return_type = self._resolve_annotation(statement.returns, statement)
-            self.functions[statement.name] = AotFunctionInfo(
-                statement.name,
-                tuple(parameters),
-                return_type,
+                continue
+            parameters.append((arg.arg, annotation_name(annotation)))
+            self._resolve_annotation(annotation, arg)
+        for arg in statement.args.kwonlyargs:
+            if arg.annotation is None:
+                self._add_error(
+                    "XCC-AOT-TYPE-0001",
+                    f"Missing annotation for parameter: {function_name}.{arg.arg}",
+                    statement,
+                )
+                continue
+            parameters.append((arg.arg, annotation_name(arg.annotation)))
+            self._resolve_annotation(arg.annotation, arg)
+        if statement.returns is None:
+            self._add_error(
+                "XCC-AOT-TYPE-0001",
+                f"Missing return annotation for function: {function_name}",
+                statement,
             )
+            return_type = AotType("None")
+        else:
+            return_type = self._resolve_annotation(statement.returns, statement)
+        self.functions[function_name] = AotFunctionInfo(
+            function_name,
+            tuple(parameters),
+            return_type,
+        )
 
     def _resolve_annotation(self, node: ast.expr, owner: ast.AST) -> AotType:
         name = annotation_name(node)
@@ -151,7 +180,7 @@ def _is_annotation_alias_value(node: ast.expr) -> bool:
 
 def _is_supported_composite_annotation(name: str) -> bool:
     return (
-        name.startswith(("tuple[", "Literal["))
+        name.startswith(("tuple[", "Literal[", "dict[", "set["))
         or _is_supported_list_annotation(name)
         or " | " in name
         or _is_project_type_reference(name)
