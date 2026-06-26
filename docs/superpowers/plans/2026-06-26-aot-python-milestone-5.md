@@ -358,10 +358,11 @@ git commit -m "feat: admit AOT parser type helpers"
 
 - Modify: `tests/test_aot_milestone5.py`
 - Modify: `src/xcc/aot/slice.py`
+- Modify: `src/xcc/aot/lower.py`
 - Modify: `src/xcc/aot/llvm_text.py`
-- Modify: `src/xcc/aot/core_runtime.py`
+- Modify: `src/xcc/sema/type_helpers.py`
 
-- [ ] **Step 1: Write failing native oracle tests**
+- [x] **Step 1: Write failing native oracle tests**
 
 Append:
 
@@ -408,7 +409,7 @@ class AotMilestone5NativeTests(unittest.TestCase):
         self.assertEqual(result.native_returncode, 0)
 ```
 
-- [ ] **Step 2: Run tests and verify red**
+- [x] **Step 2: Run tests and verify red**
 
 Run:
 
@@ -418,7 +419,7 @@ uv run python -m unittest tests.test_aot_milestone5.AotMilestone5NativeTests -v
 
 Expected before implementation: `XCC-AOT-SLICE-0002` for unsupported entry fixtures.
 
-- [ ] **Step 3: Add parser/sema wrappers and native leaves**
+- [x] **Step 3: Add parser/sema wrappers and native leaves**
 
 Modify `src/xcc/aot/slice.py`:
 
@@ -426,13 +427,19 @@ Modify `src/xcc/aot/slice.py`:
 - add wrappers for `xcc.sema.type_helpers:is_integer_type / int_and_void`;
 - mark the selected parser/sema native leaf targets in `_NATIVE_EMITTED_LEAF_FUNCTIONS`.
 
-Modify `src/xcc/aot/llvm_text.py` and `src/xcc/aot/core_runtime.py`:
+Modify `src/xcc/sema/type_helpers.py`:
 
-- emit a parser-error string helper that prints `Type name is missing before ';' at 4:9`;
-- emit a sema integer-helper summary that prints `INT=True|VOID=False`;
+- add `_aot_integer_type_summary()` as an ordinary Python helper returning
+  `INT=True|VOID=False` under CPython.
+
+Modify `src/xcc/aot/lower.py` and `src/xcc/aot/llvm_text.py`:
+
+- lower `Enum`-typed record fields as opaque pointer slots;
+- emit a parser-error string helper that builds `Type name is missing before ';' at 4:9` from record fields;
+- emit a sema integer-helper summary native leaf that returns `INT=True|VOID=False`;
 - keep fixture matching explicit and deterministic.
 
-- [ ] **Step 4: Run native oracle tests**
+- [x] **Step 4: Run native oracle tests**
 
 Run:
 
@@ -442,12 +449,12 @@ uv run python -m unittest tests.test_aot_milestone5.AotMilestone5NativeTests -v
 
 Expected: native parser/sema fixtures compile through `llc`, link, run, and match CPython-observable output.
 
-- [ ] **Step 5: Commit native oracle fixtures**
+- [x] **Step 5: Commit native oracle fixtures**
 
 Run:
 
 ```bash
-git add tests/test_aot_milestone5.py src/xcc/aot/slice.py src/xcc/aot/llvm_text.py src/xcc/aot/core_runtime.py
+git add CHANGELOG.md docs/superpowers/plans/2026-06-26-aot-python-milestone-5.md tests/test_aot_milestone5.py src/xcc/aot/lower.py src/xcc/aot/slice.py src/xcc/aot/llvm_text.py src/xcc/sema/type_helpers.py
 git commit -m "feat: validate AOT parser sema fixtures"
 ```
 

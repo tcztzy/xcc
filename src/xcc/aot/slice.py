@@ -45,6 +45,8 @@ _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.lexer._aot_header_summary_for_source",
     "xcc.lexer._aot_token_summary_for_source",
     "xcc.lexer.translate_source",
+    "xcc.parser.type_specs.ParserError.__str__",
+    "xcc.sema.type_helpers._aot_integer_type_summary",
     "xcc.types.Type.__str__",
 }
 
@@ -179,6 +181,16 @@ def _lower_core_slice_from_roots(
         )
         for record in module.records:
             records_by_name.setdefault(record.name, record)
+        missing_required_records = record_names.difference(records_by_name)
+        if missing_required_records:
+            _add_missing_records(
+                missing_required_records,
+                records_by_name,
+                class_modules,
+                inputs_by_name,
+                source_cache,
+                class_types,
+            )
         rename_map = rename_maps[module_name]
         for function in module.functions:
             full_name = rename_map[function.name]
@@ -316,6 +328,10 @@ def core_entry_wrapper(entry: str, fixture: str) -> IrFunction:
         return _lexer_header_name_wrapper()
     if entry == "xcc.lexer:lex_error" and fixture == "unterminated_string":
         return _lexer_unterminated_string_wrapper()
+    if entry == "xcc.parser.type_specs:ParserError.__str__" and fixture == "missing_type_name":
+        return _parser_error_str_wrapper()
+    if entry == "xcc.sema.type_helpers:is_integer_type" and fixture == "int_and_void":
+        return _sema_integer_type_summary_wrapper()
     raise AotError(
         (
             AotDiagnostic(
@@ -387,6 +403,50 @@ def _lexer_unterminated_string_wrapper() -> IrFunction:
         (IrConstString('"'),),
         status=2,
     )
+
+
+def _parser_error_str_wrapper() -> IrFunction:
+    int32 = IrIntType(32, signed=True)
+    int64 = IrIntType(64, signed=True)
+    token_type = IrRecordType("Token")
+    error_type = IrRecordType("ParserError")
+    return IrFunction(
+        "__xcc_aot_core_entry",
+        (),
+        int32,
+        (
+            IrPrint(
+                IrCall(
+                    "xcc.parser.type_specs.ParserError.__str__",
+                    (
+                        IrConstructRecord(
+                            "ParserError",
+                            (
+                                IrConstString("Type name is missing before ';'"),
+                                IrConstructRecord(
+                                    "Token",
+                                    (
+                                        IrConstNone(),
+                                        IrConstString(";"),
+                                        IrConstInt(4, int64),
+                                        IrConstInt(9, int64),
+                                    ),
+                                    token_type,
+                                ),
+                            ),
+                            error_type,
+                        ),
+                    ),
+                    IrStringType(),
+                ),
+            ),
+            IrReturn(IrConstInt(0, int32)),
+        ),
+    )
+
+
+def _sema_integer_type_summary_wrapper() -> IrFunction:
+    return _string_call_wrapper("xcc.sema.type_helpers._aot_integer_type_summary", ())
 
 
 def _string_call_wrapper(

@@ -398,6 +398,8 @@ class _Lowerer:
             return IrBoolType()
         if name == "None":
             return IrNoneType()
+        if name == "Enum":
+            return IrRecordType("Enum")
         if name in self.class_types:
             return IrRecordType(name)
         width_type = _width_alias_to_ir_type(name)
@@ -541,6 +543,8 @@ class _Lowerer:
             return IrBoolType()
         if type_info.name == "None":
             return IrNoneType()
+        if type_info.name == "Enum":
+            return IrRecordType("Enum")
         if type_info.name in self.class_types:
             return IrRecordType(type_info.name)
         if type_info.name.startswith("Literal["):

@@ -105,6 +105,10 @@ def is_arithmetic_type(type_: Type) -> bool:
     return is_integer_type(type_) or is_floating_type(type_)
 
 
+def _aot_integer_type_summary() -> str:
+    return f"INT={is_integer_type(INT)}|VOID={is_integer_type(VOID)}"
+
+
 def unqualified_type(type_: Type) -> Type:
     if not type_.qualifiers:
         return type_

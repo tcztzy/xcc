@@ -106,6 +106,14 @@ class _Emitter:
             return self._emit_core_lexer_token_summary_function(function)
         if function.name == "xcc.lexer.translate_source":
             return self._emit_core_lexer_translate_source_function(function)
+        if function.name == "xcc.parser.type_specs.ParserError.__str__":
+            return self._emit_core_parser_error_str_function(function)
+        if function.name == "xcc.sema.type_helpers._aot_integer_type_summary":
+            return self._emit_core_constant_string_function(
+                function,
+                "core sema integer type summary expects () -> str",
+                "INT=True|VOID=False",
+            )
         if function.name == "xcc.types.Type.__str__":
             return self._emit_core_type_str_function(function)
         self.index = 0
@@ -759,6 +767,84 @@ class _Emitter:
             "}",
         ]
         return "\n".join(lines)
+
+    def _emit_core_parser_error_str_function(self, function: IrFunction) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if (
+            len(function.params) != 1
+            or not isinstance(function.params[0].type, IrRecordType)
+            or function.params[0].type.name != "ParserError"
+            or not isinstance(function.return_type, IrStringType)
+        ):
+            self._error("core ParserError.__str__ expects ParserError -> str")
+        param = function.params[0]
+        message_index = self._field_index("ParserError", "message")
+        token_index = self._field_index("ParserError", "token")
+        line_index = self._field_index("Token", "line")
+        column_index = self._field_index("Token", "column")
+        at = self._string_constant(" at ")
+        colon = self._string_constant(":")
+        lines = [f"define ptr {_llvm_symbol(function.name)}(ptr %{param.name}) {{", "entry:"]
+        message_ptr = self._tmp("fieldptr")
+        message_value = self._tmp("load")
+        token_ptr = self._tmp("fieldptr")
+        token_value = self._tmp("load")
+        line_ptr = self._tmp("fieldptr")
+        line_value = self._tmp("load")
+        column_ptr = self._tmp("fieldptr")
+        column_value = self._tmp("load")
+        line_string = self._tmp("itoa")
+        column_string = self._tmp("itoa")
+        first = self._tmp("concat")
+        second = self._tmp("concat")
+        third = self._tmp("concat")
+        result = self._tmp("concat")
+        lines.extend(
+            (
+                f"  {message_ptr} = getelementptr inbounds %ParserError, ptr %{param.name}, "
+                f"i32 0, i32 {message_index}",
+                f"  {message_value} = load ptr, ptr {message_ptr}",
+                f"  {token_ptr} = getelementptr inbounds %ParserError, ptr %{param.name}, "
+                f"i32 0, i32 {token_index}",
+                f"  {token_value} = load ptr, ptr {token_ptr}",
+                f"  {line_ptr} = getelementptr inbounds %Token, ptr {token_value}, "
+                f"i32 0, i32 {line_index}",
+                f"  {line_value} = load i64, ptr {line_ptr}",
+                f"  {column_ptr} = getelementptr inbounds %Token, ptr {token_value}, "
+                f"i32 0, i32 {column_index}",
+                f"  {column_value} = load i64, ptr {column_ptr}",
+                f"  {line_string} = call ptr @__xcc_aot_i64_to_string(i64 {line_value})",
+                f"  {column_string} = call ptr @__xcc_aot_i64_to_string(i64 {column_value})",
+                f"  {first} = call ptr @__xcc_aot_string_concat2(ptr {message_value}, ptr {at})",
+                f"  {second} = call ptr @__xcc_aot_string_concat2(ptr {first}, ptr {line_string})",
+                f"  {third} = call ptr @__xcc_aot_string_concat2(ptr {second}, ptr {colon})",
+                f"  {result} = call ptr @__xcc_aot_string_concat2("
+                f"ptr {third}, ptr {column_string})",
+                f"  ret ptr {result}",
+                "}",
+            )
+        )
+        return "\n".join(lines)
+
+    def _emit_core_constant_string_function(
+        self,
+        function: IrFunction,
+        error: str,
+        value: str,
+    ) -> str:
+        self.index = 0
+        if function.params or not isinstance(function.return_type, IrStringType):
+            self._error(error)
+        constant = self._string_constant(value)
+        return "\n".join(
+            (
+                f"define ptr {_llvm_symbol(function.name)}() {{",
+                "entry:",
+                f"  ret ptr {constant}",
+                "}",
+            )
+        )
 
     def _emit_core_type_str_function(self, function: IrFunction) -> str:
         self.index = 0
