@@ -3,7 +3,22 @@ import unittest
 from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
-from xcc.aot import IrRecordType, analyze_path, lower_core_slice, run_native_core_smoke
+from xcc.aot import (
+    AotError,
+    IrFunction,
+    IrIntType,
+    IrModule,
+    IrRecord,
+    IrRecordType,
+    IrStringType,
+    analyze_path,
+    analyze_source,
+    emit_llvm_text,
+    lower_core_slice,
+    lower_source_to_ir,
+    run_native_core_smoke,
+)
+from xcc.aot.slice import _add_missing_records
 from xcc.lexer import Token, TokenKind
 from xcc.parser.type_specs import ParserError
 from xcc.sema.type_helpers import _aot_integer_type_summary
@@ -61,6 +76,20 @@ class AotMilestone5AdmissionTests(unittest.TestCase):
         self.assertEqual(function.parameters, (("self", "Scope"),))
         self.assertEqual(function.return_type.name, "dict[str, VarSymbol | EnumConstSymbol]")
 
+    def test_reports_missing_keyword_only_method_parameter_annotation(self) -> None:
+        source = (
+            "class Box:\n"
+            "    def update(self, *, value) -> None:\n"
+            "        return None\n"
+        )
+        with self.assertRaises(AotError) as ctx:
+            analyze_source(source, filename="bad_method.py")
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-TYPE-0001")
+        self.assertEqual(
+            ctx.exception.diagnostics[0].message,
+            "Missing annotation for parameter: Box.update.value",
+        )
+
 
 class AotMilestone5SliceTests(unittest.TestCase):
     def test_lowers_sema_type_helper_signature_with_imported_type_record(self) -> None:
@@ -75,6 +104,71 @@ class AotMilestone5SliceTests(unittest.TestCase):
         function = functions["xcc.sema.type_helpers.is_integer_type"]
         self.assertEqual(function.params[0].type, IrRecordType("Type"))
         self.assertEqual(function.return_type.__class__.__name__, "IrBoolType")
+
+    def test_missing_record_adder_skips_records_already_present(self) -> None:
+        records = {"Known": IrRecord("Known", ())}
+        _add_missing_records({"Known"}, records, {}, {}, {}, {})
+        self.assertEqual(records, {"Known": IrRecord("Known", ())})
+
+
+class AotMilestone5LoweringTests(unittest.TestCase):
+    def test_lowers_enum_annotation_to_opaque_record(self) -> None:
+        source = (
+            "from enum import Enum\n"
+            "def echo(value: Enum) -> Enum:\n"
+            "    return value\n"
+        )
+        module = lower_source_to_ir(
+            source,
+            filename="enum_signature.py",
+            include_functions={"echo"},
+            bodyless_functions={"echo"},
+        )
+        function = module.functions[0]
+        self.assertEqual(function.params[0].type, IrRecordType("Enum"))
+        self.assertEqual(function.return_type, IrRecordType("Enum"))
+
+
+class AotMilestone5LlvmTests(unittest.TestCase):
+    def test_reports_bad_core_parser_error_str_signature(self) -> None:
+        module = IrModule(
+            "bad.py",
+            (),
+            (
+                IrFunction(
+                    "xcc.parser.type_specs.ParserError.__str__",
+                    (),
+                    IrStringType(),
+                    (),
+                ),
+            ),
+        )
+        with self.assertRaises(AotError) as ctx:
+            emit_llvm_text(module)
+        self.assertEqual(
+            ctx.exception.diagnostics[0].message,
+            "core ParserError.__str__ expects ParserError -> str",
+        )
+
+    def test_reports_bad_core_constant_string_signature(self) -> None:
+        module = IrModule(
+            "bad.py",
+            (),
+            (
+                IrFunction(
+                    "xcc.sema.type_helpers._aot_integer_type_summary",
+                    (),
+                    IrIntType(64, signed=True),
+                    (),
+                ),
+            ),
+        )
+        with self.assertRaises(AotError) as ctx:
+            emit_llvm_text(module)
+        self.assertEqual(
+            ctx.exception.diagnostics[0].message,
+            "core sema integer type summary expects () -> str",
+        )
 
 
 class AotMilestone5ParserSubsetTests(unittest.TestCase):

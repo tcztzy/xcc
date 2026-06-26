@@ -466,7 +466,7 @@ git commit -m "feat: validate AOT parser sema fixtures"
 - Modify: `LESSONS.md` only if a new reusable lesson was discovered.
 - Modify: `docs/superpowers/plans/2026-06-26-aot-python-milestone-5.md`
 
-- [ ] **Step 1: Update changelog**
+- [x] **Step 1: Update changelog**
 
 Add this bullet at the top of `## Current` in `CHANGELOG.md`:
 
@@ -477,7 +477,7 @@ Add this bullet at the top of `## Current` in `CHANGELOG.md`:
   fixtures.
 ```
 
-- [ ] **Step 2: Run focused AOT tests**
+- [x] **Step 2: Run focused AOT tests**
 
 Run:
 
@@ -487,7 +487,7 @@ uv run python -m unittest tests.test_aot tests.test_aot_ir tests.test_aot_llvm t
 
 Expected: all focused AOT tests pass; optional real native tests skip only if `llc` is unavailable.
 
-- [ ] **Step 3: Run relevant existing module tests**
+- [x] **Step 3: Run relevant existing module tests**
 
 Run:
 
@@ -497,7 +497,7 @@ uv run python -m unittest tests.test_parser tests.test_sema -v
 
 Expected: parser and sema behavior remains unchanged under CPython.
 
-- [ ] **Step 4: Run full py311 gate**
+- [x] **Step 4: Run full py311 gate**
 
 Run:
 
@@ -507,7 +507,7 @@ uv run tox -e py311
 
 Expected: full test suite passes with 100.00% coverage.
 
-- [ ] **Step 5: Run handoff gates**
+- [x] **Step 5: Run handoff gates**
 
 Run:
 
@@ -518,12 +518,12 @@ uv run tox -e type
 
 Expected: lint and type gates pass.
 
-- [ ] **Step 6: Commit Milestone 5 status**
+- [x] **Step 6: Commit Milestone 5 status**
 
 Run:
 
 ```bash
-git add CHANGELOG.md docs/superpowers/plans/2026-06-26-aot-python-milestone-5.md
+git add CHANGELOG.md docs/superpowers/plans/2026-06-26-aot-python-milestone-5.md tests/test_aot_milestone5.py
 git commit -m "docs: record AOT milestone 5 status"
 ```
 

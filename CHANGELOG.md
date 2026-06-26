@@ -2,6 +2,10 @@
 
 ## Current
 
+- Added Milestone 5 AOT parser/sema slice support, including class method
+  signature binding, nested container annotation admission, parser helper subset
+  cleanup, cross-module record type resolution, and native parser/sema oracle
+  fixtures.
 - Added Milestone 5 native parser/sema oracle fixtures for
   `ParserError.__str__` and sema integer-type classification, including
   ParserError field-based native string rendering and an opaque AOT lowering
