@@ -1,7 +1,7 @@
 import unittest
 
 from tests import _bootstrap  # noqa: F401
-from xcc.aot import AotDiagnostic, AotError
+from xcc.aot import AotDiagnostic, AotError, parse_source
 
 
 class AotDiagnosticTests(unittest.TestCase):
@@ -39,6 +39,24 @@ class AotDiagnosticTests(unittest.TestCase):
         error = AotError((first, second))
         self.assertEqual(error.diagnostics, (first, second))
         self.assertEqual(str(error), "bad.py: aot: XCC-AOT-PARSE-0001: invalid syntax")
+
+
+class AotModuleParseTests(unittest.TestCase):
+    def test_parse_source_records_filename_and_tree(self) -> None:
+        module = parse_source("def f() -> int:\n    return 1\n", filename="sample.py")
+        self.assertEqual(module.filename, "sample.py")
+        self.assertEqual(module.source, "def f() -> int:\n    return 1\n")
+        self.assertEqual(len(module.tree.body), 1)
+
+    def test_parse_source_reports_syntax_error(self) -> None:
+        with self.assertRaises(AotError) as ctx:
+            parse_source("def bad(:\n    return 1\n", filename="bad.py")
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-PARSE-0001")
+        self.assertEqual(diagnostic.filename, "bad.py")
+        self.assertEqual(diagnostic.line, 1)
+        self.assertIsNotNone(diagnostic.column)
+        self.assertIn("invalid syntax", diagnostic.message)
 
 
 if __name__ == "__main__":
