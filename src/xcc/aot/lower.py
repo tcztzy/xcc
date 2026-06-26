@@ -375,6 +375,8 @@ class _Lowerer:
             return IrStringType()
         if name.startswith(("list[", "tuple[")):
             return IrTupleType(())
+        if _is_optional_int(name):
+            return IrIntType(64, signed=True)
         if " | " in name:
             return IrRecordType(name)
         self._error(
@@ -513,6 +515,8 @@ class _Lowerer:
             return IrStringType()
         if type_info.name.startswith(("list[", "tuple[")):
             return IrTupleType(())
+        if _is_optional_int(type_info.name):
+            return IrIntType(64, signed=True)
         if " | " in type_info.name:
             return IrRecordType(type_info.name)
         self._error(
@@ -617,6 +621,10 @@ def _width_alias_to_ir_type(name: str) -> IrIntType | None:
     if name == "usize":
         return IrIntType(64, signed=False)
     return None
+
+
+def _is_optional_int(name: str) -> bool:
+    return name in {"int | None", "None | int"}
 
 
 def _collect_global_names(tree: ast.Module) -> set[str]:

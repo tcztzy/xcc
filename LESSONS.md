@@ -1,5 +1,11 @@
 # Lessons
 
+- AOT core native oracle tests should prune from the fixture wrapper before
+  LLVM emission. Whole-module lowered output can contain source-reachable but
+  fixture-unexecuted helpers such as generator expressions; namespace
+  same-module calls first, then treat native-specialized functions as leaf
+  symbols so the oracle validates the intended entry behavior instead of
+  failing on unrelated lowered helpers.
 - Treat the real CPython build gate as an isolation problem as well as a
   compiler problem. If the default CPython checkout has ignored in-source
   artifacts, do not clean or reuse it for validation; clone a fresh temporary

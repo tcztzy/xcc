@@ -7,6 +7,7 @@ from xcc.aot import (
     IrBinary,
     IrBoolType,
     IrBranch,
+    IrCall,
     IrConstBool,
     IrConstInt,
     IrConstNone,
@@ -16,6 +17,7 @@ from xcc.aot import (
     IrForEach,
     IrFunction,
     IrGetField,
+    IrIf,
     IrIntType,
     IrModule,
     IrName,
@@ -35,6 +37,7 @@ from xcc.aot import (
 from xcc.aot.llvm_text import (
     _block_is_terminated,
     _current_label,
+    _EmittedValue,
     _Emitter,
     _for_each_targets,
     _llvm_symbol,
@@ -228,6 +231,171 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn('c"\\00"', llvm_ir)
         self.assertIn("@__xcc_aot_tuple_len", llvm_ir)
 
+    def test_emits_intrinsics_tuple_boxes_and_truth_edges(self) -> None:
+        int32 = IrIntType(32, signed=True)
+        uint32 = IrIntType(32, signed=False)
+        int64 = IrIntType(64, signed=True)
+        int128 = IrIntType(128, signed=True)
+        bool_type = IrBoolType()
+        tuple_type = IrTupleType((IrNoneType(), bool_type, int32, uint32, int128, IrStringType()))
+        module = IrModule(
+            "intrinsics.py",
+            (),
+            (
+                IrFunction(
+                    "condition_int",
+                    (),
+                    int64,
+                    (
+                        IrIf(
+                            IrConstInt(1, int64),
+                            IrBranch((IrReturn(IrConstInt(1, int64)),)),
+                            IrBranch((IrReturn(IrConstInt(0, int64)),)),
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "condition_none",
+                    (),
+                    int64,
+                    (
+                        IrIf(
+                            IrConstNone(),
+                            IrBranch((IrReturn(IrConstInt(1, int64)),)),
+                            IrBranch((IrReturn(IrConstInt(0, int64)),)),
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "string_none",
+                    (),
+                    IrStringType(),
+                    (IrReturn(IrStringConcat((IrConstString("x"), IrConstNone()))),),
+                ),
+                IrFunction(
+                    "tuple_boxes",
+                    (),
+                    tuple_type,
+                    (
+                        IrReturn(
+                            IrTuple(
+                                (
+                                    IrConstNone(),
+                                    IrConstBool(True),
+                                    IrConstInt(-1, int32),
+                                    IrConstInt(1, uint32),
+                                    IrConstInt(1, int128),
+                                    IrConstString("s"),
+                                ),
+                                tuple_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "not_in_empty",
+                    (),
+                    bool_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__cmp_NotIn",
+                                (IrConstString("x"), IrTuple((), IrTupleType(()))),
+                                bool_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "and_empty", (), bool_type, (IrReturn(IrCall("__bool_and", (), bool_type)),)
+                ),
+                IrFunction(
+                    "or_empty", (), bool_type, (IrReturn(IrCall("__bool_or", (), bool_type)),)
+                ),
+                IrFunction(
+                    "not_none",
+                    (),
+                    bool_type,
+                    (IrReturn(IrCall("__not", (IrConstNone(),), bool_type)),),
+                ),
+                IrFunction(
+                    "not_int",
+                    (),
+                    bool_type,
+                    (IrReturn(IrCall("__not", (IrConstInt(1, int64),), bool_type)),),
+                ),
+                IrFunction(
+                    "eq_int",
+                    (),
+                    bool_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__cmp_Eq",
+                                (IrConstInt(1, int64), IrConstInt(1, int64)),
+                                bool_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "eq_bool",
+                    (),
+                    bool_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__cmp_Eq",
+                                (IrConstBool(True), IrConstBool(False)),
+                                bool_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "eq_ptr_int",
+                    (),
+                    bool_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__cmp_Eq",
+                                (IrConstNone(), IrConstInt(0, int64)),
+                                bool_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "eq_int_ptr",
+                    (),
+                    bool_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__cmp_Eq",
+                                (IrConstInt(0, int64), IrConstNone()),
+                                bool_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "eq_ptr",
+                    (),
+                    bool_type,
+                    (IrReturn(IrCall("__cmp_Eq", (IrConstNone(), IrConstNone()), bool_type)),),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("icmp ne i64 1, 0", llvm_ir)
+        self.assertIn("inttoptr i64", llvm_ir)
+        self.assertIn("sext i32 -1 to i64", llvm_ir)
+        self.assertIn("zext i32 1 to i64", llvm_ir)
+        self.assertIn("trunc i128 1 to i64", llvm_ir)
+        self.assertIn("icmp eq ptr null, null", llvm_ir)
+
     def test_llvm_text_private_helpers_cover_edge_inputs(self) -> None:
         self.assertEqual(_llvm_symbol("super().__init__"), '@"super().__init__"')
         self.assertFalse(_block_is_terminated([]))
@@ -243,6 +411,23 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
         with self.assertRaises(AotError) as ctx:
             emitter._emit_default_return([], object())  # type: ignore[arg-type]
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        original_emit_expr = emitter._emit_expr
+        emitter._emit_expr = (  # type: ignore[method-assign]
+            lambda expr, names, lines: _EmittedValue("value", object())
+        )
+        with self.assertRaises(AotError) as ctx:
+            emitter._emit_condition(IrConstBool(True), {}, [])
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        emitter._emit_expr = original_emit_expr  # type: ignore[method-assign]
+        with self.assertRaises(AotError) as ctx:
+            emitter._coerce_to_bool(_EmittedValue("value", object()), [])  # type: ignore[arg-type]
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        with self.assertRaises(AotError) as ctx:
+            emitter._box_to_runtime_ptr(_EmittedValue("value", object()), [])  # type: ignore[arg-type]
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        with self.assertRaises(AotError) as ctx:
+            emitter._pointer_compare_value(_EmittedValue("value", object()))  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
 
     def test_reports_unsupported_llvm_shapes(self) -> None:
@@ -313,6 +498,72 @@ class AotLlvmTextTests(unittest.TestCase):
                     ),
                 ),
                 entry="box",
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (IrReturn(IrStringConcat((IrConstString("x"), IrConstBool(True)))),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f", (), IrBoolType(), (IrReturn(IrCall("__not", (), IrBoolType())),)
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (IrReturn(IrCall("__ifexp", (IrConstBool(True),), IrBoolType())),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (IrReturn(IrCall("__cmp_Eq", (IrConstInt(1, int64),), IrBoolType())),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (IrReturn(IrCall("__cmp_Is", (IrConstInt(1, int64),), IrBoolType())),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (IrRecord("Type", (IrField("name", IrStringType()),)),),
+                (
+                    IrFunction(
+                        "xcc.types.Type.__str__", (), IrStringType(), (IrReturn(IrConstString("")),)
+                    ),
+                ),
             ),
         )
         for module in cases:

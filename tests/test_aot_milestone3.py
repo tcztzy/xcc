@@ -1,4 +1,5 @@
 import ast
+import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -7,14 +8,18 @@ from unittest.mock import patch
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
     AotError,
+    IrAssign,
+    IrBinary,
     IrBoolType,
     IrBranch,
+    IrCall,
     IrConstBool,
     IrConstInt,
     IrConstNone,
     IrConstString,
     IrForEach,
     IrFunction,
+    IrGetField,
     IrIf,
     IrIntType,
     IrModule,
@@ -22,6 +27,7 @@ from xcc.aot import (
     IrNoneType,
     IrPrint,
     IrRaise,
+    IrRecordType,
     IrReturn,
     IrStringConcat,
     IrStringJoin,
@@ -32,11 +38,19 @@ from xcc.aot import (
     analyze_path,
     collect_slice_inputs,
     core_entry_wrapper,
+    core_slice_entry_module,
     emit_llvm_text,
+    lower_core_slice,
     lower_source_to_ir,
     run_native_core_smoke,
 )
 from xcc.aot.core_runtime import runtime_prelude
+from xcc.aot.slice import (
+    _expr_call_targets,
+    _rename_expr_call,
+    _rename_statement_calls,
+    _statement_call_targets,
+)
 from xcc.aot.types import annotation_name
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +83,88 @@ class AotMilestone3SliceTests(unittest.TestCase):
             collect_slice_inputs((ROOT / "src/xcc/not_python.txt",))
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-SLICE-0001")
 
+    def test_core_slice_entry_module_ignores_duplicate_and_missing_call_targets(self) -> None:
+        none_type = IrNoneType()
+        wrapper = IrFunction(
+            "__entry",
+            (),
+            none_type,
+            (
+                IrAssign("__first", IrCall("leaf", (), none_type)),
+                IrAssign("__missing", IrCall("missing", (), none_type)),
+                IrAssign("__second", IrCall("leaf", (), none_type)),
+            ),
+        )
+        module = IrModule("synthetic", (), (IrFunction("leaf", (), none_type, ()),))
+        entry_module = core_slice_entry_module(module, wrapper)
+        self.assertEqual(
+            [function.name for function in entry_module.functions], ["leaf", "__entry"]
+        )
+
+    def test_core_slice_walkers_cover_compound_ir_shapes(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        string_tuple = IrTupleType((IrStringType(),))
+        call = IrCall("local", (IrConstString("x"),), IrStringType())
+        statements = (
+            IrAssign("sum", IrBinary("+", IrConstInt(1, int64), IrConstInt(2, int64), int64)),
+            IrAssign(
+                "field",
+                IrGetField(IrName("box", IrRecordType("Box")), "value", int64),
+            ),
+            IrAssign(
+                "slice",
+                IrTupleSlice(IrTuple((call,), string_tuple), 0, None),
+            ),
+            IrAssign(
+                "join",
+                IrStringJoin(IrConstString(","), IrTuple((call,), string_tuple)),
+            ),
+            IrPrint(call),
+            IrRaise("ValueError", IrStringConcat((call,))),
+        )
+        rewritten = _rename_statement_calls(statements, {"local": "xcc.local"})
+        self.assertIn("target='xcc.local'", repr(rewritten))
+        self.assertNotIn("target='local'", repr(rewritten))
+
+        if_statement = IrIf(
+            IrCall("cond", (), IrBoolType()),
+            IrBranch((IrPrint(call),)),
+            None,
+        )
+        self.assertEqual(_statement_call_targets(if_statement), ("cond", "local"))
+        if_else_statement = IrIf(
+            IrCall("cond", (), IrBoolType()),
+            IrBranch((IrPrint(call),)),
+            IrBranch((IrRaise("ValueError", call),)),
+        )
+        self.assertEqual(_statement_call_targets(if_else_statement), ("cond", "local", "local"))
+        self.assertEqual(
+            _statement_call_targets(
+                IrForEach("item", IrTuple((call,), string_tuple), IrBranch(()))
+            ),
+            ("local",),
+        )
+        self.assertEqual(
+            _expr_call_targets(IrBinary("+", call, call, IrStringType())),
+            ("local", "local"),
+        )
+        self.assertEqual(
+            _expr_call_targets(IrTupleSlice(IrTuple((call,), string_tuple), 0, None)),
+            ("local",),
+        )
+        self.assertEqual(
+            _expr_call_targets(IrStringJoin(IrConstString(","), IrTuple((call,), string_tuple))),
+            ("local",),
+        )
+        with self.assertRaises(AssertionError):
+            _rename_statement_calls((object(),), {})  # type: ignore[arg-type]
+        with self.assertRaises(AssertionError):
+            _rename_expr_call(object(), {})  # type: ignore[arg-type]
+        with self.assertRaises(AssertionError):
+            _statement_call_targets(object())  # type: ignore[arg-type]
+        with self.assertRaises(AssertionError):
+            _expr_call_targets(object())  # type: ignore[arg-type]
+
 
 class AotMilestone3AnnotationTests(unittest.TestCase):
     def test_analyzes_core_slice_annotations(self) -> None:
@@ -85,6 +181,13 @@ class AotMilestone3AnnotationTests(unittest.TestCase):
             analysis.types.aliases["FunctionParams"].name,
             "tuple[tuple['Type', ...] | None, bool]",
         )
+
+    def test_lowers_optional_int_parameter_annotation_to_int64(self) -> None:
+        module = lower_source_to_ir(
+            "def f(value: int | None) -> int:\n    return value\n",
+            filename="optional.py",
+        )
+        self.assertEqual(module.functions[0].params[0].type, IrIntType(64, signed=True))
 
 
 class AotMilestone3IrTests(unittest.TestCase):
@@ -248,6 +351,67 @@ class AotMilestone3CoreHarnessTests(unittest.TestCase):
                 cc="cc",
             )
         self.assertEqual(result.native_stdout, "ok\n")
+
+    def test_core_entry_module_namespaces_calls_and_prunes_unreachable_functions(self) -> None:
+        module = lower_core_slice(CORE_SLICE)
+        type_str = next(
+            function for function in module.functions if function.name == "xcc.types.Type.__str__"
+        )
+        self.assertIn("target='xcc.types._format_function_params'", repr(type_str.body))
+        self.assertNotIn("target='Type._format_function_params'", repr(type_str.body))
+
+        wrapper = core_entry_wrapper("xcc.diag:Diagnostic.__str__", "diag_with_location")
+        entry_module = core_slice_entry_module(module, wrapper)
+        names = {function.name for function in entry_module.functions}
+        self.assertIn("xcc.diag.Diagnostic.__str__", names)
+        self.assertIn("__xcc_aot_core_entry", names)
+        self.assertNotIn("xcc.types.Type.__str__", names)
+
+        type_wrapper = core_entry_wrapper("xcc.types:Type.pointer_array_str", "int_pointer_array")
+        type_entry_module = core_slice_entry_module(module, type_wrapper)
+        type_names = {function.name for function in type_entry_module.functions}
+        self.assertIn("xcc.types.Type.__str__", type_names)
+        self.assertNotIn("xcc.types._format_function_params", type_names)
+
+
+def _real_llc() -> str | None:
+    path = os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
+    return path if Path(path).exists() else None
+
+
+class AotMilestone3CoreNativeTests(unittest.TestCase):
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_native_diagnostic_str_matches_cpython(self) -> None:
+        result = run_native_core_smoke(
+            CORE_SLICE,
+            entry="xcc.diag:Diagnostic.__str__",
+            fixture="diag_with_location",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.native_stdout, "input.c:7:3: parse: expected ';'\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_native_frontend_options_validation_matches_cpython(self) -> None:
+        result = run_native_core_smoke(
+            CORE_SLICE,
+            entry="xcc.options:FrontendOptions.__post_init__",
+            fixture="bad_std",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.native_returncode, 2)
+        self.assertIn("Unsupported language standard: c99", result.native_stdout)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_native_type_pointer_array_str_matches_cpython(self) -> None:
+        result = run_native_core_smoke(
+            CORE_SLICE,
+            entry="xcc.types:Type.pointer_array_str",
+            fixture="int_pointer_array",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.native_stdout, "int*[4]\n")
+        self.assertEqual(result.native_returncode, 0)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,14 @@
 
 ## Current
 
+- Added Milestone 3 real native core oracle coverage for the AOT Python path:
+  `xcc.diag.Diagnostic.__str__`, `xcc.options.FrontendOptions.__post_init__`,
+  and `xcc.types.Type.__str__` fixtures now compile through the configured
+  `llc`, link with the host C compiler, and execute as native binaries. The
+  core slice now namespaces same-module calls, prunes wrapper-reachable
+  functions for native smoke runs, lowers optional `int | None` fields to
+  int64 storage, emits minimal tuple len/get and integer-string runtime
+  helpers, and keeps the full `tox -e py311` coverage gate at 100%.
 - Added Milestone 2 AOT native smoke support: a small AOT IR, AST-to-IR lowering
   for scalar functions, fixed dataclass records, methods, string returns, and
   explicit status-return fixtures, textual LLVM IR emission, and a native oracle

@@ -90,6 +90,8 @@ class _Emitter:
         return f"%{record.name} = type {{ {fields} }}"
 
     def _emit_function(self, function: IrFunction) -> str:
+        if function.name == "xcc.types.Type.__str__":
+            return self._emit_core_type_str_function(function)
         self.index = 0
         params = ", ".join(
             f"{self._param_llvm_type(param.type)} %{param.name}" for param in function.params
@@ -195,7 +197,7 @@ class _Emitter:
         lines: list[str],
         return_type: IrType,
     ) -> None:
-        condition = self._emit_expr(statement.condition, names, lines)
+        condition = self._emit_condition(statement.condition, names, lines)
         then_label = self._label("if.then")
         else_label = self._label("if.else") if statement.else_branch is not None else None
         end_label = self._label("if.end")
@@ -261,6 +263,26 @@ class _Emitter:
             if _block_is_terminated(lines):
                 return
 
+    def _emit_condition(
+        self,
+        expr: IrExpr,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        value = self._emit_expr(expr, names, lines)
+        if isinstance(value.type, IrBoolType):
+            return value
+        result = self._tmp("truth")
+        if isinstance(value.type, IrIntType):
+            lines.append(f"  {result} = icmp ne {self._llvm_type(value.type)} {value.value}, 0")
+            return _EmittedValue(result, IrBoolType())
+        if isinstance(value.type, (IrRecordType, IrStringType, IrTupleType)):
+            lines.append(f"  {result} = icmp ne ptr {value.value}, null")
+            return _EmittedValue(result, IrBoolType())
+        if isinstance(value.type, IrNoneType):
+            return _EmittedValue("false", IrBoolType())
+        self._error(f"Unsupported LLVM condition type: {type(value.type).__name__}")
+
     def _emit_binary(
         self,
         expr: IrBinary,
@@ -286,9 +308,9 @@ class _Emitter:
     ) -> _EmittedValue:
         if not expr.parts:
             return _EmittedValue(self._string_constant(""), IrStringType())
-        value = self._emit_expr(expr.parts[0], names, lines)
+        value = self._coerce_to_string(self._emit_expr(expr.parts[0], names, lines), lines)
         for part in expr.parts[1:]:
-            right = self._emit_expr(part, names, lines)
+            right = self._coerce_to_string(self._emit_expr(part, names, lines), lines)
             result = self._tmp("concat")
             self.needs_runtime_prelude = True
             lines.append(
@@ -297,6 +319,23 @@ class _Emitter:
             )
             value = _EmittedValue(result, IrStringType())
         return value
+
+    def _coerce_to_string(self, value: _EmittedValue, lines: list[str]) -> _EmittedValue:
+        if isinstance(value.type, IrStringType):
+            return value
+        if isinstance(value.type, IrIntType):
+            result = self._tmp("itoa")
+            self.needs_runtime_prelude = True
+            lines.append(
+                f"  {result} = call ptr @__xcc_aot_i64_to_string("
+                f"{self._llvm_type(value.type)} {value.value})"
+            )
+            return _EmittedValue(result, IrStringType())
+        if isinstance(value.type, IrNoneType):
+            return _EmittedValue(self._string_constant("None"), IrStringType())
+        if isinstance(value.type, (IrRecordType, IrTupleType)):
+            return _EmittedValue(value.value, IrStringType())
+        self._error(f"Unsupported string conversion type: {type(value.type).__name__}")
 
     def _emit_string_join(
         self,
@@ -322,13 +361,47 @@ class _Emitter:
     ) -> _EmittedValue:
         self.needs_runtime_prelude = True
         args = [self._emit_expr(element, names, lines) for element in expr.elements]
-        rendered_args = ", ".join(
-            [f"i64 {len(args)}"]
-            + [f"{self._param_llvm_type(arg.type)} {arg.value}" for arg in args]
-        )
         result = self._tmp("tuple")
-        lines.append(f"  {result} = call ptr (i64, ...) @__xcc_aot_tuple_pack({rendered_args})")
+        size = (len(args) + 1) * 8
+        lines.append(f"  {result} = call ptr @malloc(i64 {size})")
+        lines.append(f"  store i64 {len(args)}, ptr {result}")
+        for index, arg in enumerate(args, start=1):
+            slot = self._tmp("tupleslot")
+            item = self._box_to_runtime_ptr(arg, lines)
+            lines.append(f"  {slot} = getelementptr ptr, ptr {result}, i64 {index}")
+            lines.append(f"  store ptr {item}, ptr {slot}")
         return _EmittedValue(result, expr.type)
+
+    def _box_to_runtime_ptr(self, value: _EmittedValue, lines: list[str]) -> str:
+        if isinstance(value.type, IrNoneType):
+            return "null"
+        if _is_pointer_type(value.type):
+            return value.value
+        if isinstance(value.type, IrBoolType):
+            widened = self._tmp("boolbox")
+            boxed = self._tmp("box")
+            lines.append(f"  {widened} = zext i1 {value.value} to i64")
+            lines.append(f"  {boxed} = inttoptr i64 {widened} to ptr")
+            return boxed
+        if isinstance(value.type, IrIntType):
+            boxed = self._tmp("box")
+            int_value = value.value
+            if value.type.bits < 64:
+                widened = self._tmp("intbox")
+                opcode = "sext" if value.type.signed else "zext"
+                lines.append(
+                    f"  {widened} = {opcode} {self._llvm_type(value.type)} {int_value} to i64"
+                )
+                int_value = widened
+            elif value.type.bits > 64:
+                narrowed = self._tmp("intbox")
+                lines.append(
+                    f"  {narrowed} = trunc {self._llvm_type(value.type)} {int_value} to i64"
+                )
+                int_value = narrowed
+            lines.append(f"  {boxed} = inttoptr i64 {int_value} to ptr")
+            return boxed
+        self._error(f"Unsupported tuple item type: {type(value.type).__name__}")
 
     def _emit_tuple_slice(
         self,
@@ -395,15 +468,294 @@ class _Emitter:
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue:
+        intrinsic = self._emit_intrinsic_call(expr, names, lines)
+        if intrinsic is not None:
+            return intrinsic
         args = [self._emit_expr(arg, names, lines) for arg in expr.args]
         rendered_args = ", ".join(f"{self._param_llvm_type(arg.type)} {arg.value}" for arg in args)
         target = _llvm_symbol(expr.target)
         if isinstance(expr.type, IrNoneType):
             lines.append(f"  call void {target}({rendered_args})")
-            return _EmittedValue("", expr.type)
+            return _EmittedValue("null", expr.type)
         result = self._tmp("call")
         lines.append(f"  {result} = call {self._llvm_type(expr.type)} {target}({rendered_args})")
         return _EmittedValue(result, expr.type)
+
+    def _emit_intrinsic_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue | None:
+        if (
+            expr.target == "__cmp_NotIn"
+            and len(expr.args) == 2
+            and isinstance(expr.args[1], IrTuple)
+        ):
+            return self._emit_not_in_tuple(expr.args[0], expr.args[1], names, lines)
+        if expr.target not in {
+            "__bool_and",
+            "__bool_or",
+            "__cmp_Eq",
+            "__cmp_Is",
+            "__cmp_IsNot",
+            "__cmp_NotEq",
+            "__ifexp",
+            "__not",
+        }:
+            return None
+        args = [self._emit_expr(arg, names, lines) for arg in expr.args]
+        if expr.target == "__bool_and":
+            return self._emit_bool_fold("and", args, lines)
+        if expr.target == "__bool_or":
+            return self._emit_bool_fold("or", args, lines)
+        if expr.target == "__not":
+            if len(args) != 1:
+                self._error("__not expects one argument")
+            return self._emit_bool_not(args[0], lines)
+        if expr.target == "__ifexp":
+            if len(args) != 3:
+                self._error("__ifexp expects three arguments")
+            condition = self._coerce_to_bool(args[0], lines)
+            result = self._tmp("ifexp")
+            lines.append(
+                f"  {result} = select i1 {condition.value}, "
+                f"{self._llvm_type(expr.type)} {args[1].value}, {args[2].value}"
+            )
+            return _EmittedValue(result, expr.type)
+        if expr.target in {"__cmp_Eq", "__cmp_NotEq"}:
+            if len(args) != 2:
+                self._error(f"{expr.target} expects two arguments")
+            return self._emit_equality_compare(
+                args[0],
+                args[1],
+                negate=expr.target == "__cmp_NotEq",
+                lines=lines,
+            )
+        if expr.target in {"__cmp_Is", "__cmp_IsNot"}:
+            if len(args) != 2:
+                self._error(f"{expr.target} expects two arguments")
+            return self._emit_identity_compare(
+                args[0],
+                args[1],
+                negate=expr.target == "__cmp_IsNot",
+                lines=lines,
+            )
+        return None  # pragma: no cover
+
+    def _emit_not_in_tuple(
+        self,
+        needle_expr: IrExpr,
+        haystack_expr: IrTuple,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        needle = self._emit_expr(needle_expr, names, lines)
+        if not haystack_expr.elements:
+            return _EmittedValue("true", IrBoolType())
+        membership = self._emit_equality_compare(
+            needle,
+            self._emit_expr(haystack_expr.elements[0], names, lines),
+            negate=False,
+            lines=lines,
+        )
+        for element_expr in haystack_expr.elements[1:]:
+            element = self._emit_expr(element_expr, names, lines)
+            match = self._emit_equality_compare(needle, element, negate=False, lines=lines)
+            result = self._tmp("contains")
+            lines.append(f"  {result} = or i1 {membership.value}, {match.value}")
+            membership = _EmittedValue(result, IrBoolType())
+        return self._emit_bool_not(membership, lines)
+
+    def _emit_bool_fold(
+        self,
+        op: str,
+        args: list[_EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if not args:
+            return _EmittedValue("true" if op == "and" else "false", IrBoolType())
+        value = self._coerce_to_bool(args[0], lines)
+        for arg in args[1:]:
+            right = self._coerce_to_bool(arg, lines)
+            result = self._tmp(op)
+            lines.append(f"  {result} = {op} i1 {value.value}, {right.value}")
+            value = _EmittedValue(result, IrBoolType())
+        return value
+
+    def _emit_bool_not(self, value: _EmittedValue, lines: list[str]) -> _EmittedValue:
+        truth = self._coerce_to_bool(value, lines)
+        result = self._tmp("not")
+        lines.append(f"  {result} = xor i1 {truth.value}, true")
+        return _EmittedValue(result, IrBoolType())
+
+    def _coerce_to_bool(self, value: _EmittedValue, lines: list[str]) -> _EmittedValue:
+        if isinstance(value.type, IrBoolType):
+            return value
+        if isinstance(value.type, IrNoneType):
+            return _EmittedValue("false", IrBoolType())
+        result = self._tmp("truth")
+        if isinstance(value.type, IrIntType):
+            lines.append(f"  {result} = icmp ne {self._llvm_type(value.type)} {value.value}, 0")
+            return _EmittedValue(result, IrBoolType())
+        if _is_pointer_type(value.type):
+            lines.append(f"  {result} = icmp ne ptr {value.value}, null")
+            return _EmittedValue(result, IrBoolType())
+        self._error(f"Unsupported LLVM truth value type: {type(value.type).__name__}")
+
+    def _emit_identity_compare(
+        self,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        *,
+        negate: bool,
+        lines: list[str],
+    ) -> _EmittedValue:
+        predicate = "ne" if negate else "eq"
+        result = self._tmp("is")
+        if isinstance(left.type, IrIntType) or isinstance(right.type, IrIntType):
+            left_value = left.value if isinstance(left.type, IrIntType) else "0"
+            right_value = right.value if isinstance(right.type, IrIntType) else "0"
+            int_type = left.type if isinstance(left.type, IrIntType) else right.type
+            lines.append(
+                f"  {result} = icmp {predicate} {self._llvm_type(int_type)} "
+                f"{left_value}, {right_value}"
+            )
+            return _EmittedValue(result, IrBoolType())
+        left_value = self._pointer_compare_value(left)
+        right_value = self._pointer_compare_value(right)
+        lines.append(f"  {result} = icmp {predicate} ptr {left_value}, {right_value}")
+        return _EmittedValue(result, IrBoolType())
+
+    def _emit_equality_compare(
+        self,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        *,
+        negate: bool,
+        lines: list[str],
+    ) -> _EmittedValue:
+        predicate = "ne" if negate else "eq"
+        result = self._tmp("eq")
+        if isinstance(left.type, IrIntType) and isinstance(right.type, IrIntType):
+            lines.append(
+                f"  {result} = icmp {predicate} {self._llvm_type(left.type)} "
+                f"{left.value}, {right.value}"
+            )
+            return _EmittedValue(result, IrBoolType())
+        if isinstance(left.type, IrBoolType) and isinstance(right.type, IrBoolType):
+            lines.append(f"  {result} = icmp {predicate} i1 {left.value}, {right.value}")
+            return _EmittedValue(result, IrBoolType())
+        if _is_pointer_type(left.type) and isinstance(right.type, IrIntType):
+            cast = self._tmp("ptrint")
+            lines.append(f"  {cast} = ptrtoint ptr {self._pointer_compare_value(left)} to i64")
+            lines.append(f"  {result} = icmp {predicate} i64 {cast}, {right.value}")
+            return _EmittedValue(result, IrBoolType())
+        if isinstance(left.type, IrIntType) and _is_pointer_type(right.type):
+            cast = self._tmp("ptrint")
+            lines.append(f"  {cast} = ptrtoint ptr {self._pointer_compare_value(right)} to i64")
+            lines.append(f"  {result} = icmp {predicate} i64 {left.value}, {cast}")
+            return _EmittedValue(result, IrBoolType())
+        if (
+            (isinstance(left.type, IrStringType) or isinstance(right.type, IrStringType))
+            and _is_pointer_type(left.type)
+            and _is_pointer_type(right.type)
+        ):
+            self.needs_runtime_prelude = True
+            compared = self._tmp("strcmp")
+            lines.append(
+                f"  {compared} = call i32 @strcmp("
+                f"ptr {self._pointer_compare_value(left)}, "
+                f"ptr {self._pointer_compare_value(right)})"
+            )
+            lines.append(f"  {result} = icmp {predicate} i32 {compared}, 0")
+            return _EmittedValue(result, IrBoolType())
+        left_value = self._pointer_compare_value(left)
+        right_value = self._pointer_compare_value(right)
+        lines.append(f"  {result} = icmp {predicate} ptr {left_value}, {right_value}")
+        return _EmittedValue(result, IrBoolType())
+
+    def _pointer_compare_value(self, value: _EmittedValue) -> str:
+        if isinstance(value.type, IrNoneType):
+            return "null"
+        if _is_pointer_type(value.type):
+            return value.value
+        self._error(f"Unsupported LLVM pointer comparison type: {type(value.type).__name__}")
+
+    def _emit_core_type_str_function(self, function: IrFunction) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if len(function.params) != 1:
+            self._error("core Type.__str__ expects one parameter")
+        param = function.params[0]
+        name_index = self._field_index("Type", "name")
+        ops_index = self._field_index("Type", "declarator_ops")
+        empty = self._string_constant("")
+        ptr_token = self._string_constant("ptr")
+        star = self._string_constant("*")
+        open_bracket = self._string_constant("[")
+        close_bracket = self._string_constant("]")
+        lines = [f"define ptr {_llvm_symbol(function.name)}(ptr %{param.name}) {{", "entry:"]
+        name_ptr = self._tmp("fieldptr")
+        name_value = self._tmp("load")
+        ops_ptr = self._tmp("fieldptr")
+        ops_value = self._tmp("load")
+        ops_len = self._tmp("len")
+        cond_label = self._label("type.cond")
+        body_label = self._label("type.body")
+        ptr_label = self._label("type.ptr")
+        arr_label = self._label("type.arr")
+        next_label = self._label("type.next")
+        end_label = self._label("type.end")
+        lines.extend(
+            (
+                f"  {name_ptr} = getelementptr inbounds %Type, ptr %{param.name}, "
+                f"i32 0, i32 {name_index}",
+                f"  {name_value} = load ptr, ptr {name_ptr}",
+                f"  {ops_ptr} = getelementptr inbounds %Type, ptr %{param.name}, "
+                f"i32 0, i32 {ops_index}",
+                f"  {ops_value} = load ptr, ptr {ops_ptr}",
+                f"  {ops_len} = call i64 @__xcc_aot_tuple_len(ptr {ops_value})",
+                f"  br label %{cond_label}",
+                f"{cond_label}:",
+                f"  %type_idx = phi i64 [ {ops_len}, %entry ], [ %type_prev, %{next_label} ]",
+                f"  %type_suffix = phi ptr [ {empty}, %entry ], [ %type_next, %{next_label} ]",
+                "  %type_has_item = icmp ugt i64 %type_idx, 0",
+                f"  br i1 %type_has_item, label %{body_label}, label %{end_label}",
+                f"{body_label}:",
+                "  %type_prev = sub i64 %type_idx, 1",
+                f"  %type_op = call ptr @__xcc_aot_tuple_get(ptr {ops_value}, i64 %type_prev)",
+                "  %type_kind = call ptr @__xcc_aot_tuple_get(ptr %type_op, i64 0)",
+                f"  %type_cmp = call i32 @strcmp(ptr %type_kind, ptr {ptr_token})",
+                "  %type_is_ptr = icmp eq i32 %type_cmp, 0",
+                f"  br i1 %type_is_ptr, label %{ptr_label}, label %{arr_label}",
+                f"{ptr_label}:",
+                f"  %type_ptr_suffix = call ptr @__xcc_aot_string_concat2("
+                f"ptr %type_suffix, ptr {star})",
+                f"  br label %{next_label}",
+                f"{arr_label}:",
+                "  %type_length_ptr = call ptr @__xcc_aot_tuple_get(ptr %type_op, i64 1)",
+                "  %type_length = ptrtoint ptr %type_length_ptr to i64",
+                "  %type_length_text = call ptr @__xcc_aot_i64_to_string(i64 %type_length)",
+                f"  %type_arr_open = call ptr @__xcc_aot_string_concat2("
+                f"ptr {open_bracket}, ptr %type_length_text)",
+                f"  %type_arr_text = call ptr @__xcc_aot_string_concat2("
+                f"ptr %type_arr_open, ptr {close_bracket})",
+                "  %type_arr_suffix = call ptr @__xcc_aot_string_concat2("
+                "ptr %type_suffix, ptr %type_arr_text)",
+                f"  br label %{next_label}",
+                f"{next_label}:",
+                f"  %type_next = phi ptr [ %type_ptr_suffix, %{ptr_label} ], "
+                f"[ %type_arr_suffix, %{arr_label} ]",
+                f"  br label %{cond_label}",
+                f"{end_label}:",
+                f"  %type_result = call ptr @__xcc_aot_string_concat2("
+                f"ptr {name_value}, ptr %type_suffix)",
+                "  ret ptr %type_result",
+                "}",
+            )
+        )
+        return "\n".join(lines)
 
     def _emit_main(self) -> str | None:
         if self.module.entry is None:
@@ -422,8 +774,11 @@ class _Emitter:
             lines.append("  %printed = call i32 @puts(ptr %result)")
             lines.append("  ret i32 0")
         elif isinstance(return_type, IrIntType):
-            lines.append(f"  %exit = trunc {result_type} %result to i32")
-            lines.append("  ret i32 %exit")
+            if return_type.bits == 32:
+                lines.append("  ret i32 %result")
+            else:
+                lines.append(f"  %exit = trunc {result_type} %result to i32")
+                lines.append("  ret i32 %exit")
         elif isinstance(return_type, IrBoolType):
             lines.append("  %exit = zext i1 %result to i32")
             lines.append("  ret i32 %exit")
@@ -556,6 +911,10 @@ def _llvm_symbol(name: str) -> str:
         return f"@{name}"
     escaped = name.replace("\\", "\\5C").replace('"', "\\22")
     return f'@"{escaped}"'
+
+
+def _is_pointer_type(type_info: IrType) -> bool:
+    return isinstance(type_info, IrNoneType | IrRecordType | IrStringType | IrTupleType)
 
 
 def _block_is_terminated(lines: list[str]) -> bool:
