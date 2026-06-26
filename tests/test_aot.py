@@ -1,7 +1,7 @@
 import unittest
 
 from tests import _bootstrap  # noqa: F401
-from xcc.aot import AotDiagnostic, AotError, bind_types, check_subset, parse_source
+from xcc.aot import AotDiagnostic, AotError, analyze_source, bind_types, check_subset, parse_source
 
 
 class AotDiagnosticTests(unittest.TestCase):
@@ -156,6 +156,20 @@ class AotTypeBinderTests(unittest.TestCase):
         diagnostic = ctx.exception.diagnostics[0]
         self.assertEqual(diagnostic.code, "XCC-AOT-TYPE-0003")
         self.assertEqual(diagnostic.message, "Width alias must target int: int64")
+
+
+class AotAnalysisApiTests(unittest.TestCase):
+    def test_analyze_source_returns_summary_and_types(self) -> None:
+        source = "int64 = int\ndef f(value: int64) -> int64:\n    return value\n"
+        analysis = analyze_source(source, filename="api.py")
+        self.assertEqual(analysis.module.filename, "api.py")
+        self.assertEqual(analysis.summary.functions, ("f",))
+        self.assertEqual(analysis.types.functions["f"].return_type.name, "int64")
+
+    def test_analyze_source_raises_first_stage_error(self) -> None:
+        with self.assertRaises(AotError) as ctx:
+            analyze_source("value = lambda x: x\n", filename="bad.py")
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-SUBSET-0001")
 
 
 if __name__ == "__main__":
