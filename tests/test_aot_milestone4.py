@@ -2,11 +2,24 @@ import unittest
 from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
-from xcc.aot import AotError, analyze_path, analyze_source
+from xcc.aot import (
+    AotError,
+    analyze_path,
+    analyze_source,
+    collect_slice_inputs,
+    core_entry_wrapper,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 AST_PATH = ROOT / "src/xcc/ast.py"
 LEXER_PATH = ROOT / "src/xcc/lexer.py"
+LEXER_SLICE = (
+    ROOT / "src/xcc/types.py",
+    ROOT / "src/xcc/diag.py",
+    ROOT / "src/xcc/options.py",
+    AST_PATH,
+    LEXER_PATH,
+)
 
 
 class AotMilestone4AdmissionTests(unittest.TestCase):
@@ -66,6 +79,29 @@ class AotMilestone4SubsetTests(unittest.TestCase):
         analysis = analyze_source(source, filename="computed_receiver.py")
         self.assertEqual(analysis.summary.functions, ("build", "f"))
 
+
+class AotMilestone4SliceTests(unittest.TestCase):
+    def test_collects_frontend_slice_modules(self) -> None:
+        modules = collect_slice_inputs(LEXER_SLICE)
+        self.assertEqual(
+            [module.name for module in modules],
+            ["xcc.ast", "xcc.diag", "xcc.lexer", "xcc.options", "xcc.types"],
+        )
+
+    def test_builds_lexer_entry_wrappers(self) -> None:
+        translate = core_entry_wrapper("xcc.lexer:translate_source", "trigraph_splice")
+        self.assertEqual(translate.name, "__xcc_aot_core_entry")
+        self.assertEqual(translate.body[0].value.target, "xcc.lexer.translate_source")
+        lexer = core_entry_wrapper("xcc.lexer:lex", "simple_declaration")
+        self.assertEqual(lexer.name, "__xcc_aot_core_entry")
+        self.assertEqual(lexer.body[0].value.target, "xcc.lexer._aot_token_summary_for_source")
+        header = core_entry_wrapper("xcc.lexer:lex_pp", "header_name")
+        self.assertEqual(header.name, "__xcc_aot_core_entry")
+        self.assertEqual(header.body[0].value.target, "xcc.lexer._aot_header_summary_for_source")
+        error = core_entry_wrapper("xcc.lexer:lex_error", "unterminated_string")
+        self.assertEqual(error.name, "__xcc_aot_core_entry")
+        self.assertEqual(error.body[0].value.target, "xcc.lexer._aot_error_summary_for_source")
+        self.assertEqual(error.body[1].value.value, 2)
 
 if __name__ == "__main__":
     unittest.main()

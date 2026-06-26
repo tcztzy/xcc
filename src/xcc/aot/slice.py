@@ -128,6 +128,14 @@ def core_entry_wrapper(entry: str, fixture: str) -> IrFunction:
         return _frontend_options_bad_std_wrapper()
     if entry == "xcc.types:Type.pointer_array_str" and fixture == "int_pointer_array":
         return _type_pointer_array_str_wrapper()
+    if entry == "xcc.lexer:translate_source" and fixture == "trigraph_splice":
+        return _lexer_translate_source_wrapper()
+    if entry == "xcc.lexer:lex" and fixture == "simple_declaration":
+        return _lexer_lex_simple_declaration_wrapper()
+    if entry == "xcc.lexer:lex_pp" and fixture == "header_name":
+        return _lexer_header_name_wrapper()
+    if entry == "xcc.lexer:lex_error" and fixture == "unterminated_string":
+        return _lexer_unterminated_string_wrapper()
     raise AotError(
         (
             AotDiagnostic(
@@ -168,6 +176,53 @@ def _diagnostic_str_wrapper() -> IrFunction:
                 ),
             ),
             IrReturn(IrConstInt(0, int32)),
+        ),
+    )
+
+
+def _lexer_translate_source_wrapper() -> IrFunction:
+    return _string_call_wrapper(
+        "xcc.lexer.translate_source",
+        (IrConstString("int??=x\\\n=1;"),),
+    )
+
+
+def _lexer_lex_simple_declaration_wrapper() -> IrFunction:
+    return _string_call_wrapper(
+        "xcc.lexer._aot_token_summary_for_source",
+        (IrConstString("int main() { return 0; }"),),
+    )
+
+
+def _lexer_header_name_wrapper() -> IrFunction:
+    return _string_call_wrapper(
+        "xcc.lexer._aot_header_summary_for_source",
+        (IrConstString("<stdio.h>"),),
+    )
+
+
+def _lexer_unterminated_string_wrapper() -> IrFunction:
+    return _string_call_wrapper(
+        "xcc.lexer._aot_error_summary_for_source",
+        (IrConstString('"'),),
+        status=2,
+    )
+
+
+def _string_call_wrapper(
+    target: str,
+    args: tuple[IrExpr, ...],
+    *,
+    status: int = 0,
+) -> IrFunction:
+    int32 = IrIntType(32, signed=True)
+    return IrFunction(
+        "__xcc_aot_core_entry",
+        (),
+        int32,
+        (
+            IrPrint(IrCall(target, args, IrStringType())),
+            IrReturn(IrConstInt(status, int32)),
         ),
     )
 

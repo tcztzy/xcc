@@ -361,11 +361,6 @@ class AotMilestone4SliceTests(unittest.TestCase):
         error = core_entry_wrapper("xcc.lexer:lex_error", "unterminated_string")
         self.assertEqual(error.name, "__xcc_aot_core_entry")
 
-    def test_lowers_frontend_slice_to_module_graph(self) -> None:
-        module = lower_core_slice(LEXER_SLICE)
-        names = {function.name for function in module.functions}
-        self.assertIn("xcc.lexer.translate_source", names)
-        self.assertIn("xcc.lexer.lex", names)
 ```
 
 - [ ] **Step 2: Run tests and verify red**
@@ -376,7 +371,7 @@ Run:
 uv run python -m unittest tests.test_aot_milestone4.AotMilestone4SliceTests -v
 ```
 
-Expected: wrapper fixture tests fail with `XCC-AOT-SLICE-0002`; lowering may still fail on unsupported syntax until Tasks 1 and 2 are complete.
+Expected: wrapper fixture tests fail with `XCC-AOT-SLICE-0002`.
 
 - [ ] **Step 3: Add wrapper cases**
 
@@ -425,7 +420,7 @@ Run:
 uv run python -m unittest tests.test_aot_milestone4.AotMilestone4SliceTests -v
 ```
 
-Expected: wrapper construction passes. Full native behavior waits for later tasks.
+Expected: wrapper construction passes. Full frontend-slice lowering and native behavior wait for later tasks.
 
 - [ ] **Step 5: Commit wrapper foundation**
 
