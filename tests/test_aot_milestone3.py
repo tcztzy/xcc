@@ -1,6 +1,8 @@
 import ast
+import subprocess
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
@@ -29,8 +31,10 @@ from xcc.aot import (
     IrTupleType,
     analyze_path,
     collect_slice_inputs,
+    core_entry_wrapper,
     emit_llvm_text,
     lower_source_to_ir,
+    run_native_core_smoke,
 )
 from xcc.aot.core_runtime import runtime_prelude
 from xcc.aot.types import annotation_name
@@ -209,6 +213,41 @@ class AotMilestone3LlvmTests(unittest.TestCase):
                 module = lower_source_to_ir(path.read_text(encoding="utf-8"), filename=str(path))
                 llvm_ir = emit_llvm_text(module)
                 self.assertIn("define", llvm_ir)
+
+
+class AotMilestone3CoreHarnessTests(unittest.TestCase):
+    def test_core_entry_wrappers_cover_supported_fixtures(self) -> None:
+        options = core_entry_wrapper("xcc.options:FrontendOptions.__post_init__", "bad_std")
+        self.assertEqual(options.body[0].value.target, "xcc.options.FrontendOptions.__post_init__")
+        type_str = core_entry_wrapper("xcc.types:Type.pointer_array_str", "int_pointer_array")
+        self.assertEqual(type_str.body[0].value.target, "xcc.types.Type.__str__")
+        with self.assertRaises(AotError) as ctx:
+            core_entry_wrapper("xcc.unknown:entry", "missing")
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-SLICE-0002")
+
+    def test_core_smoke_calls_lowered_entry_symbol(self) -> None:
+        def fake_run(cmd, **kwargs):
+            command = tuple(str(part) for part in cmd)
+            if command[0] == "/tool/llc":
+                llvm_ir = Path(command[2]).read_text(encoding="utf-8")
+                self.assertIn("@xcc.diag.Diagnostic.__str__", llvm_ir)
+                self.assertNotIn("input.c:7:3: parse: expected", llvm_ir)
+                Path(command[-1]).write_bytes(b"object")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if command[0] == "cc":
+                Path(command[-1]).write_text("#!/bin/sh\nprintf 'ok\\n'\n", encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+
+        with patch("xcc.aot.native.subprocess.run", side_effect=fake_run):
+            result = run_native_core_smoke(
+                CORE_SLICE,
+                entry="xcc.diag:Diagnostic.__str__",
+                fixture="diag_with_location",
+                llc="/tool/llc",
+                cc="cc",
+            )
+        self.assertEqual(result.native_stdout, "ok\n")
 
 
 if __name__ == "__main__":
