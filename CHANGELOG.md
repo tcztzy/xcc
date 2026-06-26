@@ -2,6 +2,12 @@
 
 ## Current
 
+- Added the Milestone 1 AOT Python front-end skeleton under `src/xcc/aot/`:
+  deterministic AOT diagnostics, Python source parsing through `ast.parse`,
+  an XCC-Python subset checker for accepted and rejected syntax, a basic type
+  binder for dataclass fields, function annotations, and width aliases, plus
+  focused `tests/test_aot.py` coverage. This milestone intentionally emits no
+  LLVM IR and does not change the existing `xcc` CLI path.
 - Added the Milestone 1 implementation plan for the approved AOT Python design,
   covering the initial `xcc.aot` diagnostics, parser wrapper, subset checker,
   type binder, public analysis API, tests, and handoff gates while explicitly
