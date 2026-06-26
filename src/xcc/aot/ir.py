@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 
 @dataclass(frozen=True)
@@ -18,7 +18,22 @@ class IrRecordType:
     name: str
 
 
-IrType = IrIntType | IrStringType | IrRecordType
+@dataclass(frozen=True)
+class IrBoolType:
+    pass
+
+
+@dataclass(frozen=True)
+class IrNoneType:
+    pass
+
+
+@dataclass(frozen=True)
+class IrTupleType:
+    elements: tuple["IrType", ...]
+
+
+IrType = IrIntType | IrStringType | IrRecordType | IrBoolType | IrNoneType | IrTupleType
 
 
 @dataclass(frozen=True)
@@ -52,6 +67,22 @@ class IrConstString:
     @property
     def type(self) -> IrStringType:
         return IrStringType()
+
+
+@dataclass(frozen=True)
+class IrConstBool:
+    value: bool
+
+    @property
+    def type(self) -> IrBoolType:
+        return IrBoolType()
+
+
+@dataclass(frozen=True)
+class IrConstNone:
+    @property
+    def type(self) -> IrNoneType:
+        return IrNoneType()
 
 
 @dataclass(frozen=True)
@@ -89,7 +120,57 @@ class IrCall:
     type: IrType
 
 
-IrExpr = IrConstInt | IrConstString | IrName | IrBinary | IrGetField | IrConstructRecord | IrCall
+@dataclass(frozen=True)
+class IrTuple:
+    elements: tuple["IrExpr", ...]
+    type: IrTupleType
+
+
+@dataclass(frozen=True)
+class IrTupleSlice:
+    value: "IrExpr"
+    start: int | None
+    stop: int | None
+
+    @property
+    def type(self) -> IrTupleType:
+        return cast(IrTupleType, self.value.type)
+
+
+@dataclass(frozen=True)
+class IrStringConcat:
+    parts: tuple["IrExpr", ...]
+
+    @property
+    def type(self) -> IrStringType:
+        return IrStringType()
+
+
+@dataclass(frozen=True)
+class IrStringJoin:
+    separator: "IrExpr"
+    values: "IrExpr"
+
+    @property
+    def type(self) -> IrStringType:
+        return IrStringType()
+
+
+IrExpr = (
+    IrConstInt
+    | IrConstString
+    | IrConstBool
+    | IrConstNone
+    | IrName
+    | IrBinary
+    | IrGetField
+    | IrConstructRecord
+    | IrCall
+    | IrTuple
+    | IrTupleSlice
+    | IrStringConcat
+    | IrStringJoin
+)
 
 
 @dataclass(frozen=True)
@@ -103,7 +184,37 @@ class IrReturn:
     value: IrExpr
 
 
-IrStmt = IrAssign | IrReturn
+@dataclass(frozen=True)
+class IrBranch:
+    statements: tuple["IrStmt", ...]
+
+
+@dataclass(frozen=True)
+class IrIf:
+    condition: IrExpr
+    then_branch: IrBranch
+    else_branch: IrBranch | None = None
+
+
+@dataclass(frozen=True)
+class IrForEach:
+    target: str
+    iterable: IrExpr
+    body: IrBranch
+
+
+@dataclass(frozen=True)
+class IrPrint:
+    value: IrExpr
+
+
+@dataclass(frozen=True)
+class IrRaise:
+    exception: str
+    message: IrExpr
+
+
+IrStmt = IrAssign | IrReturn | IrIf | IrForEach | IrPrint | IrRaise
 
 
 @dataclass(frozen=True)
