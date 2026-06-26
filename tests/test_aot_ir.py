@@ -87,6 +87,43 @@ class AotScalarLoweringTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
 
+    def test_lowers_dataclass_record_layout_and_field_read(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "int64 = int\n"
+            "@dataclass(frozen=True)\n"
+            "class Pair:\n"
+            "    left: int64\n"
+            "    right: int64\n"
+            "def use(pair: Pair) -> int64:\n"
+            "    return pair.left + pair.right\n"
+        )
+        module = lower_source_to_ir(source, filename="pair.py", entry="use")
+        self.assertEqual(module.records[0].name, "Pair")
+        self.assertEqual([field.name for field in module.records[0].fields], ["left", "right"])
+        returned = module.functions[0].body[0].value
+        self.assertEqual(returned.left.field, "left")
+        self.assertEqual(returned.right.field, "right")
+
+    def test_lowers_record_constructor_and_method_call(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "int64 = int\n"
+            "@dataclass(frozen=True)\n"
+            "class Pair:\n"
+            "    left: int64\n"
+            "    right: int64\n"
+            "    def total(self) -> int64:\n"
+            "        return self.left + self.right\n"
+            "def entry() -> int64:\n"
+            "    pair = Pair(2, 3)\n"
+            "    return pair.total()\n"
+        )
+        module = lower_source_to_ir(source, filename="method.py", entry="entry")
+        self.assertEqual([function.name for function in module.functions], ["Pair.total", "entry"])
+        self.assertEqual(module.functions[1].body[0].target, "pair")
+        self.assertEqual(module.functions[1].body[1].value.target, "Pair.total")
+
 
 if __name__ == "__main__":
     unittest.main()
