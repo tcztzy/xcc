@@ -1,8 +1,10 @@
 import os
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.llvm_text import emit_llvm_text
@@ -59,7 +61,8 @@ def _run_python_entry(source: str, entry: str) -> object:
     function = namespace[entry]
     if not callable(function):
         raise TypeError(f"{entry} is not callable")
-    return function()
+    typed_function = cast(Callable[[], object], function)
+    return typed_function()
 
 
 def _run_tool(command: tuple[str, ...], filename: str) -> None:

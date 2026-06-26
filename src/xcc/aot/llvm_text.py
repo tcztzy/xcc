@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import NoReturn
 
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.ir import (
@@ -171,13 +172,14 @@ class _Emitter:
         lines: list[str],
     ) -> _EmittedValue:
         value = self._emit_expr(expr.value, names, lines)
-        if not isinstance(value.type, IrRecordType):
+        record_type = value.type
+        if not isinstance(record_type, IrRecordType):
             self._error(f"Unsupported LLVM field receiver: {expr.field}")
-        index = self._field_index(value.type.name, expr.field)
+        index = self._field_index(record_type.name, expr.field)
         field_ptr = self._tmp("fieldptr")
         result = self._tmp("load")
         lines.append(
-            f"  {field_ptr} = getelementptr inbounds %{value.type.name}, ptr {value.value}, "
+            f"  {field_ptr} = getelementptr inbounds %{record_type.name}, ptr {value.value}, "
             f"i32 0, i32 {index}"
         )
         lines.append(f"  {result} = load {self._llvm_type(expr.type)}, ptr {field_ptr}")
@@ -252,7 +254,7 @@ class _Emitter:
         self.index += 1
         return f"%{prefix}{self.index}"
 
-    def _error(self, message: str) -> None:
+    def _error(self, message: str) -> NoReturn:
         raise AotError(
             (
                 AotDiagnostic(

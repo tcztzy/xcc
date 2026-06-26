@@ -8,6 +8,7 @@ from xcc.aot import (
     IrAssign,
     IrBinary,
     IrConstInt,
+    IrConstString,
     IrFunction,
     IrIntType,
     IrModule,
@@ -56,6 +57,9 @@ class AotIrModelTests(unittest.TestCase):
         )
         self.assertEqual(function.params[0].name, "value")
         self.assertEqual(function.params[0].type, int64)
+
+    def test_string_constant_exposes_type(self) -> None:
+        self.assertEqual(IrConstString("ok").type, IrStringType())
 
 
 class AotScalarLoweringTests(unittest.TestCase):

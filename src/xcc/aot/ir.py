@@ -49,6 +49,10 @@ class IrConstInt:
 class IrConstString:
     value: str
 
+    @property
+    def type(self) -> IrStringType:
+        return IrStringType()
+
 
 @dataclass(frozen=True)
 class IrName:

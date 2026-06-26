@@ -1,4 +1,5 @@
 import ast
+from typing import Literal, NoReturn
 
 from xcc.aot.analysis import analyze_source
 from xcc.aot.diag import AotDiagnostic, AotError
@@ -139,6 +140,7 @@ class _Lowerer:
         if isinstance(expr, ast.Call):
             return self._lower_call(expr, names, expected)
         if isinstance(expr, ast.BinOp) and isinstance(expr.op, (ast.Add, ast.Sub, ast.Mult)):
+            op: Literal["+", "-", "*"]
             if isinstance(expr.op, ast.Add):
                 op = "+"
             elif isinstance(expr.op, ast.Sub):
@@ -197,8 +199,9 @@ class _Lowerer:
             return IrConstructRecord(record_name, args, record_type)
         if isinstance(expr.func, ast.Attribute):
             receiver = self._lower_expr(expr.func.value, names, expected)
-            if isinstance(receiver.type, IrRecordType):
-                target = f"{receiver.type.name}.{expr.func.attr}"
+            receiver_type = receiver.type
+            if isinstance(receiver_type, IrRecordType):
+                target = f"{receiver_type.name}.{expr.func.attr}"
                 args = (receiver,) + tuple(
                     self._lower_expr(arg, names, expected) for arg in expr.args
                 )
@@ -240,7 +243,7 @@ class _Lowerer:
             ast.Pass(),
         )
 
-    def _error(self, code: str, message: str, node: ast.AST) -> None:
+    def _error(self, code: str, message: str, node: ast.AST) -> NoReturn:
         raise AotError(
             (
                 AotDiagnostic(
