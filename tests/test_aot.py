@@ -1,7 +1,17 @@
+from pathlib import Path
+import tempfile
 import unittest
 
 from tests import _bootstrap  # noqa: F401
-from xcc.aot import AotDiagnostic, AotError, analyze_source, bind_types, check_subset, parse_source
+from xcc.aot import (
+    AotDiagnostic,
+    AotError,
+    analyze_path,
+    analyze_source,
+    bind_types,
+    check_subset,
+    parse_source,
+)
 
 
 class AotDiagnosticTests(unittest.TestCase):
@@ -39,6 +49,11 @@ class AotDiagnosticTests(unittest.TestCase):
         error = AotError((first, second))
         self.assertEqual(error.diagnostics, (first, second))
         self.assertEqual(str(error), "bad.py: aot: XCC-AOT-PARSE-0001: invalid syntax")
+
+    def test_error_rejects_empty_diagnostics(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            AotError(())
+        self.assertEqual(str(ctx.exception), "AotError requires at least one diagnostic")
 
 
 class AotModuleParseTests(unittest.TestCase):
@@ -103,6 +118,78 @@ class AotSubsetCheckerTests(unittest.TestCase):
         self.assertEqual(diagnostic.code, "XCC-AOT-SUBSET-0003")
         self.assertEqual(diagnostic.message, "Unsupported dynamic call: getattr")
 
+    def test_records_import_roots_once_and_ignores_relative_import_module(self) -> None:
+        source = "import os\nimport os.path\nfrom . import local\ndef f() -> int:\n    return 1\n"
+        summary = check_subset(parse_source(source, filename="imports.py"))
+        self.assertEqual(summary.imports, ("os",))
+        self.assertEqual(summary.functions, ("f",))
+
+    def test_accepts_bare_dataclass_decorator_and_attribute_call(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class Box:\n"
+            "    value: int\n"
+            "def f(value: Box) -> int:\n"
+            "    value.touch()\n"
+            "    return 1\n"
+        )
+        summary = check_subset(parse_source(source, filename="bare_dataclass.py"))
+        self.assertEqual(summary.classes, ("Box",))
+        self.assertEqual(summary.functions, ("f",))
+
+    def test_rejects_decorator_call_that_is_not_dataclass(self) -> None:
+        source = "def marker() -> object:\n    return object()\n@marker()\ndef f() -> int:\n    return 1\n"
+        module = parse_source(source, filename="decorator_call.py")
+        with self.assertRaises(AotError) as ctx:
+            check_subset(module)
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-SUBSET-0002")
+        self.assertEqual(diagnostic.message, "Unsupported decorator: marker()")
+
+    def test_rejects_dataclass_unsupported_keyword(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(slots=True)\n"
+            "class Box:\n"
+            "    value: int\n"
+        )
+        module = parse_source(source, filename="dataclass_keyword.py")
+        with self.assertRaises(AotError) as ctx:
+            check_subset(module)
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-SUBSET-0002")
+        self.assertEqual(diagnostic.message, "Unsupported decorator: dataclass(slots=True)")
+
+    def test_rejects_dataclass_non_constant_frozen(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "flag = True\n"
+            "@dataclass(frozen=flag)\n"
+            "class Box:\n"
+            "    value: int\n"
+        )
+        module = parse_source(source, filename="dataclass_dynamic.py")
+        with self.assertRaises(AotError) as ctx:
+            check_subset(module)
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-SUBSET-0002")
+        self.assertEqual(diagnostic.message, "Unsupported decorator: dataclass(frozen=flag)")
+
+    def test_rejects_dataclass_false_frozen(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=False)\n"
+            "class Box:\n"
+            "    value: int\n"
+        )
+        module = parse_source(source, filename="dataclass_false.py")
+        with self.assertRaises(AotError) as ctx:
+            check_subset(module)
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-SUBSET-0002")
+        self.assertEqual(diagnostic.message, "Unsupported decorator: dataclass(frozen=False)")
+
 
 class AotTypeBinderTests(unittest.TestCase):
     def test_binds_width_alias_dataclass_and_function(self) -> None:
@@ -157,6 +244,48 @@ class AotTypeBinderTests(unittest.TestCase):
         self.assertEqual(diagnostic.code, "XCC-AOT-TYPE-0003")
         self.assertEqual(diagnostic.message, "Width alias must target int: int64")
 
+    def test_ignores_non_alias_assignments_and_non_name_targets(self) -> None:
+        source = "count = int\n(int64,) = (int,)\ndef f(value: int) -> int:\n    return value\n"
+        module = parse_source(source, filename="assignments.py")
+        analysis = bind_types(check_subset(module), module)
+        self.assertEqual(analysis.width_aliases, {})
+
+    def test_ignores_non_field_class_body_entries(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Box:\n"
+            "    'doc'\n"
+            "    value: int\n"
+        )
+        module = parse_source(source, filename="class_body.py")
+        analysis = bind_types(check_subset(module), module)
+        self.assertEqual(analysis.classes["Box"].fields["value"].name, "int")
+
+    def test_rejects_missing_return_annotation(self) -> None:
+        source = "def f(value: int):\n    return value\n"
+        module = parse_source(source, filename="missing_return.py")
+        with self.assertRaises(AotError) as ctx:
+            bind_types(check_subset(module), module)
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-TYPE-0001")
+        self.assertEqual(diagnostic.message, "Missing return annotation for function: f")
+
+    def test_binds_none_return_annotation(self) -> None:
+        source = "def f() -> None:\n    return None\n"
+        module = parse_source(source, filename="none_return.py")
+        analysis = bind_types(check_subset(module), module)
+        self.assertEqual(analysis.functions["f"].return_type.name, "None")
+
+    def test_rejects_subscript_annotation(self) -> None:
+        source = "def f(value: list[int]) -> int:\n    return 1\n"
+        module = parse_source(source, filename="subscript.py")
+        with self.assertRaises(AotError) as ctx:
+            bind_types(check_subset(module), module)
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual(diagnostic.code, "XCC-AOT-TYPE-0002")
+        self.assertEqual(diagnostic.message, "Unsupported annotation: list[int]")
+
 
 class AotAnalysisApiTests(unittest.TestCase):
     def test_analyze_source_returns_summary_and_types(self) -> None:
@@ -170,6 +299,17 @@ class AotAnalysisApiTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             analyze_source("value = lambda x: x\n", filename="bad.py")
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-SUBSET-0001")
+
+    def test_analyze_path_reads_python_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api.py"
+            path.write_text(
+                "int64 = int\ndef f(value: int64) -> int64:\n    return value\n",
+                encoding="utf-8",
+            )
+            analysis = analyze_path(path)
+        self.assertEqual(analysis.module.filename, str(path))
+        self.assertEqual(analysis.types.functions["f"].return_type.name, "int64")
 
 
 if __name__ == "__main__":
