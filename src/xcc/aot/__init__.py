@@ -27,6 +27,7 @@ from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
 from xcc.aot.module import AotModule, parse_path, parse_source
 from xcc.aot.native import NativeSmokeResult, run_native_smoke
+from xcc.aot.slice import AotSliceInput, collect_slice_inputs
 from xcc.aot.subset import AotModuleSummary, check_subset
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType, AotTypeAnalysis
 
@@ -38,6 +39,7 @@ __all__ = (
     "AotFunctionInfo",
     "AotModule",
     "AotModuleSummary",
+    "AotSliceInput",
     "AotType",
     "AotTypeAnalysis",
     "IrAssign",
@@ -65,6 +67,7 @@ __all__ = (
     "analyze_source",
     "bind_types",
     "check_subset",
+    "collect_slice_inputs",
     "emit_llvm_text",
     "lower_source_to_ir",
     "parse_path",
