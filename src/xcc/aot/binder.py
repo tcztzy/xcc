@@ -24,12 +24,14 @@ class _TypeBinder:
         self.summary = summary
         self.module = module
         self.width_aliases: dict[str, AotType] = {}
+        self.aliases: dict[str, AotType] = {}
         self.classes: dict[str, AotClassInfo] = {}
         self.functions: dict[str, AotFunctionInfo] = {}
         self._diagnostics: list[AotDiagnostic] = []
 
     def bind(self) -> AotTypeAnalysis:
         self._collect_width_aliases()
+        self._collect_type_aliases()
         self._collect_classes()
         self._collect_functions()
         if self._diagnostics:
@@ -39,6 +41,7 @@ class _TypeBinder:
             dict(self.width_aliases),
             dict(self.classes),
             dict(self.functions),
+            dict(self.aliases),
         )
 
     def _collect_width_aliases(self) -> None:
@@ -60,15 +63,30 @@ class _TypeBinder:
                 continue
             self.width_aliases[name] = alias
 
+    def _collect_type_aliases(self) -> None:
+        for statement in self.module.tree.body:
+            if not isinstance(statement, ast.Assign):
+                continue
+            if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+                continue
+            if not _is_annotation_alias_value(statement.value):
+                continue
+            name = statement.targets[0].id
+            if name in self.width_aliases:
+                continue
+            if name[:1].isupper() or name.endswith("Params") or name.endswith("Op"):
+                self.aliases[name] = AotType(annotation_name(statement.value))
+
     def _collect_classes(self) -> None:
         for statement in self.module.tree.body:
             if not isinstance(statement, ast.ClassDef):
                 continue
+            bases = tuple(annotation_name(base) for base in statement.bases)
             fields: dict[str, AotType] = {}
             for child in statement.body:
                 if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
                     fields[child.target.id] = self._resolve_annotation(child.annotation, child)
-            self.classes[statement.name] = AotClassInfo(statement.name, fields)
+            self.classes[statement.name] = AotClassInfo(statement.name, fields, bases)
 
     def _collect_functions(self) -> None:
         for statement in self.module.tree.body:
@@ -105,7 +123,12 @@ class _TypeBinder:
         alias = self.width_aliases.get(name)
         if alias is not None:
             return alias
+        alias = self.aliases.get(name)
+        if alias is not None:
+            return alias
         if name in self.classes or is_builtin_type_name(name):
+            return AotType(name)
+        if _is_supported_composite_annotation(name):
             return AotType(name)
         self._add_error("XCC-AOT-TYPE-0002", f"Unsupported annotation: {name}", owner)
         return AotType(name)
@@ -120,3 +143,11 @@ class _TypeBinder:
                 column=getattr(node, "col_offset", None),
             )
         )
+
+
+def _is_annotation_alias_value(node: ast.expr) -> bool:
+    return isinstance(node, (ast.Subscript, ast.BinOp, ast.Name))
+
+
+def _is_supported_composite_annotation(name: str) -> bool:
+    return name.startswith(("tuple[", "Literal[")) or " | " in name

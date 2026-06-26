@@ -1,7 +1,7 @@
 import ast
 from dataclasses import dataclass
 
-_BUILTIN_TYPES = {"bool", "int", "None", "str"}
+_BUILTIN_TYPES = {"bool", "int", "None", "object", "str", "ValueError"}
 _WIDTH_ALIASES = {
     "int8": (8, True),
     "int16": (16, True),
@@ -26,6 +26,7 @@ class AotType:
 class AotClassInfo:
     name: str
     fields: dict[str, AotType]
+    bases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class AotTypeAnalysis:
     width_aliases: dict[str, AotType]
     classes: dict[str, AotClassInfo]
     functions: dict[str, AotFunctionInfo]
+    aliases: dict[str, AotType]
 
 
 def width_alias_type(name: str) -> AotType | None:
@@ -56,6 +58,14 @@ def annotation_name(node: ast.expr) -> str:
         return node.id
     if isinstance(node, ast.Constant) and node.value is None:
         return "None"
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return f"{annotation_name(node.left)} | {annotation_name(node.right)}"
+    if isinstance(node, ast.Subscript):
+        return ast.unparse(node)
+    if isinstance(node, ast.Tuple):
+        return ", ".join(annotation_name(element) for element in node.elts)
     return ast.unparse(node)
 
 
