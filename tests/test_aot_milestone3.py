@@ -12,8 +12,10 @@ from xcc.aot import (
     IrConstNone,
     IrConstString,
     IrForEach,
+    IrFunction,
     IrIf,
     IrIntType,
+    IrModule,
     IrName,
     IrNoneType,
     IrPrint,
@@ -27,6 +29,7 @@ from xcc.aot import (
     IrTupleType,
     analyze_path,
     collect_slice_inputs,
+    emit_llvm_text,
     lower_source_to_ir,
 )
 from xcc.aot.core_runtime import runtime_prelude
@@ -111,6 +114,10 @@ class AotMilestone3IrTests(unittest.TestCase):
         prelude = runtime_prelude()
         self.assertIn("declare i32 @puts(ptr)", prelude)
         self.assertIn("define ptr @__xcc_aot_string_concat2", prelude)
+        self.assertIn("call i64 @strlen", prelude)
+        self.assertIn("call ptr @malloc", prelude)
+        self.assertIn("call ptr @memcpy", prelude)
+        self.assertIn("store i8 0", prelude)
 
     def test_annotation_name_edge_forms(self) -> None:
         string_annotation = ast.parse('def f() -> "Type | None":\n    pass\n').body[0].returns
@@ -149,6 +156,59 @@ class AotMilestone3LoweringTests(unittest.TestCase):
         self.assertIn("Type.pointer_to", names)
         self.assertIn("Type.array_of", names)
         self.assertIn("Type.callable_signature", names)
+
+
+class AotMilestone3LlvmTests(unittest.TestCase):
+    def test_emits_if_print_raise_and_runtime_string_calls(self) -> None:
+        int32 = IrIntType(32, signed=True)
+        module = IrModule(
+            "core_ir.py",
+            (),
+            (
+                IrFunction(
+                    "entry",
+                    (),
+                    int32,
+                    (
+                        IrIf(
+                            IrConstBool(True),
+                            IrBranch((IrPrint(IrConstString("ok")),)),
+                            IrBranch((IrRaise("ValueError", IrConstString("bad")),)),
+                        ),
+                        IrReturn(IrConstInt(0, int32)),
+                    ),
+                ),
+            ),
+            entry="entry",
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("br i1 true", llvm_ir)
+        self.assertIn("call i32 @puts", llvm_ir)
+        self.assertIn("ret i32 2", llvm_ir)
+
+    def test_emits_string_concat_runtime_call(self) -> None:
+        module = IrModule(
+            "concat.py",
+            (),
+            (
+                IrFunction(
+                    "entry",
+                    (),
+                    IrStringType(),
+                    (IrReturn(IrStringConcat((IrConstString("a"), IrConstString("b")))),),
+                ),
+            ),
+            entry="entry",
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("@__xcc_aot_string_concat2", llvm_ir)
+
+    def test_emits_core_slice_modules_to_llvm_text(self) -> None:
+        for path in CORE_SLICE:
+            with self.subTest(path=path.name):
+                module = lower_source_to_ir(path.read_text(encoding="utf-8"), filename=str(path))
+                llvm_ir = emit_llvm_text(module)
+                self.assertIn("define", llvm_ir)
 
 
 if __name__ == "__main__":

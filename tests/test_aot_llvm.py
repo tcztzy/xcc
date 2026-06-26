@@ -5,22 +5,39 @@ from xcc.aot import (
     AotError,
     IrAssign,
     IrBinary,
+    IrBoolType,
+    IrBranch,
+    IrConstBool,
     IrConstInt,
+    IrConstNone,
     IrConstructRecord,
     IrConstString,
     IrField,
+    IrForEach,
     IrFunction,
     IrGetField,
     IrIntType,
     IrModule,
     IrName,
+    IrNoneType,
     IrParam,
+    IrRaise,
     IrRecord,
     IrRecordType,
     IrReturn,
+    IrStringConcat,
     IrStringType,
+    IrTuple,
+    IrTupleType,
     emit_llvm_text,
     lower_source_to_ir,
+)
+from xcc.aot.llvm_text import (
+    _block_is_terminated,
+    _current_label,
+    _Emitter,
+    _for_each_targets,
+    _llvm_symbol,
 )
 
 
@@ -132,6 +149,101 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
         self.assertIn("%box1 = alloca %Box", llvm_ir)
         self.assertIn("\\22\\5C\\0A\\00", llvm_ir)
+
+    def test_emits_bool_none_default_and_status_returns(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        tuple_type = IrTupleType(())
+        record_type = IrRecordType("Box")
+        module = IrModule(
+            "defaults.py",
+            (IrRecord("Box", (IrField("none", IrNoneType()),)),),
+            (
+                IrFunction("flag", (), IrBoolType(), (IrReturn(IrConstBool(True)),)),
+                IrFunction("done", (), IrNoneType(), ()),
+                IrFunction("count", (), int64, (IrReturn(IrName("COUNT", int64)),)),
+                IrFunction("default_int", (), int64, ()),
+                IrFunction("default_bool", (), IrBoolType(), ()),
+                IrFunction("default_string", (), IrStringType(), ()),
+                IrFunction("default_tuple", (), tuple_type, ()),
+                IrFunction("default_record", (), record_type, ()),
+                IrFunction(
+                    "raise_bool",
+                    (),
+                    IrBoolType(),
+                    (IrRaise("ValueError", IrConstString("b")),),
+                ),
+                IrFunction(
+                    "raise_string",
+                    (),
+                    IrStringType(),
+                    (IrRaise("ValueError", IrConstString("s")),),
+                ),
+                IrFunction(
+                    "box",
+                    (),
+                    record_type,
+                    (IrReturn(IrConstructRecord("Box", (IrConstNone(),), record_type)),),
+                ),
+            ),
+            entry="flag",
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("%exit = zext i1 %result to i32", llvm_ir)
+        self.assertIn("define void @done()", llvm_ir)
+        self.assertIn("ret i64 0", llvm_ir)
+        self.assertIn("ret i1 false", llvm_ir)
+        self.assertIn("ret ptr null", llvm_ir)
+        self.assertIn("store ptr null", llvm_ir)
+
+    def test_emits_none_entry_empty_concat_and_terminated_loop(self) -> None:
+        tuple_type = IrTupleType(())
+        module = IrModule(
+            "edge.py",
+            (),
+            (
+                IrFunction("done", (), IrNoneType(), ()),
+                IrFunction(
+                    "empty",
+                    (),
+                    IrStringType(),
+                    (IrReturn(IrStringConcat(())),),
+                ),
+                IrFunction(
+                    "loop_return",
+                    (),
+                    IrNoneType(),
+                    (
+                        IrForEach(
+                            "item",
+                            IrTuple((), tuple_type),
+                            IrBranch((IrReturn(IrConstNone()),)),
+                        ),
+                    ),
+                ),
+            ),
+            entry="done",
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("call void @done()", llvm_ir)
+        self.assertIn('c"\\00"', llvm_ir)
+        self.assertIn("@__xcc_aot_tuple_len", llvm_ir)
+
+    def test_llvm_text_private_helpers_cover_edge_inputs(self) -> None:
+        self.assertEqual(_llvm_symbol("super().__init__"), '@"super().__init__"')
+        self.assertFalse(_block_is_terminated([]))
+        self.assertEqual(_current_label(["  ret i32 0"]), "entry")
+        self.assertEqual(_for_each_targets("item"), ("item",))
+        self.assertEqual(_for_each_targets("(kind, _)"), ("kind",))
+        emitter = _Emitter(IrModule("bad.py", (), ()))
+        with self.assertRaises(AotError) as ctx:
+            emitter._default_value(object())  # type: ignore[arg-type]
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        with self.assertRaises(AotError) as ctx:
+            emitter._emit_status_return([], object())  # type: ignore[arg-type]
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        with self.assertRaises(AotError) as ctx:
+            emitter._emit_default_return([], object())  # type: ignore[arg-type]
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
 
     def test_reports_unsupported_llvm_shapes(self) -> None:
         int64 = IrIntType(64, signed=True)
