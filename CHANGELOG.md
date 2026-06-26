@@ -2,6 +2,10 @@
 
 ## Current
 
+- Added the Milestone 1 implementation plan for the approved AOT Python design,
+  covering the initial `xcc.aot` diagnostics, parser wrapper, subset checker,
+  type binder, public analysis API, tests, and handoff gates while explicitly
+  deferring LLVM/native emission and existing CLI changes to later milestones.
 - Raised the project coverage ratchet to 100.00% after closing remaining
   statement and branch gaps in AArch64, generic codegen, and x86_64 helper
   coverage. The full parallel `tox -e py311` gate now reports 25,250
