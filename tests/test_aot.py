@@ -1,6 +1,6 @@
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
@@ -139,7 +139,13 @@ class AotSubsetCheckerTests(unittest.TestCase):
         self.assertEqual(summary.functions, ("f",))
 
     def test_rejects_decorator_call_that_is_not_dataclass(self) -> None:
-        source = "def marker() -> object:\n    return object()\n@marker()\ndef f() -> int:\n    return 1\n"
+        source = (
+            "def marker() -> object:\n"
+            "    return object()\n"
+            "@marker()\n"
+            "def f() -> int:\n"
+            "    return 1\n"
+        )
         module = parse_source(source, filename="decorator_call.py")
         with self.assertRaises(AotError) as ctx:
             check_subset(module)
