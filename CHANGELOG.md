@@ -2,6 +2,9 @@
 
 ## Current
 
+- Rewrote the parser integer type-spec helper to avoid AOT-rejected `del` and
+  `nonlocal` syntax while preserving existing parser behavior, allowing
+  `parser/type_specs.py` to pass AOT subset admission.
 - Added cross-module AOT record type resolution for the parser/sema slice so
   `sema/type_helpers.py` can lower imported `Type` annotations to
   `IrRecordType("Type")` and pull the record definition from `types.py`.

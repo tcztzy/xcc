@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PARSER_INIT_PATH = ROOT / "src/xcc/parser/__init__.py"
 SEMA_SYMBOLS_PATH = ROOT / "src/xcc/sema/symbols.py"
 SEMA_TYPE_HELPERS_PATH = ROOT / "src/xcc/sema/type_helpers.py"
+PARSER_TYPE_SPECS_PATH = ROOT / "src/xcc/parser/type_specs.py"
 TYPE_HELPER_SLICE = (
     ROOT / "src/xcc/types.py",
     ROOT / "src/xcc/sema/type_helpers.py",
@@ -64,6 +65,14 @@ class AotMilestone5SliceTests(unittest.TestCase):
         function = functions["xcc.sema.type_helpers.is_integer_type"]
         self.assertEqual(function.params[0].type, IrRecordType("Type"))
         self.assertEqual(function.return_type.__class__.__name__, "IrBoolType")
+
+
+class AotMilestone5ParserSubsetTests(unittest.TestCase):
+    def test_analyzes_parser_type_specs_without_rejected_syntax(self) -> None:
+        analysis = analyze_path(PARSER_TYPE_SPECS_PATH)
+        self.assertIn("ParserError", analysis.types.classes)
+        self.assertIn("ParserError.__str__", analysis.types.functions)
+        self.assertIn("parse_integer_type_spec", analysis.types.functions)
 
 
 if __name__ == "__main__":

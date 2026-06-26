@@ -280,7 +280,7 @@ git commit -m "feat: resolve AOT imported record annotations"
 - Modify: `tests/test_aot_milestone5.py`
 - Modify: `src/xcc/parser/type_specs.py`
 
-- [ ] **Step 1: Write failing parser helper admission test**
+- [x] **Step 1: Write failing parser helper admission test**
 
 Append:
 
@@ -296,7 +296,7 @@ class AotMilestone5ParserSubsetTests(unittest.TestCase):
         self.assertIn("parse_integer_type_spec", analysis.types.functions)
 ```
 
-- [ ] **Step 2: Run test and verify red**
+- [x] **Step 2: Run test and verify red**
 
 Run:
 
@@ -306,7 +306,7 @@ uv run python -m unittest tests.test_aot_milestone5.AotMilestone5ParserSubsetTes
 
 Expected before implementation: `XCC-AOT-SUBSET-0001` for `Delete` and `Nonlocal`.
 
-- [ ] **Step 3: Rewrite `parse_integer_type_spec()` state**
+- [x] **Step 3: Rewrite `parse_integer_type_spec()` state**
 
 Modify `src/xcc/parser/type_specs.py`:
 
@@ -317,23 +317,23 @@ Modify `src/xcc/parser/type_specs.py`:
 Use this shape:
 
 ```python
-def consume_integer_type_keyword(
+def consume(
     keyword: str,
     token: Token,
-    signedness: str | None,
-    base: str | None,
+    current_signedness: str | None,
+    current_base: str | None,
 ) -> tuple[str | None, str | None]:
     ...
-    return signedness, base
+    return current_signedness, current_base
 ```
 
 Then call:
 
 ```python
-signedness, base = consume_integer_type_keyword(keyword, token, signedness, base)
+signedness, base = consume(keyword, token, signedness, base)
 ```
 
-- [ ] **Step 4: Run parser tests and AOT subset test**
+- [x] **Step 4: Run parser tests and AOT subset test**
 
 Run:
 
@@ -343,12 +343,12 @@ uv run python -m unittest tests.test_aot_milestone5.AotMilestone5ParserSubsetTes
 
 Expected: parser behavior remains unchanged and the AOT subset checker admits `parser/type_specs.py`.
 
-- [ ] **Step 5: Commit parser subset rewrite**
+- [x] **Step 5: Commit parser subset rewrite**
 
 Run:
 
 ```bash
-git add tests/test_aot_milestone5.py src/xcc/parser/type_specs.py
+git add CHANGELOG.md docs/superpowers/plans/2026-06-26-aot-python-milestone-5.md tests/test_aot_milestone5.py src/xcc/parser/type_specs.py
 git commit -m "feat: admit AOT parser type helpers"
 ```
 

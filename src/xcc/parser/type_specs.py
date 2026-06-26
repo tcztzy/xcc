@@ -536,7 +536,6 @@ def parse_integer_type_spec(
     *,
     context: str = "declaration",
 ) -> str:
-    del context
     p = cast(Any, parser)
     signedness: str | None = None
     base: str | None = None
@@ -545,41 +544,39 @@ def parse_integer_type_spec(
         prior = current_base if current_base is not None else "<none>"
         return f"Invalid integer type keyword order: '{keyword}' after '{prior}'"
 
-    def consume(keyword: str, token: Token) -> None:
-        nonlocal signedness, base
+    def consume(
+        keyword: str,
+        token: Token,
+        current_signedness: str | None,
+        current_base: str | None,
+    ) -> tuple[str | None, str | None]:
         if keyword in {"signed", "unsigned"}:
-            if signedness is not None:
+            if current_signedness is not None:
                 raise ParserError(
                     f"Duplicate integer signedness specifier: '{keyword}'",
                     token,
                 )
-            signedness = keyword
-            return
+            return keyword, current_base
         if keyword == "char":
-            if base is not None:
-                raise ParserError(invalid_order(keyword, current_base=base), token)
-            base = keyword
-            return
+            if current_base is not None:
+                raise ParserError(invalid_order(keyword, current_base=current_base), token)
+            return current_signedness, keyword
         if keyword == "short":
-            if base in {None, "int"}:
-                base = keyword
-                return
-            raise ParserError(invalid_order(keyword, current_base=base), token)
+            if current_base in {None, "int"}:
+                return current_signedness, keyword
+            raise ParserError(invalid_order(keyword, current_base=current_base), token)
         if keyword == "long":
-            if base in {None, "int"}:
-                base = keyword
-                return
-            if base == "long":
-                base = "long long"
-                return
-            raise ParserError(invalid_order(keyword, current_base=base), token)
+            if current_base in {None, "int"}:
+                return current_signedness, keyword
+            if current_base == "long":
+                return current_signedness, "long long"
+            raise ParserError(invalid_order(keyword, current_base=current_base), token)
         assert keyword == "int"
-        if base is None:
-            base = keyword
-            return
-        if base in {"short", "long", "long long"}:
-            return
-        raise ParserError(invalid_order(keyword, current_base=base), token)
+        if current_base is None:
+            return current_signedness, keyword
+        if current_base in {"short", "long", "long long"}:
+            return current_signedness, current_base
+        raise ParserError(invalid_order(keyword, current_base=current_base), token)
 
     def _consume_gnu_int_type(token: Token) -> str | None:
         assert isinstance(token.lexeme, str)
@@ -587,14 +584,14 @@ def parse_integer_type_spec(
             return str(token.lexeme)
         return None
 
-    consume(first_keyword, first_token)
+    signedness, base = consume(first_keyword, first_token, signedness, base)
     while p._current().kind == TokenKind.KEYWORD:
         token = p._current()
         assert isinstance(token.lexeme, str)
         if token.lexeme not in INTEGER_TYPE_KEYWORDS:
             break
         p._advance()
-        consume(token.lexeme, token)
+        signedness, base = consume(token.lexeme, token, signedness, base)
 
     if base is None and p._current().kind == TokenKind.IDENT:
         gnu_base = _consume_gnu_int_type(p._current())
