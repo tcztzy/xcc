@@ -2,6 +2,10 @@
 
 ## Current
 
+- Added Milestone 2 AOT native smoke support: a small AOT IR, AST-to-IR lowering
+  for scalar functions, fixed dataclass records, methods, string returns, and
+  explicit status-return fixtures, textual LLVM IR emission, and a native oracle
+  harness that compiles through `llc` and compares CPython/native behavior.
 - Added the Milestone 2 implementation plan for the approved AOT Python design,
   covering AOT IR modeling, scalar/dataclass/method lowering, textual LLVM IR
   emission, `llc` object generation, and CPython/native oracle smoke tests.
