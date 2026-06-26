@@ -179,20 +179,79 @@ def _is_annotation_alias_value(node: ast.expr) -> bool:
 
 
 def _is_supported_composite_annotation(name: str) -> bool:
-    return (
-        name.startswith(("tuple[", "Literal[", "dict[", "set["))
-        or _is_supported_list_annotation(name)
-        or " | " in name
-        or _is_project_type_reference(name)
+    try:
+        node = ast.parse(name, mode="eval").body
+    except SyntaxError:
+        return _is_project_type_reference(name)
+    return _is_supported_annotation_node(node)
+
+
+def _is_supported_annotation_node(node: ast.expr) -> bool:
+    if isinstance(node, ast.Name):
+        return (
+            is_builtin_type_name(node.id)
+            or width_alias_type(node.id) is not None
+            or _is_project_type_reference(node.id)
+        )
+    if isinstance(node, ast.Attribute):
+        return True
+    if isinstance(node, ast.Constant):
+        if node.value is None:
+            return True
+        if isinstance(node.value, str):
+            return _is_supported_composite_annotation(node.value)
+        return node.value is Ellipsis
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _is_supported_annotation_node(node.left) and (
+            _is_supported_annotation_node(node.right)
+        )
+    if isinstance(node, ast.Subscript):
+        return _is_supported_subscript_annotation(node)
+    return False
+
+
+def _is_supported_subscript_annotation(node: ast.Subscript) -> bool:
+    base = ast.unparse(node.value)
+    elements = _annotation_slice_elements(node.slice)
+    if base == "Literal":
+        return all(isinstance(element, ast.Constant) for element in elements)
+    if base in {"list", "set", "frozenset"}:
+        return len(elements) == 1 and _is_supported_annotation_node(elements[0])
+    if base == "dict":
+        return len(elements) == 2 and all(
+            _is_supported_annotation_node(element) for element in elements
+        )
+    if base == "tuple":
+        return all(
+            isinstance(element, ast.Constant)
+            and element.value is Ellipsis
+            or _is_supported_annotation_node(element)
+            for element in elements
+        )
+    if base == "Callable":
+        return _is_supported_callable_annotation(elements)
+    return False
+
+
+def _is_supported_callable_annotation(elements: tuple[ast.expr, ...]) -> bool:
+    if len(elements) != 2:
+        return False
+    args, return_type = elements
+    if isinstance(args, ast.Constant) and args.value is Ellipsis:
+        return _is_supported_annotation_node(return_type)
+    if not isinstance(args, ast.List):
+        return False
+    return all(_is_supported_annotation_node(arg) for arg in args.elts) and (
+        _is_supported_annotation_node(return_type)
     )
 
 
-def _is_supported_list_annotation(name: str) -> bool:
-    if not name.startswith("list[") or not name.endswith("]"):
-        return False
-    element = name[5:-1].strip("\"'")
-    return _is_project_type_reference(element)
+def _annotation_slice_elements(node: ast.expr) -> tuple[ast.expr, ...]:
+    if isinstance(node, ast.Tuple):
+        return tuple(node.elts)
+    return (node,)
 
 
 def _is_project_type_reference(name: str) -> bool:
-    return name[:1].isupper()
+    leaf = name.rsplit(".", 1)[-1].strip("\"'").lstrip("_")
+    return leaf[:1].isupper()

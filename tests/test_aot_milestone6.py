@@ -1,0 +1,55 @@
+import unittest
+from pathlib import Path
+
+from tests import _bootstrap  # noqa: F401
+from xcc.aot import analyze_path, analyze_source
+
+
+ROOT = Path(__file__).resolve().parents[1]
+PREPROCESSOR_CONDITIONALS_PATH = ROOT / "src/xcc/preprocessor/conditionals.py"
+PREPROCESSOR_MACROS_PATH = ROOT / "src/xcc/preprocessor/macros.py"
+
+
+class AotMilestone6AdmissionTests(unittest.TestCase):
+    def test_binds_bootstrap_container_and_callable_annotations(self) -> None:
+        source = (
+            "from collections.abc import Callable\n"
+            "from pathlib import Path\n"
+            "from . import _SourceLocation\n"
+            "class _MacroToken:\n"
+            "    text: str\n"
+            "def expand(\n"
+            "    names: list[str],\n"
+            "    tokens: list[_MacroToken],\n"
+            "    groups: list[list[_MacroToken]],\n"
+            "    disabled: frozenset[str],\n"
+            "    location: _SourceLocation,\n"
+            "    callback: Callable[[str, _SourceLocation, Path | None], bool],\n"
+            ") -> dict[str, tuple[list[_MacroToken], frozenset[str]]]:\n"
+            "    return {}\n"
+        )
+        analysis = analyze_source(source, filename="bootstrap_annotations.py")
+        function = analysis.types.functions["expand"]
+        self.assertEqual(function.parameters[0], ("names", "list[str]"))
+        self.assertEqual(function.parameters[1], ("tokens", "list[_MacroToken]"))
+        self.assertEqual(function.parameters[2], ("groups", "list[list[_MacroToken]]"))
+        self.assertEqual(function.parameters[3], ("disabled", "frozenset[str]"))
+        self.assertEqual(function.parameters[4], ("location", "_SourceLocation"))
+        self.assertEqual(
+            function.parameters[5],
+            ("callback", "Callable[[str, _SourceLocation, Path | None], bool]"),
+        )
+        self.assertEqual(
+            function.return_type.name,
+            "dict[str, tuple[list[_MacroToken], frozenset[str]]]",
+        )
+
+    def test_admits_preprocessor_modules_blocked_by_common_annotations(self) -> None:
+        for path in (PREPROCESSOR_CONDITIONALS_PATH, PREPROCESSOR_MACROS_PATH):
+            with self.subTest(path=path.name):
+                analysis = analyze_path(path)
+                self.assertGreater(len(analysis.types.functions), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

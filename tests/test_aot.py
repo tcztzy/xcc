@@ -1,3 +1,4 @@
+import ast
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,10 @@ from xcc.aot import (
     bind_types,
     check_subset,
     parse_source,
+)
+from xcc.aot.binder import (
+    _is_supported_annotation_node,
+    _is_supported_composite_annotation,
 )
 
 
@@ -283,14 +288,34 @@ class AotTypeBinderTests(unittest.TestCase):
         analysis = bind_types(check_subset(module), module)
         self.assertEqual(analysis.functions["f"].return_type.name, "None")
 
-    def test_rejects_subscript_annotation(self) -> None:
-        source = "def f(value: list[int]) -> int:\n    return 1\n"
+    def test_rejects_subscript_annotation_with_unsupported_element(self) -> None:
+        source = "def f(value: list[complex]) -> int:\n    return 1\n"
         module = parse_source(source, filename="subscript.py")
         with self.assertRaises(AotError) as ctx:
             bind_types(check_subset(module), module)
         diagnostic = ctx.exception.diagnostics[0]
         self.assertEqual(diagnostic.code, "XCC-AOT-TYPE-0002")
-        self.assertEqual(diagnostic.message, "Unsupported annotation: list[int]")
+        self.assertEqual(diagnostic.message, "Unsupported annotation: list[complex]")
+
+    def test_annotation_support_helper_edges(self) -> None:
+        self.assertTrue(_is_supported_composite_annotation("ast.expr"))
+        self.assertTrue(_is_supported_composite_annotation("'Type | None'"))
+        self.assertTrue(_is_supported_composite_annotation("tuple[str, ...]"))
+        self.assertTrue(_is_supported_composite_annotation("Callable[..., bool]"))
+        self.assertFalse(_is_supported_composite_annotation("["))
+        self.assertFalse(_is_supported_composite_annotation("list[str, int]"))
+        self.assertFalse(_is_supported_composite_annotation("dict[str]"))
+        self.assertFalse(_is_supported_composite_annotation("Callable[[str]]"))
+        self.assertFalse(_is_supported_composite_annotation("Callable[[str], complex]"))
+        self.assertFalse(_is_supported_composite_annotation("Callable[str, bool]"))
+        self.assertFalse(_is_supported_composite_annotation("type[str]"))
+
+        ellipsis_constant = ast.parse("value = ...\n").body[0].value
+        unsupported_constant = ast.parse("value = 1\n").body[0].value
+        unsupported_expr = ast.parse("value = 1 + 2\n").body[0].value
+        self.assertTrue(_is_supported_annotation_node(ellipsis_constant))
+        self.assertFalse(_is_supported_annotation_node(unsupported_constant))
+        self.assertFalse(_is_supported_annotation_node(unsupported_expr))
 
 
 class AotAnalysisApiTests(unittest.TestCase):
