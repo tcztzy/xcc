@@ -190,9 +190,7 @@ class _Emitter:
         lines: list[str],
     ) -> _EmittedValue:
         args = [self._emit_expr(arg, names, lines) for arg in expr.args]
-        rendered_args = ", ".join(
-            f"{self._param_llvm_type(arg.type)} {arg.value}" for arg in args
-        )
+        rendered_args = ", ".join(f"{self._param_llvm_type(arg.type)} {arg.value}" for arg in args)
         result = self._tmp("call")
         lines.append(
             f"  {result} = call {self._llvm_type(expr.type)} @{expr.target}({rendered_args})"
