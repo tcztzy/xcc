@@ -27,6 +27,7 @@ from xcc.aot import (
     IrTupleType,
     analyze_path,
     collect_slice_inputs,
+    lower_source_to_ir,
 )
 from xcc.aot.core_runtime import runtime_prelude
 from xcc.aot.types import annotation_name
@@ -114,12 +115,40 @@ class AotMilestone3IrTests(unittest.TestCase):
     def test_annotation_name_edge_forms(self) -> None:
         string_annotation = ast.parse('def f() -> "Type | None":\n    pass\n').body[0].returns
         tuple_expr = ast.parse("value = (int, str)\n").body[0].value
-        attribute_annotation = ast.parse("def f(value: module.Type) -> int:\n    pass\n").body[
-            0
-        ].args.args[0].annotation
+        attribute_annotation = (
+            ast.parse("def f(value: module.Type) -> int:\n    pass\n")
+            .body[0]
+            .args.args[0]
+            .annotation
+        )
         self.assertEqual(annotation_name(string_annotation), "Type | None")
         self.assertEqual(annotation_name(tuple_expr), "int, str")
         self.assertEqual(annotation_name(attribute_annotation), "module.Type")
+
+
+class AotMilestone3LoweringTests(unittest.TestCase):
+    def test_lowers_diagnostic_options_and_type_methods(self) -> None:
+        cases = (
+            (ROOT / "src/xcc/diag.py", "Diagnostic.__str__"),
+            (ROOT / "src/xcc/options.py", "FrontendOptions.__post_init__"),
+            (ROOT / "src/xcc/types.py", "Type.__str__"),
+        )
+        for path, entry in cases:
+            with self.subTest(path=path.name, entry=entry):
+                module = lower_source_to_ir(
+                    path.read_text(encoding="utf-8"),
+                    filename=str(path),
+                    entry=entry,
+                )
+                self.assertIn(entry, {function.name for function in module.functions})
+
+    def test_lowers_type_transformation_methods(self) -> None:
+        source = (ROOT / "src/xcc/types.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(source, filename="src/xcc/types.py", entry="Type.pointer_to")
+        names = {function.name for function in module.functions}
+        self.assertIn("Type.pointer_to", names)
+        self.assertIn("Type.array_of", names)
+        self.assertIn("Type.callable_signature", names)
 
 
 if __name__ == "__main__":

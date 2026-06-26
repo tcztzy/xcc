@@ -7,19 +7,27 @@ from xcc.aot import (
     AotError,
     IrAssign,
     IrBinary,
+    IrBoolType,
+    IrConstBool,
     IrConstInt,
+    IrConstNone,
+    IrConstructRecord,
     IrConstString,
     IrFunction,
     IrIntType,
     IrModule,
     IrName,
+    IrNoneType,
     IrParam,
     IrRecordType,
     IrReturn,
+    IrStringConcat,
+    IrStringJoin,
     IrStringType,
+    IrTuple,
     lower_source_to_ir,
 )
-from xcc.aot.lower import _Lowerer
+from xcc.aot.lower import _collect_global_names, _Lowerer
 from xcc.aot.types import AotClassInfo, AotType
 
 
@@ -165,6 +173,28 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer.lower_function(unsupported_call, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
 
+        unsupported_dynamic_call = ast.parse("def f() -> int:\n    return (lambda: 1)()\n").body[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer.lower_function(unsupported_dynamic_call, owner=None)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
+
+        missing_kwonly = ast.parse("def f(*, flag) -> int:\n    return 1\n").body[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer.lower_function(missing_kwonly, owner=None)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
+
+        chained_compare = ast.parse(
+            "def f(left: int, middle: int, right: int) -> bool:\n    return left < middle < right\n"
+        ).body[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer.lower_function(chained_compare, owner=None)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0004")
+
+        malformed_fstring = ast.JoinedStr([ast.Name("value", ast.Load())])
+        with self.assertRaises(AotError) as ctx:
+            lowerer._lower_joined_str(malformed_fstring, {})
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0005")
+
         unsupported_statement = ast.parse("def f() -> int:\n    pass\n").body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(unsupported_statement, owner=None)
@@ -191,9 +221,84 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(record.fields[0].type, IrStringType())
         self.assertEqual(record.fields[1].type, IrIntType(64, signed=True))
         self.assertEqual(record.fields[2].type, IrRecordType("Node"))
+        self.assertEqual(
+            lowerer._record_field_types("Node"),
+            (IrStringType(), IrIntType(64, signed=True), IrRecordType("Node")),
+        )
+        with self.assertRaises(AotError) as ctx:
+            lowerer._record_field_type(IrIntType(64, signed=True), "value", ast.Pass())
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
         with self.assertRaises(AotError) as ctx:
             lowerer._aot_type_to_ir_type(AotType("object"))
         self.assertEqual(ctx.exception.diagnostics[0].message, "Unsupported lowered type: object")
+
+    def test_lowers_core_default_literal_and_runtime_shapes(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "from typing import Literal\n"
+            "Mode = Literal['fast', 'slow']\n"
+            "@dataclass(frozen=True)\n"
+            "class Defaults:\n"
+            "    flag: bool\n"
+            "    text: str\n"
+            "    empty: None\n"
+            "    values: tuple[str, ...]\n"
+            "    maybe: Defaults | None\n"
+            "def literal(value: Literal['fast', 'slow']) -> Literal['fast', 'slow']:\n"
+            "    return value\n"
+            "def truth() -> bool:\n"
+            "    return True\n"
+            "def concat(value: str) -> str:\n"
+            "    return value + 'x'\n"
+            "def make() -> Defaults:\n"
+            "    return Defaults()\n"
+            "def raise_empty() -> None:\n"
+            "    raise ValueError()\n"
+        )
+        module = lower_source_to_ir(source, filename="defaults.py")
+        functions = {function.name: function for function in module.functions}
+        self.assertEqual(functions["literal"].params[0].type, IrStringType())
+        self.assertEqual(functions["truth"].return_type, IrBoolType())
+        self.assertIsInstance(functions["truth"].body[0].value, IrConstBool)
+        self.assertIsInstance(functions["concat"].body[0].value, IrStringConcat)
+        constructed = functions["make"].body[0].value
+        self.assertIsInstance(constructed, IrConstructRecord)
+        self.assertIsInstance(constructed.args[0], IrConstBool)
+        self.assertIsInstance(constructed.args[1], IrConstString)
+        self.assertIsInstance(constructed.args[2], IrConstNone)
+        self.assertIsInstance(constructed.args[3], IrTuple)
+        self.assertIsInstance(constructed.args[4], IrConstNone)
+        self.assertIsInstance(functions["raise_empty"].return_type, IrNoneType)
+        self.assertEqual(functions["raise_empty"].body[0].message.value, "")
+
+    def test_direct_lowerer_covers_assignment_and_global_name_edges(self) -> None:
+        lowerer = _Lowerer("direct.py", {})
+        names: dict[str, IrIntType] = {}
+        target = ast.parse("self.value = 1\n").body[0].targets[0]
+        lowerer._bind_assignment_target(target, IrIntType(64, signed=True), names)
+        self.assertIn("self.value", names)
+        unsupported_target = ast.parse("items[0] = 1\n").body[0].targets[0]
+        with self.assertRaises(AotError) as ctx:
+            lowerer._bind_assignment_target(
+                unsupported_target,
+                IrIntType(64, signed=True),
+                names,
+            )
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
+        tree = ast.parse("left, right = (1, 2)\nname: int = 1\nclass Box:\n    pass\n")
+        self.assertEqual(_collect_global_names(tree), {"name", "Box"})
+        self.assertIsInstance(
+            lowerer._default_expr(IrRecordType("Unknown")),
+            IrConstNone,
+        )
+        self.assertIsInstance(
+            lowerer._lower_call(
+                ast.parse("''.join()\n").body[0].value,
+                {},
+                IrStringType(),
+            ),
+            IrStringJoin,
+        )
 
     def test_lowers_dataclass_record_layout_and_field_read(self) -> None:
         source = (
