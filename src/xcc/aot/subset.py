@@ -15,6 +15,7 @@ _DYNAMIC_CALLS = {
     "locals",
     "setattr",
 }
+_REJECTED_STDLIB_SHIM_CALLS = {"re.fullmatch", "re.match", "re.search"}
 
 _UNSUPPORTED_NODES = (
     ast.AsyncFor,
@@ -89,6 +90,12 @@ class _SubsetChecker(ast.NodeVisitor):
                 f"Unsupported dynamic call: {name}",
                 node,
             )
+        elif name in _REJECTED_STDLIB_SHIM_CALLS:
+            self._add_error(
+                "XCC-AOT-SUBSET-0004",
+                f"Unsupported runtime stdlib shim call: {name}",
+                node,
+            )
         self.generic_visit(node)
 
     def generic_visit(self, node: ast.AST) -> None:
@@ -148,4 +155,9 @@ def _is_allowed_decorator(decorator: ast.expr) -> bool:
 def _call_name(expr: ast.expr) -> str | None:
     if isinstance(expr, ast.Name):
         return expr.id
+    if isinstance(expr, ast.Attribute):
+        receiver = _call_name(expr.value)
+        if receiver is None:
+            return expr.attr
+        return f"{receiver}.{expr.attr}"
     return None
