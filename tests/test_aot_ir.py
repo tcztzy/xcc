@@ -95,6 +95,52 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(returned.op, "+")
         self.assertEqual(returned.left, IrName("left", function.params[0].type))
 
+    def test_lowers_only_requested_functions(self) -> None:
+        module = lower_source_to_ir(
+            "def wanted() -> int:\n"
+            "    return 1\n"
+            "def skipped() -> int:\n"
+            "    while True:\n"
+            "        continue\n"
+            "    return 0\n",
+            filename="filtered.py",
+            include_functions={"wanted"},
+        )
+        self.assertEqual([function.name for function in module.functions], ["wanted"])
+
+    def test_lowers_only_requested_records(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Wanted:\n"
+            "    value: int\n"
+            "@dataclass(frozen=True)\n"
+            "class Skipped:\n"
+            "    value: object\n"
+            "def wanted() -> int:\n"
+            "    return 1\n",
+            filename="record_filter.py",
+            include_records={"Wanted"},
+            include_functions={"wanted"},
+        )
+        self.assertEqual([record.name for record in module.records], ["Wanted"])
+        self.assertEqual([function.name for function in module.functions], ["wanted"])
+
+    def test_lowers_bodyless_requested_function_signature(self) -> None:
+        module = lower_source_to_ir(
+            "def native_leaf(value: str) -> str:\n"
+            "    while True:\n"
+            "        continue\n",
+            filename="bodyless.py",
+            include_functions={"native_leaf"},
+            bodyless_functions={"native_leaf"},
+        )
+        function = module.functions[0]
+        self.assertEqual(function.name, "native_leaf")
+        self.assertEqual(function.params[0].type, IrStringType())
+        self.assertEqual(function.return_type, IrStringType())
+        self.assertEqual(function.body, ())
+
     def test_lowers_plain_int_uint_subtract_and_multiply(self) -> None:
         module = lower_source_to_ir(
             "uint32 = int\n"

@@ -46,6 +46,7 @@ from xcc.aot.slice import (
     collect_slice_inputs,
     core_entry_wrapper,
     core_slice_entry_module,
+    lower_core_entry_slice,
     lower_core_slice,
 )
 from xcc.aot.subset import AotModuleSummary, check_subset
@@ -103,6 +104,7 @@ __all__ = (
     "check_subset",
     "collect_slice_inputs",
     "core_entry_wrapper",
+    "lower_core_entry_slice",
     "core_slice_entry_module",
     "emit_llvm_text",
     "lower_core_slice",

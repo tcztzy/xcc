@@ -437,10 +437,13 @@ git commit -m "feat: add AOT lexer slice wrappers"
 
 - Modify: `tests/test_aot_milestone4.py`
 - Modify: `src/xcc/aot/lower.py`
+- Modify: `src/xcc/aot/slice.py`
+- Modify: `src/xcc/aot/native.py`
+- Modify: `src/xcc/aot/__init__.py`
 - Modify: `src/xcc/aot/llvm_text.py`
 - Modify: `src/xcc/aot/core_runtime.py`
 
-- [ ] **Step 1: Write failing native translate test**
+- [x] **Step 1: Write failing native translate test**
 
 Append:
 
@@ -467,7 +470,7 @@ class AotMilestone4NativeTests(unittest.TestCase):
         self.assertEqual(result.native_returncode, 0)
 ```
 
-- [ ] **Step 2: Run native translate test and verify red**
+- [x] **Step 2: Run native translate test and verify red**
 
 Run:
 
@@ -475,11 +478,19 @@ Run:
 uv run python -m unittest tests.test_aot_milestone4.AotMilestone4NativeTests.test_native_translate_source_matches_cpython -v
 ```
 
-Expected: failure because `while`, string indexing/slicing, list append, or `"".join` lowering is missing.
+Observed: failure in whole-slice lowering before native emission, because the
+unrelated `src/xcc/ast.py` body contains unsupported `continue` statements.
 
-- [ ] **Step 3: Lower concrete while-loop and string indexing shapes**
+- [x] **Step 3: Add entry-aware lowering and bodyless native leaf support**
 
-Extend `src/xcc/aot/ir.py` only if needed with `IrWhile`, `IrBreak`, or string index operations. Then update `src/xcc/aot/lower.py` for the exact `translate_source`, `_replace_trigraphs`, and `_splice_lines` shapes:
+The implementation uses the native-specialized helper path allowed below
+rather than adding general `while`, string-index, list append, or join
+lowering. `run_native_core_smoke()` now builds the wrapper first, lowers only
+wrapper-reachable functions and records, and keeps `xcc.lexer.translate_source`
+as a bodyless native leaf signature, matching the existing
+`xcc.types.Type.__str__` specialization pattern.
+
+Deferred generic lowering shapes:
 
 - `while i < length:`
 - `if source[i] == ...`
@@ -487,21 +498,20 @@ Extend `src/xcc/aot/ir.py` only if needed with `IrWhile`, `IrBreak`, or string i
 - `i += N`
 - `"".join(out)`
 
-If the current generic lowering would pull in too much Python list behavior, add a native-specialized helper path for `xcc.lexer.translate_source`, matching the existing `xcc.types.Type.__str__` specialization pattern. Keep the Python source unchanged.
+Keep the Python source unchanged.
 
-- [ ] **Step 4: Add minimal runtime helpers**
+- [x] **Step 4: Add minimal runtime helpers**
 
-Add helpers only as needed:
+Added `__xcc_aot_lexer_translate_source` in `src/xcc/aot/core_runtime.py`.
+The helper implements:
 
-- string length
-- single-byte string index
-- string equality against one-character constants
-- growable byte buffer append
-- byte buffer join
+- CRLF/CR normalization to LF
+- C trigraph replacement
+- escaped-newline splicing
 
 Runtime helpers must live in `src/xcc/aot/core_runtime.py` and be exercised by tests.
 
-- [ ] **Step 5: Run translate native test**
+- [x] **Step 5: Run translate native test**
 
 Run:
 
@@ -511,7 +521,7 @@ uv run python -m unittest tests.test_aot_milestone4.AotMilestone4NativeTests.tes
 
 Expected: test passes when `llc` is present.
 
-- [ ] **Step 6: Run focused AOT tests**
+- [x] **Step 6: Run focused AOT tests**
 
 Run:
 
@@ -521,7 +531,7 @@ uv run python -m unittest tests.test_aot_llvm tests.test_aot_milestone3 tests.te
 
 Expected: tests pass.
 
-- [ ] **Step 7: Commit translate native behavior**
+- [x] **Step 7: Commit translate native behavior**
 
 Run:
 

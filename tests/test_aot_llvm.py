@@ -69,6 +69,25 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("declare i32 @puts(ptr)", llvm_ir)
         self.assertIn("%printed = call i32 @puts(ptr %result)", llvm_ir)
 
+    def test_emits_core_lexer_translate_source_leaf(self) -> None:
+        module = IrModule(
+            "core.py",
+            (),
+            (
+                IrFunction(
+                    "xcc.lexer.translate_source",
+                    (IrParam("source", IrStringType()),),
+                    IrStringType(),
+                    (),
+                ),
+            ),
+            entry="xcc.lexer.translate_source",
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define ptr @xcc.lexer.translate_source(ptr %source)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_lexer_translate_source(ptr %source)", llvm_ir)
+        self.assertIn("define ptr @__xcc_aot_lexer_translate_source", llvm_ir)
+
     def test_emits_record_type_and_method_call(self) -> None:
         source = (
             "from dataclasses import dataclass\n"
@@ -442,6 +461,18 @@ class AotLlvmTextTests(unittest.TestCase):
             IrModule("bad.py", (), (IrFunction("f", (), int64, (object(),)),)),
             IrModule("bad.py", (), (IrFunction("f", (), int64, (IrReturn(object()),)),)),
             IrModule("bad.py", (), (IrFunction("f", (), int64, (IrReturn(IrName("x", int64)),)),)),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "xcc.lexer.translate_source",
+                        (),
+                        IrStringType(),
+                        (IrReturn(IrConstString("")),),
+                    ),
+                ),
+            ),
             IrModule(
                 "bad.py",
                 (),

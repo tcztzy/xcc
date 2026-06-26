@@ -90,6 +90,8 @@ class _Emitter:
         return f"%{record.name} = type {{ {fields} }}"
 
     def _emit_function(self, function: IrFunction) -> str:
+        if function.name == "xcc.lexer.translate_source":
+            return self._emit_core_lexer_translate_source_function(function)
         if function.name == "xcc.types.Type.__str__":
             return self._emit_core_type_str_function(function)
         self.index = 0
@@ -681,6 +683,25 @@ class _Emitter:
         if _is_pointer_type(value.type):
             return value.value
         self._error(f"Unsupported LLVM pointer comparison type: {type(value.type).__name__}")
+
+    def _emit_core_lexer_translate_source_function(self, function: IrFunction) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if (
+            len(function.params) != 1
+            or not isinstance(function.params[0].type, IrStringType)
+            or not isinstance(function.return_type, IrStringType)
+        ):
+            self._error("core lexer.translate_source expects str -> str")
+        param = function.params[0]
+        lines = [
+            f"define ptr {_llvm_symbol(function.name)}(ptr %{param.name}) {{",
+            "entry:",
+            f"  %translated = call ptr @__xcc_aot_lexer_translate_source(ptr %{param.name})",
+            "  ret ptr %translated",
+            "}",
+        ]
+        return "\n".join(lines)
 
     def _emit_core_type_str_function(self, function: IrFunction) -> str:
         self.index = 0

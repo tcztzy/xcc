@@ -25,6 +25,7 @@ from xcc.aot import (
     IrModule,
     IrName,
     IrNoneType,
+    IrParam,
     IrPrint,
     IrRaise,
     IrRecordType,
@@ -46,9 +47,12 @@ from xcc.aot import (
 )
 from xcc.aot.core_runtime import runtime_prelude
 from xcc.aot.slice import (
+    _expr_record_names,
     _expr_call_targets,
+    _function_record_names,
     _rename_expr_call,
     _rename_statement_calls,
+    _statement_record_names,
     _statement_call_targets,
 )
 from xcc.aot.types import annotation_name
@@ -164,6 +168,55 @@ class AotMilestone3SliceTests(unittest.TestCase):
             _statement_call_targets(object())  # type: ignore[arg-type]
         with self.assertRaises(AssertionError):
             _expr_call_targets(object())  # type: ignore[arg-type]
+
+    def test_core_slice_record_walkers_cover_compound_ir_shapes(self) -> None:
+        box_type = IrRecordType("Box")
+        other_type = IrRecordType("Other")
+        tuple_type = IrTupleType((box_type,))
+        call = IrCall("local", (IrName("box", box_type),), other_type)
+        statements = (
+            IrIf(
+                IrName("cond", IrBoolType()),
+                IrBranch((IrAssign("then_value", IrName("box", box_type)),)),
+                IrBranch((IrReturn(IrName("other", other_type)),)),
+            ),
+            IrForEach(
+                "item",
+                IrName("items", tuple_type),
+                IrBranch((IrPrint(IrName("box", box_type)),)),
+            ),
+            IrAssign(
+                "binary",
+                IrBinary(
+                    "+",
+                    IrName("left", box_type),
+                    IrName("right", other_type),
+                    box_type,
+                ),
+            ),
+            IrAssign("field", IrGetField(IrName("box", box_type), "value", other_type)),
+            IrAssign("slice", IrTupleSlice(IrName("items", tuple_type), 0, None)),
+            IrAssign(
+                "join",
+                IrStringJoin(
+                    IrConstString(","),
+                    IrTuple((IrName("box", box_type),), tuple_type),
+                ),
+            ),
+            IrRaise("ValueError", call),
+        )
+        function = IrFunction(
+            "walk",
+            (IrParam("box", box_type),),
+            other_type,
+            statements,
+        )
+        self.assertEqual(_function_record_names(function), ("Box", "Other"))
+        with self.assertRaises(AssertionError):
+            _statement_record_names(object())  # type: ignore[arg-type]
+        unknown_expr = type("UnknownExpr", (), {"type": IrStringType()})()
+        with self.assertRaises(AssertionError):
+            _expr_record_names(unknown_expr)  # type: ignore[arg-type]
 
 
 class AotMilestone3AnnotationTests(unittest.TestCase):

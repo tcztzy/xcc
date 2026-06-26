@@ -60,6 +60,9 @@ def lower_source_to_ir(
     *,
     filename: str = "<input>",
     entry: str | None = None,
+    include_records: set[str] | frozenset[str] | None = None,
+    include_functions: set[str] | frozenset[str] | None = None,
+    bodyless_functions: set[str] | frozenset[str] | None = None,
 ) -> IrModule:
     analysis = analyze_source(source, filename=filename)
     lowerer = _Lowerer(
@@ -72,16 +75,34 @@ def lower_source_to_ir(
         lowerer.lower_record(node)
         for node in analysis.module.tree.body
         if isinstance(node, ast.ClassDef)
+        and (include_records is None or node.name in include_records)
     )
     functions: list[IrFunction] = []
+    bodyless = bodyless_functions or frozenset()
     for node in analysis.module.tree.body:
         if isinstance(node, ast.ClassDef):
             for child in node.body:
                 if isinstance(child, ast.FunctionDef):
-                    functions.append(lowerer.lower_function(child, owner=node.name))
+                    function_name = _lowered_function_name(child.name, node.name)
+                    if include_functions is None or function_name in include_functions:
+                        functions.append(
+                            lowerer.lower_function(
+                                child,
+                                owner=node.name,
+                                bodyless=function_name in bodyless,
+                            )
+                        )
     for node in analysis.module.tree.body:
         if isinstance(node, ast.FunctionDef):
-            functions.append(lowerer.lower_function(node, owner=None))
+            function_name = _lowered_function_name(node.name, None)
+            if include_functions is None or function_name in include_functions:
+                functions.append(
+                    lowerer.lower_function(
+                        node,
+                        owner=None,
+                        bodyless=function_name in bodyless,
+                    )
+                )
     return IrModule(filename, records, tuple(functions), entry=entry)
 
 
@@ -106,10 +127,18 @@ class _Lowerer:
         )
         return IrRecord(node.name, fields)
 
-    def lower_function(self, node: ast.FunctionDef, *, owner: str | None) -> IrFunction:
-        function_name = f"{owner}.{node.name}" if owner is not None else node.name
+    def lower_function(
+        self,
+        node: ast.FunctionDef,
+        *,
+        owner: str | None,
+        bodyless: bool = False,
+    ) -> IrFunction:
+        function_name = _lowered_function_name(node.name, owner)
         params, names = self._lower_params(node, owner)
         return_type = self._annotation_to_ir_type(node.returns)
+        if bodyless:
+            return IrFunction(function_name, params, return_type, ())
         body = tuple(
             self._lower_statement(statement, names, return_type) for statement in node.body
         )
@@ -621,6 +650,10 @@ def _width_alias_to_ir_type(name: str) -> IrIntType | None:
     if name == "usize":
         return IrIntType(64, signed=False)
     return None
+
+
+def _lowered_function_name(name: str, owner: str | None) -> str:
+    return f"{owner}.{name}" if owner is not None else name
 
 
 def _is_optional_int(name: str) -> bool:

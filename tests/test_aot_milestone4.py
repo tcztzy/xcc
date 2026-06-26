@@ -1,3 +1,4 @@
+import os
 import unittest
 from pathlib import Path
 
@@ -8,6 +9,9 @@ from xcc.aot import (
     analyze_source,
     collect_slice_inputs,
     core_entry_wrapper,
+    lower_core_entry_slice,
+    lower_core_slice,
+    run_native_core_smoke,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,6 +106,49 @@ class AotMilestone4SliceTests(unittest.TestCase):
         self.assertEqual(error.name, "__xcc_aot_core_entry")
         self.assertEqual(error.body[0].value.target, "xcc.lexer._aot_error_summary_for_source")
         self.assertEqual(error.body[1].value.value, 2)
+
+    def test_lowers_lexer_translate_entry_without_unrelated_frontend_methods(self) -> None:
+        wrapper = core_entry_wrapper("xcc.lexer:translate_source", "trigraph_splice")
+        module = lower_core_entry_slice(LEXER_SLICE, wrapper)
+        names = {function.name for function in module.functions}
+        self.assertEqual(names, {"xcc.lexer.translate_source", "__xcc_aot_core_entry"})
+        translate = next(
+            function for function in module.functions if function.name == "xcc.lexer.translate_source"
+        )
+        self.assertEqual(translate.body, ())
+
+    def test_entry_driven_core_slice_handles_duplicate_roots_and_record_discovery(self) -> None:
+        module = lower_core_slice(
+            (ROOT / "src/xcc/options.py",),
+            root_targets=(
+                "xcc.options.normalize_options",
+                "xcc.options.normalize_options",
+            ),
+        )
+        self.assertEqual(
+            [function.name for function in module.functions],
+            ["xcc.options.normalize_options"],
+        )
+        self.assertIn("FrontendOptions", {record.name for record in module.records})
+
+
+def _real_llc() -> str | None:
+    path = os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
+    return path if Path(path).exists() else None
+
+
+class AotMilestone4NativeTests(unittest.TestCase):
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_native_translate_source_matches_cpython(self) -> None:
+        result = run_native_core_smoke(
+            LEXER_SLICE,
+            entry="xcc.lexer:translate_source",
+            fixture="trigraph_splice",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.native_stdout, "int#x=1;\n")
+        self.assertEqual(result.native_returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

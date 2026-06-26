@@ -1,5 +1,10 @@
 # Lessons
 
+- Entry-driven AOT lowering has to filter both functions and records. Skipping
+  unrelated function bodies avoids unsupported statements, but unrelated record
+  layouts can still fail lowering, as with lexer-only smoke tests that need
+  `translate_source` but not `Token.kind: Enum`. Derive required records from
+  the wrapper and lowered IR instead of lowering every class in the module.
 - AOT core native oracle tests should prune from the fixture wrapper before
   LLVM emission. Whole-module lowered output can contain source-reachable but
   fixture-unexecuted helpers such as generator expressions; namespace

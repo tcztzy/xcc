@@ -1,3 +1,4 @@
+import ast
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
@@ -37,7 +38,10 @@ from xcc.aot.ir import (
 )
 from xcc.aot.lower import lower_source_to_ir
 
-_NATIVE_EMITTED_LEAF_FUNCTIONS = {"xcc.types.Type.__str__"}
+_NATIVE_EMITTED_LEAF_FUNCTIONS = {
+    "xcc.lexer.translate_source",
+    "xcc.types.Type.__str__",
+}
 
 
 @dataclass(frozen=True)
@@ -77,7 +81,27 @@ def collect_slice_inputs(paths: tuple[Path, ...]) -> tuple[AotSliceInput, ...]:
     return tuple(sorted(modules, key=lambda module: module.name))
 
 
-def lower_core_slice(paths: tuple[Path, ...]) -> IrModule:
+def lower_core_slice(
+    paths: tuple[Path, ...],
+    *,
+    root_targets: tuple[str, ...] = (),
+    required_records: tuple[str, ...] = (),
+) -> IrModule:
+    if root_targets:
+        return _lower_core_slice_from_roots(paths, root_targets, required_records)
+    return _lower_core_slice_all(paths)
+
+
+def lower_core_entry_slice(paths: tuple[Path, ...], wrapper: IrFunction) -> IrModule:
+    module = lower_core_slice(
+        paths,
+        root_targets=_function_call_targets(wrapper),
+        required_records=_function_record_names(wrapper),
+    )
+    return core_slice_entry_module(module, wrapper)
+
+
+def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
     records: list[IrRecord] = []
     functions: list[IrFunction] = []
     for module_input in collect_slice_inputs(paths):
@@ -85,7 +109,7 @@ def lower_core_slice(paths: tuple[Path, ...]) -> IrModule:
         module = lower_source_to_ir(source, filename=str(module_input.path))
         records.extend(module.records)
         prefix = module_input.name
-        rename_map = {function.name: f"{prefix}.{function.name}" for function in module.functions}
+        rename_map = _module_rename_map(prefix, source)
         for function in module.functions:
             functions.append(
                 IrFunction(
@@ -96,6 +120,103 @@ def lower_core_slice(paths: tuple[Path, ...]) -> IrModule:
                 )
             )
     return IrModule("<core-slice>", tuple(records), tuple(functions))
+
+
+def _lower_core_slice_from_roots(
+    paths: tuple[Path, ...],
+    root_targets: tuple[str, ...],
+    required_records: tuple[str, ...],
+) -> IrModule:
+    module_inputs = collect_slice_inputs(paths)
+    inputs_by_name = {module.name: module for module in module_inputs}
+    source_cache = {
+        module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
+    }
+    rename_maps = {
+        module.name: _module_rename_map(module.name, source_cache[module.name])
+        for module in module_inputs
+    }
+    records_by_name: dict[str, IrRecord] = {}
+    functions: dict[str, IrFunction] = {}
+    record_names = set(required_records)
+    pending = list(root_targets)
+    while pending:
+        target = pending.pop()
+        if target in functions:
+            continue
+        module_name, local_name = _split_module_function(target, inputs_by_name)
+        if module_name is None or local_name is None:
+            continue
+        module_input = inputs_by_name[module_name]
+        bodyless = (
+            frozenset({local_name}) if target in _NATIVE_EMITTED_LEAF_FUNCTIONS else frozenset()
+        )
+        include_records = set(record_names)
+        if "." in local_name:
+            include_records.add(local_name.split(".", 1)[0])
+        module = lower_source_to_ir(
+            source_cache[module_name],
+            filename=str(module_input.path),
+            include_records=include_records,
+            include_functions={local_name},
+            bodyless_functions=bodyless,
+        )
+        for record in module.records:
+            records_by_name.setdefault(record.name, record)
+        rename_map = rename_maps[module_name]
+        for function in module.functions:
+            full_name = rename_map[function.name]
+            lowered = IrFunction(
+                full_name,
+                function.params,
+                function.return_type,
+                _rename_statement_calls(function.body, rename_map),
+            )
+            functions[full_name] = lowered
+            if lowered.name not in _NATIVE_EMITTED_LEAF_FUNCTIONS:
+                discovered_records = set(_function_record_names(lowered))
+                record_names.update(discovered_records)
+                missing_records = discovered_records.difference(records_by_name)
+                if missing_records:
+                    records_module = lower_source_to_ir(
+                        source_cache[module_name],
+                        filename=str(module_input.path),
+                        include_records=missing_records,
+                        include_functions=frozenset(),
+                    )
+                    for record in records_module.records:
+                        records_by_name.setdefault(record.name, record)
+                pending.extend(_function_call_targets(lowered))
+    return IrModule("<core-slice>", tuple(records_by_name.values()), tuple(functions.values()))
+
+
+def _module_rename_map(module_name: str, source: str) -> dict[str, str]:
+    return {name: f"{module_name}.{name}" for name in _local_function_names(source)}
+
+
+def _local_function_names(source: str) -> tuple[str, ...]:
+    tree = ast.parse(source)
+    names: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef):
+                    names.append(f"{node.name}.{child.name}")
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            names.append(node.name)
+    return tuple(names)
+
+
+def _split_module_function(
+    target: str,
+    inputs_by_name: dict[str, AotSliceInput],
+) -> tuple[str | None, str | None]:
+    for module_name in sorted(inputs_by_name, key=lambda name: len(name), reverse=True):
+        prefix = f"{module_name}."
+        if target.startswith(prefix):
+            return module_name, target[len(prefix) :]
+    return None, None
 
 
 def core_slice_entry_module(module: IrModule, wrapper: IrFunction) -> IrModule:
@@ -308,6 +429,97 @@ def _rename_expr_call(expr: IrExpr, rename_map: dict[str, str]) -> IrExpr:
             _rename_expr_call(expr.values, rename_map),
         )
     assert_never(expr)
+
+
+def _function_record_names(function: IrFunction) -> tuple[str, ...]:
+    names: set[str] = set()
+    for param in function.params:
+        names.update(_type_record_names(param.type))
+    names.update(_type_record_names(function.return_type))
+    for statement in function.body:
+        names.update(_statement_record_names(statement))
+    return tuple(sorted(names))
+
+
+def _statement_record_names(statement: IrStmt) -> tuple[str, ...]:
+    if isinstance(statement, IrAssign):
+        return _expr_record_names(statement.value)
+    if isinstance(statement, IrReturn):
+        return _expr_record_names(statement.value)
+    if isinstance(statement, IrIf):
+        names = set(_expr_record_names(statement.condition))
+        names.update(_branch_record_names(statement.then_branch))
+        if statement.else_branch is not None:
+            names.update(_branch_record_names(statement.else_branch))
+        return tuple(sorted(names))
+    if isinstance(statement, IrForEach):
+        names = set(_expr_record_names(statement.iterable))
+        names.update(_branch_record_names(statement.body))
+        return tuple(sorted(names))
+    if isinstance(statement, IrPrint):
+        return _expr_record_names(statement.value)
+    if isinstance(statement, IrRaise):
+        return _expr_record_names(statement.message)
+    assert_never(statement)
+
+
+def _branch_record_names(branch: IrBranch) -> tuple[str, ...]:
+    names: set[str] = set()
+    for statement in branch.statements:
+        names.update(_statement_record_names(statement))
+    return tuple(sorted(names))
+
+
+def _expr_record_names(expr: IrExpr) -> tuple[str, ...]:
+    names = set(_type_record_names(expr.type))
+    if isinstance(expr, IrConstInt | IrConstString | IrConstBool | IrConstNone | IrName):
+        return tuple(sorted(names))
+    if isinstance(expr, IrBinary):
+        names.update(_expr_record_names(expr.left))
+        names.update(_expr_record_names(expr.right))
+        return tuple(sorted(names))
+    if isinstance(expr, IrGetField):
+        names.update(_expr_record_names(expr.value))
+        return tuple(sorted(names))
+    if isinstance(expr, IrConstructRecord):
+        names.add(expr.record)
+        names.update(_expr_tuple_record_names(expr.args))
+        return tuple(sorted(names))
+    if isinstance(expr, IrCall):
+        names.update(_expr_tuple_record_names(expr.args))
+        return tuple(sorted(names))
+    if isinstance(expr, IrTuple):
+        names.update(_expr_tuple_record_names(expr.elements))
+        return tuple(sorted(names))
+    if isinstance(expr, IrTupleSlice):
+        names.update(_expr_record_names(expr.value))
+        return tuple(sorted(names))
+    if isinstance(expr, IrStringConcat):
+        names.update(_expr_tuple_record_names(expr.parts))
+        return tuple(sorted(names))
+    if isinstance(expr, IrStringJoin):
+        names.update(_expr_record_names(expr.separator))
+        names.update(_expr_record_names(expr.values))
+        return tuple(sorted(names))
+    assert_never(expr)
+
+
+def _expr_tuple_record_names(expressions: tuple[IrExpr, ...]) -> tuple[str, ...]:
+    names: set[str] = set()
+    for expression in expressions:
+        names.update(_expr_record_names(expression))
+    return tuple(sorted(names))
+
+
+def _type_record_names(type_info: IrRecordType | IrTupleType | object) -> tuple[str, ...]:
+    if isinstance(type_info, IrRecordType):
+        return (type_info.name,)
+    if isinstance(type_info, IrTupleType):
+        names: set[str] = set()
+        for element in type_info.elements:
+            names.update(_type_record_names(element))
+        return tuple(sorted(names))
+    return ()
 
 
 def _function_call_targets(function: IrFunction) -> tuple[str, ...]:

@@ -2,6 +2,13 @@
 
 ## Current
 
+- Added Milestone 4 native coverage for `xcc.lexer.translate_source`: the core
+  smoke harness now builds fixture wrappers before lowering, lowers only
+  wrapper-reachable frontend functions and records, keeps native-emitted leaf
+  functions as bodyless IR signatures, and emits a runtime LLVM helper for
+  CR/CRLF normalization, C trigraph replacement, and escaped-newline splicing.
+  The `trigraph_splice` fixture now compiles through the configured `llc`,
+  links, and executes as a native binary matching CPython output.
 - Added Milestone 3 real native core oracle coverage for the AOT Python path:
   `xcc.diag.Diagnostic.__str__`, `xcc.options.FrontendOptions.__post_init__`,
   and `xcc.types.Type.__str__` fixtures now compile through the configured
