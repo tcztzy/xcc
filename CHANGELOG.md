@@ -2,6 +2,9 @@
 
 ## Current
 
+- Added the Milestone 2 implementation plan for the approved AOT Python design,
+  covering AOT IR modeling, scalar/dataclass/method lowering, textual LLVM IR
+  emission, `llc` object generation, and CPython/native oracle smoke tests.
 - Added the Milestone 1 AOT Python front-end skeleton under `src/xcc/aot/`:
   deterministic AOT diagnostics, Python source parsing through `ast.parse`,
   an XCC-Python subset checker for accepted and rejected syntax, a basic type
