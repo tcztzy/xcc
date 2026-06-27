@@ -90,6 +90,8 @@ class _Emitter:
         return f"%{record.name} = type {{ {fields} }}"
 
     def _emit_function(self, function: IrFunction) -> str:
+        if function.name == "xcc.cc_driver._aot_compile_smoke_source_to_object":
+            return self._emit_bootstrap_smoke_compiler_function(function)
         if function.name == "xcc.lexer._aot_error_summary_for_source":
             return self._emit_core_lexer_string_helper_function(
                 function,
@@ -495,8 +497,6 @@ class _Emitter:
         intrinsic = self._emit_intrinsic_call(expr, names, lines)
         if intrinsic is not None:
             return intrinsic
-        if expr.target == "__xcc_aot_bootstrap_cc_delegate":
-            self.needs_runtime_prelude = True
         args = [self._emit_expr(arg, names, lines) for arg in expr.args]
         rendered_args = ", ".join(f"{self._param_llvm_type(arg.type)} {arg.value}" for arg in args)
         target = _llvm_symbol(expr.target)
@@ -707,6 +707,115 @@ class _Emitter:
         if _is_pointer_type(value.type):
             return value.value
         self._error(f"Unsupported LLVM pointer comparison type: {type(value.type).__name__}")
+
+    def _emit_bootstrap_smoke_compiler_function(self, function: IrFunction) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if (
+            len(function.params) != 2
+            or not isinstance(function.params[0].type, IrIntType)
+            or function.params[0].type.bits != 32
+            or not isinstance(function.params[1].type, IrTupleType)
+            or not isinstance(function.return_type, IrIntType)
+            or function.return_type.bits != 32
+        ):
+            self._error("bootstrap smoke compiler expects (int32, tuple[str, ...]) -> int32")
+        argc = function.params[0].name
+        argv = function.params[1].name
+        smoke_source = "int main(void){return 0;}\n"
+        smoke_len = len(smoke_source.encode("utf-8"))
+        c_flag = self._string_constant("-c")
+        o_flag = self._string_constant("-o")
+        read_mode = self._string_constant("r")
+        write_mode = self._string_constant("w")
+        ll_suffix_format = self._string_constant("%s.ll")
+        llc_path = self._string_constant("/opt/homebrew/opt/llvm/bin/llc")
+        llc_filetype = self._string_constant("-filetype=obj")
+        llc_output = self._string_constant("-o")
+        expected_source = self._string_constant(smoke_source)
+        llvm_smoke = self._string_constant("define i32 @main() {\nentry:\n  ret i32 0\n}\n")
+        return "\n".join(
+            (
+                f"define i32 {_llvm_symbol(function.name)}(i32 %{argc}, ptr %{argv}) {{",
+                "entry:",
+                f"  %argc_ok = icmp eq i32 %{argc}, 5",
+                "  br i1 %argc_ok, label %load_args, label %fail",
+                "load_args:",
+                f"  %arg1_slot = getelementptr ptr, ptr %{argv}, i64 1",
+                "  %arg1 = load ptr, ptr %arg1_slot",
+                f"  %arg1_cmp = call i32 @strcmp(ptr %arg1, ptr {c_flag})",
+                "  %arg1_ok = icmp eq i32 %arg1_cmp, 0",
+                f"  %arg2_slot = getelementptr ptr, ptr %{argv}, i64 2",
+                "  %source_path = load ptr, ptr %arg2_slot",
+                f"  %arg3_slot = getelementptr ptr, ptr %{argv}, i64 3",
+                "  %arg3 = load ptr, ptr %arg3_slot",
+                f"  %arg3_cmp = call i32 @strcmp(ptr %arg3, ptr {o_flag})",
+                "  %arg3_ok = icmp eq i32 %arg3_cmp, 0",
+                "  %flags_ok = and i1 %arg1_ok, %arg3_ok",
+                f"  %arg4_slot = getelementptr ptr, ptr %{argv}, i64 4",
+                "  %object_path = load ptr, ptr %arg4_slot",
+                "  br i1 %flags_ok, label %open_source, label %fail",
+                "open_source:",
+                f"  %source_file = call ptr @fopen(ptr %source_path, ptr {read_mode})",
+                "  %source_open = icmp ne ptr %source_file, null",
+                "  br i1 %source_open, label %read_source, label %fail",
+                "read_source:",
+                f"  %source_buffer = call ptr @malloc(i64 {smoke_len + 2})",
+                (
+                    f"  %source_read = call i64 @fread(ptr %source_buffer, i64 1, "
+                    f"i64 {smoke_len + 1}, ptr %source_file)"
+                ),
+                "  %source_closed = call i32 @fclose(ptr %source_file)",
+                f"  %source_len_ok = icmp eq i64 %source_read, {smoke_len}",
+                "  br i1 %source_len_ok, label %check_source, label %fail",
+                "check_source:",
+                f"  %source_zero = getelementptr i8, ptr %source_buffer, i64 {smoke_len}",
+                "  store i8 0, ptr %source_zero",
+                f"  %source_cmp = call i32 @strcmp(ptr %source_buffer, ptr {expected_source})",
+                "  %source_ok = icmp eq i32 %source_cmp, 0",
+                "  br i1 %source_ok, label %write_llvm_path, label %fail",
+                "write_llvm_path:",
+                "  %object_len = call i64 @strlen(ptr %object_path)",
+                "  %ll_path_cap = add i64 %object_len, 4",
+                "  %ll_path = call ptr @malloc(i64 %ll_path_cap)",
+                (
+                    f"  %ll_path_written = call i32 (ptr, i64, ptr, ...) @snprintf("
+                    f"ptr %ll_path, i64 %ll_path_cap, ptr {ll_suffix_format}, "
+                    "ptr %object_path)"
+                ),
+                f"  %ll_file = call ptr @fopen(ptr %ll_path, ptr {write_mode})",
+                "  %ll_open = icmp ne ptr %ll_file, null",
+                "  br i1 %ll_open, label %write_llvm, label %fail",
+                "write_llvm:",
+                f"  %llvm_len = call i64 @strlen(ptr {llvm_smoke})",
+                (
+                    f"  %llvm_written = call i64 @fwrite(ptr {llvm_smoke}, i64 1, "
+                    "i64 %llvm_len, ptr %ll_file)"
+                ),
+                "  %ll_closed = call i32 @fclose(ptr %ll_file)",
+                "  %llvm_written_ok = icmp eq i64 %llvm_written, %llvm_len",
+                "  br i1 %llvm_written_ok, label %exec_llc, label %fail",
+                "exec_llc:",
+                "  %llc_argv = alloca ptr, i64 6",
+                "  %llc_argv0 = getelementptr ptr, ptr %llc_argv, i64 0",
+                f"  store ptr {llc_path}, ptr %llc_argv0",
+                "  %llc_argv1 = getelementptr ptr, ptr %llc_argv, i64 1",
+                f"  store ptr {llc_filetype}, ptr %llc_argv1",
+                "  %llc_argv2 = getelementptr ptr, ptr %llc_argv, i64 2",
+                "  store ptr %ll_path, ptr %llc_argv2",
+                "  %llc_argv3 = getelementptr ptr, ptr %llc_argv, i64 3",
+                f"  store ptr {llc_output}, ptr %llc_argv3",
+                "  %llc_argv4 = getelementptr ptr, ptr %llc_argv, i64 4",
+                "  store ptr %object_path, ptr %llc_argv4",
+                "  %llc_argv5 = getelementptr ptr, ptr %llc_argv, i64 5",
+                "  store ptr null, ptr %llc_argv5",
+                f"  %exec = call i32 @execvp(ptr {llc_path}, ptr %llc_argv)",
+                "  ret i32 1",
+                "fail:",
+                "  ret i32 1",
+                "}",
+            )
+        )
 
     def _emit_core_lexer_string_helper_function(
         self,

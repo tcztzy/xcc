@@ -116,7 +116,7 @@ def plan_bootstrap_entry(root: Path) -> AotBootstrapEntryPlan:
 def lower_bootstrap_entry_smoke(root: Path) -> IrModule:
     plan_bootstrap_entry(root)
     return lower_core_entry_slice(
-        (root / "src/xcc/options.py",),
+        (root / "src/xcc/cc_driver.py", root / "src/xcc/options.py"),
         _bootstrap_entry_smoke_wrapper(),
     )
 
@@ -226,7 +226,7 @@ def _bootstrap_entry_smoke_wrapper() -> IrFunction:
             ),
             IrReturn(
                 IrCall(
-                    "__xcc_aot_bootstrap_cc_delegate",
+                    "xcc.cc_driver._aot_compile_smoke_source_to_object",
                     (IrName("argc", int32), IrName("argv", argv_type)),
                     int32,
                 )

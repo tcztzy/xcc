@@ -38,6 +38,9 @@ class CliTests(unittest.TestCase):
             if call.args[0][0] == llc_path and "-filetype=obj" in call.args[0]
         ]
 
+    def test_aot_smoke_compiler_stub_fails_under_cpython(self) -> None:
+        self.assertEqual(cc_driver._aot_compile_smoke_source_to_object(0, ()), 1)
+
     def test_main_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ok.c"

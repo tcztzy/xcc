@@ -104,20 +104,26 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             repr(functions["aot_bootstrap_smoke_main"].body),
         )
 
-    def test_bootstrap_entry_uses_argv_aware_native_driver_thunk(self) -> None:
+    def test_bootstrap_entry_uses_project_owned_smoke_compiler(self) -> None:
         module = lower_bootstrap_entry_smoke(ROOT)
         functions = {function.name: function for function in module.functions}
         entry = functions["aot_bootstrap_smoke_main"]
         self.assertEqual(tuple(param.name for param in entry.params), ("argc", "argv"))
-        self.assertIn("__xcc_aot_bootstrap_cc_delegate", repr(entry.body))
+        self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", functions)
+        self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", repr(entry.body))
 
         llvm_ir = emit_llvm_text(module)
 
         self.assertIn("define i32 @main(i32 %argc, ptr %argv)", llvm_ir)
+        self.assertNotIn("__xcc_aot_bootstrap_cc_delegate", llvm_ir)
+        self.assertNotIn("@__xcc_aot_cc", llvm_ir)
         self.assertIn(
-            "define i32 @__xcc_aot_bootstrap_cc_delegate(i32 %argc, ptr %argv)",
+            "define i32 @xcc.cc_driver._aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
             llvm_ir,
         )
+        self.assertIn("/opt/homebrew/opt/llvm/bin/llc", llvm_ir)
+        self.assertIn("declare ptr @fopen(ptr, ptr)", llvm_ir)
+        self.assertIn("declare i64 @fwrite(ptr, i64, i64, ptr)", llvm_ir)
         self.assertIn("declare i32 @execvp(ptr, ptr)", llvm_ir)
 
 

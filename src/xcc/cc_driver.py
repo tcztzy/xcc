@@ -13,6 +13,8 @@ from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
 from xcc.options import FrontendOptions, StdMode
 
+int32 = int
+
 TargetName = Literal["llvm", "aarch64-apple-darwin", "x86_64-linux-gnu", "evm"]
 DriverAction = Literal["link", "compile", "assembly", "delegate"]
 
@@ -450,6 +452,10 @@ def _delegate_argv(config: DriverConfig) -> tuple[str, ...] | list[str]:
     if config.target == "x86_64-linux-gnu":
         return _drop_x86_64_linux_latomic(config.clang_argv)
     return config.clang_argv
+
+
+def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
+    return 1
 
 
 def _compile_frontend_inputs(

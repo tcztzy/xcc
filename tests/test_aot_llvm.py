@@ -486,6 +486,18 @@ class AotLlvmTextTests(unittest.TestCase):
                 (),
                 (
                     IrFunction(
+                        "xcc.cc_driver._aot_compile_smoke_source_to_object",
+                        (),
+                        IrIntType(32, signed=True),
+                        (),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
                         "xcc.lexer.translate_source",
                         (),
                         IrStringType(),

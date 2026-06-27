@@ -77,6 +77,12 @@
   produces `build/aot/self-host-smoke.o` without entering the CPython runtime.
   This is an explicit transition bridge; project-owned frontend/backend lowering
   is still required before claiming final bootstrap completion.
+- Replaced the bootstrap smoke's host `cc` delegate with a project-owned AOT
+  smoke compiler leaf. The generated native executable now validates the
+  project smoke source, writes minimal LLVM IR for that source, invokes the
+  configured `/opt/homebrew/opt/llvm/bin/llc` path, and produces
+  `build/aot/self-host-smoke.o` without CPython or host `cc`. This remains a
+  fixed smoke-subset bridge; general frontend/backend lowering is still pending.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation
