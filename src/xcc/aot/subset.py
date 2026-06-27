@@ -136,9 +136,13 @@ class _SubsetChecker(ast.NodeVisitor):
 
 
 def _is_allowed_decorator(decorator: ast.expr) -> bool:
-    if isinstance(decorator, ast.Name) and decorator.id == "dataclass":
-        return True
-    if isinstance(decorator, ast.Name) and decorator.id == "property":
+    if isinstance(decorator, ast.Name) and decorator.id in {
+        "cache",
+        "classmethod",
+        "dataclass",
+        "property",
+        "staticmethod",
+    }:
         return True
     if isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Name):
         if decorator.func.id != "dataclass":

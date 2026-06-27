@@ -10,6 +10,7 @@ PREPROCESSOR_CONDITIONALS_PATH = ROOT / "src/xcc/preprocessor/conditionals.py"
 PREPROCESSOR_INCLUDES_PATH = ROOT / "src/xcc/preprocessor/includes.py"
 PREPROCESSOR_MACROS_PATH = ROOT / "src/xcc/preprocessor/macros.py"
 XCC_INIT_PATH = ROOT / "src/xcc/__init__.py"
+HOST_INCLUDES_PATH = ROOT / "src/xcc/host_includes.py"
 
 
 class AotMilestone6AdmissionTests(unittest.TestCase):
@@ -58,8 +59,34 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
         self.assertEqual(function.parameters[1], ("roots", "Iterable[str]"))
         self.assertEqual(function.return_type.name, "tuple[str, ...]")
 
+    def test_accepts_builtin_method_and_cache_decorators(self) -> None:
+        source = (
+            "from functools import cache\n"
+            "class Factory:\n"
+            "    @staticmethod\n"
+            "    def make(value: int) -> int:\n"
+            "        return value\n"
+            "    @classmethod\n"
+            "    def wrap(cls, value: int) -> int:\n"
+            "        return value\n"
+            "@cache\n"
+            "def cached(value: int) -> int:\n"
+            "    return value\n"
+        )
+        analysis = analyze_source(source, filename="decorators.py")
+        self.assertEqual(
+            analysis.types.functions["Factory.make"].parameters,
+            (("value", "int"),),
+        )
+        self.assertEqual(
+            analysis.types.functions["Factory.wrap"].parameters,
+            (("cls", "Factory"), ("value", "int")),
+        )
+        self.assertIn("cached", analysis.types.functions)
+
     def test_admits_preprocessor_modules_blocked_by_common_annotations(self) -> None:
         for path in (
+            HOST_INCLUDES_PATH,
             PREPROCESSOR_CONDITIONALS_PATH,
             PREPROCESSOR_INCLUDES_PATH,
             PREPROCESSOR_MACROS_PATH,
