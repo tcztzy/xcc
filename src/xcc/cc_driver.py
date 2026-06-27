@@ -627,21 +627,28 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                 return _emit_assembly_outputs(config, results, generate_llvm_ir)
 
             llc_path = _find_llc()
-            return _compile_or_link_generated_outputs(
-                config,
-                results,
-                suffix="ll",
-                generate=generate_llvm_ir,
-                object_cmd=lambda source, obj: [
+
+            def llvm_object_cmd(source: Path, obj: Path) -> list[str]:
+                return [
                     llc_path,
                     "-O0",
                     "-filetype=obj",
                     str(source),
                     "-o",
                     str(obj),
-                ],
+                ]
+
+            def llvm_link_cmd(objects: list[str]) -> list[str]:
+                return _link_argv_with_objects(config, objects)
+
+            return _compile_or_link_generated_outputs(
+                config,
+                results,
+                suffix="ll",
+                generate=generate_llvm_ir,
+                object_cmd=llvm_object_cmd,
                 tool_error="llc failed",
-                link_cmd=lambda objects: _link_argv_with_objects(config, objects),
+                link_cmd=llvm_link_cmd,
             )
 
         if config.target == "aarch64-apple-darwin":
@@ -650,7 +657,18 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
             if config.action == "assembly":
                 return _emit_assembly_outputs(config, results, generate_aarch64_asm)
 
-            def link_cmd(objects: list[str]) -> list[str]:
+            def aarch64_object_cmd(source: Path, obj: Path) -> list[str]:
+                return [
+                    "clang",
+                    "-target",
+                    config.target,
+                    "-c",
+                    str(source),
+                    "-o",
+                    str(obj),
+                ]
+
+            def aarch64_link_cmd(objects: list[str]) -> list[str]:
                 command = _link_argv_with_objects(config, objects)
                 command[1:1] = ["-target", config.target]
                 return command
@@ -660,17 +678,9 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                 results,
                 suffix="s",
                 generate=generate_aarch64_asm,
-                object_cmd=lambda source, obj: [
-                    "clang",
-                    "-target",
-                    config.target,
-                    "-c",
-                    str(source),
-                    "-o",
-                    str(obj),
-                ],
+                object_cmd=aarch64_object_cmd,
                 tool_error="clang assembler failed",
-                link_cmd=link_cmd,
+                link_cmd=aarch64_link_cmd,
             )
 
         if config.target == "x86_64-linux-gnu":
@@ -679,22 +689,28 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
             if config.action == "assembly":
                 return _emit_assembly_outputs(config, results, generate_x86_64_asm)
 
-            return _compile_or_link_generated_outputs(
-                config,
-                results,
-                suffix="s",
-                generate=generate_x86_64_asm,
-                object_cmd=lambda source, obj: [
+            def x86_64_object_cmd(source: Path, obj: Path) -> list[str]:
+                return [
                     "cc",
                     "-c",
                     str(source),
                     "-o",
                     str(obj),
-                ],
-                tool_error="cc assembler failed",
-                link_cmd=lambda objects: _drop_x86_64_linux_latomic(
+                ]
+
+            def x86_64_link_cmd(objects: list[str]) -> list[str]:
+                return _drop_x86_64_linux_latomic(
                     _link_argv_with_objects(config, objects, linker="cc")
-                ),
+                )
+
+            return _compile_or_link_generated_outputs(
+                config,
+                results,
+                suffix="s",
+                generate=generate_x86_64_asm,
+                object_cmd=x86_64_object_cmd,
+                tool_error="cc assembler failed",
+                link_cmd=x86_64_link_cmd,
             )
 
         if config.target == "evm":
@@ -705,15 +721,23 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
             if config.action == "assembly":
                 return _emit_assembly_outputs(config, results, generate_evm_asm)
             if config.evm_initcode:
+
+                def generate_evm_initcode_text(result: FrontendResult) -> str:
+                    return generate_evm_initcode(result) + "\n"
+
                 return _emit_assembly_outputs(
                     config,
                     results,
-                    lambda result: generate_evm_initcode(result) + "\n",
+                    generate_evm_initcode_text,
                 )
+
+            def generate_evm_bytecode_text(result: FrontendResult) -> str:
+                return generate_evm_bytecode(result) + "\n"
+
             return _emit_assembly_outputs(
                 config,
                 results,
-                lambda result: generate_evm_bytecode(result) + "\n",
+                generate_evm_bytecode_text,
             )
     except Exception as error:
         print(f"xcc: {error}", file=sys.stderr)

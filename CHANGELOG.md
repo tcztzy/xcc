@@ -12,8 +12,10 @@
   explicit `node_location()` helper instead of reflection-style `getattr`,
   admitting `aot/binder.py`, `aot/lower.py`, and `aot/subset.py`.
   `aot/slice.py` now uses named sort-key helpers instead of lambdas, admitting
-  the slice collector itself. The all-`src/xcc` probe now reaches 38/57
-  modules, up from 19/57 before this milestone slice, with remaining blockers
+  the slice collector itself. The C driver now uses named local callback
+  helpers instead of lambdas for generated object/link and EVM text emission,
+  admitting `cc_driver.py`. The all-`src/xcc` probe now reaches 39/57 modules,
+  up from 19/57 before this milestone slice, with remaining blockers
   concentrated in dynamic calls, lambdas/nonlocals/globals, and rejected
   runtime `re` shims.
 - Added Milestone 5 AOT parser/sema slice support, including class method

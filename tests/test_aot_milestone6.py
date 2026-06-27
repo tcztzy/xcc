@@ -6,6 +6,7 @@ from xcc.aot import analyze_path, analyze_source
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CC_DRIVER_PATH = ROOT / "src/xcc/cc_driver.py"
 PREPROCESSOR_CONDITIONALS_PATH = ROOT / "src/xcc/preprocessor/conditionals.py"
 PREPROCESSOR_INCLUDES_PATH = ROOT / "src/xcc/preprocessor/includes.py"
 PREPROCESSOR_MACROS_PATH = ROOT / "src/xcc/preprocessor/macros.py"
@@ -105,6 +106,10 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 analysis = analyze_path(path)
                 self.assertGreater(len(analysis.types.functions), 0)
+
+    def test_admits_driver_without_lambda_callbacks(self) -> None:
+        analysis = analyze_path(CC_DRIVER_PATH)
+        self.assertIn("main", analysis.types.functions)
 
 
 if __name__ == "__main__":
