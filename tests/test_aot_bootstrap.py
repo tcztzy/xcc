@@ -111,6 +111,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertEqual(tuple(param.name for param in entry.params), ("argc", "argv"))
         self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", functions)
         self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", repr(entry.body))
+        self.assertIn("xcc.cc_driver._aot_is_smoke_compile_command", functions)
         self.assertIn("xcc.cc_driver._aot_is_smoke_source", functions)
         self.assertIn("xcc.cc_driver._aot_smoke_llvm_ir", functions)
 
@@ -123,6 +124,18 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "define i32 @xcc.cc_driver._aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
             llvm_ir,
         )
+        self.assertIn(
+            "define i1 @xcc.cc_driver._aot_is_smoke_compile_command("
+            "i32 %argc, ptr %c_flag, ptr %output_flag)",
+            llvm_ir,
+        )
+        self.assertIn(
+            "call i1 @xcc.cc_driver._aot_is_smoke_compile_command("
+            "i32 %argc, ptr %arg1, ptr %arg3)",
+            llvm_ir,
+        )
+        self.assertNotIn("%arg1_cmp = call i32 @strcmp", llvm_ir)
+        self.assertNotIn("%arg3_cmp = call i32 @strcmp", llvm_ir)
         self.assertIn("define i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source)", llvm_ir)
         self.assertIn("call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source_buffer)", llvm_ir)
         self.assertIn("%source_len_ok = icmp eq i64 %source_read, 26", llvm_ir)

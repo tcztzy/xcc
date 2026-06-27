@@ -89,12 +89,17 @@ class CliTests(unittest.TestCase):
                     4,
                     ("xcc", "-c", str(source), "-o"),
                 )
+                bad_flags = cc_driver._aot_compile_smoke_source_to_object(
+                    5,
+                    ("xcc", "--compile", str(source), "-o", str(output)),
+                )
                 bad_source = cc_driver._aot_compile_smoke_source_to_object(
                     5,
                     ("xcc", "-c", str(source), "-o", str(output)),
                 )
 
             self.assertEqual(bad_args, 1)
+            self.assertEqual(bad_flags, 1)
             self.assertEqual(bad_source, 1)
             run.assert_not_called()
             self.assertFalse((root / "smoke.o.ll").exists())

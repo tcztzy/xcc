@@ -724,8 +724,6 @@ class _Emitter:
         argv = function.params[1].name
         smoke_source = "int main(void){return 0;}\n"
         smoke_len = len(smoke_source.encode("utf-8"))
-        c_flag = self._string_constant("-c")
-        o_flag = self._string_constant("-o")
         read_mode = self._string_constant("r")
         write_mode = self._string_constant("w")
         ll_suffix_format = self._string_constant("%s.ll")
@@ -741,15 +739,15 @@ class _Emitter:
                 "load_args:",
                 f"  %arg1_slot = getelementptr ptr, ptr %{argv}, i64 1",
                 "  %arg1 = load ptr, ptr %arg1_slot",
-                f"  %arg1_cmp = call i32 @strcmp(ptr %arg1, ptr {c_flag})",
-                "  %arg1_ok = icmp eq i32 %arg1_cmp, 0",
                 f"  %arg2_slot = getelementptr ptr, ptr %{argv}, i64 2",
                 "  %source_path = load ptr, ptr %arg2_slot",
                 f"  %arg3_slot = getelementptr ptr, ptr %{argv}, i64 3",
                 "  %arg3 = load ptr, ptr %arg3_slot",
-                f"  %arg3_cmp = call i32 @strcmp(ptr %arg3, ptr {o_flag})",
-                "  %arg3_ok = icmp eq i32 %arg3_cmp, 0",
-                "  %flags_ok = and i1 %arg1_ok, %arg3_ok",
+                (
+                    "  %flags_ok = call i1 "
+                    "@xcc.cc_driver._aot_is_smoke_compile_command("
+                    f"i32 %{argc}, ptr %arg1, ptr %arg3)"
+                ),
                 f"  %arg4_slot = getelementptr ptr, ptr %{argv}, i64 4",
                 "  %object_path = load ptr, ptr %arg4_slot",
                 "  br i1 %flags_ok, label %open_source, label %fail",

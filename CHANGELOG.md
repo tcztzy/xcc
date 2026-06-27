@@ -96,6 +96,11 @@
   `xcc.cc_driver._aot_is_smoke_source()` from the AOT slice instead of owning
   the source equality check entirely in the LLVM emitter; the remaining native
   specialization is still file/process glue plus the fixed read envelope.
+- Moved the fixed bootstrap smoke `-c`/`-o` command validation into a lowered
+  project helper. The native smoke compiler leaf now calls
+  `xcc.cc_driver._aot_is_smoke_compile_command()` from the AOT slice instead of
+  embedding the flag string comparisons in the LLVM emitter; the outer native
+  bridge still owns argv loading, file I/O, and process execution.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

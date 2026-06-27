@@ -460,12 +460,18 @@ def _aot_smoke_llvm_ir() -> str:
     return "define i32 @main() {\nentry:\n  ret i32 0\n}\n"
 
 
+def _aot_is_smoke_compile_command(argc: int32, c_flag: str, output_flag: str) -> bool:
+    return argc == 5 and c_flag == "-c" and output_flag == "-o"
+
+
 def _aot_is_smoke_source(source: str) -> bool:
     return source == "int main(void){return 0;}\n"
 
 
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
-    if (argc, len(argv), argv[1:2], argv[3:4]) != (5, 5, ("-c",), ("-o",)):
+    if argc != 5 or len(argv) != 5:
+        return 1
+    if not _aot_is_smoke_compile_command(argc, argv[1], argv[3]):
         return 1
     source_path = Path(argv[2])
     object_path = Path(argv[4])
