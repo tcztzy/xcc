@@ -468,6 +468,10 @@ def _aot_is_smoke_source(source: str) -> bool:
     return source == "int main(void){return 0;}\n"
 
 
+def _aot_smoke_llvm_path(object_path: str) -> str:
+    return object_path + ".ll"
+
+
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
     if argc != 5 or len(argv) != 5:
         return 1
@@ -477,7 +481,7 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
     object_path = Path(argv[4])
     if not _aot_is_smoke_source(source_path.read_text(encoding="utf-8")):
         return 1
-    llvm_path = Path(str(object_path) + ".ll")
+    llvm_path = Path(_aot_smoke_llvm_path(str(object_path)))
     llvm_path.write_text(_aot_smoke_llvm_ir(), encoding="utf-8")
     completed = subprocess.run(
         (

@@ -113,6 +113,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", repr(entry.body))
         self.assertIn("xcc.cc_driver._aot_is_smoke_compile_command", functions)
         self.assertIn("xcc.cc_driver._aot_is_smoke_source", functions)
+        self.assertIn("xcc.cc_driver._aot_smoke_llvm_path", functions)
         self.assertIn("xcc.cc_driver._aot_smoke_llvm_ir", functions)
 
         llvm_ir = emit_llvm_text(module)
@@ -141,6 +142,10 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("%source_len_ok = icmp eq i64 %source_read, 26", llvm_ir)
         self.assertIn("call i32 @strcmp(ptr %source, ptr @.str", llvm_ir)
         self.assertNotIn("call i32 @strcmp(ptr %source, ptr null)", llvm_ir)
+        self.assertIn("define ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %object_path)", llvm_ir)
+        self.assertIn("call ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %object_path)", llvm_ir)
+        self.assertNotIn("%ll_path_written = call i32", llvm_ir)
+        self.assertNotIn("%s.ll", llvm_ir)
         self.assertIn("define ptr @xcc.cc_driver._aot_smoke_llvm_ir()", llvm_ir)
         self.assertIn("call ptr @xcc.cc_driver._aot_smoke_llvm_ir()", llvm_ir)
         self.assertIn("/opt/homebrew/opt/llvm/bin/llc", llvm_ir)

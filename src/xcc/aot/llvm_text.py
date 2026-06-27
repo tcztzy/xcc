@@ -726,7 +726,6 @@ class _Emitter:
         smoke_len = len(smoke_source.encode("utf-8"))
         read_mode = self._string_constant("r")
         write_mode = self._string_constant("w")
-        ll_suffix_format = self._string_constant("%s.ll")
         llc_path = self._string_constant("/opt/homebrew/opt/llvm/bin/llc")
         llc_filetype = self._string_constant("-filetype=obj")
         llc_output = self._string_constant("-o")
@@ -770,14 +769,7 @@ class _Emitter:
                 "  %source_ok = call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source_buffer)",
                 "  br i1 %source_ok, label %write_llvm_path, label %fail",
                 "write_llvm_path:",
-                "  %object_len = call i64 @strlen(ptr %object_path)",
-                "  %ll_path_cap = add i64 %object_len, 4",
-                "  %ll_path = call ptr @malloc(i64 %ll_path_cap)",
-                (
-                    f"  %ll_path_written = call i32 (ptr, i64, ptr, ...) @snprintf("
-                    f"ptr %ll_path, i64 %ll_path_cap, ptr {ll_suffix_format}, "
-                    "ptr %object_path)"
-                ),
+                "  %ll_path = call ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %object_path)",
                 f"  %ll_file = call ptr @fopen(ptr %ll_path, ptr {write_mode})",
                 "  %ll_open = icmp ne ptr %ll_file, null",
                 "  br i1 %ll_open, label %write_llvm, label %fail",
