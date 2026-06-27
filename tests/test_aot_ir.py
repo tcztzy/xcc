@@ -11,6 +11,7 @@ from xcc.aot import (
     IrBreak,
     IrCall,
     IrConstBool,
+    IrConstFloat,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
@@ -20,6 +21,8 @@ from xcc.aot import (
     IrForEach,
     IrFunction,
     IrGetField,
+    IrFloatType,
+    IrIf,
     IrIntType,
     IrModule,
     IrName,
@@ -40,17 +43,19 @@ from xcc.aot import (
 )
 from xcc.aot.binder import _TypeBinder
 from xcc.aot.lower import (
+    _can_narrow_to_record,
     _collect_global_names,
     _dict_container_type_names,
     _dict_get_result_type,
     _Lowerer,
     _llvm_api_call_return_type,
     _none_guard_name,
+    _record_extends,
     _tuple_backed_container_element_name,
 )
 from xcc.aot.module import parse_source
 from xcc.aot.subset import check_subset
-from xcc.aot.types import AotClassInfo, AotType
+from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
 
 
 class AotIrModelTests(unittest.TestCase):
@@ -315,6 +320,118 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_float_literal_for_llvm_api_call(self) -> None:
+        module = lower_source_to_ir(
+            "from xcc.llvm_api import llvm\n"
+            "def zero_value(type_ref: int) -> int:\n"
+            "    c = llvm()\n"
+            "    return c.ConstReal(type_ref, 0.0)\n",
+            filename="llvm_api_float.py",
+        )
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__llvm_ConstReal",
+                (IrName("type_ref", IrIntType(64, signed=True)), IrConstFloat(0.0)),
+                IrIntType(64, signed=True),
+            ),
+        )
+        self.assertEqual(IrConstFloat(0.0).type, IrFloatType())
+
+    def test_lowers_negative_int_literal_subscript_index(self) -> None:
+        module = lower_source_to_ir(
+            "def last(values: tuple[str, ...]) -> str:\n"
+            "    return values[-1]\n",
+            filename="negative_index.py",
+        )
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__getitem",
+                (
+                    IrName("values", IrTupleType((IrStringType(),))),
+                    IrConstInt(-1, IrIntType(64, signed=True)),
+                ),
+                IrStringType(),
+            ),
+        )
+
+    def test_lowers_unary_int_plus_and_minus_expressions(self) -> None:
+        negated = lower_source_to_ir(
+            "def negate(value: int) -> int:\n"
+            "    return -value\n",
+            filename="unary_minus.py",
+        )
+        self.assertEqual(
+            negated.functions[0].body[0].value,
+            IrBinary(
+                "-",
+                IrConstInt(0, IrIntType(64, signed=True)),
+                IrName("value", IrIntType(64, signed=True)),
+                IrIntType(64, signed=True),
+            ),
+        )
+
+        positive = lower_source_to_ir(
+            "def positive(value: int) -> int:\n"
+            "    return +value\n",
+            filename="unary_plus.py",
+        )
+        self.assertEqual(
+            positive.functions[0].body[0].value,
+            IrName("value", IrIntType(64, signed=True)),
+        )
+
+    def test_lowers_unary_int_invert_expression(self) -> None:
+        module = lower_source_to_ir(
+            "def invert(value: int) -> int:\n"
+            "    return ~value\n",
+            filename="unary_invert.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            module.functions[0].body[0].value,
+            IrBinary(
+                "-",
+                IrConstInt(-1, int64),
+                IrName("value", int64),
+                int64,
+            ),
+        )
+
+    def test_lowers_tuple_backed_pop_call_statement(self) -> None:
+        module = lower_source_to_ir(
+            "def drop(values: list[str]) -> None:\n"
+            "    values.pop()\n",
+            filename="tuple_pop.py",
+        )
+        statement = module.functions[0].body[0]
+        self.assertEqual(
+            statement,
+            IrAssign(
+                "__expr",
+                IrCall(
+                    "values.pop",
+                    (IrName("values", IrTupleType((IrStringType(),))),),
+                    IrNoneType(),
+                ),
+            ),
+        )
+
+    def test_lowers_pass_statement_as_noop(self) -> None:
+        module = lower_source_to_ir(
+            "def skip() -> None:\n"
+            "    pass\n",
+            filename="pass.py",
+        )
+        self.assertEqual(module.functions[0].body[0], IrAssign("__pass", IrConstNone()))
+
     def test_lowers_dict_get_and_none_guard_narrows_optional_record(self) -> None:
         module = lower_source_to_ir(
             "from dataclasses import dataclass\n"
@@ -352,6 +469,255 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(return_type_field, IrGetField)
         assert isinstance(return_type_field, IrGetField)
         self.assertEqual(return_type_field.value, IrName("func_sym", IrRecordType("FunctionSymbol")))
+
+    def test_lowers_isinstance_guarded_ifexp_record_field(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "@dataclass(frozen=True)\n"
+            "class VarSymbol:\n"
+            "    type_: Type\n"
+            "@dataclass(frozen=True)\n"
+            "class OtherSymbol:\n"
+            "    type_: Type\n"
+            "def pick_type(symbol: VarSymbol | OtherSymbol, fallback: Type) -> Type:\n"
+            "    return symbol.type_ if isinstance(symbol, VarSymbol) else fallback\n",
+            filename="isinstance_ifexp.py",
+        )
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__ifexp",
+                (
+                    IrCall(
+                        "isinstance",
+                        (
+                            IrName("symbol", IrRecordType("VarSymbol | OtherSymbol")),
+                            IrName("VarSymbol", IrBoolType()),
+                        ),
+                        IrBoolType(),
+                    ),
+                    IrGetField(
+                        IrName("symbol", IrRecordType("VarSymbol")),
+                        "type_",
+                        IrRecordType("Type"),
+                    ),
+                    IrName("fallback", IrRecordType("Type")),
+                ),
+                IrRecordType("Type"),
+            ),
+        )
+
+    def test_lowers_isinstance_guarded_if_statement_record_field(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "class Stmt:\n"
+            "    pass\n"
+            "@dataclass(frozen=True)\n"
+            "class CompoundStmt(Stmt):\n"
+            "    statements: list[str]\n"
+            "@dataclass(frozen=True)\n"
+            "class ReturnStmt(Stmt):\n"
+            "    value: str\n"
+            "def first(stmt: Stmt) -> str:\n"
+            "    if isinstance(stmt, CompoundStmt):\n"
+            "        return stmt.statements[0]\n"
+            "    return ''\n",
+            filename="isinstance_if.py",
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__getitem",
+                (
+                    IrGetField(
+                        IrName("stmt", IrRecordType("CompoundStmt")),
+                        "statements",
+                        IrTupleType((IrStringType(),)),
+                    ),
+                    IrConstInt(0, IrIntType(64, signed=True)),
+                ),
+                IrStringType(),
+            ),
+        )
+
+    def test_lowers_truthy_optional_instance_field_guard(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class FunctionSymbol:\n"
+            "    locals: dict[str, int]\n"
+            "class Owner:\n"
+            "    def __init__(self, sym: FunctionSymbol | None) -> None:\n"
+            "        self._func_sym = sym\n"
+            "    def local_count(self) -> int:\n"
+            "        if self._func_sym:\n"
+            "            return len(self._func_sym.locals)\n"
+            "        return 0\n",
+            filename="truthy_optional_field.py",
+            include_records={"Owner", "FunctionSymbol"},
+            include_functions={"Owner.local_count"},
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "len",
+                (
+                    IrGetField(
+                        IrGetField(
+                            IrName("self", IrRecordType("Owner")),
+                            "_func_sym",
+                            IrRecordType("FunctionSymbol"),
+                        ),
+                        "locals",
+                        IrTupleType((IrStringType(), IrIntType(64, signed=True))),
+                    ),
+                ),
+                IrIntType(64, signed=True),
+            ),
+        )
+
+    def test_lowers_not_none_optional_instance_field_guard(self) -> None:
+        module = lower_source_to_ir(
+            "class Scope:\n"
+            "    def lookup(self, name: str) -> int:\n"
+            "        return 1\n"
+            "class Owner:\n"
+            "    def __init__(self, scope: Scope | None) -> None:\n"
+            "        self.scope = scope\n"
+            "    def read(self) -> int:\n"
+            "        if self.scope is not None:\n"
+            "            return self.scope.lookup('x')\n"
+            "        return 0\n",
+            filename="not_none_optional_field.py",
+            include_records={"Owner", "Scope"},
+            include_functions={"Owner.read"},
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "Scope.lookup",
+                (
+                    IrGetField(
+                        IrName("self", IrRecordType("Owner")),
+                        "scope",
+                        IrRecordType("Scope"),
+                    ),
+                    IrConstString("x"),
+                ),
+                IrIntType(64, signed=True),
+            ),
+        )
+
+    def test_lowers_isinstance_after_optional_assignment_without_else(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class VarSymbol:\n"
+            "    name: str\n"
+            "@dataclass(frozen=True)\n"
+            "class EnumConstSymbol:\n"
+            "    value: int\n"
+            "class Scope:\n"
+            "    def lookup(self, name: str) -> VarSymbol | EnumConstSymbol | None:\n"
+            "        return None\n"
+            "class Owner:\n"
+            "    def __init__(self, scope: Scope | None) -> None:\n"
+            "        self.scope = scope\n"
+            "    def read(self, name: str) -> int:\n"
+            "        sym = None\n"
+            "        if self.scope is not None:\n"
+            "            sym = self.scope.lookup(name)\n"
+            "        if isinstance(sym, EnumConstSymbol):\n"
+            "            return sym.value\n"
+            "        return 0\n",
+            filename="optional_assignment_no_else.py",
+            include_records={"Owner", "Scope", "VarSymbol", "EnumConstSymbol"},
+            include_functions={"Owner.read"},
+        )
+        branch = module.functions[0].body[2]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrGetField(
+                IrName("sym", IrRecordType("EnumConstSymbol")),
+                "value",
+                IrIntType(64, signed=True),
+            ),
+        )
+
+    def test_lowers_with_extra_cross_module_method_signature(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class VarSymbol:\n"
+            "    name: str\n"
+            "@dataclass(frozen=True)\n"
+            "class EnumConstSymbol:\n"
+            "    value: int\n"
+            "class Scope:\n"
+            "    pass\n"
+            "class Owner:\n"
+            "    def __init__(self, scope: Scope) -> None:\n"
+            "        self.scope = scope\n"
+            "    def read(self, name: str) -> int:\n"
+            "        sym = None\n"
+            "        sym = self.scope.lookup(name)\n"
+            "        if isinstance(sym, EnumConstSymbol):\n"
+            "            return sym.value\n"
+            "        return 0\n",
+            filename="extra_method_signature.py",
+            include_records={"Owner", "Scope", "VarSymbol", "EnumConstSymbol"},
+            include_functions={"Owner.read"},
+            extra_functions={
+                "Scope.lookup": AotFunctionInfo(
+                    "Scope.lookup",
+                    (("self", "Scope"), ("name", "str")),
+                    AotType("VarSymbol | EnumConstSymbol | None"),
+                )
+            },
+        )
+        branch = module.functions[0].body[2]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrGetField(
+                IrName("sym", IrRecordType("EnumConstSymbol")),
+                "value",
+                IrIntType(64, signed=True),
+            ),
+        )
 
     def test_lowers_empty_dict_literal_as_tuple_backed_container(self) -> None:
         module = lower_source_to_ir(
@@ -658,6 +1024,26 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_int_bool_call_as_ifexp(self) -> None:
+        module = lower_source_to_ir(
+            "def numeric(flag: bool) -> int:\n"
+            "    return int(flag)\n",
+            filename="int_bool.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            module.functions[0].body[0].value,
+            IrCall(
+                "__ifexp",
+                (
+                    IrName("flag", IrBoolType()),
+                    IrConstInt(1, int64),
+                    IrConstInt(0, int64),
+                ),
+                int64,
+            ),
+        )
+
     def test_lowers_project_method_call_with_analyzed_signature_types(self) -> None:
         module = lower_source_to_ir(
             "class Scanner:\n"
@@ -717,6 +1103,17 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         returned = module.functions[0].body[0].value
         self.assertEqual(returned, IrEnumMember("Kind", "EOF"))
+
+    def test_lowers_class_int_constant_attribute(self) -> None:
+        module = lower_source_to_ir(
+            "class Kind:\n"
+            "    POINTER = 12\n"
+            "def pointer() -> int:\n"
+            "    return Kind.POINTER\n",
+            filename="class_int_constant.py",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(returned, IrConstInt(12, IrIntType(64, signed=True)))
 
     def test_lowers_init_assigned_instance_attribute_field_read(self) -> None:
         module = lower_source_to_ir(
@@ -858,7 +1255,7 @@ class AotScalarLoweringTests(unittest.TestCase):
     def test_rejects_unsupported_expression(self) -> None:
         with self.assertRaises(AotError) as ctx:
             lower_source_to_ir(
-                "int64 = int\ndef f() -> int64:\n    return -1\n",
+                "int64 = int\ndef f() -> int64:\n    return {1: 2}\n",
                 filename="bad.py",
                 entry="f",
             )
@@ -867,7 +1264,7 @@ class AotScalarLoweringTests(unittest.TestCase):
     def test_rejects_unknown_name_call_target_and_field_access(self) -> None:
         cases = (
             ("def f() -> int:\n    return missing\n", "XCC-AOT-LOWER-0002"),
-            ("def f() -> int:\n    return 1.5\n", "XCC-AOT-LOWER-0002"),
+            ("def f() -> int:\n    return 1j\n", "XCC-AOT-LOWER-0002"),
             ("def f() -> int:\n    return helper()\n", "XCC-AOT-LOWER-0003"),
             ("def f() -> int:\n    return int()\n", "XCC-AOT-LOWER-0003"),
             ("def f() -> int:\n    return int('1', base=10)\n", "XCC-AOT-LOWER-0003"),
@@ -1039,12 +1436,18 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer._lower_joined_str(malformed_fstring, {})
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0005")
 
-        unsupported_statement = ast.parse("def f() -> int:\n    pass\n").body[0]
+        unsupported_statement = ast.parse(
+            "def f() -> int:\n"
+            "    try:\n"
+            "        return 1\n"
+            "    except Exception:\n"
+            "        return 0\n"
+        ).body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(unsupported_statement, owner=None)
         self.assertEqual(
             ctx.exception.diagnostics[0].message,
-            "Unsupported lowered statement: Pass",
+            "Unsupported lowered statement: Try",
         )
 
     def test_direct_lowerer_maps_string_int_and_record_field_types(self) -> None:
@@ -1073,6 +1476,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer._aot_type_to_ir_type(AotType("tuple[Node, ...]")),
             IrTupleType((IrRecordType("Node"),)),
         )
+        self.assertEqual(lowerer._aot_type_to_ir_type(AotType("float")), IrFloatType())
         self.assertEqual(
             lowerer._aot_type_to_ir_type(AotType("tuple[TypeOp, ...]")),
             IrTupleType(()),
@@ -1089,6 +1493,73 @@ class AotScalarLoweringTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             lowerer._aot_type_to_ir_type(AotType("object"))
         self.assertEqual(ctx.exception.diagnostics[0].message, "Unsupported lowered type: object")
+
+    def test_direct_lowerer_narrowing_helpers_cover_edge_inputs(self) -> None:
+        class_types = {
+            "Base": AotClassInfo("Base", {}),
+            "Child": AotClassInfo("Child", {}, ("Base",)),
+        }
+        lowerer = _Lowerer("narrow.py", class_types)
+        self.assertFalse(_can_narrow_to_record(IrIntType(64, signed=True), "Child", class_types))
+        self.assertTrue(_can_narrow_to_record(IrRecordType("object"), "Child", class_types))
+        self.assertTrue(_record_extends("Child", "Child", class_types))
+        self.assertFalse(_record_extends("Missing", "Base", class_types))
+
+        self.assertIsNone(
+            lowerer._isinstance_guard_narrowing(
+                ast.parse("isinstance(value.attr, Child)", mode="eval").body,
+                {"value": IrRecordType("object")},
+            )
+        )
+        self.assertIsNone(
+            lowerer._isinstance_guard_narrowing(
+                ast.parse("isinstance(value, Missing)", mode="eval").body,
+                {"value": IrRecordType("object")},
+            )
+        )
+        self.assertIsNone(
+            lowerer._isinstance_guard_narrowing(
+                ast.parse("isinstance(value, Child)", mode="eval").body,
+                {"value": IrIntType(64, signed=True)},
+            )
+        )
+
+        self.assertIsNone(lowerer._truthy_optional_record_narrowing(ast.Constant(True), {}))
+        self.assertIsNone(
+            lowerer._truthy_optional_record_narrowing(ast.Name("missing", ast.Load()), {})
+        )
+        self.assertIsNone(
+            lowerer._truthy_optional_record_narrowing(
+                ast.Name("value", ast.Load()),
+                {"value": IrIntType(64, signed=True)},
+            )
+        )
+
+        self.assertEqual(
+            lowerer._not_none_guard_narrowing(
+                ast.parse("None is not value", mode="eval").body,
+                {"value": IrRecordType("Child | None")},
+            ),
+            ("value", IrRecordType("Child")),
+        )
+        self.assertIsNone(
+            lowerer._not_none_guard_narrowing(ast.parse("None is not 1", mode="eval").body, {})
+        )
+        self.assertIsNone(
+            lowerer._not_none_guard_narrowing(ast.parse("1 is not 2", mode="eval").body, {})
+        )
+        self.assertIsNone(
+            lowerer._not_none_guard_narrowing(
+                ast.parse("missing is not None", mode="eval").body,
+                {},
+            )
+        )
+        self.assertIsNone(
+            lowerer._not_none_guard_narrowing(
+                ast.parse("value is not None", mode="eval").body,
+                {"value": IrIntType(64, signed=True)},
+            )
+        )
 
     def test_lowers_core_default_literal_and_runtime_shapes(self) -> None:
         source = (

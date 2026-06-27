@@ -11,6 +11,7 @@ from xcc.aot.ir import (
     IrBreak,
     IrCall,
     IrConstBool,
+    IrConstFloat,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
@@ -19,6 +20,7 @@ from xcc.aot.ir import (
     IrEnumMember,
     IrExpr,
     IrField,
+    IrFloatType,
     IrForEach,
     IrFunction,
     IrGetField,
@@ -57,7 +59,7 @@ _ALLOWED_BUILTIN_CALLS = {
     "tuple",
 }
 _ALLOWED_BUILTIN_VALUES = {"bool", "int", "object", "str", "tuple"}
-_ALLOWED_MUTATING_TUPLE_CALLS = {"append", "extend"}
+_ALLOWED_MUTATING_TUPLE_CALLS = {"append", "extend", "pop"}
 _STRING_PREDICATE_METHODS = frozenset({"isalpha", "isdigit", "isalnum", "isspace"})
 _LLVM_API_RECORD = "LLVMApi"
 
@@ -71,14 +73,17 @@ def lower_source_to_ir(
     include_functions: set[str] | frozenset[str] | None = None,
     bodyless_functions: set[str] | frozenset[str] | None = None,
     extra_classes: dict[str, AotClassInfo] | None = None,
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
 ) -> IrModule:
     analysis = analyze_source(source, filename=filename)
     class_types = dict(extra_classes or {})
     class_types.update(analysis.types.classes)
+    function_types = dict(extra_functions or {})
+    function_types.update(analysis.types.functions)
     lowerer = _Lowerer(
         filename,
         class_types,
-        analysis.types.functions,
+        function_types,
         analysis.types.aliases,
         _collect_global_names(analysis.module.tree),
     )
@@ -202,12 +207,31 @@ class _Lowerer:
             condition = self._lower_expr(statement.test, names, IrBoolType())
             then_names = dict(names)
             else_names = dict(names)
+            narrowed: tuple[str, IrType] | None = (
+                self._isinstance_guard_narrowing(
+                    statement.test,
+                    names,
+                )
+                or self._not_none_guard_narrowing(
+                    statement.test,
+                    names,
+                )
+                or self._truthy_optional_record_narrowing(statement.test, names)
+            )
+            if narrowed is not None:
+                narrowed_name, narrowed_type = narrowed
+                then_names[narrowed_name] = narrowed_type
             then_branch = IrBranch(
                 tuple(
                     self._lower_statement(child, then_names, return_type)
                     for child in statement.body
                 )
             )
+            if narrowed is not None and then_names.get(narrowed_name) == narrowed_type:
+                if narrowed_name in names:
+                    then_names[narrowed_name] = names[narrowed_name]
+                else:
+                    then_names.pop(narrowed_name, None)
             else_branch = None
             if statement.orelse:
                 else_branch = IrBranch(
@@ -217,7 +241,8 @@ class _Lowerer:
                     )
                 )
             names.update(then_names)
-            names.update(else_names)
+            if statement.orelse:
+                names.update(else_names)
             narrowed = self._none_guard_narrowing(
                 statement.test,
                 statement.body,
@@ -269,6 +294,8 @@ class _Lowerer:
         if isinstance(statement, ast.Assert):
             condition = self._lower_expr(statement.test, names, IrBoolType())
             return IrAssign("__assert", IrCall("__assert", (condition,), IrNoneType()))
+        if isinstance(statement, ast.Pass):
+            return IrAssign("__pass", IrConstNone())
         if isinstance(statement, ast.Expr):
             value = self._lower_expr(statement.value, names, return_type)
             return IrAssign("__expr", value)
@@ -351,6 +378,8 @@ class _Lowerer:
                 return IrConstString(expr.value)
             if isinstance(expr.value, bytes):
                 return IrConstString(expr.value.decode("utf-8"))
+            if isinstance(expr.value, float):
+                return IrConstFloat(expr.value)
         if isinstance(expr, ast.Name):
             value_type = names.get(expr.id)
             if value_type is None:
@@ -363,9 +392,16 @@ class _Lowerer:
                 class_info = self.class_types.get(expr.value.id)
                 if class_info is not None and _is_enum_class(class_info):
                     return IrEnumMember(expr.value.id, expr.attr)
+                if class_info is not None and expr.attr in class_info.int_constants:
+                    return IrConstInt(
+                        class_info.int_constants[expr.attr],
+                        expected if isinstance(expected, IrIntType) else IrIntType(64, signed=True),
+                    )
             value = self._lower_expr(expr.value, names, expected)
             if isinstance(value.type, IrRecordType) and value.type.name in self.class_types:
-                field_type = self._record_field_type(value.type, expr.attr, expr)
+                field_type = names.get(ast.unparse(expr))
+                if field_type is None:
+                    field_type = self._record_field_type(value.type, expr.attr, expr)
                 return IrGetField(value, expr.attr, field_type)
             self._error(
                 "XCC-AOT-LOWER-0002",
@@ -386,12 +422,49 @@ class _Lowerer:
                 (self._lower_expr(expr.operand, names, IrBoolType()),),
                 IrBoolType(),
             )
+        if (
+            isinstance(expr, ast.UnaryOp)
+            and isinstance(expr.op, ast.USub)
+            and isinstance(expr.operand, ast.Constant)
+            and type(expr.operand.value) is int
+            and isinstance(expected, IrIntType)
+        ):
+            return IrConstInt(-expr.operand.value, expected)
+        if isinstance(expr, ast.UnaryOp) and isinstance(expr.op, ast.UAdd):
+            return self._lower_expr(expr.operand, names, expected)
+        if (
+            isinstance(expr, ast.UnaryOp)
+            and isinstance(expr.op, ast.USub)
+            and isinstance(expected, IrIntType)
+        ):
+            return IrBinary(
+                "-",
+                IrConstInt(0, expected),
+                self._lower_expr(expr.operand, names, expected),
+                expected,
+            )
+        if (
+            isinstance(expr, ast.UnaryOp)
+            and isinstance(expr.op, ast.Invert)
+            and isinstance(expected, IrIntType)
+        ):
+            return IrBinary(
+                "-",
+                IrConstInt(-1, expected),
+                self._lower_expr(expr.operand, names, expected),
+                expected,
+            )
         if isinstance(expr, ast.IfExp):
+            body_names = dict(names)
+            narrowed = self._isinstance_guard_narrowing(expr.test, names)
+            if narrowed is not None:
+                name, narrowed_type = narrowed
+                body_names[name] = narrowed_type
             return IrCall(
                 "__ifexp",
                 (
                     self._lower_expr(expr.test, names, IrBoolType()),
-                    self._lower_expr(expr.body, names, expected),
+                    self._lower_expr(expr.body, body_names, expected),
                     self._lower_expr(expr.orelse, names, expected),
                 ),
                 expected,
@@ -614,13 +687,23 @@ class _Lowerer:
         expr: ast.Call,
         names: dict[str, IrType],
     ) -> IrExpr:
+        int64 = IrIntType(64, signed=True)
+        if not expr.keywords and len(expr.args) == 1:
+            return IrCall(
+                "__ifexp",
+                (
+                    self._lower_expr(expr.args[0], names, IrBoolType()),
+                    IrConstInt(1, int64),
+                    IrConstInt(0, int64),
+                ),
+                int64,
+            )
         if expr.keywords or len(expr.args) != 2:
             self._error(
                 "XCC-AOT-LOWER-0003",
                 f"Unsupported call target: {ast.unparse(expr.func)}",
                 expr,
             )
-        int64 = IrIntType(64, signed=True)
         return IrCall(
             "__int_parse",
             (
@@ -798,6 +881,8 @@ class _Lowerer:
             return IrIntType(type_info.bits, type_info.signed)
         if type_info.name == "str":
             return IrStringType()
+        if type_info.name == "float":
+            return IrFloatType()
         if type_info.name == "int":
             return IrIntType(64, signed=True)
         if type_info.name == "bool":
@@ -1075,6 +1160,73 @@ class _Lowerer:
             return IrRecordType(non_none[0])
         return None
 
+    def _isinstance_guard_narrowing(
+        self,
+        test: ast.expr,
+        names: dict[str, IrType],
+    ) -> tuple[str, IrRecordType] | None:
+        if (
+            not isinstance(test, ast.Call)
+            or not isinstance(test.func, ast.Name)
+            or test.func.id != "isinstance"
+            or test.keywords
+            or len(test.args) != 2
+        ):
+            return None
+        value, target_type = test.args
+        if not isinstance(value, ast.Name) or not isinstance(target_type, ast.Name):
+            return None
+        if target_type.id not in self.class_types:
+            return None
+        current = names.get(value.id)
+        if not _can_narrow_to_record(current, target_type.id, self.class_types):
+            return None
+        return value.id, IrRecordType(target_type.id)
+
+    def _truthy_optional_record_narrowing(
+        self,
+        test: ast.expr,
+        names: dict[str, IrType],
+    ) -> tuple[str, IrRecordType] | None:
+        if not isinstance(test, ast.Name | ast.Attribute):
+            return None
+        try:
+            value = self._lower_expr(test, names, IrRecordType("object"))
+        except AotError:
+            return None
+        narrowed = self._optional_record_inner(value.type)
+        if narrowed is None:
+            return None
+        return ast.unparse(test), narrowed
+
+    def _not_none_guard_narrowing(
+        self,
+        test: ast.expr,
+        names: dict[str, IrType],
+    ) -> tuple[str, IrRecordType] | None:
+        if (
+            not isinstance(test, ast.Compare)
+            or len(test.ops) != 1
+            or not isinstance(test.ops[0], ast.IsNot)
+            or len(test.comparators) != 1
+        ):
+            return None
+        guarded: ast.expr | None = None
+        if _is_none_constant(test.left):
+            guarded = test.comparators[0]
+        elif _is_none_constant(test.comparators[0]):
+            guarded = test.left
+        if guarded is None or not isinstance(guarded, ast.Name | ast.Attribute):
+            return None
+        try:
+            value = self._lower_expr(guarded, names, IrRecordType("object"))
+        except AotError:
+            return None
+        narrowed = self._optional_record_inner(value.type)
+        if narrowed is None:
+            return None
+        return ast.unparse(guarded), narrowed
+
     def _lower_compare(self, expr: ast.Compare, names: dict[str, IrType]) -> IrExpr:
         if len(expr.ops) != len(expr.comparators) or not expr.ops:
             self._error(
@@ -1257,6 +1409,37 @@ def _dict_get_result_type(value_type: IrType) -> IrType:
             return value_type
         return IrRecordType(f"{value_type.name} | None")
     return value_type
+
+
+def _can_narrow_to_record(
+    type_info: IrType | None,
+    record_name: str,
+    class_types: dict[str, AotClassInfo],
+) -> bool:
+    if not isinstance(type_info, IrRecordType):
+        return False
+    if type_info.name == "object":
+        return True
+    return any(
+        _record_extends(record_name, part.strip(), class_types)
+        for part in type_info.name.split("|")
+    )
+
+
+def _record_extends(
+    record_name: str,
+    base_name: str,
+    class_types: dict[str, AotClassInfo],
+) -> bool:
+    if record_name == base_name:
+        return True
+    class_info = class_types.get(record_name)
+    if class_info is None:
+        return False
+    return any(
+        base == base_name or _record_extends(base, base_name, class_types)
+        for base in class_info.bases
+    )
 
 
 def _none_guard_name(test: ast.expr) -> str | None:

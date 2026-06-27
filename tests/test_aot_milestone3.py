@@ -15,6 +15,7 @@ from xcc.aot import (
     IrBranch,
     IrCall,
     IrConstBool,
+    IrConstFloat,
     IrConstInt,
     IrConstNone,
     IrConstString,
@@ -250,6 +251,7 @@ class AotMilestone3SliceTests(unittest.TestCase):
             _expr_record_names(IrCall("__llvm_api", (), IrRecordType("LLVMApi"))),
             (),
         )
+        self.assertEqual(_expr_record_names(IrConstFloat(0.0)), ())
         with self.assertRaises(AssertionError):
             _statement_record_names(object())  # type: ignore[arg-type]
         unknown_expr = type("UnknownExpr", (), {"type": IrStringType()})()

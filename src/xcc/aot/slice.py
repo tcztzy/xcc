@@ -12,6 +12,7 @@ from xcc.aot.ir import (
     IrBreak,
     IrCall,
     IrConstBool,
+    IrConstFloat,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
@@ -43,7 +44,7 @@ from xcc.aot.ir import (
     IrWhile,
 )
 from xcc.aot.lower import lower_source_to_ir
-from xcc.aot.types import AotClassInfo
+from xcc.aot.types import AotClassInfo, AotFunctionInfo
 
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.cc_driver._aot_compile_source_to_llvm_ir",
@@ -131,6 +132,7 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
         module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
     }
     class_types, _ = _slice_class_tables(module_inputs, source_cache)
+    function_types = _slice_method_signature_table(module_inputs, source_cache)
     records: list[IrRecord] = []
     functions: list[IrFunction] = []
     for module_input in module_inputs:
@@ -139,6 +141,7 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
             source,
             filename=str(module_input.path),
             extra_classes=class_types,
+            extra_functions=function_types,
         )
         records.extend(module.records)
         prefix = module_input.name
@@ -166,6 +169,7 @@ def _lower_core_slice_from_roots(
         module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
     }
     class_types, class_modules = _slice_class_tables(module_inputs, source_cache)
+    function_types = _slice_method_signature_table(module_inputs, source_cache)
     rename_maps = {
         module.name: _module_rename_map(module.name, source_cache[module.name])
         for module in module_inputs
@@ -195,6 +199,7 @@ def _lower_core_slice_from_roots(
             include_functions={local_name},
             bodyless_functions=bodyless,
             extra_classes=class_types,
+            extra_functions=function_types,
         )
         for record in module.records:
             records_by_name.setdefault(record.name, record)
@@ -252,6 +257,22 @@ def _slice_class_tables(
             class_types.setdefault(class_name, class_info)
             class_modules.setdefault(class_name, module_input.name)
     return class_types, class_modules
+
+
+def _slice_method_signature_table(
+    module_inputs: tuple[AotSliceInput, ...],
+    source_cache: dict[str, str],
+) -> dict[str, AotFunctionInfo]:
+    function_types: dict[str, AotFunctionInfo] = {}
+    for module_input in module_inputs:
+        analysis = analyze_source(
+            source_cache[module_input.name],
+            filename=str(module_input.path),
+        )
+        for function_name, function_info in analysis.types.functions.items():
+            if "." in function_name:
+                function_types.setdefault(function_name, function_info)
+    return function_types
 
 
 def _add_missing_records(
@@ -567,7 +588,13 @@ def _rename_branch_calls(branch: IrBranch, rename_map: dict[str, str]) -> IrBran
 def _rename_expr_call(expr: IrExpr, rename_map: dict[str, str]) -> IrExpr:
     if isinstance(
         expr,
-        IrConstInt | IrConstString | IrConstBool | IrConstNone | IrEnumMember | IrName,
+        IrConstInt
+        | IrConstString
+        | IrConstFloat
+        | IrConstBool
+        | IrConstNone
+        | IrEnumMember
+        | IrName,
     ):
         return expr
     if isinstance(expr, IrBinary):
@@ -662,7 +689,13 @@ def _expr_record_names(expr: IrExpr) -> tuple[str, ...]:
     names = set(_type_record_names(expr.type))
     if isinstance(
         expr,
-        IrConstInt | IrConstString | IrConstBool | IrConstNone | IrEnumMember | IrName,
+        IrConstInt
+        | IrConstString
+        | IrConstFloat
+        | IrConstBool
+        | IrConstNone
+        | IrEnumMember
+        | IrName,
     ):
         return tuple(sorted(names))
     if isinstance(expr, IrBinary):
@@ -766,7 +799,13 @@ def _branch_call_targets(branch: IrBranch) -> tuple[str, ...]:
 def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
     if isinstance(
         expr,
-        IrConstInt | IrConstString | IrConstBool | IrConstNone | IrEnumMember | IrName,
+        IrConstInt
+        | IrConstString
+        | IrConstFloat
+        | IrConstBool
+        | IrConstNone
+        | IrEnumMember
+        | IrName,
     ):
         return ()
     if isinstance(expr, IrBinary):

@@ -11,6 +11,7 @@ from xcc.aot.ir import (
     IrBreak,
     IrCall,
     IrConstBool,
+    IrConstFloat,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
@@ -18,6 +19,7 @@ from xcc.aot.ir import (
     IrContinue,
     IrEnumMember,
     IrExpr,
+    IrFloatType,
     IrForEach,
     IrFunction,
     IrGetField,
@@ -236,6 +238,8 @@ class _Emitter:
     ) -> _EmittedValue:
         if isinstance(expr, IrConstInt):
             return _EmittedValue(str(expr.value), expr.type)
+        if isinstance(expr, IrConstFloat):
+            return _EmittedValue(_format_float_literal(expr.value), expr.type)
         if isinstance(expr, IrConstBool):
             return _EmittedValue("true" if expr.value else "false", IrBoolType())
         if isinstance(expr, IrConstNone):
@@ -1515,6 +1519,8 @@ class _Emitter:
     def _default_value(self, type_info: IrType) -> str:
         if isinstance(type_info, IrBoolType):
             return "false"
+        if isinstance(type_info, IrFloatType):
+            return "0.0"
         if isinstance(type_info, IrIntType):
             return "0"
         if isinstance(type_info, (IrNoneType, IrRecordType, IrStringType, IrTupleType)):
@@ -1558,6 +1564,8 @@ class _Emitter:
             return f"i{type_info.bits}"
         if isinstance(type_info, IrBoolType):
             return "i1"
+        if isinstance(type_info, IrFloatType):
+            return "double"
         if isinstance(type_info, IrStringType):
             return "ptr"
         if isinstance(type_info, IrRecordType):
@@ -1623,6 +1631,11 @@ def _llvm_symbol(name: str) -> str:
 
 def _is_pointer_type(type_info: IrType) -> bool:
     return isinstance(type_info, IrNoneType | IrRecordType | IrStringType | IrTupleType)
+
+
+def _format_float_literal(value: float) -> str:
+    rendered = repr(value)
+    return rendered if "." in rendered or "e" in rendered.lower() else f"{rendered}.0"
 
 
 def _block_is_terminated(lines: list[str]) -> bool:

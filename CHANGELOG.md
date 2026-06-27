@@ -236,6 +236,17 @@
   now advances past `c.FunctionType(...)`, `func.name.encode()`, and
   `c.AppendBasicBlock(fn, b"entry")`; the next observed blocker is
   `symbol.type_` after `isinstance(symbol, VarSymbol)` in `codegen.py`.
+- Added AOT lowering for `isinstance(...)` branch narrowing over union/base
+  record types, optional attribute guards (`is not None` and truthy checks),
+  class-level integer constants, Python float literals, negative indexes,
+  unary integer `+`, `-`, and `~`, `int(bool)` coercion, tuple-backed `pop()`,
+  and `pass` statements. Core slice lowering now also injects cross-module
+  method signatures. The broader source-to-LLVM unchecked slice now advances
+  past `symbol.type_`, `self._locals[-1]`, `LLVMTypeKind.POINTER`,
+  `c.ConstReal(..., 0.0)`, `stmt.statements`, `self._locals.pop()`,
+  `pass`, `_eval_case_val` unary operators, and optional `self._func_sym` /
+  `self._sema.file_scope` guards; the next observed blocker is `left // right`
+  in `codegen.py`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

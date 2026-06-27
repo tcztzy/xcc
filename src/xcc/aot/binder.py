@@ -84,11 +84,25 @@ class _TypeBinder:
                 continue
             bases = tuple(annotation_name(base) for base in statement.bases)
             fields: dict[str, AotType] = {}
+            int_constants: dict[str, int] = {}
             for child in statement.body:
                 if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
                     fields[child.target.id] = self._resolve_annotation(child.annotation, child)
+                elif (
+                    isinstance(child, ast.Assign)
+                    and len(child.targets) == 1
+                    and isinstance(child.targets[0], ast.Name)
+                    and isinstance(child.value, ast.Constant)
+                    and type(child.value.value) is int
+                ):
+                    int_constants[child.targets[0].id] = child.value.value
             self._collect_init_fields(statement, fields, return_types)
-            self.classes[statement.name] = AotClassInfo(statement.name, fields, bases)
+            self.classes[statement.name] = AotClassInfo(
+                statement.name,
+                fields,
+                bases,
+                int_constants,
+            )
 
     def _collect_init_fields(
         self,

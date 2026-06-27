@@ -10,6 +10,7 @@ from xcc.aot import (
     IrBranch,
     IrCall,
     IrConstBool,
+    IrConstFloat,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
@@ -21,6 +22,7 @@ from xcc.aot import (
     IrFunction,
     IrGetField,
     IrIf,
+    IrFloatType,
     IrIntType,
     IrModule,
     IrName,
@@ -64,6 +66,23 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("define i32 @main()", llvm_ir)
         self.assertIn("%result = call i64 @answer()", llvm_ir)
         self.assertIn("%exit = trunc i64 %result to i32", llvm_ir)
+
+    def test_emits_float_constant_return(self) -> None:
+        module = IrModule(
+            "float.py",
+            (),
+            (
+                IrFunction(
+                    "zero",
+                    (),
+                    IrFloatType(),
+                    (IrReturn(IrConstFloat(0.0)),),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define double @zero()", llvm_ir)
+        self.assertIn("ret double 0.0", llvm_ir)
 
     def test_emits_string_return_with_puts_wrapper(self) -> None:
         module = lower_source_to_ir(
@@ -1013,6 +1032,7 @@ class AotLlvmTextTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             emitter._default_value(object())  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        self.assertEqual(emitter._default_value(IrFloatType()), "0.0")
         with self.assertRaises(AotError) as ctx:
             emitter._emit_status_return([], object())  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")

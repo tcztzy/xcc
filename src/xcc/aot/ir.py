@@ -14,6 +14,11 @@ class IrStringType:
 
 
 @dataclass(frozen=True)
+class IrFloatType:
+    pass
+
+
+@dataclass(frozen=True)
 class IrRecordType:
     name: str
 
@@ -33,7 +38,9 @@ class IrTupleType:
     elements: tuple["IrType", ...]
 
 
-IrType = IrIntType | IrStringType | IrRecordType | IrBoolType | IrNoneType | IrTupleType
+IrType = (
+    IrIntType | IrStringType | IrFloatType | IrRecordType | IrBoolType | IrNoneType | IrTupleType
+)
 
 
 @dataclass(frozen=True)
@@ -67,6 +74,15 @@ class IrConstString:
     @property
     def type(self) -> IrStringType:
         return IrStringType()
+
+
+@dataclass(frozen=True)
+class IrConstFloat:
+    value: float
+
+    @property
+    def type(self) -> IrFloatType:
+        return IrFloatType()
 
 
 @dataclass(frozen=True)
@@ -169,6 +185,7 @@ class IrStringJoin:
 IrExpr = (
     IrConstInt
     | IrConstString
+    | IrConstFloat
     | IrConstBool
     | IrConstNone
     | IrEnumMember

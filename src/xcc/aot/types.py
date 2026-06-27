@@ -1,5 +1,5 @@
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _BUILTIN_TYPES = {
     "Enum",
@@ -41,6 +41,7 @@ class AotClassInfo:
     name: str
     fields: dict[str, AotType]
     bases: tuple[str, ...] = ()
+    int_constants: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

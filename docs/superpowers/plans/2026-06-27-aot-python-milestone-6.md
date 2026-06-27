@@ -900,6 +900,17 @@ string constants for LLVM-C names. The broader source-to-LLVM unchecked slice
 now advances past `c.FunctionType(...)`, `func.name.encode()`, and
 `c.AppendBasicBlock(fn, b"entry")`; the next observed blocker is `symbol.type_`
 after `isinstance(symbol, VarSymbol)` in `codegen.py`.
+AOT lowering now handles `isinstance(...)` branch narrowing over union/base
+record types, optional attribute guards (`is not None` and truthy checks),
+class-level integer constants, Python float literals, negative indexes, unary
+integer `+`, `-`, and `~`, `int(bool)` coercion, tuple-backed `pop()`, and
+`pass` statements. Core slice lowering now also injects cross-module method
+signatures. The broader source-to-LLVM unchecked slice now advances past
+`symbol.type_`, `self._locals[-1]`, `LLVMTypeKind.POINTER`,
+`c.ConstReal(..., 0.0)`, `stmt.statements`, `self._locals.pop()`, `pass`,
+`_eval_case_val` unary operators, and optional `self._func_sym` /
+`self._sema.file_scope` guards; the next observed blocker is `left // right` in
+`codegen.py`.
 The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with
