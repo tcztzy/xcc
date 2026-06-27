@@ -79,6 +79,21 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("%call1 = call ptr @__xcc_aot_tuple_get(ptr %argv, i64 2)", llvm_ir)
         self.assertNotIn("call ptr @__getitem", llvm_ir)
 
+    def test_emits_tuple_len_intrinsic(self) -> None:
+        module = lower_source_to_ir(
+            "int32 = int\n"
+            "def check(argv: tuple[str, ...]) -> int32:\n"
+            "    if len(argv) != 5:\n"
+            "        return 1\n"
+            "    return 0\n",
+            filename="tuple_len.py",
+            entry="check",
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("%call1 = call i64 @__xcc_aot_tuple_len(ptr %argv)", llvm_ir)
+        self.assertNotIn("call i64 @len", llvm_ir)
+        self.assertNotIn("ptrtoint ptr %call1", llvm_ir)
+
     def test_emits_core_lexer_translate_source_leaf(self) -> None:
         cases = (
             (
@@ -560,6 +575,49 @@ class AotLlvmTextTests(unittest.TestCase):
                         (),
                         IrIntType(32, signed=True),
                         (),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "len",
+                                    (
+                                        IrTuple((), IrTupleType(())),
+                                        IrConstInt(0, int64),
+                                    ),
+                                    int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "len",
+                                    (IrTuple((), IrTupleType(())),),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
                     ),
                 ),
             ),

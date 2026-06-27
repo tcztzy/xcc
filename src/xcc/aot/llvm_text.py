@@ -519,6 +519,8 @@ class _Emitter:
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue | None:
+        if expr.target == "len" and expr.args and isinstance(expr.args[0].type, IrTupleType):
+            return self._emit_len_call(expr, names, lines)
         if expr.target == "__getitem" and expr.args and isinstance(expr.args[0].type, IrTupleType):
             return self._emit_getitem_call(expr, names, lines)
         if (
@@ -576,6 +578,22 @@ class _Emitter:
                 lines=lines,
             )
         return None  # pragma: no cover
+
+    def _emit_len_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("len expects one argument")
+        value = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(expr.type, IrIntType) or expr.type.bits != 64:
+            self._error("len expects an int64 result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("call")
+        lines.append(f"  {result} = call i64 @__xcc_aot_tuple_len(ptr {value.value})")
+        return _EmittedValue(result, expr.type)
 
     def _emit_getitem_call(
         self,

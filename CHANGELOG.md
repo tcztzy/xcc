@@ -133,6 +133,10 @@
   expressions such as `argv[2]` now call `__xcc_aot_tuple_get()` instead of
   leaving an unresolved `__getitem` symbol, preparing
   `_aot_compile_smoke_source_to_object()` for ordinary body lowering.
+- Added LLVM emission for lowered tuple length checks. Ordinary lowered Python
+  expressions such as `len(argv) != 5` now call `__xcc_aot_tuple_len()` and
+  compare an `int64` result instead of treating `len()` as a dynamic pointer
+  call.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

@@ -425,6 +425,12 @@ class _Lowerer:
         names: dict[str, IrType],
         expected: IrType,
     ) -> IrExpr:
+        if isinstance(expr.func, ast.Name) and expr.func.id == "len" and len(expr.args) == 1:
+            return IrCall(
+                "len",
+                (self._lower_expr(expr.args[0], names, IrTupleType(())),),
+                IrIntType(64, signed=True),
+            )
         if isinstance(expr.func, ast.Name) and expr.func.id in self.class_types:
             record_name = expr.func.id
             record_type = IrRecordType(record_name)
