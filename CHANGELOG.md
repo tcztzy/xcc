@@ -26,7 +26,10 @@
   access; AOT lowering also supports tuple-of-class `isinstance` narrowing for
   common record-field access. The broader source-to-LLVM unchecked slice from
   `xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked` now lowers to AOT IR
-  successfully, currently covering 237 functions and 62 records.
+  successfully, currently covering 237 functions and 62 records. LLVM text
+  emission and runtime support now cover the newly reached `str.ljust(...)`,
+  `str.rstrip(...)`, `bytes(...)`, `int.to_bytes(...)`, and `id(...)`
+  intrinsics, with native smoke coverage for observable string/byte/id paths.
 - Expanded Milestone 6 AOT bootstrap admission by validating ordinary
   container, private project-type, dotted type, and `Callable[[...], ...]`
   annotations structurally, plus read-only `Sequence[...]` and `Iterable[...]`

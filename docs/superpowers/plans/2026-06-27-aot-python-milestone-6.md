@@ -931,9 +931,13 @@ tuple-of-class `isinstance` narrowing for common record-field access, so codegen
 can keep the ordinary CPython form where ruff expects it.
 The broader source-to-LLVM unchecked slice rooted at
 `xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked` now lowers to AOT IR
-successfully, currently covering 237 functions and 62 records. The remaining
-Step 4d work moves from source-to-IR reachability to LLVM text emission/runtime
-coverage for the newly discovered intrinsics and the lowered codegen path.
+successfully, currently covering 237 functions and 62 records. LLVM text
+emission and runtime coverage now exists for the newly discovered
+`str.ljust`, `str.rstrip`, `bytes`, `int.to_bytes`, and `id` intrinsics, with
+native smoke coverage for observable string/byte/id paths. The remaining Step
+4d work is the broader lowered codegen emission/execution path plus
+length-aware bytes semantics beyond the current C-string-compatible buffer
+shape.
 The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with

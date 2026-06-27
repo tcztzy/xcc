@@ -52,7 +52,7 @@ from xcc.ast import (
 from xcc.diag import CodegenError
 from xcc.frontend import compile_source
 from xcc.options import FrontendOptions
-from xcc.sema.symbols import RecordMemberInfo
+from xcc.sema.symbols import EnumConstSymbol, RecordMemberInfo
 from xcc.types import BOOL, DOUBLE, FLOAT, INT, VOID, Type
 from xcc.x86_64_asm import (
     _AggregateChunk,
@@ -1528,6 +1528,15 @@ int f(void) { struct Mixed local_mixed; return 0; }
             gen._sizeof_operand_type(SizeofExpr(MemberExpr(FloatLiteral("1.0"), "missing", False), None))
         with self.assertRaisesRegex(CodegenError, "cannot resolve sizeof operand type"):
             gen._sizeof_operand_type(SizeofExpr(MemberExpr(Identifier("callee"), "missing", False), None))
+        assert gen._func_sym is not None
+        gen._func_sym.locals["enum_like"] = EnumConstSymbol("enum_like", 1)
+        enum_like_chain = MemberExpr(
+            MemberExpr(Identifier("enum_like"), "missing", False),
+            "tail",
+            False,
+        )
+        with self.assertRaisesRegex(CodegenError, "cannot resolve sizeof operand type"):
+            gen._sizeof_operand_type(SizeofExpr(enum_like_chain, None))
 
         offsetof_missing = typed_expr(
             BuiltinOffsetofExpr(TypeSpec("struct", record_tag="Mixed"), "missing"),

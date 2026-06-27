@@ -792,9 +792,19 @@ class _Emitter:
             return self._emit_string_startswith_call(expr, names, lines)
         if expr.target == "__str_endswith":
             return self._emit_string_endswith_call(expr, names, lines)
+        if expr.target == "__str_ljust":
+            return self._emit_string_ljust_call(expr, names, lines)
+        if expr.target == "__str_rstrip":
+            return self._emit_string_rstrip_call(expr, names, lines)
         predicate_mode = _STRING_PREDICATE_INTRINSICS.get(expr.target)
         if predicate_mode is not None:
             return self._emit_string_predicate_call(expr, predicate_mode, names, lines)
+        if expr.target == "__bytes":
+            return self._emit_bytes_call(expr, names, lines)
+        if expr.target == "__id":
+            return self._emit_id_call(expr, names, lines)
+        if expr.target == "__int_to_bytes":
+            return self._emit_int_to_bytes_call(expr, names, lines)
         if expr.target == "__int_parse":
             return self._emit_int_parse_call(expr, names, lines)
         if expr.target not in {
@@ -915,6 +925,114 @@ class _Emitter:
         lines.append(
             f"  {result} = call i1 @__xcc_aot_string_endswith("
             f"ptr {value.value}, ptr {suffix.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_string_ljust_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 3:
+            self._error("__str_ljust expects three arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        width = self._emit_expr(expr.args[1], names, lines)
+        fill = self._emit_expr(expr.args[2], names, lines)
+        if not isinstance(value.type, IrStringType) or not isinstance(fill.type, IrStringType):
+            self._error("__str_ljust expects string receiver and fill")
+        if not isinstance(width.type, IrIntType) or width.type.bits != 64:
+            self._error("__str_ljust expects an int64 width")
+        if not isinstance(expr.type, IrStringType):
+            self._error("__str_ljust expects a string result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("ljust")
+        lines.append(
+            f"  {result} = call ptr @__xcc_aot_string_ljust("
+            f"ptr {value.value}, i64 {width.value}, ptr {fill.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_string_rstrip_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__str_rstrip expects two arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        chars = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(value.type, IrStringType) or not isinstance(chars.type, IrStringType):
+            self._error("__str_rstrip expects string receiver and chars")
+        if not isinstance(expr.type, IrStringType):
+            self._error("__str_rstrip expects a string result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("rstrip")
+        lines.append(
+            f"  {result} = call ptr @__xcc_aot_string_rstrip(ptr {value.value}, ptr {chars.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_bytes_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("__bytes expects one argument")
+        size = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(size.type, IrIntType) or size.type.bits != 64:
+            self._error("__bytes expects an int64 size")
+        if not isinstance(expr.type, IrStringType):
+            self._error("__bytes expects a string result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("bytes")
+        lines.append(f"  {result} = call ptr @__xcc_aot_zero_bytes(i64 {size.value})")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_id_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("__id expects one argument")
+        value = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(expr.type, IrIntType) or expr.type.bits != 64:
+            self._error("__id expects an int64 result")
+        if not _is_pointer_type(value.type):
+            self._error("__id expects a pointer-like value")
+        result = self._tmp("id")
+        lines.append(f"  {result} = ptrtoint ptr {value.value} to i64")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_int_to_bytes_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 3:
+            self._error("__int_to_bytes expects three arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        size = self._emit_expr(expr.args[1], names, lines)
+        byteorder = self._emit_expr(expr.args[2], names, lines)
+        if not isinstance(value.type, IrIntType) or value.type.bits != 64:
+            self._error("__int_to_bytes expects an int64 value")
+        if not isinstance(size.type, IrIntType) or size.type.bits != 64:
+            self._error("__int_to_bytes expects an int64 size")
+        if not isinstance(byteorder.type, IrStringType):
+            self._error("__int_to_bytes expects a string byteorder")
+        if not isinstance(expr.type, IrStringType):
+            self._error("__int_to_bytes expects a string result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("tobytes")
+        lines.append(
+            f"  {result} = call ptr @__xcc_aot_int_to_bytes("
+            f"i64 {value.value}, i64 {size.value}, ptr {byteorder.value})"
         )
         return _EmittedValue(result, expr.type)
 

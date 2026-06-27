@@ -127,6 +127,42 @@ class AotNativeRealSmokeTests(unittest.TestCase):
         self.assertEqual(result.native_stdout, "ok\n")
         self.assertEqual(result.native_returncode, 0)
 
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_real_string_padding_native_smoke_matches_cpython_stdout(self) -> None:
+        result = run_native_smoke(
+            "def message() -> str:\n"
+            "    padded = 'ab'.ljust(4, '.')\n"
+            "    return padded.rstrip('.')\n",
+            entry="message",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.python_result, "ab")
+        self.assertEqual(result.native_stdout, "ab\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_real_int_to_bytes_native_smoke_matches_single_byte_stdout(self) -> None:
+        result = run_native_smoke(
+            "def message() -> bytes:\n"
+            "    return (65).to_bytes(1, 'little')\n",
+            entry="message",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.python_result, b"A")
+        self.assertEqual(result.native_stdout, "A\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_real_id_native_smoke_returns_truthy_pointer_identity(self) -> None:
+        result = run_native_smoke(
+            "def check() -> bool:\n"
+            "    return id('x') != 0\n",
+            entry="check",
+            llc=_real_llc(),
+        )
+        self.assertIs(result.python_result, True)
+        self.assertEqual(result.native_returncode, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

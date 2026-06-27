@@ -900,6 +900,98 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("define i1 @__xcc_aot_string_endswith", llvm_ir)
         self.assertIn("call i1 @__xcc_aot_string_endswith(ptr @.str0, ptr @.str1)", llvm_ir)
 
+    def test_emits_string_ljust_and_rstrip_intrinsic_calls(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        string_type = IrStringType()
+        module = IrModule(
+            "string_padding.py",
+            (),
+            (
+                IrFunction(
+                    "pad",
+                    (),
+                    string_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__str_ljust",
+                                (
+                                    IrConstString("ab"),
+                                    IrConstInt(4, int64),
+                                    IrConstString("."),
+                                ),
+                                string_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "trim",
+                    (),
+                    string_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__str_rstrip",
+                                (IrConstString("ab.."), IrConstString(".")),
+                                string_type,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define ptr @__xcc_aot_string_ljust", llvm_ir)
+        self.assertIn("define ptr @__xcc_aot_string_rstrip", llvm_ir)
+        self.assertIn(
+            "call ptr @__xcc_aot_string_ljust(ptr @.str0, i64 4, ptr @.str1)",
+            llvm_ir,
+        )
+        self.assertIn("call ptr @__xcc_aot_string_rstrip(ptr @.str2, ptr @.str3)", llvm_ir)
+
+    def test_emits_bytes_id_and_int_to_bytes_intrinsic_calls(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        string_type = IrStringType()
+        module = IrModule(
+            "bytes_helpers.py",
+            (),
+            (
+                IrFunction(
+                    "zeroed",
+                    (),
+                    string_type,
+                    (IrReturn(IrCall("__bytes", (IrConstInt(3, int64),), string_type)),),
+                ),
+                IrFunction(
+                    "key",
+                    (IrParam("value", IrRecordType("object")),),
+                    int64,
+                    (IrReturn(IrCall("__id", (IrName("value", IrRecordType("object")),), int64)),),
+                ),
+                IrFunction(
+                    "encode",
+                    (),
+                    string_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__int_to_bytes",
+                                (IrConstInt(65, int64), IrConstInt(1, int64), IrConstString("little")),
+                                string_type,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define ptr @__xcc_aot_zero_bytes", llvm_ir)
+        self.assertIn("define ptr @__xcc_aot_int_to_bytes", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_zero_bytes(i64 3)", llvm_ir)
+        self.assertIn("ptrtoint ptr %value to i64", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_int_to_bytes(i64 65, i64 1, ptr @.str0)", llvm_ir)
+
     def test_emits_string_predicate_intrinsic_calls(self) -> None:
         bool_type = IrBoolType()
         module = IrModule(
@@ -1358,6 +1450,338 @@ class AotLlvmTextTests(unittest.TestCase):
                                         IrTuple((), IrTupleType(())),
                                         IrConstInt(0, int64),
                                     ),
+                                    int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (IrReturn(IrCall("__bytes", (), IrStringType())),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (IrReturn(IrCall("__bytes", (IrConstBool(True),), IrStringType())),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (IrReturn(IrCall("__bytes", (IrConstInt(1, int64),), int64)),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (IrReturn(IrCall("__id", (), int64)),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (IrReturn(IrCall("__id", (IrConstString("x"),), IrStringType())),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (IrReturn(IrCall("__id", (IrConstInt(1, int64),), int64)),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (IrReturn(IrCall("__int_to_bytes", (IrConstInt(1, int64),), IrStringType())),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__int_to_bytes",
+                                    (
+                                        IrConstString("x"),
+                                        IrConstInt(1, int64),
+                                        IrConstString("little"),
+                                    ),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__int_to_bytes",
+                                    (
+                                        IrConstInt(1, int64),
+                                        IrConstBool(True),
+                                        IrConstString("little"),
+                                    ),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__int_to_bytes",
+                                    (
+                                        IrConstInt(1, int64),
+                                        IrConstInt(1, int64),
+                                        IrConstBool(True),
+                                    ),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__int_to_bytes",
+                                    (
+                                        IrConstInt(1, int64),
+                                        IrConstInt(1, int64),
+                                        IrConstString("little"),
+                                    ),
+                                    int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_ljust",
+                                    (IrConstString("x"), IrConstInt(2, int64)),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_ljust",
+                                    (
+                                        IrConstInt(1, int64),
+                                        IrConstInt(2, int64),
+                                        IrConstString(" "),
+                                    ),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_ljust",
+                                    (
+                                        IrConstString("x"),
+                                        IrConstBool(True),
+                                        IrConstString(" "),
+                                    ),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_ljust",
+                                    (
+                                        IrConstString("x"),
+                                        IrConstInt(2, int64),
+                                        IrConstString(" "),
+                                    ),
+                                    int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_rstrip",
+                                    (IrConstString("x"),),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_rstrip",
+                                    (IrConstString("x"), IrConstInt(1, int64)),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_rstrip",
+                                    (IrConstString("x"), IrConstString("x")),
                                     int64,
                                 )
                             ),
