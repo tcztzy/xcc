@@ -8,7 +8,7 @@ from xcc.diag import Diagnostic, FrontendError
 from xcc.lexer import LexerError, Token, lex, lex_pp
 from xcc.options import FrontendOptions, normalize_options
 from xcc.parser import ParserError, parse
-from xcc.preprocessor import PreprocessorError, preprocess_source
+from xcc.preprocessor import PreprocessorError, PreprocessResult, preprocess_source
 from xcc.sema import SemaError, SemaUnit, analyze
 
 _LEX_ERROR_CODE = "XCC-LEX-0001"
@@ -71,6 +71,37 @@ def read_source(path: str, *, stdin: TextIO | None = None) -> tuple[str, str]:
         return "<stdin>", stream.read()
     resolved = Path(path)
     return str(resolved), resolved.read_text(encoding="utf-8", errors="surrogateescape")
+
+
+def _aot_compile_source_unchecked(
+    source: str,
+    filename: str,
+    options: FrontendOptions,
+) -> FrontendResult:
+    normalized_options: FrontendOptions = normalize_options(options)
+    pp_result: PreprocessResult = preprocess_source(
+        source,
+        filename=filename,
+        options=normalized_options,
+    )
+    tokens: list[Token] = lex(pp_result.source)
+    unit: TranslationUnit = parse(tokens, std=normalized_options.std)
+    sema: SemaUnit = analyze(
+        unit,
+        std=normalized_options.std,
+        excess_init_ok=pp_result.embed_used,
+        pack_changes=pp_result.pack_changes,
+    )
+    return FrontendResult(
+        filename,
+        source,
+        pp_result.source,
+        tokens,
+        unit,
+        sema,
+        pp_result.include_trace,
+        pp_result.macro_table,
+    )
 
 
 def compile_source(

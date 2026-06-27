@@ -11,8 +11,19 @@ from typing import Literal, TextIO
 
 from xcc.codegen import generate_llvm_ir
 from xcc.diag import CodegenError, Diagnostic
-from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
-from xcc.options import FrontendOptions, StdMode
+from xcc.frontend import (
+    FrontendError,
+    FrontendResult,
+    _aot_compile_source_unchecked,
+    compile_path,
+    compile_source,
+    read_source,
+)
+from xcc.lexer import LexerError
+from xcc.options import FrontendOptions, StdMode, normalize_options
+from xcc.parser import ParserError
+from xcc.preprocessor import PreprocessorError
+from xcc.sema import SemaError
 
 int32 = int
 
@@ -493,14 +504,15 @@ def _aot_write_text_file(path: str, text: str) -> bool:
 
 
 def _aot_compile_source_to_llvm_ir_unchecked(source_path: str, source_text: str) -> str:
-    result: FrontendResult = compile_source(source_text, filename=source_path)
+    options: FrontendOptions = normalize_options(None)
+    result: FrontendResult = _aot_compile_source_unchecked(source_text, source_path, options)
     return generate_llvm_ir(result)
 
 
 def _aot_compile_source_to_llvm_ir(source_path: str, source_text: str) -> str:
     try:
         return _aot_compile_source_to_llvm_ir_unchecked(source_path, source_text)
-    except (FrontendError, CodegenError):
+    except (FrontendError, CodegenError, PreprocessorError, LexerError, ParserError, SemaError):
         return ""
 
 

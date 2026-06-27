@@ -257,18 +257,53 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             filename=str(ROOT / "src/xcc/cc_driver.py"),
             include_records=frozenset(),
             include_functions={"_aot_compile_source_to_llvm_ir_unchecked"},
-            extra_classes=analyze_path(ROOT / "src/xcc/frontend.py").types.classes,
+            extra_classes={
+                **analyze_path(ROOT / "src/xcc/frontend.py").types.classes,
+                **analyze_path(ROOT / "src/xcc/options.py").types.classes,
+            },
         )
         self.assertEqual(len(module.functions), 1)
         helper = module.functions[0]
         body = repr(helper.body)
-        self.assertIn("target='compile_source'", body)
+        self.assertIn("target='_aot_compile_source_unchecked'", body)
+        self.assertNotIn("target='compile_source'", body)
         self.assertIn("target='generate_llvm_ir'", body)
+
+    def test_frontend_unchecked_success_helper_body_is_ordinary_lowerable(self) -> None:
+        class_types = {}
+        for module_path in (
+            ROOT / "src/xcc/ast.py",
+            ROOT / "src/xcc/frontend.py",
+            ROOT / "src/xcc/lexer.py",
+            ROOT / "src/xcc/options.py",
+            ROOT / "src/xcc/preprocessor/__init__.py",
+            ROOT / "src/xcc/sema/symbols.py",
+        ):
+            class_types.update(analyze_path(module_path).types.classes)
+        source = (ROOT / "src/xcc/frontend.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/frontend.py"),
+            include_records=frozenset(),
+            include_functions={"_aot_compile_source_unchecked"},
+            extra_classes=class_types,
+        )
+        self.assertEqual(len(module.functions), 1)
+        body = repr(module.functions[0].body)
+        self.assertIn("target='normalize_options'", body)
+        self.assertIn("target='preprocess_source'", body)
+        self.assertIn("target='lex'", body)
+        self.assertIn("target='parse'", body)
+        self.assertIn("target='analyze'", body)
+        self.assertIn("record='FrontendResult'", body)
 
     def test_project_imports_are_renamed_to_qualified_slice_targets(self) -> None:
         source = (ROOT / "src/xcc/cc_driver.py").read_text(encoding="utf-8")
         rename_map = aot_slice._module_rename_map("xcc.cc_driver", source)
-        self.assertEqual(rename_map["compile_source"], "xcc.frontend.compile_source")
+        self.assertEqual(
+            rename_map["_aot_compile_source_unchecked"],
+            "xcc.frontend._aot_compile_source_unchecked",
+        )
         self.assertEqual(rename_map["generate_llvm_ir"], "xcc.codegen.generate_llvm_ir")
         edge_map = aot_slice._module_rename_map(
             "xcc.demo",

@@ -160,6 +160,14 @@
   keyword argument values in lowered calls, preparing the bootstrap path to pull
   the real frontend/backend implementation behind the current smoke-only native
   leaf.
+- Split the frontend success path into a lowerable
+  `_aot_compile_source_unchecked()` helper that exposes the ordinary
+  `normalize_options()`, `preprocess_source()`, `lex()`, `parse()`, `analyze()`,
+  and `FrontendResult(...)` pipeline without changing `compile_source()`'s
+  diagnostic wrappers. The source-to-LLVM unchecked helper now calls that
+  frontend success helper before `generate_llvm_ir()`, while the public
+  source-to-LLVM wrapper still converts frontend/backend failures to an empty
+  string for the current smoke compiler bridge.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

@@ -130,7 +130,7 @@ class CliTests(unittest.TestCase):
             output = root / "smoke.o"
             source.write_text("int main(void){\n", encoding="utf-8")
 
-            with patch("subprocess.run") as run:
+            with patch("xcc.cc_driver._aot_exec_argv") as exec_argv:
                 bad_args = cc_driver._aot_compile_smoke_source_to_object(
                     4,
                     ("xcc", "-c", str(source), "-o"),
@@ -147,7 +147,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(bad_args, 1)
             self.assertEqual(bad_flags, 1)
             self.assertEqual(bad_source, 1)
-            run.assert_not_called()
+            exec_argv.assert_not_called()
             self.assertFalse((root / "smoke.o.ll").exists())
 
     def test_main_success(self) -> None:
