@@ -24,6 +24,7 @@ XCC_INIT_PATH = ROOT / "src/xcc/__init__.py"
 HOST_INCLUDES_PATH = ROOT / "src/xcc/host_includes.py"
 AOT_BINDER_PATH = ROOT / "src/xcc/aot/binder.py"
 AOT_LOWER_PATH = ROOT / "src/xcc/aot/lower.py"
+AOT_NATIVE_PATH = ROOT / "src/xcc/aot/native.py"
 AOT_SLICE_PATH = ROOT / "src/xcc/aot/slice.py"
 AOT_SUBSET_PATH = ROOT / "src/xcc/aot/subset.py"
 
@@ -104,6 +105,10 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 analysis = analyze_path(path)
                 self.assertGreater(len(analysis.types.functions), 0)
+
+    def test_admits_aot_native_harness_without_exec(self) -> None:
+        analysis = analyze_path(AOT_NATIVE_PATH)
+        self.assertIn("run_native_smoke", analysis.types.functions)
 
     def test_admits_preprocessor_modules_blocked_by_common_annotations(self) -> None:
         for path in (

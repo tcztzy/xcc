@@ -24,7 +24,9 @@
   explicit static operand dispatch instead of reflection-style `getattr`,
   admitting `parser/expressions.py`. Preprocessor pragma validation now scans
   the `defined` operator without runtime `re.search`, admitting
-  `preprocessor/pragmas.py`. The all-`src/xcc` probe now reaches 49/57
+  `preprocessor/pragmas.py`. The native AOT smoke harness now runs CPython
+  oracle fixtures through generated temporary scripts instead of parent-process
+  `exec`, admitting `aot/native.py`. The all-`src/xcc` probe now reaches 50/57
   modules, up from 19/57 before this milestone slice, with remaining blockers
   concentrated in dynamic calls, lambdas/nonlocals/globals, and rejected
   runtime `re` shims.

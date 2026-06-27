@@ -1,10 +1,11 @@
+import ast
 import os
+import pickle
 import subprocess
+import sys
 import tempfile
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.llvm_text import emit_llvm_text
@@ -92,13 +93,49 @@ def run_native_core_smoke(
 
 
 def _run_python_entry(source: str, entry: str) -> object:
-    namespace: dict[str, object] = {}
-    exec(source, namespace)
-    function = namespace[entry]
-    if not callable(function):
+    if not _source_defines_entry_function(source, entry):
         raise TypeError(f"{entry} is not callable")
-    typed_function = cast(Callable[[], object], function)
-    return typed_function()
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        script_path = root / "oracle.py"
+        result_path = root / "result.pickle"
+        script_path.write_text(_python_oracle_script(source, entry), encoding="utf-8")
+        completed = subprocess.run(
+            (sys.executable, str(script_path), str(result_path)),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            message = (
+                completed.stderr.strip() or completed.stdout.strip() or "CPython oracle failed"
+            )
+            raise AotError((AotDiagnostic("XCC-AOT-NATIVE-0001", message, filename="<python>"),))
+        with result_path.open("rb") as result_file:
+            return pickle.load(result_file)
+
+
+def _source_defines_entry_function(source: str, entry: str) -> bool:
+    if not entry.isidentifier():
+        return False
+    module = ast.parse(source)
+    for statement in module.body:
+        if isinstance(statement, ast.FunctionDef) and statement.name == entry:
+            return True
+    return False
+
+
+def _python_oracle_script(source: str, entry: str) -> str:
+    prefix = source if source.endswith("\n") else source + "\n"
+    suffix = (
+        "if __name__ == '__main__':\n"
+        "    import pickle as __xcc_pickle\n"
+        "    import sys as __xcc_sys\n"
+        f"    __xcc_result = {entry}()\n"
+        "    with open(__xcc_sys.argv[1], 'wb') as __xcc_result_file:\n"
+        "        __xcc_pickle.dump(__xcc_result, __xcc_result_file)\n"
+    )
+    return prefix + suffix
 
 
 def _run_tool(command: tuple[str, ...], filename: str) -> None:

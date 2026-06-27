@@ -1,5 +1,7 @@
 import os
+import pickle
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -15,6 +17,9 @@ class AotNativeHarnessTests(unittest.TestCase):
         def fake_run(cmd, **kwargs):
             command = tuple(str(part) for part in cmd)
             calls.append(command)
+            if command[0] == sys.executable:
+                Path(command[2]).write_bytes(pickle.dumps(42))
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             if command[0] == "/tool/llc":
                 Path(command[-1]).write_bytes(b"object")
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -39,6 +44,10 @@ class AotNativeHarnessTests(unittest.TestCase):
 
     def test_native_smoke_reports_tool_failure(self) -> None:
         def fake_run(cmd, **kwargs):
+            command = tuple(str(part) for part in cmd)
+            if command[0] == sys.executable:
+                Path(command[2]).write_bytes(pickle.dumps(42))
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="failed")
 
         with (
@@ -53,10 +62,42 @@ class AotNativeHarnessTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-NATIVE-0001")
 
+    def test_native_smoke_reports_python_oracle_failure(self) -> None:
+        for stdout, stderr, expected in (
+            ("", "oracle stderr", "oracle stderr"),
+            ("oracle stdout", "", "oracle stdout"),
+            ("", "", "CPython oracle failed"),
+        ):
+            with self.subTest(expected=expected):
+
+                def fake_run(cmd, **kwargs):
+                    return subprocess.CompletedProcess(cmd, 1, stdout=stdout, stderr=stderr)
+
+                with (
+                    patch("xcc.aot.native.subprocess.run", side_effect=fake_run),
+                    self.assertRaises(AotError) as ctx,
+                ):
+                    run_native_smoke(
+                        "def answer() -> int:\n    return 42\n",
+                        entry="answer",
+                        llc="/tool/llc",
+                    )
+                self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-NATIVE-0001")
+                self.assertEqual(ctx.exception.diagnostics[0].message, expected)
+
     def test_native_smoke_rejects_non_callable_python_entry(self) -> None:
         with self.assertRaises(TypeError) as ctx:
             run_native_smoke("answer = 42\n", entry="answer", llc="/tool/llc")
         self.assertEqual(str(ctx.exception), "answer is not callable")
+
+    def test_native_smoke_rejects_invalid_python_entry_name(self) -> None:
+        with self.assertRaises(TypeError) as ctx:
+            run_native_smoke(
+                "def answer() -> int:\n    return 42\n",
+                entry="answer.bad",
+                llc="/tool/llc",
+            )
+        self.assertEqual(str(ctx.exception), "answer.bad is not callable")
 
 
 def _real_llc() -> str | None:
