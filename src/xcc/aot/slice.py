@@ -36,6 +36,7 @@ from xcc.aot.ir import (
     IrTuple,
     IrTupleSlice,
     IrTupleType,
+    IrWhile,
 )
 from xcc.aot.lower import lower_source_to_ir
 from xcc.aot.types import AotClassInfo
@@ -533,6 +534,11 @@ def _rename_statement_call(statement: IrStmt, rename_map: dict[str, str]) -> IrS
             _rename_expr_call(statement.iterable, rename_map),
             _rename_branch_calls(statement.body, rename_map),
         )
+    if isinstance(statement, IrWhile):
+        return IrWhile(
+            _rename_expr_call(statement.condition, rename_map),
+            _rename_branch_calls(statement.body, rename_map),
+        )
     if isinstance(statement, IrPrint):
         return IrPrint(_rename_expr_call(statement.value, rename_map))
     if isinstance(statement, IrRaise):
@@ -611,6 +617,10 @@ def _statement_record_names(statement: IrStmt) -> tuple[str, ...]:
         return tuple(sorted(names))
     if isinstance(statement, IrForEach):
         names = set(_expr_record_names(statement.iterable))
+        names.update(_branch_record_names(statement.body))
+        return tuple(sorted(names))
+    if isinstance(statement, IrWhile):
+        names = set(_expr_record_names(statement.condition))
         names.update(_branch_record_names(statement.body))
         return tuple(sorted(names))
     if isinstance(statement, IrPrint):
@@ -703,6 +713,8 @@ def _statement_call_targets(statement: IrStmt) -> tuple[str, ...]:
         return tuple(targets)
     if isinstance(statement, IrForEach):
         return _expr_call_targets(statement.iterable) + _branch_call_targets(statement.body)
+    if isinstance(statement, IrWhile):
+        return _expr_call_targets(statement.condition) + _branch_call_targets(statement.body)
     if isinstance(statement, IrPrint):
         return _expr_call_targets(statement.value)
     if isinstance(statement, IrRaise):

@@ -172,8 +172,13 @@
   `dict[...]`, `set[...]`, `frozenset[...]`, `Iterable[...]`, and
   `Sequence[...]` to the existing tuple-backed opaque runtime shape. This lets
   the cross-module frontend success-path slice get past `SemaUnit`'s existing
-  `dict[...]` and `set[...]` fields; the next observed blocker is lowering the
-  `while` loop shape in `xcc.lexer.lex()`.
+  `dict[...]` and `set[...]` fields.
+- Added AOT IR, lowering, slice discovery, and LLVM text emission for ordinary
+  `while` loops. LLVM emission now gives loop-carried locals header phi values
+  and emits integer ordering comparisons for lowered `<`, `<=`, `>`, and `>=`
+  predicates. The cross-module frontend success-path slice now advances past
+  `xcc.lexer.lex()`'s loop shape; the next observed blocker is class/enum
+  attribute access such as `TokenKind.EOF`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

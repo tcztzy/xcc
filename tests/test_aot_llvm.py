@@ -31,6 +31,7 @@ from xcc.aot import (
     IrStringType,
     IrTuple,
     IrTupleType,
+    IrWhile,
     emit_llvm_text,
     lower_source_to_ir,
 )
@@ -39,8 +40,10 @@ from xcc.aot.llvm_text import (
     _current_label,
     _EmittedValue,
     _Emitter,
+    _branch_assigned_names,
     _for_each_targets,
     _llvm_symbol,
+    _statement_assigned_names,
 )
 
 
@@ -376,6 +379,82 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn('c"\\00"', llvm_ir)
         self.assertIn("@__xcc_aot_tuple_len", llvm_ir)
 
+    def test_emits_while_loop_control_flow(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "while.py",
+            (),
+            (
+                IrFunction(
+                    "spin",
+                    (IrParam("limit", int64),),
+                    int64,
+                    (
+                        IrAssign("value", IrConstInt(0, int64)),
+                        IrWhile(
+                            IrCall(
+                                "__cmp_Lt",
+                                (IrName("value", int64), IrName("limit", int64)),
+                                IrBoolType(),
+                            ),
+                            IrBranch(
+                                (
+                                    IrAssign(
+                                        "value",
+                                        IrBinary(
+                                            "+",
+                                            IrName("value", int64),
+                                            IrConstInt(1, int64),
+                                            int64,
+                                        ),
+                                    ),
+                                )
+                            ),
+                        ),
+                        IrReturn(IrName("value", int64)),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("br label %while.cond", llvm_ir)
+        self.assertIn("while.cond", llvm_ir)
+        self.assertIn("while.body", llvm_ir)
+        self.assertIn("while.end", llvm_ir)
+        self.assertIn("br i1 %", llvm_ir)
+        self.assertIn("phi i64", llvm_ir)
+        self.assertIn("icmp slt i64", llvm_ir)
+
+    def test_emits_terminated_while_loop_control_flow(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "while_return.py",
+            (),
+            (
+                IrFunction(
+                    "spin",
+                    (),
+                    int64,
+                    (
+                        IrAssign("value", IrConstInt(0, int64)),
+                        IrWhile(
+                            IrConstBool(True),
+                            IrBranch(
+                                (
+                                    IrAssign("value", IrConstInt(1, int64)),
+                                    IrReturn(IrName("value", int64)),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("while.cond", llvm_ir)
+        self.assertIn("while.end", llvm_ir)
+        self.assertIn("phi i64 [ 0, %entry ]", llvm_ir)
+
     def test_emits_intrinsics_tuple_boxes_and_truth_edges(self) -> None:
         int32 = IrIntType(32, signed=True)
         uint32 = IrIntType(32, signed=False)
@@ -547,6 +626,44 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertEqual(_current_label(["  ret i32 0"]), "entry")
         self.assertEqual(_for_each_targets("item"), ("item",))
         self.assertEqual(_for_each_targets("(kind, _)"), ("kind",))
+        self.assertEqual(
+            _statement_assigned_names(IrAssign("(left, _)", IrConstNone())),
+            ("left",),
+        )
+        self.assertEqual(
+            _statement_assigned_names(
+                IrIf(
+                    IrConstBool(True),
+                    IrBranch((IrAssign("then_only", IrConstNone()),)),
+                    None,
+                )
+            ),
+            ("then_only",),
+        )
+        self.assertEqual(_statement_assigned_names(IrReturn(IrConstNone())), ())
+        self.assertEqual(
+            _branch_assigned_names(
+                IrBranch(
+                    (
+                        IrIf(
+                            IrConstBool(True),
+                            IrBranch((IrAssign("then_value", IrConstNone()),)),
+                            IrBranch((IrAssign("else_value", IrConstNone()),)),
+                        ),
+                        IrForEach(
+                            "item",
+                            IrTuple((), IrTupleType(())),
+                            IrBranch((IrAssign("loop_value", IrConstNone()),)),
+                        ),
+                        IrWhile(
+                            IrConstBool(True),
+                            IrBranch((IrAssign("while_value", IrConstNone()),)),
+                        ),
+                    )
+                )
+            ),
+            ("else_value", "item", "loop_value", "then_value", "while_value"),
+        )
         emitter = _Emitter(IrModule("bad.py", (), ()))
         with self.assertRaises(AotError) as ctx:
             emitter._default_value(object())  # type: ignore[arg-type]
@@ -604,6 +721,69 @@ class AotLlvmTextTests(unittest.TestCase):
                                         IrConstInt(0, int64),
                                     ),
                                     int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__cmp_Lt",
+                                    (IrConstInt(1, int64),),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__cmp_Lt",
+                                    (IrConstString("x"), IrConstString("y")),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__cmp_Lt",
+                                    (
+                                        IrConstInt(1, IrIntType(32, signed=True)),
+                                        IrConstInt(2, int64),
+                                    ),
+                                    IrBoolType(),
                                 )
                             ),
                         ),

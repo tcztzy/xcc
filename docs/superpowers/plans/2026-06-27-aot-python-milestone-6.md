@@ -852,9 +852,12 @@ retains keyword argument values in lowered calls. AOT lowering now maps existing
 `dict[...]`, `set[...]`, `frozenset[...]`, `Iterable[...]`, and `Sequence[...]`
 annotations to the current tuple-backed opaque runtime shape, allowing the
 cross-module frontend success-path slice to get past `SemaUnit`'s container
-fields; the next observed blocker is lowering the `while` loop shape in
-`xcc.lexer.lex()`. The generated `main(argc, argv)` now
-converts the platform C `argv` array into the AOT tuple ABI with
+fields. AOT IR/lower/slice/LLVM now supports ordinary `while` loops with
+loop-carried local phi values and integer ordering comparisons, so the frontend
+success-path slice advances past `xcc.lexer.lex()`'s loop shape; the next
+observed blocker is class/enum attribute access such as `TokenKind.EOF`. The
+generated `main(argc, argv)` now converts the platform C `argv` array into the
+AOT tuple ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its
 Python-level `argv` through `__xcc_aot_tuple_get()`, source reading goes through
 a generic `__xcc_aot_read_text_file()` runtime shim, LLVM file writing goes

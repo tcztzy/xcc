@@ -204,6 +204,12 @@ class IrForEach:
 
 
 @dataclass(frozen=True)
+class IrWhile:
+    condition: IrExpr
+    body: IrBranch
+
+
+@dataclass(frozen=True)
 class IrPrint:
     value: IrExpr
 
@@ -214,7 +220,7 @@ class IrRaise:
     message: IrExpr
 
 
-IrStmt = IrAssign | IrReturn | IrIf | IrForEach | IrPrint | IrRaise
+IrStmt = IrAssign | IrReturn | IrIf | IrForEach | IrWhile | IrPrint | IrRaise
 
 
 @dataclass(frozen=True)

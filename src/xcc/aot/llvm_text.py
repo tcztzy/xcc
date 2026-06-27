@@ -36,6 +36,7 @@ from xcc.aot.ir import (
     IrTupleSlice,
     IrTupleType,
     IrType,
+    IrWhile,
 )
 
 _BUILTIN_VALUE_NAMES = {"bool", "int", "object", "str", "tuple"}
@@ -170,6 +171,9 @@ class _Emitter:
         if isinstance(statement, IrForEach):
             self._emit_for_each(statement, names, lines, return_type)
             return
+        if isinstance(statement, IrWhile):
+            self._emit_while(statement, names, lines, return_type)
+            return
         if isinstance(statement, IrPrint):
             value = self._emit_expr(statement.value, names, lines)
             self.needs_puts = True
@@ -281,6 +285,56 @@ class _Emitter:
         if not _block_is_terminated(lines):
             lines.append(f"  %next = add i64 {index}, 1")
             lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
+
+    def _emit_while(
+        self,
+        statement: IrWhile,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+        return_type: IrType,
+    ) -> None:
+        assigned_names = tuple(
+            name
+            for name in _branch_assigned_names(statement.body)
+            if name in names and not isinstance(names[name].type, IrNoneType)
+        )
+        initial_values = {name: names[name] for name in assigned_names}
+        cond_label = self._label("while.cond")
+        body_label = self._label("while.body")
+        end_label = self._label("while.end")
+        incoming_label = _current_label(lines)
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        cond_names = dict(names)
+        phi_lines: dict[str, int] = {}
+        phi_values: dict[str, _EmittedValue] = {}
+        for name, initial in initial_values.items():
+            result = self._tmp("loop")
+            phi_lines[name] = len(lines)
+            phi_values[name] = _EmittedValue(result, initial.type)
+            cond_names[name] = phi_values[name]
+            lines.append("")
+        condition = self._emit_condition(statement.condition, cond_names, lines)
+        lines.append(f"  br i1 {condition.value}, label %{body_label}, label %{end_label}")
+        lines.append(f"{body_label}:")
+        body_names = dict(cond_names)
+        self._emit_branch(statement.body, body_names, lines, return_type)
+        backedge_label: str | None = None
+        if not _block_is_terminated(lines):
+            backedge_label = _current_label(lines)
+            lines.append(f"  br label %{cond_label}")
+        for name, line_index in phi_lines.items():
+            initial = initial_values[name]
+            body_value = body_names.get(name, phi_values[name])
+            incoming = f"[ {initial.value}, %{incoming_label} ]"
+            if backedge_label is not None:
+                incoming += f", [ {body_value.value}, %{backedge_label} ]"
+            lines[line_index] = (
+                f"  {phi_values[name].value} = phi {self._storage_llvm_type(initial.type)} "
+                f"{incoming}"
+            )
+        names.update(cond_names)
         lines.append(f"{end_label}:")
 
     def _emit_branch(
@@ -535,6 +589,10 @@ class _Emitter:
             "__cmp_Eq",
             "__cmp_Is",
             "__cmp_IsNot",
+            "__cmp_Gt",
+            "__cmp_GtE",
+            "__cmp_Lt",
+            "__cmp_LtE",
             "__cmp_NotEq",
             "__ifexp",
             "__not",
@@ -577,6 +635,10 @@ class _Emitter:
                 negate=expr.target == "__cmp_IsNot",
                 lines=lines,
             )
+        if expr.target in {"__cmp_Gt", "__cmp_GtE", "__cmp_Lt", "__cmp_LtE"}:
+            if len(args) != 2:
+                self._error(f"{expr.target} expects two arguments")
+            return self._emit_order_compare(expr.target, args[0], args[1], lines)
         return None  # pragma: no cover
 
     def _emit_len_call(
@@ -747,6 +809,31 @@ class _Emitter:
         left_value = self._pointer_compare_value(left)
         right_value = self._pointer_compare_value(right)
         lines.append(f"  {result} = icmp {predicate} ptr {left_value}, {right_value}")
+        return _EmittedValue(result, IrBoolType())
+
+    def _emit_order_compare(
+        self,
+        target: str,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        lines: list[str],
+    ) -> _EmittedValue:
+        if not isinstance(left.type, IrIntType) or not isinstance(right.type, IrIntType):
+            self._error(f"{target} currently supports integer arguments")
+        if left.type.bits != right.type.bits:
+            self._error(f"{target} expects matching integer widths")
+        prefix = "s" if left.type.signed else "u"
+        op = {
+            "__cmp_Gt": "gt",
+            "__cmp_GtE": "ge",
+            "__cmp_Lt": "lt",
+            "__cmp_LtE": "le",
+        }[target]
+        result = self._tmp("cmp")
+        lines.append(
+            f"  {result} = icmp {prefix}{op} {self._llvm_type(left.type)} "
+            f"{left.value}, {right.value}"
+        )
         return _EmittedValue(result, IrBoolType())
 
     def _pointer_compare_value(self, value: _EmittedValue) -> str:
@@ -1278,6 +1365,32 @@ def _for_each_targets(target: str) -> tuple[str, ...]:
         part.strip() for part in stripped.split(",") if part.strip() and part.strip() != "_"
     )
     return names or (target,)
+
+
+def _branch_assigned_names(branch: IrBranch) -> tuple[str, ...]:
+    names: set[str] = set()
+    for statement in branch.statements:
+        names.update(_statement_assigned_names(statement))
+    return tuple(sorted(names))
+
+
+def _statement_assigned_names(statement: IrStmt) -> tuple[str, ...]:
+    if isinstance(statement, IrAssign):
+        if "," in statement.target:
+            return _for_each_targets(statement.target)
+        return (statement.target,)
+    if isinstance(statement, IrIf):
+        names = set(_branch_assigned_names(statement.then_branch))
+        if statement.else_branch is not None:
+            names.update(_branch_assigned_names(statement.else_branch))
+        return tuple(sorted(names))
+    if isinstance(statement, IrForEach):
+        names = set(_for_each_targets(statement.target))
+        names.update(_branch_assigned_names(statement.body))
+        return tuple(sorted(names))
+    if isinstance(statement, IrWhile):
+        return _branch_assigned_names(statement.body)
+    return ()
 
 
 def _bind_emitted_target(

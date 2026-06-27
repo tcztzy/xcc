@@ -37,6 +37,7 @@ from xcc.aot.ir import (
     IrTupleSlice,
     IrTupleType,
     IrType,
+    IrWhile,
 )
 from xcc.aot.types import AotClassInfo, AotType, annotation_name
 
@@ -209,6 +210,23 @@ class _Lowerer:
             names.update(then_names)
             names.update(else_names)
             return IrIf(condition, then_branch, else_branch)
+        if isinstance(statement, ast.While):
+            if statement.orelse:
+                self._error(
+                    "XCC-AOT-LOWER-0004",
+                    "Unsupported control-flow lowering: while else",
+                    statement,
+                )
+            condition = self._lower_expr(statement.test, names, IrBoolType())
+            body_names = dict(names)
+            body = IrBranch(
+                tuple(
+                    self._lower_statement(child, body_names, return_type)
+                    for child in statement.body
+                )
+            )
+            names.update(body_names)
+            return IrWhile(condition, body)
         if isinstance(statement, ast.For):
             body_names = dict(names)
             self._bind_assignment_target(statement.target, IrRecordType("object"), body_names)

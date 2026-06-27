@@ -26,6 +26,7 @@ from xcc.aot import (
     IrStringType,
     IrTuple,
     IrTupleType,
+    IrWhile,
     lower_source_to_ir,
 )
 from xcc.aot.lower import _collect_global_names, _Lowerer
@@ -163,6 +164,32 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(function.params[0].type, IrStringType())
         self.assertEqual(function.return_type, IrStringType())
         self.assertEqual(function.body, ())
+
+    def test_lowers_while_loop_statement(self) -> None:
+        module = lower_source_to_ir(
+            "def spin(limit: int) -> int:\n"
+            "    value: int = 0\n"
+            "    while value < limit:\n"
+            "        value = value + 1\n"
+            "    return value\n",
+            filename="while_loop.py",
+        )
+        function = module.functions[0]
+        self.assertIsInstance(function.body[1], IrWhile)
+        self.assertIn("__cmp_Lt", repr(function.body[1].condition))
+        self.assertIn("value", repr(function.body[1].body))
+
+    def test_rejects_while_else_statement(self) -> None:
+        with self.assertRaises(AotError) as ctx:
+            lower_source_to_ir(
+                "def spin() -> int:\n"
+                "    while True:\n"
+                "        return 1\n"
+                "    else:\n"
+                "        return 0\n",
+                filename="while_else.py",
+            )
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0004")
 
     def test_lowers_plain_int_uint_subtract_and_multiply(self) -> None:
         module = lower_source_to_ir(

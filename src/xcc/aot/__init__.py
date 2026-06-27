@@ -47,6 +47,7 @@ from xcc.aot.ir import (
     IrTupleSlice,
     IrTupleType,
     IrType,
+    IrWhile,
 )
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
@@ -116,6 +117,7 @@ __all__ = (
     "IrTupleSlice",
     "IrTupleType",
     "IrType",
+    "IrWhile",
     "NativeSmokeResult",
     "analyze_path",
     "analyze_source",

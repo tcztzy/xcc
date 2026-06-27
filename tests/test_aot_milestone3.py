@@ -36,6 +36,7 @@ from xcc.aot import (
     IrTuple,
     IrTupleSlice,
     IrTupleType,
+    IrWhile,
     analyze_path,
     collect_slice_inputs,
     core_entry_wrapper,
@@ -125,6 +126,7 @@ class AotMilestone3SliceTests(unittest.TestCase):
             ),
             IrPrint(call),
             IrRaise("ValueError", IrStringConcat((call,))),
+            IrWhile(IrCall("cond", (), IrBoolType()), IrBranch((IrPrint(call),))),
         )
         rewritten = _rename_statement_calls(statements, {"local": "xcc.local"})
         self.assertIn("target='xcc.local'", repr(rewritten))
@@ -147,6 +149,12 @@ class AotMilestone3SliceTests(unittest.TestCase):
                 IrForEach("item", IrTuple((call,), string_tuple), IrBranch(()))
             ),
             ("local",),
+        )
+        self.assertEqual(
+            _statement_call_targets(
+                IrWhile(IrCall("cond", (), IrBoolType()), IrBranch((IrPrint(call),)))
+            ),
+            ("cond", "local"),
         )
         self.assertEqual(
             _expr_call_targets(IrBinary("+", call, call, IrStringType())),
@@ -184,6 +192,10 @@ class AotMilestone3SliceTests(unittest.TestCase):
                 "item",
                 IrName("items", tuple_type),
                 IrBranch((IrPrint(IrName("box", box_type)),)),
+            ),
+            IrWhile(
+                IrName("box", box_type),
+                IrBranch((IrPrint(IrName("other", other_type)),)),
             ),
             IrAssign(
                 "binary",
@@ -265,8 +277,10 @@ class AotMilestone3IrTests(unittest.TestCase):
         branch = IrBranch((IrReturn(IrConstInt(1, int64)),))
         node = IrIf(IrConstBool(True), branch, IrBranch((IrReturn(IrConstInt(0, int64)),)))
         loop = IrForEach("item", IrName("items", IrTupleType((IrStringType(),))), branch)
+        while_loop = IrWhile(IrConstBool(True), branch)
         self.assertEqual(node.then_branch.statements[0].value.value, 1)
         self.assertEqual(loop.target, "item")
+        self.assertEqual(while_loop.body, branch)
         self.assertEqual(IrRaise("ValueError", IrConstString("bad")).exception, "ValueError")
         self.assertEqual(IrPrint(IrConstString("ok")).value.value, "ok")
 
