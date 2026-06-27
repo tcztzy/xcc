@@ -52,6 +52,7 @@ from xcc.ast import (
     SubscriptExpr,
     SwitchStmt,
     TypedefDecl,
+    TypeSpec,
     UnaryExpr,
     UpdateExpr,
     WhileStmt,
@@ -59,7 +60,7 @@ from xcc.ast import (
 from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendResult
 from xcc.sema.constants import char_literal_body, decode_escaped_units, string_literal_body
-from xcc.sema.symbols import EnumConstSymbol, FunctionSymbol, VarSymbol
+from xcc.sema.symbols import EnumConstSymbol, FunctionSymbol, RecordMemberInfo, VarSymbol
 from xcc.sema.type_helpers import (
     integer_promotion,
     is_integer_type,
@@ -464,6 +465,11 @@ class _IndirectCallLayout:
     arg_offsets: tuple[int, ...]
 
 
+@dataclass
+class _FrameLayoutState:
+    next_offset: int
+
+
 @dataclass(frozen=True)
 class _FunctionLayout:
     return_pc_offset: int
@@ -777,7 +783,7 @@ class _EvmGen:
             self._require_return_type(symbol.return_type)
 
     def _plan_function_layouts(self, functions: list[FunctionDef]) -> None:
-        next_offset = _LOCAL_BASE
+        layout_state = _FrameLayoutState(_LOCAL_BASE)
         layouts: dict[str, _FunctionLayout] = {}
         for function in functions:
             symbol = self._sema.functions[function.name]
@@ -785,25 +791,25 @@ class _EvmGen:
             compound_literals: dict[int, _Local] = {}
             string_literals: dict[int, _Local] = {}
             indirect_calls: dict[int, _IndirectCallLayout] = {}
-            return_pc_offset = next_offset
-            next_offset += _WORD_BYTES
-            return_value_offset = next_offset
+            return_pc_offset = layout_state.next_offset
+            layout_state.next_offset += _WORD_BYTES
+            return_value_offset = layout_state.next_offset
             if not self._is_void_type(symbol.return_type):
-                next_offset += self._memory_slots_for_type(symbol.return_type) * _WORD_BYTES
+                layout_state.next_offset += (
+                    self._memory_slots_for_type(symbol.return_type) * _WORD_BYTES
+                )
 
             def alloc(name: str, type_: Type, locals_ref: dict[str, _Local] = locals_) -> None:
-                nonlocal next_offset
                 if name in locals_ref:
                     return
                 slots = self._memory_slots_for_type(type_)
-                locals_ref[name] = _Local(next_offset, type_, slots)
-                next_offset += slots * _WORD_BYTES
+                locals_ref[name] = _Local(layout_state.next_offset, type_, slots)
+                layout_state.next_offset += slots * _WORD_BYTES
 
             def alloc_compound(
                 expr: CompoundLiteralExpr,
                 compound_literals_ref: dict[int, _Local] = compound_literals,
             ) -> None:
-                nonlocal next_offset
                 expr_id = id(expr)
                 if expr_id in compound_literals_ref:
                     return
@@ -811,14 +817,13 @@ class _EvmGen:
                 if type_ is None:
                     type_ = self._resolve_type_spec(expr.type_spec)
                 slots = self._memory_slots_for_type(type_)
-                compound_literals_ref[expr_id] = _Local(next_offset, type_, slots)
-                next_offset += slots * _WORD_BYTES
+                compound_literals_ref[expr_id] = _Local(layout_state.next_offset, type_, slots)
+                layout_state.next_offset += slots * _WORD_BYTES
 
             def alloc_string(
                 expr: StringLiteral,
                 string_literals_ref: dict[int, _Local] = string_literals,
             ) -> None:
-                nonlocal next_offset
                 expr_id = id(expr)
                 if expr_id in string_literals_ref:
                     return
@@ -829,15 +834,14 @@ class _EvmGen:
                         "EVM target cannot resolve string literal type",
                     )
                 slots = self._memory_slots_for_type(type_)
-                string_literals_ref[expr_id] = _Local(next_offset, type_, slots)
-                next_offset += slots * _WORD_BYTES
+                string_literals_ref[expr_id] = _Local(layout_state.next_offset, type_, slots)
+                layout_state.next_offset += slots * _WORD_BYTES
 
             def alloc_indirect_call(
                 expr: CallExpr,
                 symbol_ref: FunctionSymbol = symbol,
                 indirect_calls_ref: dict[int, _IndirectCallLayout] = indirect_calls,
             ) -> None:
-                nonlocal next_offset
                 expr_id = id(expr)
                 if expr_id in indirect_calls_ref:
                     return
@@ -852,17 +856,19 @@ class _EvmGen:
                         self._result.filename,
                         "EVM function pointer calls need a fixed prototype",
                     )
-                target_offset = next_offset
-                next_offset += _WORD_BYTES
+                target_offset = layout_state.next_offset
+                layout_state.next_offset += _WORD_BYTES
                 arg_offsets: list[int] = []
                 for param_type in params:
                     if self._is_word_value_type(param_type):
-                        arg_offsets.append(next_offset)
-                        next_offset += _WORD_BYTES
+                        arg_offsets.append(layout_state.next_offset)
+                        layout_state.next_offset += _WORD_BYTES
                         continue
                     if self._is_record_type(param_type):
-                        arg_offsets.append(next_offset)
-                        next_offset += self._memory_slots_for_type(param_type) * _WORD_BYTES
+                        arg_offsets.append(layout_state.next_offset)
+                        layout_state.next_offset += (
+                            self._memory_slots_for_type(param_type) * _WORD_BYTES
+                        )
                         continue
                     else:
                         raise evm_backend_error(
@@ -1004,10 +1010,10 @@ class _EvmGen:
                 compound_literals,
                 string_literals,
                 indirect_calls,
-                next_offset,
+                layout_state.next_offset,
             )
         self._function_layouts = layouts
-        self._dynamic_memory_base = max(_DYNAMIC_MEMORY_BASE, next_offset)
+        self._dynamic_memory_base = max(_DYNAMIC_MEMORY_BASE, layout_state.next_offset)
 
     def _function_label(self, function: FunctionDef) -> str:
         return f"func_{function.name}"
@@ -1198,12 +1204,12 @@ class _EvmGen:
             total += self._record_member_slots(member)
         return max(total, 1)
 
-    def _record_member_slots(self, member) -> int:
+    def _record_member_slots(self, member: RecordMemberInfo) -> int:
         if member.bit_width == 0:
             return 0
         return self._storage_slots_for_type(member.type_)
 
-    def _is_anonymous_record_member(self, member) -> bool:
+    def _is_anonymous_record_member(self, member: RecordMemberInfo) -> bool:
         return (
             member.name is None
             and member.bit_width is None
@@ -1211,10 +1217,14 @@ class _EvmGen:
             and self._is_record_type(member.type_)
         )
 
-    def _is_unnamed_bit_field(self, member) -> bool:
+    def _is_unnamed_bit_field(self, member: RecordMemberInfo) -> bool:
         return member.name is None and member.bit_width is not None
 
-    def _next_record_initializer_member_index(self, members, start: int) -> int:
+    def _next_record_initializer_member_index(
+        self,
+        members: tuple[RecordMemberInfo, ...],
+        start: int,
+    ) -> int:
         index = start
         while index < len(members) and self._is_unnamed_bit_field(members[index]):
             index += 1
@@ -2065,10 +2075,9 @@ class _EvmGen:
 
     def _collect_switch_cases(self, stmt: Stmt) -> tuple[list[CaseStmt], DefaultStmt | None]:
         cases: list[CaseStmt] = []
-        default_stmt: DefaultStmt | None = None
+        default_stmt_ref: list[DefaultStmt | None] = [None]
 
         def collect(node: Stmt) -> None:
-            nonlocal default_stmt
             if isinstance(node, SwitchStmt):
                 return
             if isinstance(node, CaseStmt):
@@ -2076,7 +2085,7 @@ class _EvmGen:
                 collect(node.body)
                 return
             if isinstance(node, DefaultStmt):
-                default_stmt = node
+                default_stmt_ref[0] = node
                 collect(node.body)
                 return
             if isinstance(node, CompoundStmt):
@@ -2084,7 +2093,7 @@ class _EvmGen:
                     collect(child)
 
         collect(stmt)
-        return cases, default_stmt
+        return cases, default_stmt_ref[0]
 
     def _emit_case(self, stmt: CaseStmt) -> None:
         if not self._switch_stack:
@@ -3734,7 +3743,7 @@ class _EvmGen:
     def _is_function_declaration(stmt: DeclStmt) -> bool:
         return bool(stmt.type_spec.declarator_ops) and stmt.type_spec.declarator_ops[0][0] == "fn"
 
-    def _resolve_type_spec(self, type_spec) -> Type:
+    def _resolve_type_spec(self, type_spec: TypeSpec) -> Type:
         typedef = None
         if self._sema.file_scope is not None:
             typedef = self._sema.file_scope.lookup_typedef(type_spec.name)
@@ -3765,7 +3774,7 @@ class _EvmGen:
         ops.extend(base.declarator_ops)
         return Type(base.name, declarator_ops=tuple(ops), qualifiers=base.qualifiers)
 
-    def _record_name_for_type_spec(self, type_spec) -> str:
+    def _record_name_for_type_spec(self, type_spec: TypeSpec) -> str:
         if type_spec.record_tag is not None:
             candidate = f"{type_spec.name} {type_spec.record_tag}"
             if candidate in self._sema.record_definitions or not type_spec.has_record_body:
@@ -3786,7 +3795,7 @@ class _EvmGen:
                     return record_name
         return type_spec.name
 
-    def _record_members_match_type_spec(self, record_name: str, type_spec) -> bool:
+    def _record_members_match_type_spec(self, record_name: str, type_spec: TypeSpec) -> bool:
         members = self._sema.record_definitions.get(record_name)
         if members is None or len(members) != len(type_spec.record_members):
             return False

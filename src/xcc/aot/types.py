@@ -7,6 +7,7 @@ _BUILTIN_TYPES = {
     "NoReturn",
     "bool",
     "bytes",
+    "bytearray",
     "int",
     "None",
     "object",

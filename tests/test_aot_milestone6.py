@@ -26,6 +26,7 @@ SEMA_TYPE_RESOLUTION_PATH = ROOT / "src/xcc/sema/type_resolution.py"
 XCC_INIT_PATH = ROOT / "src/xcc/__init__.py"
 HOST_INCLUDES_PATH = ROOT / "src/xcc/host_includes.py"
 LLVM_API_PATH = ROOT / "src/xcc/llvm_api.py"
+EVM_PATH = ROOT / "src/xcc/evm.py"
 AOT_BINDER_PATH = ROOT / "src/xcc/aot/binder.py"
 AOT_LOWER_PATH = ROOT / "src/xcc/aot/lower.py"
 AOT_NATIVE_PATH = ROOT / "src/xcc/aot/native.py"
@@ -137,6 +138,10 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
     def test_admits_llvm_api_without_global_cache_or_dynamic_getattr(self) -> None:
         analysis = analyze_path(LLVM_API_PATH)
         self.assertIn("llvm", analysis.types.functions)
+
+    def test_admits_evm_without_nonlocal_layout_state(self) -> None:
+        analysis = analyze_path(EVM_PATH)
+        self.assertIn("_EvmGen._plan_function_layouts", analysis.types.functions)
 
     def test_admits_parser_and_sema_helpers_without_lambda_callbacks(self) -> None:
         for path in (PARSER_EXTENSIONS_PATH, SEMA_INIT_PATH):

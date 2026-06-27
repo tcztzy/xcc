@@ -301,6 +301,12 @@ class AotTypeBinderTests(unittest.TestCase):
         self.assertEqual(analysis.functions["f"].parameters, (("value", "bytes | None"),))
         self.assertEqual(analysis.functions["f"].return_type.name, "bytes")
 
+    def test_binds_bytearray_annotations(self) -> None:
+        source = "def f(value: bytearray) -> None:\n    value.append(0)\n"
+        module = parse_source(source, filename="bytearray_annotation.py")
+        analysis = bind_types(check_subset(module), module)
+        self.assertEqual(analysis.functions["f"].parameters, (("value", "bytearray"),))
+
     def test_binds_datetime_annotations(self) -> None:
         source = (
             "from datetime import datetime\n"
