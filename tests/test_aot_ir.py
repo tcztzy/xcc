@@ -17,6 +17,7 @@ from xcc.aot import (
     IrConstString,
     IrContinue,
     IrEnumMember,
+    IrForEach,
     IrFunction,
     IrGetField,
     IrIntType,
@@ -37,7 +38,7 @@ from xcc.aot import (
     lower_source_to_ir,
 )
 from xcc.aot.binder import _TypeBinder
-from xcc.aot.lower import _collect_global_names, _Lowerer
+from xcc.aot.lower import _collect_global_names, _Lowerer, _tuple_backed_container_element_name
 from xcc.aot.module import parse_source
 from xcc.aot.subset import check_subset
 from xcc.aot.types import AotClassInfo, AotType
@@ -159,6 +160,46 @@ class AotScalarLoweringTests(unittest.TestCase):
             ["lookup", "names", "frozen_names", "iterable_names", "sequence_names"],
         )
         self.assertTrue(all(isinstance(field.type, IrTupleType) for field in record.fields))
+
+    def test_lowers_for_target_from_homogeneous_container_annotation(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class FunctionDef:\n"
+            "    name: str\n"
+            "@dataclass(frozen=True)\n"
+            "class Unit:\n"
+            "    functions: list[FunctionDef]\n"
+            "def first_name(unit: Unit) -> str:\n"
+            "    for func in unit.functions:\n"
+            "        return func.name\n"
+            "    return ''\n",
+            filename="container_for.py",
+        )
+        function = module.functions[0]
+        loop = function.body[0]
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        returned = loop.body.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        value = returned.value
+        self.assertIsInstance(value, IrGetField)
+        assert isinstance(value, IrGetField)
+        self.assertEqual(value.field, "name")
+        self.assertEqual(value.value.type, IrRecordType("FunctionDef"))
+
+    def test_tuple_backed_container_element_name_edges(self) -> None:
+        self.assertIsNone(_tuple_backed_container_element_name("Callable[[str], bool]"))
+        self.assertIsNone(_tuple_backed_container_element_name("tuple[]"))
+        self.assertEqual(
+            _tuple_backed_container_element_name("list['FunctionDef']"),
+            "FunctionDef",
+        )
+        self.assertEqual(
+            _tuple_backed_container_element_name("tuple[list[str], ...]"),
+            "list[str]",
+        )
 
     def test_lowers_bodyless_requested_function_signature(self) -> None:
         module = lower_source_to_ir(
@@ -746,6 +787,14 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(
             lowerer._record_field_types("Node"),
             (IrStringType(), IrIntType(64, signed=True), IrRecordType("Node")),
+        )
+        self.assertEqual(
+            lowerer._aot_type_to_ir_type(AotType("tuple[Node, ...]")),
+            IrTupleType((IrRecordType("Node"),)),
+        )
+        self.assertEqual(
+            lowerer._aot_type_to_ir_type(AotType("tuple[TypeOp, ...]")),
+            IrTupleType(()),
         )
         self.assertEqual(lowerer._aot_type_to_ir_type(AotType("NoReturn")), IrNoneType())
         with self.assertRaises(AotError) as ctx:

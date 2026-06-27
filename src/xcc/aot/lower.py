@@ -235,8 +235,13 @@ class _Lowerer:
             names.update(body_names)
             return IrWhile(condition, body)
         if isinstance(statement, ast.For):
+            iterable = self._lower_expr(statement.iter, names, IrTupleType(()))
             body_names = dict(names)
-            self._bind_assignment_target(statement.target, IrRecordType("object"), body_names)
+            self._bind_assignment_target(
+                statement.target,
+                _for_each_target_type(iterable.type),
+                body_names,
+            )
             body = IrBranch(
                 tuple(
                     self._lower_statement(child, body_names, return_type)
@@ -246,7 +251,7 @@ class _Lowerer:
             names.update(body_names)
             return IrForEach(
                 ast.unparse(statement.target),
-                self._lower_expr(statement.iter, names, IrTupleType(())),
+                iterable,
                 body,
             )
         if isinstance(statement, ast.Raise) and isinstance(statement.exc, ast.Call):
@@ -467,6 +472,9 @@ class _Lowerer:
         if name.startswith("Literal["):
             return IrStringType()
         if _is_tuple_backed_container_type(name):
+            element_type = self._tuple_backed_container_element_type(name, node)
+            if element_type is not None:
+                return IrTupleType((element_type,))
             return IrTupleType(())
         if _is_optional_int(name):
             return IrIntType(64, signed=True)
@@ -757,6 +765,9 @@ class _Lowerer:
         if type_info.name.startswith("Literal["):
             return IrStringType()
         if _is_tuple_backed_container_type(type_info.name):
+            element_type = self._tuple_backed_container_element_type(type_info.name, ast.Pass())
+            if element_type is not None:
+                return IrTupleType((element_type,))
             return IrTupleType(())
         if _is_optional_int(type_info.name):
             return IrIntType(64, signed=True)
@@ -841,6 +852,19 @@ class _Lowerer:
         if isinstance(type_info, IrTupleType):
             return IrTuple((), type_info)
         return IrConstNone()
+
+    def _tuple_backed_container_element_type(
+        self,
+        name: str,
+        node: ast.AST,
+    ) -> IrType | None:
+        element_name = _tuple_backed_container_element_name(name)
+        if element_name is None:
+            return None
+        try:
+            return self._type_name_to_ir_type(element_name, node)
+        except AotError:
+            return None
 
     def _lower_compare(self, expr: ast.Compare, names: dict[str, IrType]) -> IrExpr:
         if len(expr.ops) != len(expr.comparators) or not expr.ops:
@@ -935,6 +959,53 @@ def _is_tuple_backed_container_type(name: str) -> bool:
             "tuple[",
         )
     )
+
+
+def _tuple_backed_container_element_name(name: str) -> str | None:
+    if name.startswith(("dict[", "Dict[")):
+        return None
+    if not name.startswith(
+        (
+            "Iterable[",
+            "Sequence[",
+            "frozenset[",
+            "list[",
+            "set[",
+            "tuple[",
+        )
+    ):
+        return None
+    if not name.endswith("]"):
+        return None
+    content = name[name.find("[") + 1 : -1]
+    first = _first_annotation_arg(content)
+    if first == "..." or not first:
+        return None
+    return _strip_annotation_quotes(first)
+
+
+def _first_annotation_arg(content: str) -> str:
+    depth = 0
+    for index, char in enumerate(content):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+        elif char == "," and depth == 0:
+            return content[:index].strip()
+    return content.strip()
+
+
+def _strip_annotation_quotes(name: str) -> str:
+    if len(name) >= 2 and name[0] == name[-1] and name[0] in {"'", '"'}:
+        return name[1:-1]
+    return name
+
+
+def _for_each_target_type(iterable_type: IrType) -> IrType:
+    if isinstance(iterable_type, IrTupleType) and len(iterable_type.elements) == 1:
+        return iterable_type.elements[0]
+    return IrRecordType("object")
 
 
 def _collect_global_names(tree: ast.Module) -> set[str]:

@@ -199,6 +199,49 @@ class AotLlvmTextTests(unittest.TestCase):
             ctx.exception.diagnostics[0].message,
         )
 
+    def test_emits_llvm_module_print_leaf(self) -> None:
+        module = IrModule(
+            "codegen.py",
+            (),
+            (
+                IrFunction(
+                    "xcc.codegen._llvm_print_module_to_string",
+                    (IrParam("module", IrIntType(64, signed=True)),),
+                    IrStringType(),
+                    (),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn(
+            "define ptr @xcc.codegen._llvm_print_module_to_string(i64 %module)",
+            llvm_ir,
+        )
+        self.assertIn("%module.ptr = inttoptr i64 %module to ptr", llvm_ir)
+        self.assertIn("call ptr @LLVMPrintModuleToString(ptr %module.ptr)", llvm_ir)
+        self.assertIn("declare ptr @LLVMPrintModuleToString(ptr)", llvm_ir)
+
+    def test_rejects_malformed_llvm_module_print_leaf(self) -> None:
+        module = IrModule(
+            "bad.py",
+            (),
+            (
+                IrFunction(
+                    "xcc.codegen._llvm_print_module_to_string",
+                    (IrParam("module", IrStringType()),),
+                    IrStringType(),
+                    (),
+                ),
+            ),
+        )
+        with self.assertRaises(AotError) as ctx:
+            emit_llvm_text(module)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        self.assertIn(
+            "LLVM module print helper expects int -> str",
+            ctx.exception.diagnostics[0].message,
+        )
+
     def test_rejects_malformed_aot_exec_argv_leaf(self) -> None:
         module = IrModule(
             "bad.py",

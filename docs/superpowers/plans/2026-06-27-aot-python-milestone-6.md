@@ -870,10 +870,15 @@ chained comparisons. LLVM emission now lowers the string predicates and integer
 parse calls through runtime helpers. Lexer number classification now uses
 ordinary scanner helpers instead of runtime regex `fullmatch`, and block-comment
 scanning no longer uses `while ... else`. The frontend success-path slice now
-lowers through lexer number classification and comment skipping. The broader
-source-to-LLVM unchecked slice now advances into `codegen.py`; the next
-observed blocker is the existing `c.PrintModuleToString(...)` LLVM API
-boundary. The generated
+lowers through lexer number classification and comment skipping. Codegen's LLVM
+module printing is now isolated behind the typed
+`_llvm_print_module_to_string(module: int) -> str` helper, and that helper is an
+explicit AOT native LLVM-C leaf. Tuple-backed container annotations now retain
+homogeneous element types, allowing `for` targets over fields such as
+`TranslationUnit.functions` to bind as project records. The broader
+source-to-LLVM unchecked slice now advances past `_LLVMGen.generate()`; the next
+observed blocker is the existing `self._sema.functions.get(...)` dictionary
+lookup/optional `FunctionSymbol` boundary in `codegen.py`. The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its

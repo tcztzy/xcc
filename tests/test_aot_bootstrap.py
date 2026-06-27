@@ -269,6 +269,31 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("target='compile_source'", body)
         self.assertIn("target='generate_llvm_ir'", body)
 
+    def test_codegen_generate_lowers_module_print_boundary(self) -> None:
+        class_types = {}
+        for module_path in (
+            ROOT / "src/xcc/ast.py",
+            ROOT / "src/xcc/frontend.py",
+            ROOT / "src/xcc/sema/symbols.py",
+        ):
+            class_types.update(analyze_path(module_path).types.classes)
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen.generate", "_llvm_print_module_to_string"},
+            bodyless_functions={"_llvm_print_module_to_string"},
+            extra_classes=class_types,
+        )
+        functions = {function.name: function for function in module.functions}
+        self.assertIn("_LLVMGen.generate", functions)
+        self.assertIn("_llvm_print_module_to_string", functions)
+        self.assertIn(
+            "target='_llvm_print_module_to_string'",
+            repr(functions["_LLVMGen.generate"].body),
+        )
+
     def test_frontend_unchecked_success_helper_body_is_ordinary_lowerable(self) -> None:
         class_types = {}
         for module_path in (

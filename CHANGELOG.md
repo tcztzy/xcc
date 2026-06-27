@@ -204,8 +204,16 @@
   scanner helpers and reshaped block-comment scanning away from `while ...
   else`. The frontend success-path slice now lowers through lexer number
   classification and comment skipping without runtime regex or `while else`.
-  The broader source-to-LLVM unchecked slice now advances into `codegen.py` and
-  stops at the existing `c.PrintModuleToString(...)` LLVM API boundary.
+  The broader source-to-LLVM unchecked slice now advances into `codegen.py`.
+- Split codegen's LLVM module printing behind a typed
+  `_llvm_print_module_to_string(module: int) -> str` helper and registered that
+  helper as an explicit AOT native LLVM-C leaf. Tuple-backed container
+  annotations now retain homogeneous element types for `for` target binding,
+  allowing loops over fields such as `TranslationUnit.functions` to bind
+  elements as project records. The broader source-to-LLVM unchecked slice now
+  advances past `_LLVMGen.generate()` and stops at the existing
+  `self._sema.functions.get(...)` dictionary lookup/optional `FunctionSymbol`
+  boundary in `codegen.py`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

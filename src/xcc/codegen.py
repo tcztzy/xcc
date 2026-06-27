@@ -54,6 +54,7 @@ from xcc.ast import (
     StringLiteral,
     SubscriptExpr,
     SwitchStmt,
+    TranslationUnit,
     TypedefDecl,
     TypeSpec,
     UnaryExpr,
@@ -80,7 +81,14 @@ from xcc.llvm_api import (
     zero_ptr_array,
 )
 from xcc.sema.constants import char_literal_body, decode_escaped_units
-from xcc.sema.symbols import EnumConstSymbol, FunctionSymbol, RecordMemberInfo, VarSymbol
+from xcc.sema.symbols import (
+    EnumConstSymbol,
+    FunctionSymbol,
+    RecordMemberInfo,
+    SemaUnit,
+    TypeMap,
+    VarSymbol,
+)
 from xcc.sema.type_helpers import (
     is_integer_type,
     is_signed_integer_type,
@@ -126,6 +134,30 @@ class _LoopCtx:
 
 
 class _LLVMGen:
+    _result: FrontendResult
+    _unit: TranslationUnit
+    _type_map: TypeMap
+    _sema: SemaUnit
+    _ctx: int
+    _mod: int
+    _builder: int
+    _str_constants: dict[str, int]
+    _compound_literal_globals: dict[int, int]
+    _func_types: dict[str, int]
+    _func_param_types: dict[str, list[int]]
+    _struct_types: dict[str, int]
+    _static_local_counter: int
+    _static_local_globals: dict[int, int]
+    _static_local_global_values: set[int]
+    _func: int
+    _func_sym: FunctionSymbol | None
+    _locals: list[dict[str, int]]
+    _label_blocks: dict[str, int]
+    _loop_stack: list[_LoopCtx]
+    _break_stack: list[int]
+    _switch_info: list[tuple[int, int, int | None, bool, int]]
+    _entry_block: int
+
     def __init__(self, result: FrontendResult) -> None:
         self._result = result
         self._unit = result.unit
@@ -465,10 +497,7 @@ class _LLVMGen:
     def generate(self) -> str:
         self._emit_globals()
         self._emit_functions()
-        c = llvm()
-        ir = c.PrintModuleToString(self._mod)
-        result = ir.decode("utf-8") if isinstance(ir, bytes) else str(ir)
-        return result
+        return _llvm_print_module_to_string(self._mod)
 
     def _emit_globals(self) -> None:
         llvm()
@@ -4869,3 +4898,9 @@ class _LLVMGen:
 
 def generate_llvm_ir(result: FrontendResult) -> str:
     return _LLVMGen(result).generate()
+
+
+def _llvm_print_module_to_string(module: int) -> str:
+    c = llvm()
+    ir = c.PrintModuleToString(module)
+    return ir.decode("utf-8") if isinstance(ir, bytes) else str(ir)

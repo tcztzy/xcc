@@ -117,6 +117,8 @@ class _Emitter:
             return self._emit_aot_read_text_file_function(function)
         if function.name == "xcc.cc_driver._aot_write_text_file":
             return self._emit_aot_write_text_file_function(function)
+        if function.name == "xcc.codegen._llvm_print_module_to_string":
+            return self._emit_llvm_print_module_to_string_function(function)
         if function.name == "xcc.lexer._aot_error_summary_for_source":
             return self._emit_core_lexer_string_helper_function(
                 function,
@@ -1059,6 +1061,29 @@ class _Emitter:
                 f"  %result = call ptr @__xcc_aot_read_text_file(ptr %{param.name})",
                 "  ret ptr %result",
                 "}",
+            )
+        )
+
+    def _emit_llvm_print_module_to_string_function(self, function: IrFunction) -> str:
+        self.index = 0
+        if (
+            len(function.params) != 1
+            or not isinstance(function.params[0].type, IrIntType)
+            or function.params[0].type.bits != 64
+            or not isinstance(function.return_type, IrStringType)
+        ):
+            self._error("LLVM module print helper expects int -> str")
+        param = function.params[0]
+        return "\n".join(
+            (
+                f"define ptr {_llvm_symbol(function.name)}(i64 %{param.name}) {{",
+                "entry:",
+                f"  %{param.name}.ptr = inttoptr i64 %{param.name} to ptr",
+                f"  %result = call ptr @LLVMPrintModuleToString(ptr %{param.name}.ptr)",
+                "  ret ptr %result",
+                "}",
+                "",
+                "declare ptr @LLVMPrintModuleToString(ptr)",
             )
         )
 
