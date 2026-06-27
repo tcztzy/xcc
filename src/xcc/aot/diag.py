@@ -1,4 +1,11 @@
+import ast
 from dataclasses import dataclass
+from typing import cast
+
+
+class _LocatedNode:
+    lineno: int
+    col_offset: int
 
 
 @dataclass(frozen=True)
@@ -21,3 +28,16 @@ class AotError(ValueError):
             raise ValueError("AotError requires at least one diagnostic")
         super().__init__(str(diagnostics[0]))
         self.diagnostics = diagnostics
+
+
+def node_location(node: ast.AST) -> tuple[int | None, int | None]:
+    located = cast(_LocatedNode, node)
+    try:
+        line = located.lineno
+    except AttributeError:
+        line = None
+    try:
+        column = located.col_offset
+    except AttributeError:
+        column = None
+    return line, column

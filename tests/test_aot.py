@@ -13,6 +13,7 @@ from xcc.aot import (
     check_subset,
     parse_source,
 )
+from xcc.aot.diag import node_location
 from xcc.aot.binder import (
     _is_supported_annotation_node,
     _is_supported_composite_annotation,
@@ -59,6 +60,11 @@ class AotDiagnosticTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             AotError(())
         self.assertEqual(str(ctx.exception), "AotError requires at least one diagnostic")
+
+    def test_node_location_handles_positioned_and_synthetic_nodes(self) -> None:
+        function = ast.parse("def f() -> int:\n    return 1\n").body[0]
+        self.assertEqual(node_location(function), (1, 0))
+        self.assertEqual(node_location(ast.Pass()), (None, None))
 
 
 class AotModuleParseTests(unittest.TestCase):

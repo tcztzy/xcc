@@ -8,10 +8,12 @@
   aliases used by CLI and preprocessor helpers. The subset checker now
   recognizes existing ordinary `staticmethod`, `classmethod`, and `cache`
   decorators, which admits `host_includes.py` and clears decorator diagnostics
-  from the all-`src/xcc` AOT admission probe. That probe now reaches 34/57
-  modules, up from 19/57 before this milestone slice, with remaining blockers
-  concentrated in dynamic calls, lambdas/nonlocals/globals, and rejected runtime
-  `re` shims.
+  from the all-`src/xcc` AOT admission probe. AOT diagnostics now use an
+  explicit `node_location()` helper instead of reflection-style `getattr`,
+  admitting `aot/binder.py`, `aot/lower.py`, and `aot/subset.py`. The
+  all-`src/xcc` probe now reaches 37/57 modules, up from 19/57 before this
+  milestone slice, with remaining blockers concentrated in dynamic calls,
+  lambdas/nonlocals/globals, and rejected runtime `re` shims.
 - Added Milestone 5 AOT parser/sema slice support, including class method
   signature binding, nested container annotation admission, parser helper subset
   cleanup, cross-module record type resolution, and native parser/sema oracle

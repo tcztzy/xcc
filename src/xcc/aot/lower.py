@@ -2,7 +2,7 @@ import ast
 from typing import Literal, NoReturn
 
 from xcc.aot.analysis import analyze_source
-from xcc.aot.diag import AotDiagnostic, AotError
+from xcc.aot.diag import AotDiagnostic, AotError, node_location
 from xcc.aot.ir import (
     IrAssign,
     IrBinary,
@@ -636,14 +636,15 @@ class _Lowerer:
         return IrStringConcat(tuple(parts))
 
     def _error(self, code: str, message: str, node: ast.AST) -> NoReturn:
+        line, column = node_location(node)
         raise AotError(
             (
                 AotDiagnostic(
                     code,
                     message,
                     filename=self.filename,
-                    line=getattr(node, "lineno", None),
-                    column=getattr(node, "col_offset", None),
+                    line=line,
+                    column=column,
                 ),
             )
         )

@@ -1,6 +1,6 @@
 import ast
 
-from xcc.aot.diag import AotDiagnostic, AotError
+from xcc.aot.diag import AotDiagnostic, AotError, node_location
 from xcc.aot.module import AotModule
 from xcc.aot.subset import AotModuleSummary
 from xcc.aot.types import (
@@ -163,13 +163,14 @@ class _TypeBinder:
         return AotType(name)
 
     def _add_error(self, code: str, message: str, node: ast.AST) -> None:
+        line, column = node_location(node)
         self._diagnostics.append(
             AotDiagnostic(
                 code,
                 message,
                 filename=self.summary.filename,
-                line=getattr(node, "lineno", None),
-                column=getattr(node, "col_offset", None),
+                line=line,
+                column=column,
             )
         )
 

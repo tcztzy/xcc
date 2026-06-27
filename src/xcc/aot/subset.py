@@ -1,7 +1,7 @@
 import ast
 from dataclasses import dataclass
 
-from xcc.aot.diag import AotDiagnostic, AotError
+from xcc.aot.diag import AotDiagnostic, AotError, node_location
 from xcc.aot.module import AotModule
 
 _DYNAMIC_CALLS = {
@@ -124,13 +124,14 @@ class _SubsetChecker(ast.NodeVisitor):
             )
 
     def _add_error(self, code: str, message: str, node: ast.AST) -> None:
+        line, column = node_location(node)
         self._diagnostics.append(
             AotDiagnostic(
                 code,
                 message,
                 filename=self.filename,
-                line=getattr(node, "lineno", None),
-                column=getattr(node, "col_offset", None),
+                line=line,
+                column=column,
             )
         )
 
