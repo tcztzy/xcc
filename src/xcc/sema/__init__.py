@@ -135,6 +135,10 @@ _FLOAT_COMPARE_BUILTINS = (
 )
 
 
+def _overload_rank_key(item: tuple[int, int, FunctionSignature]) -> tuple[int, int]:
+    return item[0], item[1]
+
+
 class Analyzer:
     def __init__(
         self,
@@ -1511,7 +1515,7 @@ class Analyzer:
         if not ranked:
             self._check_call_arguments(args, default.params, default.is_variadic, name, scope)
             return default
-        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        ranked.sort(key=_overload_rank_key, reverse=True)
         if len(ranked) > 1 and ranked[0][:2] == ranked[1][:2]:
             raise SemaError(f"Ambiguous overloaded call: {name}")
         chosen = ranked[0][2]

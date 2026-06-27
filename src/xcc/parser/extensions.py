@@ -341,17 +341,24 @@ def _skip_calling_convention_identifiers_if(
 def _skip_calling_convention_identifiers_before_pointer(parser: object) -> bool:
     return _skip_calling_convention_identifiers_if(
         parser,
-        lambda token: token.kind == TokenKind.PUNCTUATOR and token.lexeme == "*",
+        _is_pointer_token,
     )
 
 
 def _skip_calling_convention_identifiers_after_pointer(parser: object) -> bool:
     return _skip_calling_convention_identifiers_if(
         parser,
-        lambda token: (
-            token.kind == TokenKind.IDENT
-            or (token.kind == TokenKind.PUNCTUATOR and token.lexeme in {"(", ")"})
-        ),
+        _is_pointer_suffix_token,
+    )
+
+
+def _is_pointer_token(token: Token) -> bool:
+    return token.kind == TokenKind.PUNCTUATOR and token.lexeme == "*"
+
+
+def _is_pointer_suffix_token(token: Token) -> bool:
+    return token.kind == TokenKind.IDENT or (
+        token.kind == TokenKind.PUNCTUATOR and token.lexeme in {"(", ")"}
     )
 
 
