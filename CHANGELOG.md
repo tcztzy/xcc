@@ -177,8 +177,16 @@
   `while` loops. LLVM emission now gives loop-carried locals header phi values
   and emits integer ordering comparisons for lowered `<`, `<=`, `>`, and `>=`
   predicates. The cross-module frontend success-path slice now advances past
-  `xcc.lexer.lex()`'s loop shape; the next observed blocker is class/enum
-  attribute access such as `TokenKind.EOF`.
+  `xcc.lexer.lex()`'s loop shape.
+- Added AOT lowering and LLVM emission for enum member constants such as
+  `TokenKind.EOF`, using stable per-module constant pointers for comparisons.
+  The AOT type binder now also infers ordinary instance fields assigned in
+  `__init__`, allowing lowered methods to read fields such as `self._line`
+  without adding class-level annotations. Loop control now lowers and emits
+  `break` and `continue` for `while` and tuple-backed `for` loops. The
+  cross-module frontend success-path slice now advances through enum constants,
+  lexer instance fields, and loop control; the next observed blocker is string
+  method lowering for calls such as `self._source.startswith(...)`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

@@ -8,12 +8,15 @@ from xcc.aot.ir import (
     IrBinary,
     IrBoolType,
     IrBranch,
+    IrBreak,
     IrCall,
     IrConstBool,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
     IrConstString,
+    IrContinue,
+    IrEnumMember,
     IrExpr,
     IrForEach,
     IrFunction,
@@ -48,6 +51,13 @@ class _EmittedValue:
     type: IrType
 
 
+@dataclass
+class _LoopLabels:
+    continue_label: str
+    break_label: str
+    continue_sources: list[tuple[str, dict[str, _EmittedValue]]] | None = None
+
+
 def emit_llvm_text(module: IrModule) -> str:
     emitter = _Emitter(module)
     return emitter.emit()
@@ -61,6 +71,8 @@ class _Emitter:
         self.index = 0
         self.string_index = 0
         self.string_constants: list[str] = []
+        self.enum_constants: dict[tuple[str, str], str] = {}
+        self.loop_stack: list[_LoopLabels] = []
         self.needs_puts = False
         self.needs_runtime_prelude = False
 
@@ -174,6 +186,19 @@ class _Emitter:
         if isinstance(statement, IrWhile):
             self._emit_while(statement, names, lines, return_type)
             return
+        if isinstance(statement, IrBreak):
+            if not self.loop_stack:
+                self._error("break outside loop")
+            lines.append(f"  br label %{self.loop_stack[-1].break_label}")
+            return
+        if isinstance(statement, IrContinue):
+            if not self.loop_stack:
+                self._error("continue outside loop")
+            loop = self.loop_stack[-1]
+            if loop.continue_sources is not None:
+                loop.continue_sources.append((_current_label(lines), dict(names)))
+            lines.append(f"  br label %{self.loop_stack[-1].continue_label}")
+            return
         if isinstance(statement, IrPrint):
             value = self._emit_expr(statement.value, names, lines)
             self.needs_puts = True
@@ -199,6 +224,8 @@ class _Emitter:
             return _EmittedValue("true" if expr.value else "false", IrBoolType())
         if isinstance(expr, IrConstNone):
             return _EmittedValue("null", IrNoneType())
+        if isinstance(expr, IrEnumMember):
+            return _EmittedValue(self._enum_constant(expr), expr.type)
         if isinstance(expr, IrConstString):
             return _EmittedValue(self._string_constant(expr.value), IrStringType())
         if isinstance(expr, IrName):
@@ -265,12 +292,16 @@ class _Emitter:
         self.needs_runtime_prelude = True
         cond_label = self._label("for.cond")
         body_label = self._label("for.body")
+        next_label = self._label("for.next")
         end_label = self._label("for.end")
         current_label = _current_label(lines)
+        next_value = self._tmp("next")
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{cond_label}:")
         index = self._tmp("index")
-        lines.append(f"  {index} = phi i64 [ 0, %{current_label} ], [ %next, %{body_label} ]")
+        lines.append(
+            f"  {index} = phi i64 [ 0, %{current_label} ], [ {next_value}, %{next_label} ]"
+        )
         length = self._tmp("len")
         lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
         condition = self._tmp("forcond")
@@ -281,10 +312,14 @@ class _Emitter:
         lines.append(f"  {item} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})")
         for target in _for_each_targets(statement.target):
             names[target] = _EmittedValue(item, IrRecordType("object"))
+        self.loop_stack.append(_LoopLabels(next_label, end_label))
         self._emit_branch(statement.body, names, lines, return_type)
+        self.loop_stack.pop()
         if not _block_is_terminated(lines):
-            lines.append(f"  %next = add i64 {index}, 1")
-            lines.append(f"  br label %{cond_label}")
+            lines.append(f"  br label %{next_label}")
+        lines.append(f"{next_label}:")
+        lines.append(f"  {next_value} = add i64 {index}, 1")
+        lines.append(f"  br label %{cond_label}")
         lines.append(f"{end_label}:")
 
     def _emit_while(
@@ -319,17 +354,21 @@ class _Emitter:
         lines.append(f"  br i1 {condition.value}, label %{body_label}, label %{end_label}")
         lines.append(f"{body_label}:")
         body_names = dict(cond_names)
+        loop_labels = _LoopLabels(cond_label, end_label, [])
+        self.loop_stack.append(loop_labels)
         self._emit_branch(statement.body, body_names, lines, return_type)
-        backedge_label: str | None = None
+        self.loop_stack.pop()
+        incoming_edges: list[tuple[str, dict[str, _EmittedValue]]] = []
         if not _block_is_terminated(lines):
-            backedge_label = _current_label(lines)
+            incoming_edges.append((_current_label(lines), body_names))
             lines.append(f"  br label %{cond_label}")
+        incoming_edges.extend(loop_labels.continue_sources or ())
         for name, line_index in phi_lines.items():
             initial = initial_values[name]
-            body_value = body_names.get(name, phi_values[name])
             incoming = f"[ {initial.value}, %{incoming_label} ]"
-            if backedge_label is not None:
-                incoming += f", [ {body_value.value}, %{backedge_label} ]"
+            for source_label, source_names in incoming_edges:
+                body_value = source_names.get(name, phi_values[name])
+                incoming += f", [ {body_value.value}, %{source_label} ]"
             lines[line_index] = (
                 f"  {phi_values[name].value} = phi {self._storage_llvm_type(initial.type)} "
                 f"{incoming}"
@@ -1260,6 +1299,21 @@ class _Emitter:
         name = f"@.str{self.string_index}"
         self.string_index += 1
         size = len(value.encode("utf-8")) + 1
+        self.string_constants.append(
+            f'{name} = private unnamed_addr constant [{size} x i8] c"{escaped}\\00", align 1'
+        )
+        return name
+
+    def _enum_constant(self, value: IrEnumMember) -> str:
+        key = (value.enum, value.member)
+        existing = self.enum_constants.get(key)
+        if existing is not None:
+            return existing
+        rendered = f"{value.enum}.{value.member}"
+        escaped = _escape_c_string(rendered)
+        name = f"@.enum{len(self.enum_constants)}"
+        size = len(rendered.encode("utf-8")) + 1
+        self.enum_constants[key] = name
         self.string_constants.append(
             f'{name} = private unnamed_addr constant [{size} x i8] c"{escaped}\\00", align 1'
         )

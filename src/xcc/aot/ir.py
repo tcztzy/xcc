@@ -86,6 +86,16 @@ class IrConstNone:
 
 
 @dataclass(frozen=True)
+class IrEnumMember:
+    enum: str
+    member: str
+
+    @property
+    def type(self) -> IrRecordType:
+        return IrRecordType("Enum")
+
+
+@dataclass(frozen=True)
 class IrName:
     name: str
     type: IrType
@@ -161,6 +171,7 @@ IrExpr = (
     | IrConstString
     | IrConstBool
     | IrConstNone
+    | IrEnumMember
     | IrName
     | IrBinary
     | IrGetField
@@ -210,6 +221,16 @@ class IrWhile:
 
 
 @dataclass(frozen=True)
+class IrBreak:
+    pass
+
+
+@dataclass(frozen=True)
+class IrContinue:
+    pass
+
+
+@dataclass(frozen=True)
 class IrPrint:
     value: IrExpr
 
@@ -220,7 +241,7 @@ class IrRaise:
     message: IrExpr
 
 
-IrStmt = IrAssign | IrReturn | IrIf | IrForEach | IrWhile | IrPrint | IrRaise
+IrStmt = IrAssign | IrReturn | IrIf | IrForEach | IrWhile | IrBreak | IrContinue | IrPrint | IrRaise
 
 
 @dataclass(frozen=True)

@@ -8,12 +8,15 @@ from xcc.aot.ir import (
     IrBinary,
     IrBoolType,
     IrBranch,
+    IrBreak,
     IrCall,
     IrConstBool,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
     IrConstString,
+    IrContinue,
+    IrEnumMember,
     IrExpr,
     IrField,
     IrForEach,
@@ -275,6 +278,10 @@ class _Lowerer:
             if statement.value is None:
                 return IrReturn(IrConstNone())
             return IrReturn(self._lower_expr(statement.value, names, return_type))
+        if isinstance(statement, ast.Break):
+            return IrBreak()
+        if isinstance(statement, ast.Continue):
+            return IrContinue()
         self._error(
             "XCC-AOT-LOWER-0001",
             f"Unsupported lowered statement: {type(statement).__name__}",
@@ -301,6 +308,10 @@ class _Lowerer:
                 self._error("XCC-AOT-LOWER-0002", f"Unknown lowered name: {expr.id}", expr)
             return IrName(expr.id, value_type)
         if isinstance(expr, ast.Attribute):
+            if isinstance(expr.value, ast.Name):
+                class_info = self.class_types.get(expr.value.id)
+                if class_info is not None and _is_enum_class(class_info):
+                    return IrEnumMember(expr.value.id, expr.attr)
             value = self._lower_expr(expr.value, names, expected)
             if isinstance(value.type, IrRecordType) and value.type.name in self.class_types:
                 field_type = self._record_field_type(value.type, expr.attr, expr)
@@ -767,3 +778,7 @@ def _is_super_call(expr: ast.expr) -> bool:
         and not expr.args
         and not expr.keywords
     )
+
+
+def _is_enum_class(class_info: AotClassInfo) -> bool:
+    return any(base == "Enum" or base.endswith(".Enum") for base in class_info.bases)

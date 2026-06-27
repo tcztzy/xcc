@@ -9,12 +9,15 @@ from xcc.aot.ir import (
     IrAssign,
     IrBinary,
     IrBranch,
+    IrBreak,
     IrCall,
     IrConstBool,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
     IrConstString,
+    IrContinue,
+    IrEnumMember,
     IrExpr,
     IrForEach,
     IrFunction,
@@ -539,6 +542,8 @@ def _rename_statement_call(statement: IrStmt, rename_map: dict[str, str]) -> IrS
             _rename_expr_call(statement.condition, rename_map),
             _rename_branch_calls(statement.body, rename_map),
         )
+    if isinstance(statement, (IrBreak, IrContinue)):
+        return statement
     if isinstance(statement, IrPrint):
         return IrPrint(_rename_expr_call(statement.value, rename_map))
     if isinstance(statement, IrRaise):
@@ -553,7 +558,7 @@ def _rename_branch_calls(branch: IrBranch, rename_map: dict[str, str]) -> IrBran
 def _rename_expr_call(expr: IrExpr, rename_map: dict[str, str]) -> IrExpr:
     if isinstance(
         expr,
-        IrConstInt | IrConstString | IrConstBool | IrConstNone | IrName,
+        IrConstInt | IrConstString | IrConstBool | IrConstNone | IrEnumMember | IrName,
     ):
         return expr
     if isinstance(expr, IrBinary):
@@ -623,6 +628,8 @@ def _statement_record_names(statement: IrStmt) -> tuple[str, ...]:
         names = set(_expr_record_names(statement.condition))
         names.update(_branch_record_names(statement.body))
         return tuple(sorted(names))
+    if isinstance(statement, (IrBreak, IrContinue)):
+        return ()
     if isinstance(statement, IrPrint):
         return _expr_record_names(statement.value)
     if isinstance(statement, IrRaise):
@@ -639,7 +646,10 @@ def _branch_record_names(branch: IrBranch) -> tuple[str, ...]:
 
 def _expr_record_names(expr: IrExpr) -> tuple[str, ...]:
     names = set(_type_record_names(expr.type))
-    if isinstance(expr, IrConstInt | IrConstString | IrConstBool | IrConstNone | IrName):
+    if isinstance(
+        expr,
+        IrConstInt | IrConstString | IrConstBool | IrConstNone | IrEnumMember | IrName,
+    ):
         return tuple(sorted(names))
     if isinstance(expr, IrBinary):
         names.update(_expr_record_names(expr.left))
@@ -715,6 +725,8 @@ def _statement_call_targets(statement: IrStmt) -> tuple[str, ...]:
         return _expr_call_targets(statement.iterable) + _branch_call_targets(statement.body)
     if isinstance(statement, IrWhile):
         return _expr_call_targets(statement.condition) + _branch_call_targets(statement.body)
+    if isinstance(statement, (IrBreak, IrContinue)):
+        return ()
     if isinstance(statement, IrPrint):
         return _expr_call_targets(statement.value)
     if isinstance(statement, IrRaise):
@@ -732,7 +744,7 @@ def _branch_call_targets(branch: IrBranch) -> tuple[str, ...]:
 def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
     if isinstance(
         expr,
-        IrConstInt | IrConstString | IrConstBool | IrConstNone | IrName,
+        IrConstInt | IrConstString | IrConstBool | IrConstNone | IrEnumMember | IrName,
     ):
         return ()
     if isinstance(expr, IrBinary):

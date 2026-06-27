@@ -8,12 +8,16 @@ from xcc.aot import (
     IrAssign,
     IrBinary,
     IrBoolType,
+    IrBreak,
     IrConstBool,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
     IrConstString,
+    IrContinue,
+    IrEnumMember,
     IrFunction,
+    IrGetField,
     IrIntType,
     IrModule,
     IrName,
@@ -27,9 +31,13 @@ from xcc.aot import (
     IrTuple,
     IrTupleType,
     IrWhile,
+    analyze_source,
     lower_source_to_ir,
 )
+from xcc.aot.binder import _TypeBinder
 from xcc.aot.lower import _collect_global_names, _Lowerer
+from xcc.aot.module import parse_source
+from xcc.aot.subset import check_subset
 from xcc.aot.types import AotClassInfo, AotType
 
 
@@ -179,6 +187,112 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIn("__cmp_Lt", repr(function.body[1].condition))
         self.assertIn("value", repr(function.body[1].body))
 
+    def test_lowers_loop_break_and_continue_statements(self) -> None:
+        module = lower_source_to_ir(
+            "def spin(limit: int) -> int:\n"
+            "    value: int = 0\n"
+            "    while value < limit:\n"
+            "        value = value + 1\n"
+            "        if value < limit:\n"
+            "            continue\n"
+            "        break\n"
+            "    return value\n",
+            filename="loop_control.py",
+        )
+        loop = module.functions[0].body[1]
+        self.assertIsInstance(loop.body.statements[1].then_branch.statements[0], IrContinue)
+        self.assertIsInstance(loop.body.statements[2], IrBreak)
+
+    def test_lowers_enum_member_attribute(self) -> None:
+        module = lower_source_to_ir(
+            "from enum import Enum, auto\n"
+            "class Kind(Enum):\n"
+            "    EOF = auto()\n"
+            "def marker() -> Enum:\n"
+            "    return Kind.EOF\n",
+            filename="enum_member.py",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(returned, IrEnumMember("Kind", "EOF"))
+
+    def test_lowers_init_assigned_instance_attribute_field_read(self) -> None:
+        module = lower_source_to_ir(
+            "class Box:\n"
+            "    def __init__(self, value: int, flag: bool) -> None:\n"
+            "        self.value = value\n"
+            "        self.flag = flag\n"
+            "        self.count = 0\n"
+            "    def get(self) -> int:\n"
+            "        return self.value\n",
+            filename="init_fields.py",
+            include_records={"Box"},
+            include_functions={"Box.get"},
+        )
+        record = module.records[0]
+        self.assertEqual([field.name for field in record.fields], ["value", "flag", "count"])
+        self.assertEqual([field.type for field in record.fields], [IrIntType(64, True), IrBoolType(), IrIntType(64, True)])
+        returned = module.functions[0].body[0].value
+        self.assertEqual(returned, IrGetField(IrName("self", IrRecordType("Box")), "value", IrIntType(64, True)))
+
+    def test_binds_init_assigned_instance_attribute_edge_types(self) -> None:
+        analysis = analyze_source(
+            "int32 = int\n"
+            "Alias = list[int]\n"
+            "class Box:\n"
+            "    def make_text(self) -> str:\n"
+            "        return 'x'\n"
+            "    def __init__(self, value: int32, items: Alias, *, flag: bool) -> None:\n"
+            "        self.value = value\n"
+            "        self.items = items\n"
+            "        self.flag = flag\n"
+            "        self.none: None\n"
+            "        self.empty = None\n"
+            "        self.name = 'x'\n"
+            "        self.cast = str(value)\n"
+            "        self.same = self.name\n"
+            "        self.text = Box.make_text()\n"
+            "        self.truth = value == 0\n"
+            "        self.negated = not flag\n"
+            "        self.combo = self.name + self.text\n"
+            "        self.floaty = 1.5\n"
+            "        self.unknown = missing + value\n",
+            filename="init_field_edges.py",
+        )
+        fields = analysis.types.classes["Box"].fields
+        self.assertEqual(fields["value"], AotType("int32", bits=32, signed=True))
+        self.assertEqual(fields["items"], AotType("list[int]"))
+        self.assertEqual(fields["flag"], AotType("bool"))
+        self.assertEqual(fields["none"], AotType("None"))
+        self.assertEqual(fields["empty"], AotType("None"))
+        self.assertEqual(fields["name"], AotType("str"))
+        self.assertEqual(fields["cast"], AotType("str"))
+        self.assertEqual(fields["same"], AotType("str"))
+        self.assertEqual(fields["text"], AotType("str"))
+        self.assertEqual(fields["truth"], AotType("bool"))
+        self.assertEqual(fields["negated"], AotType("bool"))
+        self.assertEqual(fields["combo"], AotType("str"))
+        self.assertNotIn("floaty", fields)
+        self.assertNotIn("unknown", fields)
+
+    def test_init_field_inference_preserves_parameter_annotation_diagnostics(self) -> None:
+        cases = (
+            "class Bad:\n"
+            "    def __init__(this) -> None:\n"
+            "        pass\n",
+            "class Bad:\n"
+            "    def __init__(self, *, flag) -> None:\n"
+            "        self.flag = flag\n",
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                with self.assertRaises(AotError):
+                    analyze_source(source, filename="bad_init.py")
+
+    def test_direct_binder_infers_none_expression_type(self) -> None:
+        module = parse_source("", filename="direct.py")
+        binder = _TypeBinder(check_subset(module), module)
+        self.assertEqual(binder._infer_expr_type(None, {}, {}, {}), AotType("None"))
+
     def test_rejects_while_else_statement(self) -> None:
         with self.assertRaises(AotError) as ctx:
             lower_source_to_ir(
@@ -227,6 +341,8 @@ class AotScalarLoweringTests(unittest.TestCase):
             ("def f() -> int:\n    return helper()\n", "XCC-AOT-LOWER-0003"),
             ("def f(values: tuple[str, ...]) -> str:\n    return str(**values)\n", "XCC-AOT-LOWER-0003"),
             ("def f(value: int) -> int:\n    return value.real\n", "XCC-AOT-LOWER-0002"),
+            ("def build() -> int:\n    return 1\n"
+             "def f() -> int:\n    return build().real\n", "XCC-AOT-LOWER-0002"),
             (
                 "from dataclasses import dataclass\n"
                 "@dataclass(frozen=True)\n"

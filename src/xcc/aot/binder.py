@@ -78,6 +78,7 @@ class _TypeBinder:
                 self.aliases[name] = AotType(annotation_name(statement.value))
 
     def _collect_classes(self) -> None:
+        return_types = self._function_return_types()
         for statement in self.module.tree.body:
             if not isinstance(statement, ast.ClassDef):
                 continue
@@ -86,7 +87,115 @@ class _TypeBinder:
             for child in statement.body:
                 if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
                     fields[child.target.id] = self._resolve_annotation(child.annotation, child)
+            self._collect_init_fields(statement, fields, return_types)
             self.classes[statement.name] = AotClassInfo(statement.name, fields, bases)
+
+    def _collect_init_fields(
+        self,
+        class_node: ast.ClassDef,
+        fields: dict[str, AotType],
+        return_types: dict[str, AotType],
+    ) -> None:
+        for child in class_node.body:
+            if not isinstance(child, ast.FunctionDef) or child.name != "__init__":
+                continue
+            local_types = self._function_local_types(child, class_node.name)
+            for target, value, annotation in _init_self_assignments(child.body):
+                if target.attr in fields:
+                    continue
+                if annotation is not None:
+                    fields[target.attr] = self._resolve_annotation(annotation, target)
+                    continue
+                inferred = self._infer_expr_type(value, local_types, fields, return_types)
+                if inferred is not None:
+                    fields[target.attr] = inferred
+
+    def _function_return_types(self) -> dict[str, AotType]:
+        return_types: dict[str, AotType] = {}
+        for statement in self.module.tree.body:
+            if isinstance(statement, ast.FunctionDef) and statement.returns is not None:
+                return_types[statement.name] = self._annotation_to_known_type(statement.returns)
+            if not isinstance(statement, ast.ClassDef):
+                continue
+            for child in statement.body:
+                if isinstance(child, ast.FunctionDef) and child.returns is not None:
+                    return_types[f"{statement.name}.{child.name}"] = self._annotation_to_known_type(
+                        child.returns
+                    )
+        return return_types
+
+    def _function_local_types(
+        self,
+        statement: ast.FunctionDef,
+        owner: str,
+    ) -> dict[str, AotType]:
+        local_types: dict[str, AotType] = {}
+        positional_args = statement.args.posonlyargs + statement.args.args
+        for index, arg in enumerate(positional_args):
+            if index == 0 and arg.annotation is None and arg.arg == "self":
+                local_types[arg.arg] = AotType(owner)
+            elif arg.annotation is not None:
+                local_types[arg.arg] = self._annotation_to_known_type(arg.annotation)
+        for arg in statement.args.kwonlyargs:
+            if arg.annotation is not None:
+                local_types[arg.arg] = self._annotation_to_known_type(arg.annotation)
+        return local_types
+
+    def _annotation_to_known_type(self, node: ast.expr) -> AotType:
+        name = annotation_name(node)
+        alias = self.width_aliases.get(name)
+        if alias is not None:
+            return alias
+        alias = self.aliases.get(name)
+        if alias is not None:
+            return alias
+        return AotType(name)
+
+    def _infer_expr_type(
+        self,
+        expr: ast.expr | None,
+        local_types: dict[str, AotType],
+        fields: dict[str, AotType],
+        return_types: dict[str, AotType],
+    ) -> AotType | None:
+        if expr is None:
+            return AotType("None")
+        if isinstance(expr, ast.Constant):
+            if isinstance(expr.value, bool):
+                return AotType("bool")
+            if expr.value is None:
+                return AotType("None")
+            if isinstance(expr.value, int):
+                return AotType("int")
+            if isinstance(expr.value, str):
+                return AotType("str")
+        if isinstance(expr, ast.Name):
+            return local_types.get(expr.id)
+        if (
+            isinstance(expr, ast.Attribute)
+            and isinstance(expr.value, ast.Name)
+            and expr.value.id == "self"
+        ):
+            return fields.get(expr.attr)
+        if isinstance(expr, ast.Call):
+            if isinstance(expr.func, ast.Name):
+                if expr.func.id == "len":
+                    return AotType("int")
+                if expr.func.id in {"bool", "int", "str"}:
+                    return AotType(expr.func.id)
+                return return_types.get(expr.func.id)
+            call_name = ast.unparse(expr.func)
+            return return_types.get(call_name)
+        if isinstance(expr, (ast.Compare, ast.BoolOp)):
+            return AotType("bool")
+        if isinstance(expr, ast.UnaryOp) and isinstance(expr.op, ast.Not):
+            return AotType("bool")
+        if isinstance(expr, ast.BinOp):
+            left_type = self._infer_expr_type(expr.left, local_types, fields, return_types)
+            right_type = self._infer_expr_type(expr.right, local_types, fields, return_types)
+            if left_type == right_type:
+                return left_type
+        return None
 
     def _collect_functions(self) -> None:
         for statement in self.module.tree.body:
@@ -177,6 +286,34 @@ class _TypeBinder:
 
 def _is_annotation_alias_value(node: ast.expr) -> bool:
     return isinstance(node, (ast.Subscript, ast.BinOp, ast.Name))
+
+
+def _init_self_assignments(
+    statements: list[ast.stmt],
+) -> tuple[tuple[ast.Attribute, ast.expr | None, ast.expr | None], ...]:
+    assignments: list[tuple[ast.Attribute, ast.expr | None, ast.expr | None]] = []
+    for statement in statements:
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Attribute)
+            and _is_self_attribute(statement.targets[0])
+        ):
+            assignments.append((statement.targets[0], statement.value, None))
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Attribute)
+            and _is_self_attribute(statement.target)
+        ):
+            assignments.append((statement.target, statement.value, statement.annotation))
+        elif isinstance(statement, ast.If):
+            assignments.extend(_init_self_assignments(statement.body))
+            assignments.extend(_init_self_assignments(statement.orelse))
+    return tuple(assignments)
+
+
+def _is_self_attribute(expr: ast.Attribute) -> bool:
+    return isinstance(expr.value, ast.Name) and expr.value.id == "self"
 
 
 def _is_supported_composite_annotation(name: str) -> bool:

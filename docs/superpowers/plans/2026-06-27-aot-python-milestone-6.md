@@ -854,10 +854,16 @@ annotations to the current tuple-backed opaque runtime shape, allowing the
 cross-module frontend success-path slice to get past `SemaUnit`'s container
 fields. AOT IR/lower/slice/LLVM now supports ordinary `while` loops with
 loop-carried local phi values and integer ordering comparisons, so the frontend
-success-path slice advances past `xcc.lexer.lex()`'s loop shape; the next
-observed blocker is class/enum attribute access such as `TokenKind.EOF`. The
-generated `main(argc, argv)` now converts the platform C `argv` array into the
-AOT tuple ABI with
+success-path slice advances past `xcc.lexer.lex()`'s loop shape. AOT lowering
+and LLVM emission now support enum member constants such as `TokenKind.EOF`
+with stable per-module constant pointers, the type binder infers ordinary
+instance fields assigned in `__init__` for method field reads such as
+`self._line`, and loop control now lowers/emits `break` and `continue` for
+`while` and tuple-backed `for` loops. The frontend success-path slice now
+advances through these lexer shapes; the next observed blocker is string method
+lowering for calls such as `self._source.startswith(...)`. The generated
+`main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
+ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its
 Python-level `argv` through `__xcc_aot_tuple_get()`, source reading goes through
 a generic `__xcc_aot_read_text_file()` runtime shim, LLVM file writing goes

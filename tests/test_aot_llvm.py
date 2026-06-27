@@ -6,6 +6,7 @@ from xcc.aot import (
     IrAssign,
     IrBinary,
     IrBoolType,
+    IrBreak,
     IrBranch,
     IrCall,
     IrConstBool,
@@ -13,6 +14,8 @@ from xcc.aot import (
     IrConstNone,
     IrConstructRecord,
     IrConstString,
+    IrContinue,
+    IrEnumMember,
     IrField,
     IrForEach,
     IrFunction,
@@ -455,6 +458,106 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("while.end", llvm_ir)
         self.assertIn("phi i64 [ 0, %entry ]", llvm_ir)
 
+    def test_emits_while_loop_break_and_continue(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "loop_control.py",
+            (),
+            (
+                IrFunction(
+                    "spin",
+                    (),
+                    int64,
+                    (
+                        IrWhile(
+                            IrConstBool(True),
+                            IrBranch(
+                                (
+                                    IrIf(
+                                        IrConstBool(True),
+                                        IrBranch((IrContinue(),)),
+                                        None,
+                                    ),
+                                    IrBreak(),
+                                )
+                            ),
+                        ),
+                        IrReturn(IrConstInt(0, int64)),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("br label %while.cond", llvm_ir)
+        self.assertIn("br label %while.end", llvm_ir)
+
+    def test_emits_for_each_continue_through_increment_block(self) -> None:
+        module = IrModule(
+            "for_continue.py",
+            (),
+            (
+                IrFunction(
+                    "walk",
+                    (),
+                    IrNoneType(),
+                    (
+                        IrForEach(
+                            "item",
+                            IrTuple((), IrTupleType(())),
+                            IrBranch((IrContinue(),)),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("for.next", llvm_ir)
+        self.assertIn("br label %for.next", llvm_ir)
+
+    def test_emits_enum_member_constants_as_stable_pointers(self) -> None:
+        enum_type = IrRecordType("Enum")
+        module = IrModule(
+            "enum.py",
+            (),
+            (
+                IrFunction(
+                    "same",
+                    (),
+                    IrBoolType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__cmp_Eq",
+                                (
+                                    IrEnumMember("Kind", "EOF"),
+                                    IrEnumMember("Kind", "EOF"),
+                                ),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "is_eof",
+                    (IrParam("kind", enum_type),),
+                    IrBoolType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__cmp_Eq",
+                                (IrName("kind", enum_type), IrEnumMember("Kind", "EOF")),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertEqual(llvm_ir.count('c"Kind.EOF\\00"'), 1)
+        self.assertIn("icmp eq ptr @.enum0, @.enum0", llvm_ir)
+        self.assertIn("icmp eq ptr %kind, @.enum0", llvm_ir)
+
     def test_emits_intrinsics_tuple_boxes_and_truth_edges(self) -> None:
         int32 = IrIntType(32, signed=True)
         uint32 = IrIntType(32, signed=False)
@@ -630,6 +733,8 @@ class AotLlvmTextTests(unittest.TestCase):
             _statement_assigned_names(IrAssign("(left, _)", IrConstNone())),
             ("left",),
         )
+        self.assertEqual(_statement_assigned_names(IrBreak()), ())
+        self.assertEqual(_statement_assigned_names(IrContinue()), ())
         self.assertEqual(
             _statement_assigned_names(
                 IrIf(
@@ -671,6 +776,12 @@ class AotLlvmTextTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             emitter._emit_status_return([], object())  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        with self.assertRaises(AotError) as ctx:
+            emitter._emit_statement(IrBreak(), {}, [], IrNoneType())
+        self.assertEqual(ctx.exception.diagnostics[0].message, "break outside loop")
+        with self.assertRaises(AotError) as ctx:
+            emitter._emit_statement(IrContinue(), {}, [], IrNoneType())
+        self.assertEqual(ctx.exception.diagnostics[0].message, "continue outside loop")
         with self.assertRaises(AotError) as ctx:
             emitter._emit_default_return([], object())  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")

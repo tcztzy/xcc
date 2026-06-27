@@ -11,12 +11,15 @@ from xcc.aot import (
     IrAssign,
     IrBinary,
     IrBoolType,
+    IrBreak,
     IrBranch,
     IrCall,
     IrConstBool,
     IrConstInt,
     IrConstNone,
     IrConstString,
+    IrContinue,
+    IrEnumMember,
     IrForEach,
     IrFunction,
     IrGetField,
@@ -120,11 +123,14 @@ class AotMilestone3SliceTests(unittest.TestCase):
                 "slice",
                 IrTupleSlice(IrTuple((call,), string_tuple), 0, None),
             ),
+            IrAssign("enum", IrEnumMember("Kind", "EOF")),
             IrAssign(
                 "join",
                 IrStringJoin(IrConstString(","), IrTuple((call,), string_tuple)),
             ),
             IrPrint(call),
+            IrContinue(),
+            IrBreak(),
             IrRaise("ValueError", IrStringConcat((call,))),
             IrWhile(IrCall("cond", (), IrBoolType()), IrBranch((IrPrint(call),))),
         )
@@ -156,6 +162,8 @@ class AotMilestone3SliceTests(unittest.TestCase):
             ),
             ("cond", "local"),
         )
+        self.assertEqual(_statement_call_targets(IrBreak()), ())
+        self.assertEqual(_statement_call_targets(IrContinue()), ())
         self.assertEqual(
             _expr_call_targets(IrBinary("+", call, call, IrStringType())),
             ("local", "local"),
@@ -193,6 +201,9 @@ class AotMilestone3SliceTests(unittest.TestCase):
                 IrName("items", tuple_type),
                 IrBranch((IrPrint(IrName("box", box_type)),)),
             ),
+            IrAssign("enum", IrEnumMember("Kind", "EOF")),
+            IrContinue(),
+            IrBreak(),
             IrWhile(
                 IrName("box", box_type),
                 IrBranch((IrPrint(IrName("other", other_type)),)),
@@ -223,7 +234,7 @@ class AotMilestone3SliceTests(unittest.TestCase):
             other_type,
             statements,
         )
-        self.assertEqual(_function_record_names(function), ("Box", "Other"))
+        self.assertEqual(_function_record_names(function), ("Box", "Enum", "Other"))
         with self.assertRaises(AssertionError):
             _statement_record_names(object())  # type: ignore[arg-type]
         unknown_expr = type("UnknownExpr", (), {"type": IrStringType()})()
@@ -281,6 +292,9 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertEqual(node.then_branch.statements[0].value.value, 1)
         self.assertEqual(loop.target, "item")
         self.assertEqual(while_loop.body, branch)
+        self.assertEqual(IrBreak(), IrBreak())
+        self.assertEqual(IrContinue(), IrContinue())
+        self.assertEqual(IrEnumMember("TokenKind", "EOF").type, IrRecordType("Enum"))
         self.assertEqual(IrRaise("ValueError", IrConstString("bad")).exception, "ValueError")
         self.assertEqual(IrPrint(IrConstString("ok")).value.value, "ok")
 
