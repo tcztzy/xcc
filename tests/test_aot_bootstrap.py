@@ -111,6 +111,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertEqual(tuple(param.name for param in entry.params), ("argc", "argv"))
         self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", functions)
         self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", repr(entry.body))
+        self.assertIn("xcc.cc_driver._aot_is_smoke_source", functions)
         self.assertIn("xcc.cc_driver._aot_smoke_llvm_ir", functions)
 
         llvm_ir = emit_llvm_text(module)
@@ -122,6 +123,11 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "define i32 @xcc.cc_driver._aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
             llvm_ir,
         )
+        self.assertIn("define i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source)", llvm_ir)
+        self.assertIn("call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source_buffer)", llvm_ir)
+        self.assertIn("%source_len_ok = icmp eq i64 %source_read, 26", llvm_ir)
+        self.assertIn("call i32 @strcmp(ptr %source, ptr @.str", llvm_ir)
+        self.assertNotIn("call i32 @strcmp(ptr %source, ptr null)", llvm_ir)
         self.assertIn("define ptr @xcc.cc_driver._aot_smoke_llvm_ir()", llvm_ir)
         self.assertIn("call ptr @xcc.cc_driver._aot_smoke_llvm_ir()", llvm_ir)
         self.assertIn("/opt/homebrew/opt/llvm/bin/llc", llvm_ir)
@@ -154,18 +160,18 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
                 output.write_bytes(b"out")
             return Result()
 
-        with patch("subprocess.run", fake_run):
+        with TemporaryDirectory() as temp_dir, patch("subprocess.run", fake_run):
             output = build_native_bootstrap(
                 ROOT,
-                ROOT / "build/aot/xcc",
+                Path(temp_dir) / "xcc",
                 llc="/tool/llc",
                 cc="cc",
             )
 
-        self.assertEqual(output, ROOT / "build/aot/xcc")
-        self.assertTrue(any(command[0] == "/tool/llc" for command in commands))
-        self.assertTrue(any(command[0] == "cc" for command in commands))
-        self.assertTrue((ROOT / "build/aot/xcc.ll").exists())
+            self.assertEqual(output.name, "xcc")
+            self.assertTrue(any(command[0] == "/tool/llc" for command in commands))
+            self.assertTrue(any(command[0] == "cc" for command in commands))
+            self.assertTrue((output.parent / "xcc.ll").exists())
 
     def test_build_native_bootstrap_reports_tool_failure(self) -> None:
         def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
@@ -227,17 +233,19 @@ class AotBootstrapSelfHostHarnessTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, stdout="compiled\n", stderr="")
 
         with (
+            TemporaryDirectory() as temp_dir,
             patch("xcc.aot.bootstrap.build_native_bootstrap", fake_build),
             patch("subprocess.run", fake_run),
         ):
-            result = run_bootstrap_self_host_smoke(ROOT, llc="/tool/llc", cc="clang")
+            root = Path(temp_dir)
+            result = run_bootstrap_self_host_smoke(root, llc="/tool/llc", cc="clang")
 
         self.assertIsInstance(result, AotBootstrapRunResult)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "compiled\n")
         self.assertEqual(result.stderr, "")
-        self.assertEqual(builds, [(ROOT, ROOT / "build/aot/xcc", "/tool/llc", "clang")])
-        self.assertEqual(commands[0][0], str(ROOT / "build/aot/xcc"))
+        self.assertEqual(builds, [(root, root / "build/aot/xcc", "/tool/llc", "clang")])
+        self.assertEqual(commands[0][0], str(root / "build/aot/xcc"))
 
     def test_self_host_harness_returns_compiler_diagnostic_status(self) -> None:
         def fake_build(
@@ -253,10 +261,11 @@ class AotBootstrapSelfHostHarnessTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 2, stdout="", stderr="compile failed\n")
 
         with (
+            TemporaryDirectory() as temp_dir,
             patch("xcc.aot.bootstrap.build_native_bootstrap", fake_build),
             patch("subprocess.run", fake_run),
         ):
-            result = run_bootstrap_self_host_smoke(ROOT)
+            result = run_bootstrap_self_host_smoke(Path(temp_dir))
 
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stderr, "compile failed\n")
@@ -275,10 +284,11 @@ class AotBootstrapSelfHostHarnessTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         with (
+            TemporaryDirectory() as temp_dir,
             patch("xcc.aot.bootstrap.build_native_bootstrap", fake_build),
             patch("subprocess.run", fake_run),
         ):
-            result = run_bootstrap_self_host_smoke(ROOT)
+            result = run_bootstrap_self_host_smoke(Path(temp_dir))
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("missing output object", result.stderr)

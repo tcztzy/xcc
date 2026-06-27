@@ -91,6 +91,11 @@
   native smoke compiler leaf now calls `xcc.cc_driver._aot_smoke_llvm_ir()` from
   the AOT slice instead of embedding the generated IR body directly in the LLVM
   emitter, narrowing the remaining native specialization to file/process glue.
+- Moved the fixed bootstrap smoke source validator into a lowered project
+  helper. The native smoke compiler leaf now calls
+  `xcc.cc_driver._aot_is_smoke_source()` from the AOT slice instead of owning
+  the source equality check entirely in the LLVM emitter; the remaining native
+  specialization is still file/process glue plus the fixed read envelope.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

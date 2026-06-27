@@ -732,7 +732,6 @@ class _Emitter:
         llc_path = self._string_constant("/opt/homebrew/opt/llvm/bin/llc")
         llc_filetype = self._string_constant("-filetype=obj")
         llc_output = self._string_constant("-o")
-        expected_source = self._string_constant(smoke_source)
         return "\n".join(
             (
                 f"define i32 {_llvm_symbol(function.name)}(i32 %{argc}, ptr %{argv}) {{",
@@ -768,10 +767,9 @@ class _Emitter:
                 f"  %source_len_ok = icmp eq i64 %source_read, {smoke_len}",
                 "  br i1 %source_len_ok, label %check_source, label %fail",
                 "check_source:",
-                f"  %source_zero = getelementptr i8, ptr %source_buffer, i64 {smoke_len}",
+                "  %source_zero = getelementptr i8, ptr %source_buffer, i64 %source_read",
                 "  store i8 0, ptr %source_zero",
-                f"  %source_cmp = call i32 @strcmp(ptr %source_buffer, ptr {expected_source})",
-                "  %source_ok = icmp eq i32 %source_cmp, 0",
+                "  %source_ok = call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source_buffer)",
                 "  br i1 %source_ok, label %write_llvm_path, label %fail",
                 "write_llvm_path:",
                 "  %object_len = call i64 @strlen(ptr %object_path)",

@@ -51,7 +51,10 @@ _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.types.Type.__str__",
 }
 _NATIVE_EMITTED_LEAF_DEPENDENCIES = {
-    "xcc.cc_driver._aot_compile_smoke_source_to_object": ("xcc.cc_driver._aot_smoke_llvm_ir",),
+    "xcc.cc_driver._aot_compile_smoke_source_to_object": (
+        "xcc.cc_driver._aot_is_smoke_source",
+        "xcc.cc_driver._aot_smoke_llvm_ir",
+    ),
 }
 
 

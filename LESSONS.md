@@ -1,5 +1,10 @@
 # Lessons
 
+- Bootstrap AOT helpers should not compare against module-level string
+  constants until the lowerer supports those constants as runtime values. In
+  the current lowering path, an uppercase global such as `_AOT_SMOKE_SOURCE`
+  can become a default null pointer in LLVM; use a local string literal or add
+  explicit global-constant lowering before relying on that pattern.
 - Native AOT error fixtures should return a deterministic message/status pair,
   not try to mimic Python tracebacks. For early self-hosting oracles, a normal
   Python helper that returns `str(exc)` plus a native wrapper status code is a

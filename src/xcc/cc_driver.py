@@ -460,12 +460,16 @@ def _aot_smoke_llvm_ir() -> str:
     return "define i32 @main() {\nentry:\n  ret i32 0\n}\n"
 
 
+def _aot_is_smoke_source(source: str) -> bool:
+    return source == "int main(void){return 0;}\n"
+
+
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
     if (argc, len(argv), argv[1:2], argv[3:4]) != (5, 5, ("-c",), ("-o",)):
         return 1
     source_path = Path(argv[2])
     object_path = Path(argv[4])
-    if source_path.read_text(encoding="utf-8") != _AOT_SMOKE_SOURCE:
+    if not _aot_is_smoke_source(source_path.read_text(encoding="utf-8")):
         return 1
     llvm_path = Path(str(object_path) + ".ll")
     llvm_path.write_text(_aot_smoke_llvm_ir(), encoding="utf-8")
