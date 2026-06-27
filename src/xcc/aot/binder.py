@@ -215,7 +215,7 @@ def _is_supported_subscript_annotation(node: ast.Subscript) -> bool:
     elements = _annotation_slice_elements(node.slice)
     if base == "Literal":
         return all(isinstance(element, ast.Constant) for element in elements)
-    if base in {"list", "set", "frozenset"}:
+    if base in {"Iterable", "Sequence", "list", "set", "frozenset"}:
         return len(elements) == 1 and _is_supported_annotation_node(elements[0])
     if base == "dict":
         return len(elements) == 2 and all(

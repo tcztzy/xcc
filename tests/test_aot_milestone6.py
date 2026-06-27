@@ -7,7 +7,9 @@ from xcc.aot import analyze_path, analyze_source
 
 ROOT = Path(__file__).resolve().parents[1]
 PREPROCESSOR_CONDITIONALS_PATH = ROOT / "src/xcc/preprocessor/conditionals.py"
+PREPROCESSOR_INCLUDES_PATH = ROOT / "src/xcc/preprocessor/includes.py"
 PREPROCESSOR_MACROS_PATH = ROOT / "src/xcc/preprocessor/macros.py"
+XCC_INIT_PATH = ROOT / "src/xcc/__init__.py"
 
 
 class AotMilestone6AdmissionTests(unittest.TestCase):
@@ -44,8 +46,25 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
             "dict[str, tuple[list[_MacroToken], frozenset[str]]]",
         )
 
+    def test_binds_read_only_iterable_annotations(self) -> None:
+        source = (
+            "from collections.abc import Iterable, Sequence\n"
+            "def choose(argv: Sequence[str] | None, roots: Iterable[str]) -> tuple[str, ...]:\n"
+            "    return tuple(roots if argv is None else argv)\n"
+        )
+        analysis = analyze_source(source, filename="iterable_annotations.py")
+        function = analysis.types.functions["choose"]
+        self.assertEqual(function.parameters[0], ("argv", "Sequence[str] | None"))
+        self.assertEqual(function.parameters[1], ("roots", "Iterable[str]"))
+        self.assertEqual(function.return_type.name, "tuple[str, ...]")
+
     def test_admits_preprocessor_modules_blocked_by_common_annotations(self) -> None:
-        for path in (PREPROCESSOR_CONDITIONALS_PATH, PREPROCESSOR_MACROS_PATH):
+        for path in (
+            PREPROCESSOR_CONDITIONALS_PATH,
+            PREPROCESSOR_INCLUDES_PATH,
+            PREPROCESSOR_MACROS_PATH,
+            XCC_INIT_PATH,
+        ):
             with self.subTest(path=path.name):
                 analysis = analyze_path(path)
                 self.assertGreater(len(analysis.types.functions), 0)

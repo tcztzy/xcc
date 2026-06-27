@@ -4,10 +4,12 @@
 
 - Expanded Milestone 6 AOT bootstrap admission by validating ordinary
   container, private project-type, dotted type, and `Callable[[...], ...]`
-  annotations structurally. The all-`src/xcc` AOT admission probe now reaches
-  31/57 modules, up from 19/57 before this slice, with remaining blockers
+  annotations structurally, plus read-only `Sequence[...]` and `Iterable[...]`
+  aliases used by CLI and preprocessor helpers. The all-`src/xcc` AOT admission
+  probe now reaches 33/57 modules, up from 19/57 before this milestone slice,
+  with `XCC-AOT-TYPE-0002` cleared from that probe and remaining blockers
   concentrated in dynamic calls, lambdas/nonlocals/globals, decorators such as
-  `staticmethod`/`cache`, and a few iterable annotation aliases.
+  `staticmethod`/`cache`, and rejected runtime `re` shims.
 - Added Milestone 5 AOT parser/sema slice support, including class method
   signature binding, nested container annotation admission, parser helper subset
   cleanup, cross-module record type resolution, and native parser/sema oracle
