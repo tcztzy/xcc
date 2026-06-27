@@ -18,6 +18,8 @@ from xcc.aot.ir import (
     IrRecordType,
     IrReturn,
 )
+from xcc.aot.llvm_text import emit_llvm_text
+from xcc.aot.native import compile_llvm_executable
 from xcc.aot.slice import AotSliceInput, lower_core_entry_slice
 
 
@@ -106,6 +108,26 @@ def lower_bootstrap_entry_smoke(root: Path) -> IrModule:
     return lower_core_entry_slice(
         (root / "src/xcc/options.py",),
         _bootstrap_entry_smoke_wrapper(),
+    )
+
+
+def build_native_bootstrap(
+    root: Path,
+    output: Path,
+    *,
+    llc: str | None = None,
+    cc: str = "cc",
+) -> Path:
+    plan_bootstrap_entry(root)
+    module = lower_bootstrap_entry_smoke(root)
+    llvm_ir = emit_llvm_text(module)
+    return compile_llvm_executable(
+        llvm_ir,
+        output,
+        filename="<bootstrap>",
+        llc=llc,
+        cc=cc,
+        diagnostic_code="XCC-AOT-BOOTSTRAP-0003",
     )
 
 

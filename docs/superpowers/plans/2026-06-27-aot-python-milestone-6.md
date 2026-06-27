@@ -567,7 +567,7 @@ git commit -m "feat: plan AOT bootstrap entry"
 - Modify: `src/xcc/aot/core_runtime.py`
 - Modify: `tests/test_aot_bootstrap.py`
 
-- [ ] **Step 1: Add mocked native build tests**
+- [x] **Step 1: Add mocked native build tests**
 
 Append to `tests/test_aot_bootstrap.py`:
 
@@ -599,7 +599,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
         self.assertTrue(any(command[0] == "cc" for command in commands))
 ```
 
-- [ ] **Step 2: Run mocked native build tests and verify they fail**
+- [x] **Step 2: Run mocked native build tests and verify they fail**
 
 Run:
 
@@ -609,7 +609,7 @@ uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapNativeBuildTests 
 
 Expected: import failure for `build_native_bootstrap`.
 
-- [ ] **Step 3: Implement native bootstrap build orchestration**
+- [x] **Step 3: Implement native bootstrap build orchestration**
 
 Add `build_native_bootstrap(root: Path, output: Path) -> Path` to `src/xcc/aot/bootstrap.py`. It must:
 
@@ -622,7 +622,7 @@ Add `build_native_bootstrap(root: Path, output: Path) -> Path` to `src/xcc/aot/b
 - return `output` on success;
 - raise `AotError` with `XCC-AOT-BOOTSTRAP-0003` when a command fails.
 
-- [ ] **Step 4: Run mocked native build tests**
+- [x] **Step 4: Run mocked native build tests**
 
 Run:
 
@@ -632,7 +632,7 @@ uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapNativeBuildTests 
 
 Expected: mocked command planning tests pass.
 
-- [ ] **Step 5: Add an optional real toolchain smoke**
+- [x] **Step 5: Add an optional real toolchain smoke**
 
 Add a test guarded by `llc` availability:
 
@@ -653,7 +653,7 @@ uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapNativeBuildTests 
 
 Expected: mocked test passes and real smoke either passes or is skipped when the configured `llc` is unavailable.
 
-- [ ] **Step 6: Commit native bootstrap build helper**
+- [x] **Step 6: Commit native bootstrap build helper**
 
 Run:
 

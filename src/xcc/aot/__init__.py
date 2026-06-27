@@ -3,6 +3,7 @@ from xcc.aot.binder import bind_types
 from xcc.aot.bootstrap import (
     AotBootstrapAdmissionReport,
     AotBootstrapEntryPlan,
+    build_native_bootstrap,
     collect_bootstrap_sources,
     lower_bootstrap_entry_smoke,
     plan_bootstrap_entry,
@@ -48,7 +49,12 @@ from xcc.aot.ir import (
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
 from xcc.aot.module import AotModule, parse_path, parse_source
-from xcc.aot.native import NativeSmokeResult, run_native_core_smoke, run_native_smoke
+from xcc.aot.native import (
+    NativeSmokeResult,
+    compile_llvm_executable,
+    run_native_core_smoke,
+    run_native_smoke,
+)
 from xcc.aot.slice import (
     AotSliceInput,
     collect_slice_inputs,
@@ -112,6 +118,8 @@ __all__ = (
     "analyze_source",
     "bind_types",
     "check_subset",
+    "build_native_bootstrap",
+    "compile_llvm_executable",
     "collect_bootstrap_sources",
     "collect_slice_inputs",
     "core_entry_wrapper",

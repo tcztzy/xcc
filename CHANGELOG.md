@@ -61,6 +61,10 @@
   required frontend/backend module checks and a first bootstrap-reachable
   lowering smoke wrapper that calls the real lowered
   `xcc.options.FrontendOptions.__post_init__` symbol.
+- Added the Milestone 6 native bootstrap build helper. The current helper emits
+  textual LLVM IR for the bootstrap-reachable smoke entry, lowers it through the
+  configured `llc`, links the object with the host C linker, and reports
+  bootstrap-specific diagnostics for tool failures.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

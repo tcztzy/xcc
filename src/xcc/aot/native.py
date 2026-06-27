@@ -92,6 +92,33 @@ def run_native_core_smoke(
     )
 
 
+def compile_llvm_executable(
+    llvm_ir: str,
+    output: Path,
+    *,
+    filename: str,
+    llc: str | None = None,
+    cc: str = "cc",
+    diagnostic_code: str = "XCC-AOT-NATIVE-0001",
+) -> Path:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    ll_path = output.parent / f"{output.name}.ll"
+    obj_path = output.parent / f"{output.name}.o"
+    ll_path.write_text(llvm_ir, encoding="utf-8")
+    llc_path = llc or os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
+    _run_tool(
+        (llc_path, "-filetype=obj", str(ll_path), "-o", str(obj_path)),
+        filename,
+        diagnostic_code=diagnostic_code,
+    )
+    _run_tool(
+        (cc, str(obj_path), "-o", str(output)),
+        filename,
+        diagnostic_code=diagnostic_code,
+    )
+    return output
+
+
 def _run_python_entry(source: str, entry: str) -> object:
     if not _source_defines_entry_function(source, entry):
         raise TypeError(f"{entry} is not callable")
@@ -138,7 +165,12 @@ def _python_oracle_script(source: str, entry: str) -> str:
     return prefix + suffix
 
 
-def _run_tool(command: tuple[str, ...], filename: str) -> None:
+def _run_tool(
+    command: tuple[str, ...],
+    filename: str,
+    *,
+    diagnostic_code: str = "XCC-AOT-NATIVE-0001",
+) -> None:
     completed = subprocess.run(command, check=False, capture_output=True, text=True)
     if completed.returncode != 0:
         message = (
@@ -146,4 +178,4 @@ def _run_tool(command: tuple[str, ...], filename: str) -> None:
             or completed.stdout.strip()
             or f"command failed: {' '.join(command)}"
         )
-        raise AotError((AotDiagnostic("XCC-AOT-NATIVE-0001", message, filename=filename),))
+        raise AotError((AotDiagnostic(diagnostic_code, message, filename=filename),))

@@ -1,10 +1,12 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
     AotError,
+    build_native_bootstrap,
     collect_bootstrap_sources,
     lower_bootstrap_entry_smoke,
     plan_bootstrap_entry,
@@ -97,6 +99,74 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "target='xcc.options.FrontendOptions.__post_init__'",
             repr(functions["aot_bootstrap_smoke_main"].body),
         )
+
+
+class AotBootstrapNativeBuildTests(unittest.TestCase):
+    def test_build_native_bootstrap_invokes_llc_and_linker(self) -> None:
+        commands: list[tuple[str, ...]] = []
+
+        def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
+            commands.append(tuple(command))
+
+            class Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+            output = Path(command[-1])
+            if command[0] == "/tool/llc":
+                llvm_ir = Path(command[2]).read_text(encoding="utf-8")
+                self.assertIn("@aot_bootstrap_smoke_main", llvm_ir)
+                self.assertIn("@xcc.options.FrontendOptions.__post_init__", llvm_ir)
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(b"out")
+            if command[0] == "cc":
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(b"out")
+            return Result()
+
+        with patch("subprocess.run", fake_run):
+            output = build_native_bootstrap(
+                ROOT,
+                ROOT / "build/aot/xcc",
+                llc="/tool/llc",
+                cc="cc",
+            )
+
+        self.assertEqual(output, ROOT / "build/aot/xcc")
+        self.assertTrue(any(command[0] == "/tool/llc" for command in commands))
+        self.assertTrue(any(command[0] == "cc" for command in commands))
+        self.assertTrue((ROOT / "build/aot/xcc.ll").exists())
+
+    def test_build_native_bootstrap_reports_tool_failure(self) -> None:
+        def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
+            class Result:
+                returncode = 1 if command[0] == "/tool/llc" else 0
+                stdout = ""
+                stderr = "llc failed"
+
+            return Result()
+
+        with (
+            patch("subprocess.run", fake_run),
+            self.assertRaises(AotError) as ctx,
+        ):
+            build_native_bootstrap(
+                ROOT,
+                ROOT / "build/aot/xcc-fail",
+                llc="/tool/llc",
+                cc="cc",
+            )
+
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-BOOTSTRAP-0003")
+        self.assertEqual(ctx.exception.diagnostics[0].message, "llc failed")
+
+    def test_real_native_bootstrap_smoke_when_llc_exists(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        output = build_native_bootstrap(ROOT, ROOT / "build/aot/xcc-smoke")
+        self.assertTrue(output.exists())
 
 
 if __name__ == "__main__":
