@@ -38,7 +38,14 @@ from xcc.aot import (
     lower_source_to_ir,
 )
 from xcc.aot.binder import _TypeBinder
-from xcc.aot.lower import _collect_global_names, _Lowerer, _tuple_backed_container_element_name
+from xcc.aot.lower import (
+    _collect_global_names,
+    _dict_container_type_names,
+    _dict_get_result_type,
+    _Lowerer,
+    _none_guard_name,
+    _tuple_backed_container_element_name,
+)
 from xcc.aot.module import parse_source
 from xcc.aot.subset import check_subset
 from xcc.aot.types import AotClassInfo, AotType
@@ -160,6 +167,8 @@ class AotScalarLoweringTests(unittest.TestCase):
             ["lookup", "names", "frozen_names", "iterable_names", "sequence_names"],
         )
         self.assertTrue(all(isinstance(field.type, IrTupleType) for field in record.fields))
+        self.assertEqual(record.fields[0].type, IrTupleType((IrStringType(), IrIntType(64, True))))
+        self.assertEqual(record.fields[1].type, IrTupleType((IrStringType(),)))
 
     def test_lowers_for_target_from_homogeneous_container_annotation(self) -> None:
         module = lower_source_to_ir(
@@ -189,8 +198,62 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(value.field, "name")
         self.assertEqual(value.value.type, IrRecordType("FunctionDef"))
 
+    def test_lowers_dict_get_and_none_guard_narrows_optional_record(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "@dataclass(frozen=True)\n"
+            "class FunctionSymbol:\n"
+            "    return_type: Type\n"
+            "@dataclass(frozen=True)\n"
+            "class SemaUnit:\n"
+            "    functions: dict[str, FunctionSymbol]\n"
+            "def return_name(sema: SemaUnit, name: str) -> str:\n"
+            "    func_sym = sema.functions.get(name)\n"
+            "    if func_sym is None:\n"
+            "        return ''\n"
+            "    return func_sym.return_type.name\n",
+            filename="dict_get_optional.py",
+        )
+        function = module.functions[0]
+        assigned = function.body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertIsInstance(assigned.value, IrCall)
+        assert isinstance(assigned.value, IrCall)
+        self.assertEqual(assigned.value.target, "__dict_get")
+        self.assertEqual(assigned.value.type, IrRecordType("FunctionSymbol | None"))
+        returned = function.body[2]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        name_field = returned.value
+        self.assertIsInstance(name_field, IrGetField)
+        assert isinstance(name_field, IrGetField)
+        return_type_field = name_field.value
+        self.assertIsInstance(return_type_field, IrGetField)
+        assert isinstance(return_type_field, IrGetField)
+        self.assertEqual(return_type_field.value, IrName("func_sym", IrRecordType("FunctionSymbol")))
+
+    def test_lowers_empty_dict_literal_as_tuple_backed_container(self) -> None:
+        module = lower_source_to_ir(
+            "def empty() -> dict[str, int]:\n"
+            "    values: dict[str, int] = {}\n"
+            "    return values\n",
+            filename="empty_dict_literal.py",
+        )
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(
+            assigned.value,
+            IrTuple((), IrTupleType((IrStringType(), IrIntType(64, signed=True)))),
+        )
+
     def test_tuple_backed_container_element_name_edges(self) -> None:
         self.assertIsNone(_tuple_backed_container_element_name("Callable[[str], bool]"))
+        self.assertIsNone(_tuple_backed_container_element_name("dict[str, int]"))
         self.assertIsNone(_tuple_backed_container_element_name("tuple[]"))
         self.assertEqual(
             _tuple_backed_container_element_name("list['FunctionDef']"),
@@ -200,6 +263,24 @@ class AotScalarLoweringTests(unittest.TestCase):
             _tuple_backed_container_element_name("tuple[list[str], ...]"),
             "list[str]",
         )
+        self.assertIsNone(_dict_container_type_names("dict[str]"))
+        self.assertEqual(
+            _dict_container_type_names("dict[str, list[int]]"),
+            ("str", "list[int]"),
+        )
+        self.assertEqual(
+            _dict_get_result_type(IrRecordType("FunctionSymbol | None")),
+            IrRecordType("FunctionSymbol | None"),
+        )
+        self.assertEqual(
+            _dict_get_result_type(IrIntType(64, signed=True)),
+            IrIntType(64, signed=True),
+        )
+        self.assertEqual(
+            _none_guard_name(ast.parse("None is value").body[0].value),
+            "value",
+        )
+        self.assertIsNone(_none_guard_name(ast.parse("None is 1").body[0].value))
 
     def test_lowers_bodyless_requested_function_signature(self) -> None:
         module = lower_source_to_ir(
@@ -690,6 +771,8 @@ class AotScalarLoweringTests(unittest.TestCase):
                 "    return pair.missing\n",
                 "XCC-AOT-LOWER-0002",
             ),
+            ("def f(values: dict[str, int]) -> int:\n    return values.get()\n", "XCC-AOT-LOWER-0003"),
+            ("def f(values: set[str]) -> str:\n    return values.get('x')\n", "XCC-AOT-LOWER-0003"),
         )
         for source, code in cases:
             with self.subTest(source=source):
@@ -796,6 +879,11 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer._aot_type_to_ir_type(AotType("tuple[TypeOp, ...]")),
             IrTupleType(()),
         )
+        self.assertEqual(
+            lowerer._aot_type_to_ir_type(AotType("dict[str, TypeOp]")),
+            IrTupleType(()),
+        )
+        self.assertIsNone(lowerer._optional_record_inner(IrIntType(64, signed=True)))
         self.assertEqual(lowerer._aot_type_to_ir_type(AotType("NoReturn")), IrNoneType())
         with self.assertRaises(AotError) as ctx:
             lowerer._record_field_type(IrIntType(64, signed=True), "value", ast.Pass())

@@ -216,6 +216,15 @@ class _Lowerer:
                 )
             names.update(then_names)
             names.update(else_names)
+            narrowed = self._none_guard_narrowing(
+                statement.test,
+                statement.body,
+                statement.orelse,
+                names,
+            )
+            if narrowed is not None:
+                name, narrowed_type = narrowed
+                names[name] = narrowed_type
             return IrIf(condition, then_branch, else_branch)
         if isinstance(statement, ast.While):
             if statement.orelse:
@@ -381,6 +390,8 @@ class _Lowerer:
         if isinstance(expr, (ast.List, ast.Set)):
             elements = tuple(self._lower_expr(element, names, expected) for element in expr.elts)
             return IrTuple(elements, IrTupleType(tuple(element.type for element in elements)))
+        if isinstance(expr, ast.Dict) and not expr.keys and not expr.values:
+            return IrTuple((), expected if isinstance(expected, IrTupleType) else IrTupleType(()))
         if isinstance(expr, (ast.ListComp, ast.GeneratorExp)):
             return IrCall(f"__{type(expr).__name__}", (), IrTupleType(()))
         if isinstance(expr, ast.Subscript):
@@ -472,10 +483,7 @@ class _Lowerer:
         if name.startswith("Literal["):
             return IrStringType()
         if _is_tuple_backed_container_type(name):
-            element_type = self._tuple_backed_container_element_type(name, node)
-            if element_type is not None:
-                return IrTupleType((element_type,))
-            return IrTupleType(())
+            return IrTupleType(self._tuple_backed_container_types(name, node))
         if _is_optional_int(name):
             return IrIntType(64, signed=True)
         if " | " in name:
@@ -551,6 +559,8 @@ class _Lowerer:
                     self._lower_call_args_for_signature(expr, names, target, 1, expected)
                 )
                 return IrCall(target, args, return_type)
+            if isinstance(receiver_type, IrTupleType) and expr.func.attr == "get":
+                return self._lower_dict_get_call(expr, receiver, names)
             if (
                 isinstance(receiver_type, IrTupleType)
                 and expr.func.attr in _ALLOWED_MUTATING_TUPLE_CALLS
@@ -765,10 +775,7 @@ class _Lowerer:
         if type_info.name.startswith("Literal["):
             return IrStringType()
         if _is_tuple_backed_container_type(type_info.name):
-            element_type = self._tuple_backed_container_element_type(type_info.name, ast.Pass())
-            if element_type is not None:
-                return IrTupleType((element_type,))
-            return IrTupleType(())
+            return IrTupleType(self._tuple_backed_container_types(type_info.name, ast.Pass()))
         if _is_optional_int(type_info.name):
             return IrIntType(64, signed=True)
         if " | " in type_info.name:
@@ -861,10 +868,81 @@ class _Lowerer:
         element_name = _tuple_backed_container_element_name(name)
         if element_name is None:
             return None
+        return self._optional_container_type(element_name, node)
+
+    def _tuple_backed_container_types(
+        self,
+        name: str,
+        node: ast.AST,
+    ) -> tuple[IrType, ...]:
+        dict_names = _dict_container_type_names(name)
+        if dict_names is not None:
+            key_type = self._optional_container_type(dict_names[0], node)
+            value_type = self._optional_container_type(dict_names[1], node)
+            if key_type is not None and value_type is not None:
+                return (key_type, value_type)
+            return ()
+        element_type = self._tuple_backed_container_element_type(name, node)
+        if element_type is not None:
+            return (element_type,)
+        return ()
+
+    def _optional_container_type(self, name: str, node: ast.AST) -> IrType | None:
         try:
-            return self._type_name_to_ir_type(element_name, node)
+            return self._type_name_to_ir_type(name, node)
         except AotError:
             return None
+
+    def _lower_dict_get_call(
+        self,
+        expr: ast.Call,
+        receiver: IrExpr,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if expr.keywords or len(expr.args) != 1 or not isinstance(receiver.type, IrTupleType):
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        if len(receiver.type.elements) != 2:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        key_type, value_type = receiver.type.elements
+        return IrCall(
+            "__dict_get",
+            (receiver, self._lower_expr(expr.args[0], names, key_type)),
+            _dict_get_result_type(value_type),
+        )
+
+    def _none_guard_narrowing(
+        self,
+        test: ast.expr,
+        body: list[ast.stmt],
+        orelse: list[ast.stmt],
+        names: dict[str, IrType],
+    ) -> tuple[str, IrType] | None:
+        if orelse or not _statements_exit(body):
+            return None
+        name = _none_guard_name(test)
+        if name is None:
+            return None
+        narrowed = self._optional_record_inner(names.get(name))
+        if narrowed is None:
+            return None
+        return name, narrowed
+
+    def _optional_record_inner(self, type_info: IrType | None) -> IrRecordType | None:
+        if not isinstance(type_info, IrRecordType):
+            return None
+        parts = tuple(part.strip() for part in type_info.name.split("|"))
+        non_none = tuple(part for part in parts if part != "None")
+        if len(non_none) == 1 and len(non_none) != len(parts) and non_none[0] in self.class_types:
+            return IrRecordType(non_none[0])
+        return None
 
     def _lower_compare(self, expr: ast.Compare, names: dict[str, IrType]) -> IrExpr:
         if len(expr.ops) != len(expr.comparators) or not expr.ops:
@@ -984,6 +1062,32 @@ def _tuple_backed_container_element_name(name: str) -> str | None:
     return _strip_annotation_quotes(first)
 
 
+def _dict_container_type_names(name: str) -> tuple[str, str] | None:
+    if not name.startswith(("dict[", "Dict[")) or not name.endswith("]"):
+        return None
+    content = name[name.find("[") + 1 : -1]
+    args = _annotation_args(content)
+    if len(args) != 2:
+        return None
+    return (_strip_annotation_quotes(args[0]), _strip_annotation_quotes(args[1]))
+
+
+def _annotation_args(content: str) -> tuple[str, ...]:
+    args: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(content):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth -= 1
+        elif char == "," and depth == 0:
+            args.append(content[start:index].strip())
+            start = index + 1
+    args.append(content[start:].strip())
+    return tuple(arg for arg in args if arg)
+
+
 def _first_annotation_arg(content: str) -> str:
     depth = 0
     for index, char in enumerate(content):
@@ -1006,6 +1110,36 @@ def _for_each_target_type(iterable_type: IrType) -> IrType:
     if isinstance(iterable_type, IrTupleType) and len(iterable_type.elements) == 1:
         return iterable_type.elements[0]
     return IrRecordType("object")
+
+
+def _dict_get_result_type(value_type: IrType) -> IrType:
+    if isinstance(value_type, IrRecordType):
+        if "None" in (part.strip() for part in value_type.name.split("|")):
+            return value_type
+        return IrRecordType(f"{value_type.name} | None")
+    return value_type
+
+
+def _none_guard_name(test: ast.expr) -> str | None:
+    if (
+        isinstance(test, ast.Compare)
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], ast.Is)
+        and len(test.comparators) == 1
+    ):
+        if isinstance(test.left, ast.Name) and _is_none_constant(test.comparators[0]):
+            return test.left.id
+        if _is_none_constant(test.left) and isinstance(test.comparators[0], ast.Name):
+            return test.comparators[0].id
+    return None
+
+
+def _is_none_constant(expr: ast.expr) -> bool:
+    return isinstance(expr, ast.Constant) and expr.value is None
+
+
+def _statements_exit(statements: list[ast.stmt]) -> bool:
+    return bool(statements) and isinstance(statements[-1], (ast.Return, ast.Raise))
 
 
 def _collect_global_names(tree: ast.Module) -> set[str]:

@@ -214,6 +214,13 @@
   advances past `_LLVMGen.generate()` and stops at the existing
   `self._sema.functions.get(...)` dictionary lookup/optional `FunctionSymbol`
   boundary in `codegen.py`.
+- Added AOT lowering for existing `dict[str, T].get(key)` calls over the
+  tuple-backed container shape, plus simple optional-record narrowing after
+  `if value is None: return` guards. Empty `{}` literals now lower as empty
+  tuple-backed containers when the expected type is a supported dict shape. The
+  broader source-to-LLVM unchecked slice now advances past
+  `self._sema.functions.get(...)` and stops at the existing
+  `enumerate(real_params)` loop in `codegen.py`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

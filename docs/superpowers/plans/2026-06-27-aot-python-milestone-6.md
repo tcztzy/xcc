@@ -878,7 +878,14 @@ homogeneous element types, allowing `for` targets over fields such as
 `TranslationUnit.functions` to bind as project records. The broader
 source-to-LLVM unchecked slice now advances past `_LLVMGen.generate()`; the next
 observed blocker is the existing `self._sema.functions.get(...)` dictionary
-lookup/optional `FunctionSymbol` boundary in `codegen.py`. The generated
+lookup/optional `FunctionSymbol` boundary in `codegen.py`. AOT lowering now
+handles existing `dict[str, T].get(key)` calls over the tuple-backed container
+shape, applies simple optional-record narrowing after `if value is None:
+return` guards, and lowers empty `{}` literals as empty tuple-backed containers
+when the expected type is a supported dict shape. The broader source-to-LLVM
+unchecked slice now advances past `self._sema.functions.get(...)`; the next
+observed blocker is the existing `enumerate(real_params)` loop in `codegen.py`.
+The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its
