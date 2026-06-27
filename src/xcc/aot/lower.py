@@ -445,7 +445,7 @@ class _Lowerer:
                 )
             return IrCall(
                 expr.func.id,
-                tuple(self._lower_expr(arg, names, expected) for arg in expr.args),
+                self._lower_call_args(expr, names, expected),
                 expected,
             )
         if isinstance(expr.func, ast.Attribute) and _is_string_join_call(expr.func):
@@ -468,9 +468,7 @@ class _Lowerer:
             receiver_type = receiver.type
             if isinstance(receiver_type, IrRecordType):
                 target = f"{receiver_type.name}.{expr.func.attr}"
-                args = (receiver,) + tuple(
-                    self._lower_expr(arg, names, expected) for arg in expr.args
-                )
+                args = (receiver,) + tuple(self._lower_call_args(expr, names, expected))
                 return IrCall(target, args, expected)
             if (
                 isinstance(receiver_type, IrTupleType)
@@ -478,15 +476,13 @@ class _Lowerer:
             ):
                 return IrCall(
                     ast.unparse(expr.func),
-                    (receiver,)
-                    + tuple(self._lower_expr(arg, names, expected) for arg in expr.args),
+                    (receiver,) + self._lower_call_args(expr, names, expected),
                     expected,
                 )
             if expr.func.attr == "__init__" and _is_super_call(expr.func.value):
                 return IrCall(
                     ast.unparse(expr.func),
-                    (receiver,)
-                    + tuple(self._lower_expr(arg, names, expected) for arg in expr.args),
+                    (receiver,) + self._lower_call_args(expr, names, expected),
                     expected,
                 )
             self._error(
@@ -499,6 +495,23 @@ class _Lowerer:
             f"Unsupported call target: {ast.unparse(expr.func)}",
             expr,
         )
+
+    def _lower_call_args(
+        self,
+        expr: ast.Call,
+        names: dict[str, IrType],
+        expected: IrType,
+    ) -> tuple[IrExpr, ...]:
+        args = [self._lower_expr(arg, names, expected) for arg in expr.args]
+        for keyword in expr.keywords:
+            if keyword.arg is None:
+                self._error(
+                    "XCC-AOT-LOWER-0003",
+                    "Unsupported call target: **kwargs",
+                    keyword,
+                )
+            args.append(self._lower_expr(keyword.value, names, expected))
+        return tuple(args)
 
     def _lower_constructor_args(
         self,
@@ -685,6 +698,13 @@ def _collect_global_names(tree: ast.Module) -> set[str]:
             names.add(statement.target.id)
         elif isinstance(statement, (ast.ClassDef, ast.FunctionDef)):
             names.add(statement.name)
+        elif isinstance(statement, ast.ImportFrom):
+            for alias in statement.names:
+                if alias.name != "*":
+                    names.add(alias.asname or alias.name)
+        elif isinstance(statement, ast.Import):
+            for alias in statement.names:
+                names.add(alias.asname or alias.name.split(".", 1)[0])
     return names
 
 

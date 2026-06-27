@@ -175,6 +175,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             ("def f() -> int:\n    return missing\n", "XCC-AOT-LOWER-0002"),
             ("def f() -> int:\n    return 1.5\n", "XCC-AOT-LOWER-0002"),
             ("def f() -> int:\n    return helper()\n", "XCC-AOT-LOWER-0003"),
+            ("def f(values: tuple[str, ...]) -> str:\n    return str(**values)\n", "XCC-AOT-LOWER-0003"),
             ("def f(value: int) -> int:\n    return value.real\n", "XCC-AOT-LOWER-0002"),
             (
                 "from dataclasses import dataclass\n"
@@ -191,6 +192,16 @@ class AotScalarLoweringTests(unittest.TestCase):
                 with self.assertRaises(AotError) as ctx:
                     lower_source_to_ir(source, filename="bad.py", entry="f")
                 self.assertEqual(ctx.exception.diagnostics[0].code, code)
+
+    def test_star_project_import_does_not_bind_call_target_name(self) -> None:
+        module = lower_source_to_ir(
+            "from xcc.frontend import *\n"
+            "def f() -> int:\n"
+            "    return 1\n",
+            filename="star_import.py",
+            entry="f",
+        )
+        self.assertEqual(module.functions[0].name, "f")
 
     def test_direct_lowerer_reports_missing_and_unsupported_forms(self) -> None:
         lowerer = _Lowerer("direct.py", {})

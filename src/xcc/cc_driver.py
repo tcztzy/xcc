@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
 
+from xcc.codegen import generate_llvm_ir
 from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendError, FrontendResult, compile_path, compile_source, read_source
 from xcc.options import FrontendOptions, StdMode
@@ -491,12 +492,14 @@ def _aot_write_text_file(path: str, text: str) -> bool:
     return True
 
 
-def _aot_compile_source_to_llvm_ir(source_path: str, source_text: str) -> str:
-    from xcc.codegen import generate_llvm_ir
+def _aot_compile_source_to_llvm_ir_unchecked(source_path: str, source_text: str) -> str:
+    result: FrontendResult = compile_source(source_text, filename=source_path)
+    return generate_llvm_ir(result)
 
+
+def _aot_compile_source_to_llvm_ir(source_path: str, source_text: str) -> str:
     try:
-        result = compile_source(source_text, filename=source_path)
-        return generate_llvm_ir(result)
+        return _aot_compile_source_to_llvm_ir_unchecked(source_path, source_text)
     except (FrontendError, CodegenError):
         return ""
 

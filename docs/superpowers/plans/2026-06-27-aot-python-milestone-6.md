@@ -838,7 +838,13 @@ source text to LLVM IR step to project helper
 the fixed smoke source validator and fixed smoke IR helper. Under CPython, that
 new helper runs the real frontend and LLVM backend for the provided source text;
 under native AOT it is still a temporary smoke-only leaf that calls the existing
-validator and fixed smoke IR helper. The generated `main(argc, argv)` now
+validator and fixed smoke IR helper. That boundary is now split into an
+exception-handling wrapper and a lowerable unchecked helper,
+`xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked()`, whose ordinary body
+directly calls `compile_source()` and `generate_llvm_ir()`. The AOT lower/slice
+path now admits imported project call names, rewrites `from xcc... import ...`
+calls to fully qualified slice targets, and retains keyword argument values in
+lowered calls. The generated `main(argc, argv)` now
 converts the platform C `argv` array into the AOT tuple ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its
 Python-level `argv` through `__xcc_aot_tuple_get()`, source reading goes through
@@ -859,8 +865,8 @@ native-special smoke compiler shell, so the generated native `xcc` reaches the
 smoke compiler through ordinary lowered tuple length/indexing, branching, and
 project helper calls. The remaining gap for Step 4d is lowering the general
 project-owned frontend/backend implementation behind
-`_aot_compile_source_to_llvm_ir()` in native code instead of smoke-only leaf
-specializing that boundary.
+`_aot_compile_source_to_llvm_ir_unchecked()` and then replacing the smoke-only
+native leaf specialization at `_aot_compile_source_to_llvm_ir()`.
 
 - [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
 

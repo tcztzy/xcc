@@ -274,11 +274,13 @@ def _add_missing_records(
 
 
 def _module_rename_map(module_name: str, source: str) -> dict[str, str]:
-    return {name: f"{module_name}.{name}" for name in _local_function_names(source)}
-
-
-def _local_function_names(source: str) -> tuple[str, ...]:
     tree = ast.parse(source)
+    rename_map = {name: f"{module_name}.{name}" for name in _local_function_names_from_tree(tree)}
+    rename_map.update(_imported_project_function_names(tree))
+    return rename_map
+
+
+def _local_function_names_from_tree(tree: ast.Module) -> tuple[str, ...]:
     names: list[str] = []
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
@@ -289,6 +291,21 @@ def _local_function_names(source: str) -> tuple[str, ...]:
         if isinstance(node, ast.FunctionDef):
             names.append(node.name)
     return tuple(names)
+
+
+def _imported_project_function_names(tree: ast.Module) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom) or node.module is None:
+            continue
+        if not node.module.startswith("xcc."):
+            continue
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            local_name = alias.asname or alias.name
+            names[local_name] = f"{node.module}.{alias.name}"
+    return names
 
 
 def _split_module_function(

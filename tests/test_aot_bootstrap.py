@@ -8,6 +8,7 @@ from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
     AotBootstrapRunResult,
     AotError,
+    analyze_path,
     build_native_bootstrap,
     collect_bootstrap_sources,
     emit_llvm_text,
@@ -17,6 +18,7 @@ from xcc.aot import (
     run_bootstrap_self_host_smoke,
     summarize_bootstrap_admission,
 )
+from xcc.aot import slice as aot_slice
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -247,6 +249,38 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("declare ptr @fopen(ptr, ptr)", llvm_ir)
         self.assertIn("declare i64 @fwrite(ptr, i64, i64, ptr)", llvm_ir)
         self.assertIn("declare i32 @execvp(ptr, ptr)", llvm_ir)
+
+    def test_source_to_llvm_unchecked_helper_body_is_ordinary_lowerable(self) -> None:
+        source = (ROOT / "src/xcc/cc_driver.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/cc_driver.py"),
+            include_records=frozenset(),
+            include_functions={"_aot_compile_source_to_llvm_ir_unchecked"},
+            extra_classes=analyze_path(ROOT / "src/xcc/frontend.py").types.classes,
+        )
+        self.assertEqual(len(module.functions), 1)
+        helper = module.functions[0]
+        body = repr(helper.body)
+        self.assertIn("target='compile_source'", body)
+        self.assertIn("target='generate_llvm_ir'", body)
+
+    def test_project_imports_are_renamed_to_qualified_slice_targets(self) -> None:
+        source = (ROOT / "src/xcc/cc_driver.py").read_text(encoding="utf-8")
+        rename_map = aot_slice._module_rename_map("xcc.cc_driver", source)
+        self.assertEqual(rename_map["compile_source"], "xcc.frontend.compile_source")
+        self.assertEqual(rename_map["generate_llvm_ir"], "xcc.codegen.generate_llvm_ir")
+        edge_map = aot_slice._module_rename_map(
+            "xcc.demo",
+            "from pathlib import Path\n"
+            "from xcc.frontend import *\n"
+            "from xcc.lexer import lex as lex_tokens\n"
+            "def f() -> int:\n"
+            "    return 1\n",
+        )
+        self.assertNotIn("Path", edge_map)
+        self.assertNotIn("*", edge_map)
+        self.assertEqual(edge_map["lex_tokens"], "xcc.lexer.lex")
 
 
 class AotBootstrapNativeBuildTests(unittest.TestCase):

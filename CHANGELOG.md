@@ -152,6 +152,14 @@
   source validator and fixed smoke IR helper. The smoke compiler body now calls
   this source-to-LLVM boundary instead of directly validating the fixed source
   and selecting fixed LLVM text.
+- Split the source-to-LLVM boundary into an exception-handling wrapper and a
+  lowerable `_aot_compile_source_to_llvm_ir_unchecked()` helper whose ordinary
+  body directly calls `compile_source()` and `generate_llvm_ir()`. AOT lowering
+  now treats imported project call names as valid globals, rewrites
+  `from xcc... import ...` calls to fully qualified slice targets, and preserves
+  keyword argument values in lowered calls, preparing the bootstrap path to pull
+  the real frontend/backend implementation behind the current smoke-only native
+  leaf.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation
