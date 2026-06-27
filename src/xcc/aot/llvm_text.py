@@ -519,6 +519,8 @@ class _Emitter:
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue | None:
+        if expr.target == "__getitem" and expr.args and isinstance(expr.args[0].type, IrTupleType):
+            return self._emit_getitem_call(expr, names, lines)
         if (
             expr.target == "__cmp_NotIn"
             and len(expr.args) == 2
@@ -574,6 +576,28 @@ class _Emitter:
                 lines=lines,
             )
         return None  # pragma: no cover
+
+    def _emit_getitem_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__getitem expects two arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        index = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(index.type, IrIntType) or index.type.bits != 64:
+            self._error("__getitem expects an int64 index")
+        if not _is_pointer_type(expr.type):
+            self._error("__getitem currently supports pointer element results")
+        self.needs_runtime_prelude = True
+        result = self._tmp("call")
+        lines.append(
+            f"  {result} = call {self._llvm_type(expr.type)} @__xcc_aot_tuple_get("
+            f"ptr {value.value}, i64 {index.value})"
+        )
+        return _EmittedValue(result, expr.type)
 
     def _emit_not_in_tuple(
         self,

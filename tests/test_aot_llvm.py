@@ -69,6 +69,16 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("declare i32 @puts(ptr)", llvm_ir)
         self.assertIn("%printed = call i32 @puts(ptr %result)", llvm_ir)
 
+    def test_emits_tuple_getitem_intrinsic(self) -> None:
+        module = lower_source_to_ir(
+            "def pick(argv: tuple[str, ...]) -> str:\n    return argv[2]\n",
+            filename="tuple_getitem.py",
+            entry="pick",
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("%call1 = call ptr @__xcc_aot_tuple_get(ptr %argv, i64 2)", llvm_ir)
+        self.assertNotIn("call ptr @__getitem", llvm_ir)
+
     def test_emits_core_lexer_translate_source_leaf(self) -> None:
         cases = (
             (
@@ -550,6 +560,78 @@ class AotLlvmTextTests(unittest.TestCase):
                         (),
                         IrIntType(32, signed=True),
                         (),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__getitem",
+                                    (
+                                        IrTuple(
+                                            (IrConstString("x"),),
+                                            IrTupleType((IrStringType(),)),
+                                        ),
+                                        IrConstBool(True),
+                                    ),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__getitem",
+                                    (
+                                        IrTuple(
+                                            (IrConstString("x"),),
+                                            IrTupleType((IrStringType(),)),
+                                        ),
+                                        IrConstInt(0, int64),
+                                    ),
+                                    int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrStringType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__getitem",
+                                    (IrTuple((), IrTupleType(())),),
+                                    IrStringType(),
+                                )
+                            ),
+                        ),
                     ),
                 ),
             ),

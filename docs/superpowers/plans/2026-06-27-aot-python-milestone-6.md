@@ -839,10 +839,13 @@ Python-level `argv` through `__xcc_aot_tuple_get()`, source reading goes through
 a generic `__xcc_aot_read_text_file()` runtime shim, LLVM file writing goes
 through a generic `__xcc_aot_write_text_file()` runtime shim, and process
 execution goes through the generic AOT tuple-to-`execvp` runtime shim behind the
-project helper. The native bridge still emits the outer compiler helper as a
-specialized leaf rather than lowering the helper's Python body or the general
-frontend/backend path, so the remaining native specialization is the fixed smoke
-compiler shell around the lowered project-owned helpers.
+project helper. Ordinary lowered Python tuple indexing now emits
+`__xcc_aot_tuple_get()`, so `argv[1]`, `argv[2]`, and related smoke compiler
+body expressions can move out of the native-special shell. The native bridge
+still emits the outer compiler helper as a specialized leaf rather than lowering
+the helper's Python body or the general frontend/backend path, so the remaining
+native specialization is the fixed smoke compiler shell around the lowered
+project-owned helpers.
 
 - [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
 

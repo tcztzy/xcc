@@ -129,6 +129,10 @@
   The native smoke compiler leaf now calls `xcc.cc_driver._aot_exec_argv()` for
   the generated `llc` command instead of invoking the tuple-to-`execvp` runtime
   shim directly from the outer compiler helper.
+- Added LLVM emission for lowered tuple indexing. Ordinary lowered Python
+  expressions such as `argv[2]` now call `__xcc_aot_tuple_get()` instead of
+  leaving an unresolved `__getitem` symbol, preparing
+  `_aot_compile_smoke_source_to_object()` for ordinary body lowering.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation
