@@ -106,6 +106,11 @@
   `xcc.cc_driver._aot_smoke_llvm_path()` from the AOT slice instead of building
   `"%s.ll"` through emitter-owned `snprintf`, leaving less fixed path logic in
   the native bridge.
+- Moved the fixed bootstrap smoke `llc` argv construction into a lowered
+  project helper and added a generic AOT tuple-to-`execvp` runtime shim. The
+  native smoke compiler leaf now calls `xcc.cc_driver._aot_smoke_llc_argv()`
+  from the AOT slice and `__xcc_aot_execvp_tuple()` instead of hand-writing the
+  null-terminated `llc` argv array in the LLVM emitter.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

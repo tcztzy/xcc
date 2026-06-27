@@ -55,6 +55,7 @@ _NATIVE_EMITTED_LEAF_DEPENDENCIES = {
         "xcc.cc_driver._aot_is_smoke_compile_command",
         "xcc.cc_driver._aot_is_smoke_source",
         "xcc.cc_driver._aot_smoke_llvm_path",
+        "xcc.cc_driver._aot_smoke_llc_argv",
         "xcc.cc_driver._aot_smoke_llvm_ir",
     ),
 }

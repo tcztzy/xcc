@@ -726,9 +726,6 @@ class _Emitter:
         smoke_len = len(smoke_source.encode("utf-8"))
         read_mode = self._string_constant("r")
         write_mode = self._string_constant("w")
-        llc_path = self._string_constant("/opt/homebrew/opt/llvm/bin/llc")
-        llc_filetype = self._string_constant("-filetype=obj")
-        llc_output = self._string_constant("-o")
         return "\n".join(
             (
                 f"define i32 {_llvm_symbol(function.name)}(i32 %{argc}, ptr %{argv}) {{",
@@ -784,20 +781,11 @@ class _Emitter:
                 "  %llvm_written_ok = icmp eq i64 %llvm_written, %llvm_len",
                 "  br i1 %llvm_written_ok, label %exec_llc, label %fail",
                 "exec_llc:",
-                "  %llc_argv = alloca ptr, i64 6",
-                "  %llc_argv0 = getelementptr ptr, ptr %llc_argv, i64 0",
-                f"  store ptr {llc_path}, ptr %llc_argv0",
-                "  %llc_argv1 = getelementptr ptr, ptr %llc_argv, i64 1",
-                f"  store ptr {llc_filetype}, ptr %llc_argv1",
-                "  %llc_argv2 = getelementptr ptr, ptr %llc_argv, i64 2",
-                "  store ptr %ll_path, ptr %llc_argv2",
-                "  %llc_argv3 = getelementptr ptr, ptr %llc_argv, i64 3",
-                f"  store ptr {llc_output}, ptr %llc_argv3",
-                "  %llc_argv4 = getelementptr ptr, ptr %llc_argv, i64 4",
-                "  store ptr %object_path, ptr %llc_argv4",
-                "  %llc_argv5 = getelementptr ptr, ptr %llc_argv, i64 5",
-                "  store ptr null, ptr %llc_argv5",
-                f"  %exec = call i32 @execvp(ptr {llc_path}, ptr %llc_argv)",
+                (
+                    "  %llc_argv = call ptr @xcc.cc_driver._aot_smoke_llc_argv("
+                    "ptr %ll_path, ptr %object_path)"
+                ),
+                "  %exec = call i32 @__xcc_aot_execvp_tuple(ptr %llc_argv)",
                 "  ret i32 1",
                 "fail:",
                 "  ret i32 1",

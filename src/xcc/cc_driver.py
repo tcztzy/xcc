@@ -472,6 +472,16 @@ def _aot_smoke_llvm_path(object_path: str) -> str:
     return object_path + ".ll"
 
 
+def _aot_smoke_llc_argv(llvm_path: str, object_path: str) -> tuple[str, ...]:
+    return (
+        "/opt/homebrew/opt/llvm/bin/llc",
+        "-filetype=obj",
+        llvm_path,
+        "-o",
+        object_path,
+    )
+
+
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
     if argc != 5 or len(argv) != 5:
         return 1
@@ -484,13 +494,7 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
     llvm_path = Path(_aot_smoke_llvm_path(str(object_path)))
     llvm_path.write_text(_aot_smoke_llvm_ir(), encoding="utf-8")
     completed = subprocess.run(
-        (
-            _AOT_BOOTSTRAP_LLC,
-            "-filetype=obj",
-            str(llvm_path),
-            "-o",
-            str(object_path),
-        ),
+        _aot_smoke_llc_argv(str(llvm_path), str(object_path)),
         check=False,
         capture_output=True,
         text=True,
