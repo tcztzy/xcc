@@ -31,6 +31,7 @@ from xcc.aot.ir import (
     IrRecord,
     IrRecordType,
     IrReturn,
+    IrSetItem,
     IrStmt,
     IrStringConcat,
     IrStringJoin,
@@ -178,6 +179,9 @@ class _Emitter:
                 value = self._emit_expr(statement.value, names, lines)
             _bind_emitted_target(statement.target, value, names)
             return
+        if isinstance(statement, IrSetItem):
+            self._emit_set_item(statement, names, lines)
+            return
         if isinstance(statement, IrReturn):
             if isinstance(return_type, IrNoneType):
                 lines.append("  ret void")
@@ -296,7 +300,18 @@ class _Emitter:
         lines: list[str],
         return_type: IrType,
     ) -> None:
-        iterable = self._emit_expr(statement.iterable, names, lines)
+        enumerate_call = (
+            statement.iterable
+            if isinstance(statement.iterable, IrCall) and statement.iterable.target == "__enumerate"
+            else None
+        )
+        if enumerate_call is not None:
+            if len(enumerate_call.args) != 1:
+                self._error("__enumerate expects one argument")
+            iterable_expr = enumerate_call.args[0]
+        else:
+            iterable_expr = statement.iterable
+        iterable = self._emit_expr(iterable_expr, names, lines)
         self.needs_runtime_prelude = True
         cond_label = self._label("for.cond")
         body_label = self._label("for.body")
@@ -318,8 +333,11 @@ class _Emitter:
         lines.append(f"{body_label}:")
         item = self._tmp("item")
         lines.append(f"  {item} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})")
-        for target in _for_each_targets(statement.target):
-            names[target] = _EmittedValue(item, IrRecordType("object"))
+        if enumerate_call is not None:
+            self._bind_enumerate_targets(statement, index, item, names)
+        else:
+            for target in _for_each_targets(statement.target):
+                names[target] = _EmittedValue(item, IrRecordType("object"))
         self.loop_stack.append(_LoopLabels(next_label, end_label))
         self._emit_branch(statement.body, names, lines, return_type)
         self.loop_stack.pop()
@@ -329,6 +347,46 @@ class _Emitter:
         lines.append(f"  {next_value} = add i64 {index}, 1")
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{end_label}:")
+
+    def _emit_set_item(
+        self,
+        statement: IrSetItem,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> None:
+        target = self._emit_expr(statement.target, names, lines)
+        index = self._emit_expr(statement.index, names, lines)
+        value = self._emit_expr(statement.value, names, lines)
+        slot = self._tmp("setslot")
+        stored = self._box_to_runtime_ptr(value, lines)
+        lines.append(f"  {slot} = getelementptr ptr, ptr {target.value}, i64 {index.value}")
+        lines.append(f"  store ptr {stored}, ptr {slot}")
+
+    def _bind_enumerate_targets(
+        self,
+        statement: IrForEach,
+        index: str,
+        item: str,
+        names: dict[str, _EmittedValue],
+    ) -> None:
+        if not isinstance(statement.iterable, IrCall) or not isinstance(
+            statement.iterable.type, IrTupleType
+        ):
+            self._error("Malformed __enumerate loop")
+        if len(statement.iterable.type.elements) != 2:
+            self._error("__enumerate loop expects two element types")
+        slots = _for_each_target_slots(statement.target)
+        if len(slots) != 2:
+            self._error("__enumerate loop expects two targets")
+        values = (index, item)
+        for slot, value, type_info in zip(
+            slots,
+            values,
+            statement.iterable.type.elements,
+            strict=True,
+        ):
+            if slot is not None:
+                names[slot] = _EmittedValue(value, type_info)
 
     def _emit_while(
         self,
@@ -1519,13 +1577,19 @@ def _current_label(lines: list[str]) -> str:
 
 
 def _for_each_targets(target: str) -> tuple[str, ...]:
+    return tuple(name for name in _for_each_target_slots(target) if name is not None)
+
+
+def _for_each_target_slots(target: str) -> tuple[str | None, ...]:
     stripped = target.strip()
     if stripped.startswith("(") and stripped.endswith(")"):
         stripped = stripped[1:-1]
-    names = tuple(
-        part.strip() for part in stripped.split(",") if part.strip() and part.strip() != "_"
+    slots = tuple(
+        None if part.strip() == "_" else part.strip()
+        for part in stripped.split(",")
+        if part.strip()
     )
-    return names or (target,)
+    return slots or (target,)
 
 
 def _branch_assigned_names(branch: IrBranch) -> tuple[str, ...]:
@@ -1540,6 +1604,8 @@ def _statement_assigned_names(statement: IrStmt) -> tuple[str, ...]:
         if "," in statement.target:
             return _for_each_targets(statement.target)
         return (statement.target,)
+    if isinstance(statement, IrSetItem):
+        return ()
     if isinstance(statement, IrIf):
         names = set(_branch_assigned_names(statement.then_branch))
         if statement.else_branch is not None:

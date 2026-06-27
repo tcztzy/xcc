@@ -32,6 +32,7 @@ from xcc.aot.ir import (
     IrRecord,
     IrRecordType,
     IrReturn,
+    IrSetItem,
     IrStmt,
     IrStringConcat,
     IrStringJoin,
@@ -520,6 +521,12 @@ def _rename_statement_calls(
 def _rename_statement_call(statement: IrStmt, rename_map: dict[str, str]) -> IrStmt:
     if isinstance(statement, IrAssign):
         return IrAssign(statement.target, _rename_expr_call(statement.value, rename_map))
+    if isinstance(statement, IrSetItem):
+        return IrSetItem(
+            _rename_expr_call(statement.target, rename_map),
+            _rename_expr_call(statement.index, rename_map),
+            _rename_expr_call(statement.value, rename_map),
+        )
     if isinstance(statement, IrReturn):
         return IrReturn(_rename_expr_call(statement.value, rename_map))
     if isinstance(statement, IrIf):
@@ -613,6 +620,11 @@ def _function_record_names(function: IrFunction) -> tuple[str, ...]:
 def _statement_record_names(statement: IrStmt) -> tuple[str, ...]:
     if isinstance(statement, IrAssign):
         return _expr_record_names(statement.value)
+    if isinstance(statement, IrSetItem):
+        names = set(_expr_record_names(statement.target))
+        names.update(_expr_record_names(statement.index))
+        names.update(_expr_record_names(statement.value))
+        return tuple(sorted(names))
     if isinstance(statement, IrReturn):
         return _expr_record_names(statement.value)
     if isinstance(statement, IrIf):
@@ -714,6 +726,12 @@ def _native_leaf_dependencies(function_name: str) -> tuple[str, ...]:
 def _statement_call_targets(statement: IrStmt) -> tuple[str, ...]:
     if isinstance(statement, IrAssign):
         return _expr_call_targets(statement.value)
+    if isinstance(statement, IrSetItem):
+        return (
+            _expr_call_targets(statement.target)
+            + _expr_call_targets(statement.index)
+            + _expr_call_targets(statement.value)
+        )
     if isinstance(statement, IrReturn):
         return _expr_call_targets(statement.value)
     if isinstance(statement, IrIf):

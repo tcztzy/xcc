@@ -28,6 +28,7 @@ from xcc.aot import (
     IrRaise,
     IrRecordType,
     IrReturn,
+    IrSetItem,
     IrStringConcat,
     IrStringJoin,
     IrStringType,
@@ -198,6 +199,40 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(value.field, "name")
         self.assertEqual(value.value.type, IrRecordType("FunctionDef"))
 
+    def test_lowers_enumerate_for_target_from_homogeneous_container_annotation(self) -> None:
+        module = lower_source_to_ir(
+            "def first_index(names: list[str]) -> int:\n"
+            "    for index, name in enumerate(names):\n"
+            "        return index\n"
+            "    return 0\n",
+            filename="enumerate_for.py",
+        )
+        function = module.functions[0]
+        loop = function.body[0]
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        self.assertEqual(loop.target, "(index, name)")
+        self.assertIsInstance(loop.iterable, IrCall)
+        assert isinstance(loop.iterable, IrCall)
+        self.assertEqual(loop.iterable.target, "__enumerate")
+        self.assertEqual(loop.iterable.type, IrTupleType((IrIntType(64, True), IrStringType())))
+        returned = loop.body.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(returned.value, IrName("index", IrIntType(64, True)))
+
+        skipped_item = lower_source_to_ir(
+            "def first_index(names: list[str]) -> int:\n"
+            "    for index, _ in enumerate(names):\n"
+            "        return index\n"
+            "    return 0\n",
+            filename="enumerate_skip_item.py",
+        )
+        skipped_loop = skipped_item.functions[0].body[0]
+        self.assertIsInstance(skipped_loop, IrForEach)
+        assert isinstance(skipped_loop, IrForEach)
+        self.assertEqual(skipped_loop.target, "(index, _)")
+
     def test_lowers_dict_get_and_none_guard_narrows_optional_record(self) -> None:
         module = lower_source_to_ir(
             "from dataclasses import dataclass\n"
@@ -250,6 +285,19 @@ class AotScalarLoweringTests(unittest.TestCase):
             assigned.value,
             IrTuple((), IrTupleType((IrStringType(), IrIntType(64, signed=True)))),
         )
+
+    def test_lowers_subscript_assignment_statement(self) -> None:
+        module = lower_source_to_ir(
+            "def store(values: list[str], index: int, item: str) -> None:\n"
+            "    values[index] = item\n",
+            filename="subscript_assign.py",
+        )
+        statement = module.functions[0].body[0]
+        self.assertIsInstance(statement, IrSetItem)
+        assert isinstance(statement, IrSetItem)
+        self.assertEqual(statement.target, IrName("values", IrTupleType((IrStringType(),))))
+        self.assertEqual(statement.index, IrName("index", IrIntType(64, signed=True)))
+        self.assertEqual(statement.value, IrName("item", IrStringType()))
 
     def test_tuple_backed_container_element_name_edges(self) -> None:
         self.assertIsNone(_tuple_backed_container_element_name("Callable[[str], bool]"))
@@ -773,6 +821,33 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
             ("def f(values: dict[str, int]) -> int:\n    return values.get()\n", "XCC-AOT-LOWER-0003"),
             ("def f(values: set[str]) -> str:\n    return values.get('x')\n", "XCC-AOT-LOWER-0003"),
+            (
+                "def f(values: list[str]) -> int:\n"
+                "    for pair in enumerate(values):\n"
+                "        return 1\n"
+                "    return 0\n",
+                "XCC-AOT-LOWER-0001",
+            ),
+            (
+                "def f(values: list[str]) -> int:\n"
+                "    for index, name, extra in enumerate(values):\n"
+                "        return index\n"
+                "    return 0\n",
+                "XCC-AOT-LOWER-0001",
+            ),
+            (
+                "class Box:\n"
+                "    def f(self, values: list[str]) -> int:\n"
+                "        for index, self.name in enumerate(values):\n"
+                "            return index\n"
+                "        return 0\n",
+                "XCC-AOT-LOWER-0001",
+            ),
+            (
+                "def f(values: list[str]) -> int:\n"
+                "    return enumerate(values, 1)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
         )
         for source, code in cases:
             with self.subTest(source=source):
@@ -980,6 +1055,14 @@ class AotScalarLoweringTests(unittest.TestCase):
                 field_target,
                 ast.Constant(None),
                 {"value": int64},
+                fallback,
+            ),
+            fallback,
+        )
+        self.assertEqual(
+            lowerer._subscript_item_type(
+                ast.Name("values", ast.Load()),
+                {"values": IrTupleType((IrStringType(), IrIntType(64, signed=True)))},
                 fallback,
             ),
             fallback,

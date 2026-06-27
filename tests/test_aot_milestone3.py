@@ -33,6 +33,7 @@ from xcc.aot import (
     IrRaise,
     IrRecordType,
     IrReturn,
+    IrSetItem,
     IrStringConcat,
     IrStringJoin,
     IrStringType,
@@ -133,6 +134,7 @@ class AotMilestone3SliceTests(unittest.TestCase):
             IrBreak(),
             IrRaise("ValueError", IrStringConcat((call,))),
             IrWhile(IrCall("cond", (), IrBoolType()), IrBranch((IrPrint(call),))),
+            IrSetItem(IrName("items", string_tuple), call, call),
         )
         rewritten = _rename_statement_calls(statements, {"local": "xcc.local"})
         self.assertIn("target='xcc.local'", repr(rewritten))
@@ -164,6 +166,10 @@ class AotMilestone3SliceTests(unittest.TestCase):
         )
         self.assertEqual(_statement_call_targets(IrBreak()), ())
         self.assertEqual(_statement_call_targets(IrContinue()), ())
+        self.assertEqual(
+            _statement_call_targets(IrSetItem(IrName("items", string_tuple), call, call)),
+            ("local", "local"),
+        )
         self.assertEqual(
             _expr_call_targets(IrBinary("+", call, call, IrStringType())),
             ("local", "local"),
@@ -219,6 +225,11 @@ class AotMilestone3SliceTests(unittest.TestCase):
             ),
             IrAssign("field", IrGetField(IrName("box", box_type), "value", other_type)),
             IrAssign("slice", IrTupleSlice(IrName("items", tuple_type), 0, None)),
+            IrSetItem(
+                IrName("items", tuple_type),
+                IrName("box", box_type),
+                IrName("other", other_type),
+            ),
             IrAssign(
                 "join",
                 IrStringJoin(

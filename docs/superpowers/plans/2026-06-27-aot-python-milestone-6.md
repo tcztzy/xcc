@@ -885,6 +885,13 @@ return` guards, and lowers empty `{}` literals as empty tuple-backed containers
 when the expected type is a supported dict shape. The broader source-to-LLVM
 unchecked slice now advances past `self._sema.functions.get(...)`; the next
 observed blocker is the existing `enumerate(real_params)` loop in `codegen.py`.
+AOT lowering now handles existing `enumerate(iterable)` loops and subscript
+assignment statements such as `param_ts[i] = lt`; LLVM text emission treats
+enumerate loops as ordinary tuple-backed loops with the loop index bound to the
+first target and emits pointer stores for lowered subscript assignment. The
+broader source-to-LLVM unchecked slice now advances past the
+`enumerate(real_params)` loop; the next observed blocker is the existing
+`c.FunctionType(...)` LLVM-C receiver call in `codegen.py`.
 The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with

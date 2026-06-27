@@ -30,6 +30,7 @@ from xcc.aot import (
     IrRecord,
     IrRecordType,
     IrReturn,
+    IrSetItem,
     IrStringConcat,
     IrStringType,
     IrTuple,
@@ -557,6 +558,60 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("for.next", llvm_ir)
         self.assertIn("br label %for.next", llvm_ir)
 
+    def test_emits_enumerate_for_each_without_runtime_enumerate_call(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = lower_source_to_ir(
+            "def first_index(names: list[str]) -> int:\n"
+            "    for index, name in enumerate(names):\n"
+            "        return index\n"
+            "    return 0\n",
+            filename="enumerate_for.py",
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %names)", llvm_ir)
+        self.assertRegex(llvm_ir, r"ret i64 %index\d+")
+        self.assertNotIn("@__enumerate", llvm_ir)
+        self.assertIn(f"ret i{int64.bits} 0", llvm_ir)
+
+        skipped_item = lower_source_to_ir(
+            "def first_index(names: list[str]) -> int:\n"
+            "    for index, _ in enumerate(names):\n"
+            "        return index\n"
+            "    return 0\n",
+            filename="enumerate_skip_item.py",
+        )
+        skipped_ir = emit_llvm_text(skipped_item)
+        self.assertRegex(skipped_ir, r"ret i64 %index\d+")
+
+    def test_emits_subscript_assignment_as_pointer_store(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        tuple_type = IrTupleType((IrStringType(),))
+        module = IrModule(
+            "setitem.py",
+            (),
+            (
+                IrFunction(
+                    "store",
+                    (
+                        IrParam("values", tuple_type),
+                        IrParam("index", int64),
+                        IrParam("item", IrStringType()),
+                    ),
+                    IrNoneType(),
+                    (
+                        IrSetItem(
+                            IrName("values", tuple_type),
+                            IrName("index", int64),
+                            IrName("item", IrStringType()),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("getelementptr ptr, ptr %values, i64 %index", llvm_ir)
+        self.assertIn("store ptr %item", llvm_ir)
+
     def test_emits_enum_member_constants_as_stable_pointers(self) -> None:
         enum_type = IrRecordType("Enum")
         module = IrModule(
@@ -871,6 +926,16 @@ class AotLlvmTextTests(unittest.TestCase):
             _statement_assigned_names(IrAssign("(left, _)", IrConstNone())),
             ("left",),
         )
+        self.assertEqual(
+            _statement_assigned_names(
+                IrSetItem(
+                    IrName("values", IrTupleType((IrStringType(),))),
+                    IrConstInt(0, IrIntType(64, signed=True)),
+                    IrConstString("x"),
+                )
+            ),
+            (),
+        )
         self.assertEqual(_statement_assigned_names(IrBreak()), ())
         self.assertEqual(_statement_assigned_names(IrContinue()), ())
         self.assertEqual(
@@ -940,6 +1005,56 @@ class AotLlvmTextTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             emitter._pointer_compare_value(_EmittedValue("value", object()))  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+
+        int64 = IrIntType(64, signed=True)
+        enumerate_cases = (
+            (
+                IrCall("__enumerate", (), IrTupleType((int64, IrStringType()))),
+                "__enumerate expects one argument",
+            ),
+            (
+                IrCall(
+                    "__enumerate",
+                    (IrTuple((), IrTupleType(())),),
+                    IrStringType(),
+                ),
+                "Malformed __enumerate loop",
+            ),
+            (
+                IrCall(
+                    "__enumerate",
+                    (IrTuple((), IrTupleType(())),),
+                    IrTupleType((int64,)),
+                ),
+                "__enumerate loop expects two element types",
+            ),
+            (
+                IrCall(
+                    "__enumerate",
+                    (IrTuple((), IrTupleType(())),),
+                    IrTupleType((int64, IrStringType())),
+                ),
+                "__enumerate loop expects two targets",
+            ),
+        )
+        for iterable, message in enumerate_cases:
+            with self.subTest(message=message):
+                target = "pair" if "targets" in message else "(index, item)"
+                bad_module = IrModule(
+                    "bad_enumerate.py",
+                    (),
+                    (
+                        IrFunction(
+                            "walk",
+                            (),
+                            IrNoneType(),
+                            (IrForEach(target, iterable, IrBranch(())),),
+                        ),
+                    ),
+                )
+                with self.assertRaises(AotError) as ctx:
+                    emit_llvm_text(bad_module)
+                self.assertEqual(ctx.exception.diagnostics[0].message, message)
 
     def test_reports_unsupported_llvm_shapes(self) -> None:
         int64 = IrIntType(64, signed=True)

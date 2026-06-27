@@ -221,6 +221,13 @@
   broader source-to-LLVM unchecked slice now advances past
   `self._sema.functions.get(...)` and stops at the existing
   `enumerate(real_params)` loop in `codegen.py`.
+- Added AOT lowering for existing `enumerate(iterable)` loops and subscript
+  assignment statements such as `param_ts[i] = lt`. LLVM text emission now
+  treats enumerate loops as ordinary tuple-backed loops with the loop index
+  bound to the first target, and emits pointer stores for lowered subscript
+  assignment. The broader source-to-LLVM unchecked slice now advances past the
+  `enumerate(real_params)` loop and stops at the existing `c.FunctionType(...)`
+  LLVM-C receiver call in `codegen.py`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

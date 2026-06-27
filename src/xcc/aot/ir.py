@@ -191,6 +191,13 @@ class IrAssign:
 
 
 @dataclass(frozen=True)
+class IrSetItem:
+    target: IrExpr
+    index: IrExpr
+    value: IrExpr
+
+
+@dataclass(frozen=True)
 class IrReturn:
     value: IrExpr
 
@@ -241,7 +248,18 @@ class IrRaise:
     message: IrExpr
 
 
-IrStmt = IrAssign | IrReturn | IrIf | IrForEach | IrWhile | IrBreak | IrContinue | IrPrint | IrRaise
+IrStmt = (
+    IrAssign
+    | IrSetItem
+    | IrReturn
+    | IrIf
+    | IrForEach
+    | IrWhile
+    | IrBreak
+    | IrContinue
+    | IrPrint
+    | IrRaise
+)
 
 
 @dataclass(frozen=True)

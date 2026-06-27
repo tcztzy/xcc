@@ -32,6 +32,7 @@ from xcc.aot.ir import (
     IrRecord,
     IrRecordType,
     IrReturn,
+    IrSetItem,
     IrStmt,
     IrStringConcat,
     IrStringJoin,
@@ -246,11 +247,7 @@ class _Lowerer:
         if isinstance(statement, ast.For):
             iterable = self._lower_expr(statement.iter, names, IrTupleType(()))
             body_names = dict(names)
-            self._bind_assignment_target(
-                statement.target,
-                _for_each_target_type(iterable.type),
-                body_names,
-            )
+            self._bind_for_target(statement.target, iterable, body_names)
             body = IrBranch(
                 tuple(
                     self._lower_statement(child, body_names, return_type)
@@ -283,6 +280,18 @@ class _Lowerer:
             )
             names[statement.target.id] = value.type
             return IrAssign(statement.target.id, value)
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Subscript)
+        ):
+            subscript_target = statement.targets[0]
+            value_type = self._subscript_item_type(subscript_target.value, names, return_type)
+            return IrSetItem(
+                self._lower_expr(subscript_target.value, names, IrRecordType("object")),
+                self._lower_expr(subscript_target.slice, names, IrIntType(64, signed=True)),
+                self._lower_expr(statement.value, names, value_type),
+            )
         if (
             isinstance(statement, ast.Assign)
             and len(statement.targets) == 1
@@ -500,6 +509,8 @@ class _Lowerer:
         names: dict[str, IrType],
         expected: IrType,
     ) -> IrExpr:
+        if isinstance(expr.func, ast.Name) and expr.func.id == "enumerate":
+            return self._lower_enumerate_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id == "len" and len(expr.args) == 1:
             return IrCall(
                 "len",
@@ -808,6 +819,40 @@ class _Lowerer:
             target,
         )
 
+    def _bind_for_target(
+        self,
+        target: ast.expr,
+        iterable: IrExpr,
+        names: dict[str, IrType],
+    ) -> None:
+        if isinstance(iterable, IrCall) and iterable.target == "__enumerate":
+            if not isinstance(target, ast.Tuple):
+                self._error(
+                    "XCC-AOT-LOWER-0001",
+                    "Unsupported enumerate target",
+                    target,
+                )
+            if not isinstance(iterable.type, IrTupleType) or len(iterable.type.elements) != len(
+                target.elts
+            ):
+                self._error(
+                    "XCC-AOT-LOWER-0001",
+                    "Unsupported enumerate target shape",
+                    target,
+                )
+            for element, element_type in zip(target.elts, iterable.type.elements, strict=True):
+                if isinstance(element, ast.Name) and element.id == "_":
+                    continue
+                if not isinstance(element, ast.Name):
+                    self._error(
+                        "XCC-AOT-LOWER-0001",
+                        "Unsupported enumerate target",
+                        element,
+                    )
+                names[element.id] = element_type
+            return
+        self._bind_assignment_target(target, _for_each_target_type(iterable.type), names)
+
     def _assignment_value_type(
         self,
         target: ast.expr,
@@ -821,6 +866,17 @@ class _Lowerer:
             receiver = self._lower_expr(target.value, names, IrRecordType("object"))
             if isinstance(receiver.type, IrRecordType) and receiver.type.name in self.class_types:
                 return self._record_field_type(receiver.type, target.attr, target)
+        return fallback
+
+    def _subscript_item_type(
+        self,
+        target: ast.expr,
+        names: dict[str, IrType],
+        fallback: IrType,
+    ) -> IrType:
+        target_expr = self._lower_expr(target, names, IrRecordType("object"))
+        if isinstance(target_expr.type, IrTupleType) and len(target_expr.type.elements) == 1:
+            return target_expr.type.elements[0]
         return fallback
 
     def _infer_assignment_expr_type(
@@ -892,6 +948,20 @@ class _Lowerer:
             return self._type_name_to_ir_type(name, node)
         except AotError:
             return None
+
+    def _lower_enumerate_call(self, expr: ast.Call, names: dict[str, IrType]) -> IrExpr:
+        if expr.keywords or len(expr.args) != 1:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        iterable = self._lower_expr(expr.args[0], names, IrTupleType(()))
+        return IrCall(
+            "__enumerate",
+            (iterable,),
+            IrTupleType((IrIntType(64, signed=True), _for_each_target_type(iterable.type))),
+        )
 
     def _lower_dict_get_call(
         self,
