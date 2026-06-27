@@ -875,6 +875,31 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("define i1 @__xcc_aot_string_startswith", llvm_ir)
         self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 2)", llvm_ir)
 
+    def test_emits_string_endswith_intrinsic_call(self) -> None:
+        module = IrModule(
+            "endswith.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (),
+                    IrBoolType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__str_endswith",
+                                (IrConstString("abcdef"), IrConstString("ef")),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define i1 @__xcc_aot_string_endswith", llvm_ir)
+        self.assertIn("call i1 @__xcc_aot_string_endswith(ptr @.str0, ptr @.str1)", llvm_ir)
+
     def test_emits_string_predicate_intrinsic_calls(self) -> None:
         bool_type = IrBoolType()
         module = IrModule(
@@ -1333,6 +1358,66 @@ class AotLlvmTextTests(unittest.TestCase):
                                         IrTuple((), IrTupleType(())),
                                         IrConstInt(0, int64),
                                     ),
+                                    int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_endswith",
+                                    (IrConstString("x"),),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_endswith",
+                                    (IrConstString("x"), IrConstInt(1, int64)),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_endswith",
+                                    (IrConstString("x"), IrConstString("x")),
                                     int64,
                                 )
                             ),

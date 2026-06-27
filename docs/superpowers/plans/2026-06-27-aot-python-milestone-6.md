@@ -914,6 +914,7 @@ signatures. The broader source-to-LLVM unchecked slice now advances past
 AOT lowering now handles the existing integer floor-division/modulo and
 bitwise operator shapes, normal-path `try` handlers, integer `min`/`max`,
 `range`, `chr`, `float`, `float.fromhex`, `str.find`, `str.split`,
+`str.endswith`, `str.ljust`, `str.rstrip`, `int.to_bytes`, `bytes`, `id`,
 `zip(..., strict=True)`, tuple-backed `dict.items()`, empty container
 constructors, tuple identity conversion, tuple-backed `add`/`append`, expected
 types for list/generator comprehensions, optional tuple-backed top-level
@@ -921,13 +922,18 @@ unions, attribute-aware `isinstance` narrowing, `if` expression `is not None`
 narrowing, exiting `not isinstance` narrowing, and common field access over
 record unions. Codegen has also been reshaped away from several bootstrap-hostile
 source patterns while staying CPython-valid: small local dict dispatch,
-generator `max`, nested callback key functions, starred list literals,
-and an untyped optional symbol lookup. AOT lowering now supports tuple-of-class
-`isinstance` narrowing for common record-field access, so codegen can keep the
-ordinary CPython form where ruff expects it.
-The broader source-to-LLVM unchecked slice now advances past the previous
-`left // right` blocker; the next observed blocker is the existing atomic RMW
-opcode mapping dictionary at `src/xcc/codegen.py:2508`.
+generator `max`, nested callback key functions, starred list literals, untyped
+optional symbol lookups, atomic opcode dictionaries, compound operator
+dictionaries, nested helper functions, subscript-target mutating calls,
+non-empty dict literals, bytearray-backed constant assembly, dead `_term`
+writes, and Optional if-expression field access. AOT lowering now supports
+tuple-of-class `isinstance` narrowing for common record-field access, so codegen
+can keep the ordinary CPython form where ruff expects it.
+The broader source-to-LLVM unchecked slice rooted at
+`xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked` now lowers to AOT IR
+successfully, currently covering 237 functions and 62 records. The remaining
+Step 4d work moves from source-to-IR reachability to LLVM text emission/runtime
+coverage for the newly discovered intrinsics and the lowered codegen path.
 The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with

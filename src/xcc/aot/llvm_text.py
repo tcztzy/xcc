@@ -790,6 +790,8 @@ class _Emitter:
             return self._emit_not_in_tuple(expr.args[0], expr.args[1], names, lines)
         if expr.target == "__str_startswith":
             return self._emit_string_startswith_call(expr, names, lines)
+        if expr.target == "__str_endswith":
+            return self._emit_string_endswith_call(expr, names, lines)
         predicate_mode = _STRING_PREDICATE_INTRINSICS.get(expr.target)
         if predicate_mode is not None:
             return self._emit_string_predicate_call(expr, predicate_mode, names, lines)
@@ -891,6 +893,28 @@ class _Emitter:
         lines.append(
             f"  {result} = call i1 @__xcc_aot_string_startswith("
             f"ptr {value.value}, ptr {prefix.value}, i64 {start.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_string_endswith_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__str_endswith expects two arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        suffix = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(value.type, IrStringType) or not isinstance(suffix.type, IrStringType):
+            self._error("__str_endswith expects string receiver and suffix")
+        if not isinstance(expr.type, IrBoolType):
+            self._error("__str_endswith expects a bool result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("endswith")
+        lines.append(
+            f"  {result} = call i1 @__xcc_aot_string_endswith("
+            f"ptr {value.value}, ptr {suffix.value})"
         )
         return _EmittedValue(result, expr.type)
 

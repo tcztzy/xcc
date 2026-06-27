@@ -1831,6 +1831,59 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_string_endswith_method_call(self) -> None:
+        module = lower_source_to_ir(
+            "def check(text: str, suffix: str) -> bool:\n"
+            "    return text.endswith(suffix)\n",
+            filename="endswith.py",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__str_endswith",
+                (IrName("text", IrStringType()), IrName("suffix", IrStringType())),
+                IrBoolType(),
+            ),
+        )
+
+    def test_lowers_string_ljust_method_call(self) -> None:
+        module = lower_source_to_ir(
+            "def pad(text: str, width: int, fill: str) -> str:\n"
+            "    return text.ljust(width, fill)\n",
+            filename="ljust.py",
+        )
+        returned = module.functions[0].body[0].value
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__str_ljust",
+                (
+                    IrName("text", IrStringType()),
+                    IrName("width", int64),
+                    IrName("fill", IrStringType()),
+                ),
+                IrStringType(),
+            ),
+        )
+
+    def test_lowers_string_rstrip_method_call(self) -> None:
+        module = lower_source_to_ir(
+            "def trim(text: str, chars: str) -> str:\n"
+            "    return text.rstrip(chars)\n",
+            filename="rstrip.py",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__str_rstrip",
+                (IrName("text", IrStringType()), IrName("chars", IrStringType())),
+                IrStringType(),
+            ),
+        )
+
     def test_lowers_string_predicate_method_calls(self) -> None:
         module = lower_source_to_ir(
             "def alpha(ch: str) -> bool:\n"
@@ -2115,6 +2168,8 @@ class AotScalarLoweringTests(unittest.TestCase):
             ("def f() -> int:\n    return helper()\n", "XCC-AOT-LOWER-0003"),
             ("def f() -> int:\n    return int()\n", "XCC-AOT-LOWER-0003"),
             ("def f() -> int:\n    return int('1', base=10)\n", "XCC-AOT-LOWER-0003"),
+            ("def f() -> bytes:\n    return bytes()\n", "XCC-AOT-LOWER-0003"),
+            ("def f(value: int) -> int:\n    return id()\n", "XCC-AOT-LOWER-0003"),
             (
                 "def helper(value: int) -> int:\n"
                 "    return value\n"
@@ -2125,6 +2180,14 @@ class AotScalarLoweringTests(unittest.TestCase):
             ("def f(values: tuple[str, ...]) -> str:\n    return str(**values)\n", "XCC-AOT-LOWER-0003"),
             ("def f(text: str) -> bool:\n    return text.startswith()\n", "XCC-AOT-LOWER-0003"),
             ("def f(value: int) -> bool:\n    return value.startswith('x')\n", "XCC-AOT-LOWER-0003"),
+            ("def f(text: str) -> bool:\n    return text.endswith()\n", "XCC-AOT-LOWER-0003"),
+            ("def f(value: int) -> bool:\n    return value.endswith('x')\n", "XCC-AOT-LOWER-0003"),
+            ("def f(text: str) -> str:\n    return text.ljust()\n", "XCC-AOT-LOWER-0003"),
+            ("def f(value: int) -> str:\n    return value.ljust(4)\n", "XCC-AOT-LOWER-0003"),
+            ("def f(text: str) -> str:\n    return text.rstrip()\n", "XCC-AOT-LOWER-0003"),
+            ("def f(value: int) -> str:\n    return value.rstrip('x')\n", "XCC-AOT-LOWER-0003"),
+            ("def f(value: int) -> bytes:\n    return value.to_bytes(1)\n", "XCC-AOT-LOWER-0003"),
+            ("def f(text: str) -> bytes:\n    return text.to_bytes(1, 'little')\n", "XCC-AOT-LOWER-0003"),
             ("def f(text: str) -> bool:\n    return text.isalpha('x')\n", "XCC-AOT-LOWER-0003"),
             ("def f(text: str) -> bool:\n    return text.isspace(kind=True)\n", "XCC-AOT-LOWER-0003"),
             ("def f(value: int) -> bool:\n    return value.isalpha()\n", "XCC-AOT-LOWER-0003"),
@@ -2451,6 +2514,60 @@ class AotScalarLoweringTests(unittest.TestCase):
         function = module.functions[0]
         self.assertEqual(function.params[0].type, IrStringType())
         self.assertEqual(function.return_type, IrStringType())
+
+    def test_lowers_bytes_builtin_constructor(self) -> None:
+        module = lower_source_to_ir(
+            "def zeroed(size: int) -> bytes:\n"
+            "    return bytes(size)\n",
+            filename="bytes_ctor.py",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__bytes",
+                (IrName("size", IrIntType(64, signed=True)),),
+                IrStringType(),
+            ),
+        )
+
+    def test_lowers_id_builtin_call(self) -> None:
+        module = lower_source_to_ir(
+            "from typing import Any\n"
+            "def key(value: Any) -> int:\n"
+            "    return id(value)\n",
+            filename="id_builtin.py",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__id",
+                (IrName("value", IrRecordType("object")),),
+                IrIntType(64, signed=True),
+            ),
+        )
+
+    def test_lowers_int_to_bytes_method_call(self) -> None:
+        module = lower_source_to_ir(
+            "def encode(value: int, size: int) -> bytes:\n"
+            "    return value.to_bytes(size, 'little')\n",
+            filename="int_to_bytes.py",
+        )
+        returned = module.functions[0].body[0].value
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__int_to_bytes",
+                (
+                    IrName("value", int64),
+                    IrName("size", int64),
+                    IrConstString("little"),
+                ),
+                IrStringType(),
+            ),
+        )
 
     def test_direct_lowerer_narrowing_helpers_cover_edge_inputs(self) -> None:
         class_types = {

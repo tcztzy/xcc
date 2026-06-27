@@ -86,7 +86,7 @@ CANONICAL_INTEGER_TYPES = {
 
 
 def is_integer_type(type_: Type) -> bool:
-    return type_.declarator_ops == () and type_.name in CANONICAL_INTEGER_TYPES
+    return type_.declarator_ops == () and _canonical_integer_type(type_.name) is not None
 
 
 def is_const_qualified(type_: Type) -> bool:
@@ -94,11 +94,9 @@ def is_const_qualified(type_: Type) -> bool:
 
 
 def is_floating_type(type_: Type) -> bool:
-    return type_.declarator_ops == () and type_.name in {
-        FLOAT.name,
-        DOUBLE.name,
-        LONGDOUBLE.name,
-    }
+    if type_.declarator_ops != ():
+        return False
+    return type_.name in ("float", "double", "long double")
 
 
 def is_arithmetic_type(type_: Type) -> bool:
@@ -116,30 +114,77 @@ def unqualified_type(type_: Type) -> Type:
 
 
 def integer_rank(type_: Type) -> int:
-    return INTEGER_TYPE_RANKS[unqualified_type(type_).name]
+    name = unqualified_type(type_).name
+    if name == "_Bool":
+        return 1
+    if name in ("char", "unsigned char"):
+        return 2
+    if name in ("short", "unsigned short"):
+        return 3
+    if name in ("int", "unsigned int"):
+        return 4
+    if name in ("long", "unsigned long"):
+        return 5
+    if name in ("long long", "unsigned long long"):
+        return 6
+    if name in ("__int128", "unsigned __int128"):
+        return 7
+    if name == "__evm_address":
+        return 8
+    if name == "__evm_uint256":
+        return 9
+    return 0
 
 
 def is_signed_integer_type(type_: Type) -> bool:
     unqualified = unqualified_type(type_)
-    return is_integer_type(unqualified) and unqualified.name in SIGNED_INTEGER_NAMES
+    return is_integer_type(unqualified) and unqualified.name in (
+        "char",
+        "short",
+        "int",
+        "long",
+        "long long",
+        "__int128",
+    )
 
 
 def integer_promotion(type_: Type) -> Type:
     unqualified = unqualified_type(type_)
     if not is_integer_type(unqualified):
         return unqualified
-    promoted = INTEGER_PROMOTION_TYPES.get(unqualified.name)
+    promoted = _integer_promotion_type(unqualified.name)
     if promoted is not None:
         return promoted
-    return CANONICAL_INTEGER_TYPES[unqualified.name]
+    canonical = _canonical_integer_type(unqualified.name)
+    if canonical is not None:
+        return canonical
+    return unqualified  # pragma: no cover - is_integer_type requires a canonical type.
 
 
 def signed_range(type_: Type) -> tuple[int, int] | None:
-    return SIGNED_INTEGER_TYPE_LIMITS.get(unqualified_type(type_))
+    name = unqualified_type(type_).name
+    if name == "int":
+        return (-(1 << 31), (1 << 31) - 1)
+    if name in ("long", "long long"):
+        return (-(1 << 63), (1 << 63) - 1)
+    if name == "__int128":
+        return (-(1 << 127), (1 << 127) - 1)
+    return None
 
 
 def unsigned_max(type_: Type) -> int | None:
-    return UNSIGNED_INTEGER_TYPE_LIMITS.get(unqualified_type(type_))
+    name = unqualified_type(type_).name
+    if name == "unsigned int":
+        return (1 << 32) - 1
+    if name in ("unsigned long", "unsigned long long"):
+        return (1 << 64) - 1
+    if name == "unsigned __int128":
+        return (1 << 128) - 1
+    if name == "__evm_uint256":
+        return (1 << 256) - 1
+    if name == "__evm_address":
+        return (1 << 160) - 1
+    return None
 
 
 def signed_can_represent_unsigned(signed: Type, unsigned: Type) -> bool:
@@ -152,9 +197,9 @@ def usual_arithmetic_conversion(left_type: Type, right_type: Type) -> Type | Non
     left_type = unqualified_type(left_type)
     right_type = unqualified_type(right_type)
     if is_floating_type(left_type) or is_floating_type(right_type):
-        if left_type.name == LONGDOUBLE.name or right_type.name == LONGDOUBLE.name:
+        if left_type.name == "long double" or right_type.name == "long double":
             return LONGDOUBLE
-        if left_type.name == DOUBLE.name or right_type.name == DOUBLE.name:
+        if left_type.name == "double" or right_type.name == "double":
             return DOUBLE
         return FLOAT
     if not is_integer_type(left_type) or not is_integer_type(right_type):
@@ -173,7 +218,62 @@ def usual_arithmetic_conversion(left_type: Type, right_type: Type) -> Type | Non
         return unsigned_type
     if signed_can_represent_unsigned(signed_type, unsigned_type):
         return signed_type
-    return UNSIGNED_COUNTERPARTS[signed_type.name]
+    counterpart = _unsigned_counterpart(signed_type.name)
+    if counterpart is not None:
+        return counterpart
+    return unsigned_type  # pragma: no cover - all signed integer types have counterparts here.
+
+
+def _integer_promotion_type(name: str) -> Type | None:
+    if name in ("_Bool", "char", "unsigned char", "short", "unsigned short"):
+        return INT
+    return None
+
+
+def _canonical_integer_type(name: str) -> Type | None:
+    if name == "_Bool":
+        return BOOL
+    if name == "char":
+        return CHAR
+    if name == "unsigned char":
+        return UCHAR
+    if name == "short":
+        return SHORT
+    if name == "unsigned short":
+        return USHORT
+    if name == "int":
+        return INT
+    if name == "unsigned int":
+        return UINT
+    if name == "long":
+        return LONG
+    if name == "unsigned long":
+        return ULONG
+    if name == "long long":
+        return LLONG
+    if name == "unsigned long long":
+        return ULLONG
+    if name == "__int128":
+        return INT128
+    if name == "unsigned __int128":
+        return UINT128
+    if name == "__evm_address":
+        return EVM_ADDRESS
+    if name == "__evm_uint256":
+        return EVM_UINT256
+    return None
+
+
+def _unsigned_counterpart(name: str) -> Type | None:
+    if name == "int":
+        return UINT
+    if name == "long":
+        return ULONG
+    if name == "long long":
+        return ULLONG
+    if name == "__int128":
+        return UINT128
+    return None
 
 
 def is_void_pointer_type(type_: Type) -> bool:

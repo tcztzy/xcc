@@ -331,16 +331,17 @@ class _LLVMGen:
 
     @staticmethod
     def _float_rank(kind: int) -> int:
-        ranks = {
-            LLVMTypeKind.HALF: 1,
-            LLVMTypeKind.BFLOAT: 1,
-            LLVMTypeKind.FLOAT: 2,
-            LLVMTypeKind.DOUBLE: 3,
-            LLVMTypeKind.X86_FP80: 4,
-            LLVMTypeKind.FP128: 5,
-            LLVMTypeKind.PPC_FP128: 5,
-        }
-        return ranks.get(kind, 0)
+        if kind in (LLVMTypeKind.HALF, LLVMTypeKind.BFLOAT):
+            return 1
+        if kind == LLVMTypeKind.FLOAT:
+            return 2
+        if kind == LLVMTypeKind.DOUBLE:
+            return 3
+        if kind == LLVMTypeKind.X86_FP80:
+            return 4
+        if kind in (LLVMTypeKind.FP128, LLVMTypeKind.PPC_FP128):
+            return 5
+        return 0
 
     def _struct_type(self, record_name: str) -> int:
         c = llvm()
@@ -546,7 +547,11 @@ class _LLVMGen:
 
     def _emit_globals(self) -> None:
         llvm()
-        externals = self._unit.externals or [*self._unit.declarations, *self._unit.functions]
+        externals: list[FunctionDef | Stmt] = self._unit.externals
+        if not externals:
+            externals = []
+            externals.extend(self._unit.declarations)
+            externals.extend(self._unit.functions)
         for ext in externals:
             if isinstance(ext, FunctionDef):
                 continue
@@ -842,11 +847,13 @@ class _LLVMGen:
             c.BuildRetVoid(self._builder)
         else:
             v = self._emit_expr(stmt.value)
-            ret_lt = self._type_to_llvm(self._func_sym.return_type if self._func_sym else INT)
+            return_type: Type = INT
+            if self._func_sym is not None:
+                return_type = self._func_sym.return_type
+            ret_lt = self._type_to_llvm(return_type)
             if c.TypeOf(v) != ret_lt:
                 v = self._build_cast(v, ret_lt, self._type_map.get(stmt.value))
             c.BuildRet(self._builder, v)
-        self._term = True
 
     def _emit_decl_init(self, stmt: DeclStmt) -> None:
         if stmt.storage_class == "static":
@@ -1458,13 +1465,11 @@ class _LLVMGen:
         if not self._break_stack:
             raise llvm_backend_error(self._result.filename, "break not within loop or switch")
         llvm().BuildBr(self._builder, self._break_stack[-1])
-        self._term = True
 
     def _emit_continue(self) -> None:
         if not self._loop_stack:
             raise llvm_backend_error(self._result.filename, "continue not within loop")
         llvm().BuildBr(self._builder, self._loop_stack[-1].continue_block)
-        self._term = True
 
     def _label_block(self, name: str) -> int:
         block = self._label_blocks.get(name)
@@ -1758,8 +1763,10 @@ class _LLVMGen:
         name = expr.name
         assert isinstance(name, str)
 
-        if name == "__func__" and self._func_sym is not None:
-            return self._string_literal(StringLiteral(f'"{self._func_sym.name}"'))
+        if name == "__func__":  # noqa: SIM102 - keep AOT Optional narrowing explicit.
+            if self._func_sym is not None:  # pragma: no branch
+                func_name = self._func_sym.name
+                return self._string_literal(StringLiteral('"' + func_name + '"'))
 
         addr = self._lookup_local(name)
         if addr is not None:
@@ -1770,17 +1777,18 @@ class _LLVMGen:
             return c.BuildLoad2(self._builder, lt, addr, name.encode())
 
         # Check function locals (globals)
-        if self._func_sym and name in self._func_sym.locals:
-            sym = self._func_sym.locals[name]
-            if isinstance(sym, EnumConstSymbol):
-                return c.ConstInt(c.Int32Type(), sym.value, True)
-            if isinstance(sym, VarSymbol):
-                val_type = sym.type_
-                lt = self._type_to_llvm(val_type)
-                gv = self._global_var_ref(name, val_type)
-                if val_type.is_array():
-                    return gv
-                return c.BuildLoad2(self._builder, lt, gv, name.encode())
+        if self._func_sym is not None:  # noqa: SIM102  # pragma: no branch
+            if name in self._func_sym.locals:
+                sym = self._func_sym.locals[name]
+                if isinstance(sym, EnumConstSymbol):
+                    return c.ConstInt(c.Int32Type(), sym.value, True)
+                if isinstance(sym, VarSymbol):
+                    val_type = sym.type_
+                    lt = self._type_to_llvm(val_type)
+                    gv = self._global_var_ref(name, val_type)
+                    if val_type.is_array():
+                        return gv
+                    return c.BuildLoad2(self._builder, lt, gv, name.encode())
 
         val_type = self._type_map.require(expr)
         if self._is_function_designator_type(val_type):
@@ -1836,8 +1844,10 @@ class _LLVMGen:
             for i, param_type in enumerate(real_params):
                 param_arr[i] = param_type
         fn_t = c.FunctionType(ret_lt, param_arr, n, is_variadic)
-        self._func_types.setdefault(name, fn_t)
-        self._func_param_types.setdefault(name, real_params)
+        if name not in self._func_types:
+            self._func_types[name] = fn_t
+        if name not in self._func_param_types:
+            self._func_param_types[name] = real_params
         if fn:
             return fn
         fn = c.AddFunction(self._mod, name.encode(), fn_t)
@@ -1917,12 +1927,13 @@ class _LLVMGen:
             return c.BuildSub(self._builder, zero, operand, b"neg")
         if op == "~":
             ot = c.TypeOf(operand)
+            all_ones = 0 - 1
             if c.GetTypeKind(ot) == LLVMTypeKind.POINTER:
                 # Pointer ~: cast to i64 first, then xor.
                 op_i64 = c.BuildPtrToInt(self._builder, operand, c.Int64Type(), b"cast")
-                m1 = c.ConstInt(c.Int64Type(), -1, True)
+                m1 = c.ConstInt(c.Int64Type(), all_ones, True)
                 return c.BuildXor(self._builder, op_i64, m1, b"not")
-            m1 = c.ConstInt(ot, -1, True)
+            m1 = c.ConstInt(ot, all_ones, True)
             return c.BuildXor(self._builder, operand, m1, b"not")
         if op == "!":
             cond = self._to_bool(operand)
@@ -2072,35 +2083,51 @@ class _LLVMGen:
                 lt = target_t
                 rt = target_t
 
+        result = 0
         if l_float or r_float:
-            farith = {
-                "+": c.BuildFAdd,
-                "-": c.BuildFSub,
-                "*": c.BuildFMul,
-                "/": c.BuildFDiv,
-            }
-            fn = farith.get(op)
+            if op == "+":
+                result = c.BuildFAdd(self._builder, left, right, b"binop")
+            elif op == "-":
+                result = c.BuildFSub(self._builder, left, right, b"binop")
+            elif op == "*":
+                result = c.BuildFMul(self._builder, left, right, b"binop")
+            elif op == "/":  # pragma: no branch
+                result = c.BuildFDiv(self._builder, left, right, b"binop")
         else:
             unsigned_result = self._is_unsigned_integer_c_type(result_type)
-            arith = {
-                "+": c.BuildAdd,
-                "-": c.BuildSub,
-                "*": c.BuildMul,
-                "/": c.BuildUDiv if unsigned_result else c.BuildSDiv,
-                "%": c.BuildURem if unsigned_result else c.BuildSRem,
-            }
-            bit = {
-                "&": c.BuildAnd,
-                "|": c.BuildOr,
-                "^": c.BuildXor,
-                "<<": c.BuildShl,
-                ">>": c.BuildLShr if unsigned_result else c.BuildAShr,
-            }
-            fn = arith.get(op) or bit.get(op)
+            if op == "+":
+                result = c.BuildAdd(self._builder, left, right, b"binop")
+            elif op == "-":
+                result = c.BuildSub(self._builder, left, right, b"binop")
+            elif op == "*":
+                result = c.BuildMul(self._builder, left, right, b"binop")
+            elif op == "/":
+                if unsigned_result:
+                    result = c.BuildUDiv(self._builder, left, right, b"binop")
+                else:
+                    result = c.BuildSDiv(self._builder, left, right, b"binop")
+            elif op == "%":
+                if unsigned_result:
+                    result = c.BuildURem(self._builder, left, right, b"binop")
+                else:
+                    result = c.BuildSRem(self._builder, left, right, b"binop")
+            elif op == "&":
+                result = c.BuildAnd(self._builder, left, right, b"binop")
+            elif op == "|":
+                result = c.BuildOr(self._builder, left, right, b"binop")
+            elif op == "^":
+                result = c.BuildXor(self._builder, left, right, b"binop")
+            elif op == "<<":
+                result = c.BuildShl(self._builder, left, right, b"binop")
+            elif op == ">>":
+                if unsigned_result:
+                    result = c.BuildLShr(self._builder, left, right, b"binop")
+                else:
+                    result = c.BuildAShr(self._builder, left, right, b"binop")
 
-        if fn is None:
+        if result == 0:
             raise llvm_backend_error(self._result.filename, f"Unsupported binary: {op}")
-        return fn(self._builder, left, right, b"binop")
+        return result
 
     def _compare(
         self,
@@ -2148,8 +2175,21 @@ class _LLVMGen:
                 lk = rk
 
         if l_float:
-            fpreds = {"==": 1, "!=": 6, "<": 4, ">": 2, "<=": 5, ">=": 3}
-            pred = fpreds[op]
+            pred = 0
+            if op == "==":
+                pred = 1
+            elif op == "!=":
+                pred = 6
+            elif op == "<":
+                pred = 4
+            elif op == ">":
+                pred = 2
+            elif op == "<=":
+                pred = 5
+            elif op == ">=":
+                pred = 3
+            if pred == 0:
+                raise llvm_backend_error(self._result.filename, f"Unsupported compare: {op}")
             cmp = c.BuildFCmp(self._builder, pred, left, right, b"cmp")
         else:
             unsigned_compare = False
@@ -2174,10 +2214,31 @@ class _LLVMGen:
                         right = self._cast_integer_value(right, lt, right_c_type, b"cmp.cast")
                     elif rw > lw:  # pragma: no branch
                         left = self._cast_integer_value(left, rt, left_c_type, b"cmp.cast")
-            signed_preds = {"==": 32, "!=": 33, "<": 40, ">": 38, "<=": 41, ">=": 39}
-            unsigned_preds = {"==": 32, "!=": 33, "<": 36, ">": 34, "<=": 37, ">=": 35}
-            preds = unsigned_preds if unsigned_compare else signed_preds
-            pred = preds[op]
+            pred = 0
+            if op == "==":
+                pred = 32
+            elif op == "!=":
+                pred = 33
+            elif unsigned_compare:
+                if op == "<":
+                    pred = 36
+                elif op == ">":
+                    pred = 34
+                elif op == "<=":
+                    pred = 37
+                elif op == ">=":  # pragma: no branch
+                    pred = 35
+            else:
+                if op == "<":
+                    pred = 40
+                elif op == ">":
+                    pred = 38
+                elif op == "<=":
+                    pred = 41
+                elif op == ">=":
+                    pred = 39
+            if pred == 0:
+                raise llvm_backend_error(self._result.filename, f"Unsupported compare: {op}")
             cmp = c.BuildICmp(self._builder, pred, left, right, b"cmp")
         return c.BuildZExt(self._builder, cmp, c.Int32Type(), b"cmp.ext")
 
@@ -2259,35 +2320,50 @@ class _LLVMGen:
             elif self._is_float_kind(vk):  # pragma: no branch
                 val = c.BuildFPCast(self._builder, val, lt, b"cmpd.cast")
 
+        result = 0
         if is_float:
-            farith = {
-                "+=": c.BuildFAdd,
-                "-=": c.BuildFSub,
-                "*=": c.BuildFMul,
-                "/=": c.BuildFDiv,
-            }
-            fn = farith.get(expr.op)
+            if expr.op == "+=":
+                result = c.BuildFAdd(self._builder, old, val, b"compound")
+            elif expr.op == "-=":
+                result = c.BuildFSub(self._builder, old, val, b"compound")
+            elif expr.op == "*=":
+                result = c.BuildFMul(self._builder, old, val, b"compound")
+            elif expr.op == "/=":  # pragma: no branch
+                result = c.BuildFDiv(self._builder, old, val, b"compound")
         else:
             unsigned_target = self._is_unsigned_integer_c_type(target_type)
-            arith = {
-                "+=": c.BuildAdd,
-                "-=": c.BuildSub,
-                "*=": c.BuildMul,
-                "/=": c.BuildUDiv if unsigned_target else c.BuildSDiv,
-                "%=": c.BuildURem if unsigned_target else c.BuildSRem,
-            }
-            bit = {
-                "&=": c.BuildAnd,
-                "|=": c.BuildOr,
-                "^=": c.BuildXor,
-                "<<=": c.BuildShl,
-                ">>=": c.BuildLShr if unsigned_target else c.BuildAShr,
-            }
-            fn = arith.get(expr.op) or bit.get(expr.op)
+            if expr.op == "+=":
+                result = c.BuildAdd(self._builder, old, val, b"compound")
+            elif expr.op == "-=":
+                result = c.BuildSub(self._builder, old, val, b"compound")
+            elif expr.op == "*=":
+                result = c.BuildMul(self._builder, old, val, b"compound")
+            elif expr.op == "/=":
+                if unsigned_target:
+                    result = c.BuildUDiv(self._builder, old, val, b"compound")
+                else:
+                    result = c.BuildSDiv(self._builder, old, val, b"compound")
+            elif expr.op == "%=":
+                if unsigned_target:
+                    result = c.BuildURem(self._builder, old, val, b"compound")
+                else:
+                    result = c.BuildSRem(self._builder, old, val, b"compound")
+            elif expr.op == "&=":
+                result = c.BuildAnd(self._builder, old, val, b"compound")
+            elif expr.op == "|=":
+                result = c.BuildOr(self._builder, old, val, b"compound")
+            elif expr.op == "^=":
+                result = c.BuildXor(self._builder, old, val, b"compound")
+            elif expr.op == "<<=":
+                result = c.BuildShl(self._builder, old, val, b"compound")
+            elif expr.op == ">>=":
+                if unsigned_target:
+                    result = c.BuildLShr(self._builder, old, val, b"compound")
+                else:
+                    result = c.BuildAShr(self._builder, old, val, b"compound")
 
-        if fn is None:
+        if result == 0:
             raise llvm_backend_error(self._result.filename, f"Unsupported compound: {expr.op}")
-        result = fn(self._builder, old, val, b"compound")
         c.BuildStore(self._builder, result, addr)
         return result
 
@@ -2414,10 +2490,11 @@ class _LLVMGen:
             return c.BuildXor(self._builder, old, value, b"atomic.new")
         if op == ATOMIC_RMW_NAND:
             and_value = c.BuildAnd(self._builder, old, value, b"atomic.and")
+            all_ones = 0 - 1
             return c.BuildXor(
                 self._builder,
                 and_value,
-                c.ConstInt(c.TypeOf(and_value), -1, True),
+                c.ConstInt(c.TypeOf(and_value), all_ones, True),
                 b"atomic.new",
             )
         return value
@@ -2505,27 +2582,41 @@ class _LLVMGen:
             value = c.BuildLoad2(self._builder, elem_lt, in_ptr, b"atomic.in")
             return self._atomic_store_value(ptr, elem_type, elem_lt, value)
 
-        rmw_ops = {
-            "__atomic_fetch_add": ATOMIC_RMW_ADD,
-            "__atomic_fetch_sub": ATOMIC_RMW_SUB,
-            "__atomic_fetch_and": ATOMIC_RMW_AND,
-            "__atomic_fetch_or": ATOMIC_RMW_OR,
-            "__atomic_fetch_xor": ATOMIC_RMW_XOR,
-            "__atomic_fetch_nand": ATOMIC_RMW_NAND,
-            "__sync_fetch_and_add": ATOMIC_RMW_ADD,
-            "__sync_fetch_and_sub": ATOMIC_RMW_SUB,
-            "__sync_fetch_and_and": ATOMIC_RMW_AND,
-            "__sync_fetch_and_or": ATOMIC_RMW_OR,
-            "__sync_fetch_and_xor": ATOMIC_RMW_XOR,
-            "__c11_atomic_fetch_add": ATOMIC_RMW_ADD,
-            "__c11_atomic_fetch_sub": ATOMIC_RMW_SUB,
-            "__c11_atomic_fetch_and": ATOMIC_RMW_AND,
-            "__c11_atomic_fetch_or": ATOMIC_RMW_OR,
-            "__c11_atomic_fetch_xor": ATOMIC_RMW_XOR,
-            "__scoped_atomic_fetch_add": ATOMIC_RMW_ADD,
-        }
-        fetch_op = rmw_ops.get(callee_name)
-        if fetch_op is not None:
+        fetch_op = -1
+        if callee_name in {
+            "__atomic_fetch_add",
+            "__sync_fetch_and_add",
+            "__c11_atomic_fetch_add",
+            "__scoped_atomic_fetch_add",
+        }:
+            fetch_op = ATOMIC_RMW_ADD
+        elif callee_name in {
+            "__atomic_fetch_sub",
+            "__sync_fetch_and_sub",
+            "__c11_atomic_fetch_sub",
+        }:
+            fetch_op = ATOMIC_RMW_SUB
+        elif callee_name in {
+            "__atomic_fetch_and",
+            "__sync_fetch_and_and",
+            "__c11_atomic_fetch_and",
+        }:
+            fetch_op = ATOMIC_RMW_AND
+        elif callee_name in {
+            "__atomic_fetch_or",
+            "__sync_fetch_and_or",
+            "__c11_atomic_fetch_or",
+        }:
+            fetch_op = ATOMIC_RMW_OR
+        elif callee_name in {
+            "__atomic_fetch_xor",
+            "__sync_fetch_and_xor",
+            "__c11_atomic_fetch_xor",
+        }:
+            fetch_op = ATOMIC_RMW_XOR
+        elif callee_name == "__atomic_fetch_nand":
+            fetch_op = ATOMIC_RMW_NAND
+        if fetch_op >= 0:
             if len(args) < 2:
                 return c.ConstInt(c.Int32Type(), 0, False)
             ptr, elem_type, elem_lt = self._atomic_pointer(args[0])
@@ -2533,21 +2624,20 @@ class _LLVMGen:
             old = self._atomic_rmw_value(fetch_op, ptr, elem_type, elem_lt, value)
             return self._atomic_promote_result(old, elem_type)
 
-        new_value_ops = {
-            "__atomic_add_fetch": ATOMIC_RMW_ADD,
-            "__atomic_sub_fetch": ATOMIC_RMW_SUB,
-            "__atomic_and_fetch": ATOMIC_RMW_AND,
-            "__atomic_or_fetch": ATOMIC_RMW_OR,
-            "__atomic_xor_fetch": ATOMIC_RMW_XOR,
-            "__atomic_nand_fetch": ATOMIC_RMW_NAND,
-            "__sync_add_and_fetch": ATOMIC_RMW_ADD,
-            "__sync_sub_and_fetch": ATOMIC_RMW_SUB,
-            "__sync_and_and_fetch": ATOMIC_RMW_AND,
-            "__sync_or_and_fetch": ATOMIC_RMW_OR,
-            "__sync_xor_and_fetch": ATOMIC_RMW_XOR,
-        }
-        new_op = new_value_ops.get(callee_name)
-        if new_op is not None:
+        new_op = -1
+        if callee_name in {"__atomic_add_fetch", "__sync_add_and_fetch"}:
+            new_op = ATOMIC_RMW_ADD
+        elif callee_name in {"__atomic_sub_fetch", "__sync_sub_and_fetch"}:
+            new_op = ATOMIC_RMW_SUB
+        elif callee_name in {"__atomic_and_fetch", "__sync_and_and_fetch"}:
+            new_op = ATOMIC_RMW_AND
+        elif callee_name in {"__atomic_or_fetch", "__sync_or_and_fetch"}:
+            new_op = ATOMIC_RMW_OR
+        elif callee_name in {"__atomic_xor_fetch", "__sync_xor_and_fetch"}:
+            new_op = ATOMIC_RMW_XOR
+        elif callee_name == "__atomic_nand_fetch":
+            new_op = ATOMIC_RMW_NAND
+        if new_op >= 0:
             if len(args) < 2:
                 return c.ConstInt(c.Int32Type(), 0, False)
             ptr, elem_type, elem_lt = self._atomic_pointer(args[0])
@@ -3734,7 +3824,7 @@ class _LLVMGen:
         members = self._sema.record_definitions.get(record_type.name)
         if not members:
             return None
-        last_index = len(members) - 1
+        last_index: int = len(members) - 1
         flexible_member = members[last_index]
         flexible_type = flexible_member.type_
         if not flexible_type.is_array():
@@ -3754,7 +3844,9 @@ class _LLVMGen:
             declarator_ops=flexible_ops,
             qualifiers=flexible_type.qualifiers,
         )
-        return {last_index: adjusted}
+        result: dict[int, Type] = {}
+        result[last_index] = adjusted
+        return result
 
     def _record_member_initializer(
         self,
@@ -3811,7 +3903,9 @@ class _LLVMGen:
             return self._type_to_llvm(Type(record_name))
         member_types = zero_ptr_array(len(members))
         for index, member in enumerate(members):
-            member_type = member_type_overrides.get(index, member.type_)
+            member_type: Type | None = member_type_overrides.get(index)
+            if member_type is None:
+                member_type = member.type_
             member_types[index] = self._record_field_llvm_type(member_type)
         return c.StructType(member_types, len(members), False)
 
@@ -3895,6 +3989,17 @@ class _LLVMGen:
             item_index += consumed
         return self._const_array(elem_lt, elems)
 
+    def _record_init_member_type(
+        self,
+        members: tuple[RecordMemberInfo, ...],
+        overrides: dict[int, Type],
+        index: int,
+    ) -> Type:
+        override: Type | None = overrides.get(index)
+        if override is not None:
+            return override
+        return members[index].type_
+
     def _eval_record_init(
         self,
         init: InitList,
@@ -3910,9 +4015,6 @@ class _LLVMGen:
             return c.ConstNull(self._type_to_llvm(record_type))
         overrides = member_type_overrides or {}
 
-        def member_type(index: int) -> Type:
-            return overrides.get(index, members[index].type_)
-
         next_member = 0
         union_member: RecordMemberInfo | None = None
         union_value: int | None = None
@@ -3921,7 +4023,12 @@ class _LLVMGen:
         fields = (
             []
             if is_union
-            else [c.ConstNull(self._type_to_llvm(member_type(i))) for i in range(len(members))]
+            else [
+                c.ConstNull(
+                    self._type_to_llvm(self._record_init_member_type(members, overrides, i))
+                )
+                for i in range(len(members))
+            ]
         )
         nested_items: dict[int, list[InitItem]] = {}
         nested_order: list[int] = []
@@ -3944,9 +4051,9 @@ class _LLVMGen:
                     nested_designators = (
                         item.designators if path[0][2].name is None else remaining_designators
                     )
-                    nested_items[member_index].append(
-                        InitItem(nested_designators, item.initializer)
-                    )
+                    nested_member_items: list[InitItem] = nested_items[member_index]
+                    nested_member_items.append(InitItem(nested_designators, item.initializer))
+                    nested_items[member_index] = nested_member_items
                     if is_union:
                         initialized_union = True
                     else:
@@ -3964,10 +4071,13 @@ class _LLVMGen:
                 ]:  # pragma: no cover - handled above as remaining_designators.
                     val = self._eval_init(
                         InitList((InitItem(item.designators[1:], item.initializer),)),
-                        member_type(path[0][1]),
+                        self._record_init_member_type(members, overrides, path[0][1]),
                     )
                 else:
-                    val = self._eval_init(item.initializer, member_type(path[0][1]))
+                    val = self._eval_init(
+                        item.initializer,
+                        self._record_init_member_type(members, overrides, path[0][1]),
+                    )
                 if val is None:
                     item_index += 1
                     continue
@@ -3992,7 +4102,7 @@ class _LLVMGen:
                     continue
                 member_index = next_member
                 next_member += 1
-            current_member_type = member_type(member_index)
+            current_member_type = self._record_init_member_type(members, overrides, member_index)
             if self._is_single_aggregate_initializer(
                 current_member_type,
                 item.initializer,
@@ -4021,7 +4131,7 @@ class _LLVMGen:
             member = members[member_index]
             val = self._eval_init(
                 InitList(tuple(nested_items[member_index])),
-                member_type(member_index),
+                self._record_init_member_type(members, overrides, member_index),
             )
             if val is None:
                 continue
@@ -4143,7 +4253,10 @@ class _LLVMGen:
         initializer: Expr | InitList,
     ) -> int | None:
         c = llvm()
-        record_name, field_index, member = path[0]
+        first_path: tuple[str, int, RecordMemberInfo] = path[0]
+        record_name: str = first_path[0]
+        field_index: int = first_path[1]
+        member: RecordMemberInfo = first_path[2]
         record_type = Type(record_name)
         members = self._sema.record_definitions.get(record_name)
         if members is None:
@@ -4295,20 +4408,25 @@ class _LLVMGen:
         if value_type.name.startswith("union "):
             return self._const_union_bytes(value, value_type.name)
         if is_integer_type(value_type) and c.IsAConstantInt(value):
-            raw = c.ConstIntGetZExtValue(value)
-            mask = (1 << (size * 8)) - 1
-            return (raw & mask).to_bytes(size, "little")
+            raw: int = c.ConstIntGetZExtValue(value)
+            mask: int = (1 << (size * 8)) - 1
+            masked: int = raw & mask
+            return masked.to_bytes(size, "little")
         return None
 
     def _const_struct_bytes(self, value: int, record_name: str) -> bytes | None:
         members = self._sema.record_definitions.get(record_name)
         if members is None:
             return None
-        data = bytearray(self._record_size(record_name))
+        record_size = self._record_size(record_name)
+        data = b""
         offset = 0
         for index, member in enumerate(members):
             member_align = self._member_align(member)
-            offset = self._align_to(offset, member_align)
+            aligned_offset = self._align_to(offset, member_align)
+            if aligned_offset > len(data):
+                data += bytes(aligned_offset - len(data))
+            offset = aligned_offset
             member_size = self._type_size(member.type_)
             member_value = self._const_aggregate_element(
                 value,
@@ -4318,12 +4436,14 @@ class _LLVMGen:
             member_data = self._const_value_bytes(member_value, member.type_)
             if member_data is None:
                 return None
-            data[offset : offset + member_size] = member_data[:member_size].ljust(
+            data += member_data[:member_size].ljust(
                 member_size,
                 b"\0",
             )
             offset += member_size
-        return bytes(data)
+        if record_size > len(data):
+            data += bytes(record_size - len(data))
+        return data[:record_size]
 
     def _const_union_bytes(self, value: int, record_name: str) -> bytes | None:
         members = self._sema.record_definitions.get(record_name)
@@ -4375,7 +4495,11 @@ class _LLVMGen:
                     values.append(elem)
                 return self._const_array(elem_lt, values)
             if kind == "ptr":
-                if any(chunk):
+                has_nonzero = False
+                for byte in chunk:
+                    if byte:
+                        has_nonzero = True
+                if has_nonzero:
                     return None
                 lt = target_lt if target_lt is not None else self._type_to_llvm(target_type)
                 return c.ConstPointerNull(lt)
@@ -4386,7 +4510,11 @@ class _LLVMGen:
             return self._const_union_from_bytes(chunk, target_type.name, target_lt)
         if is_integer_type(target_type):
             lt = target_lt if target_lt is not None else self._type_to_llvm(target_type)
-            raw = int.from_bytes(chunk, "little")
+            raw = 0
+            shift = 0
+            for byte in chunk:
+                raw = raw | (byte << shift)
+                shift += 8
             return c.ConstInt(lt, raw, False)
         return None
 
@@ -4455,12 +4583,13 @@ class _LLVMGen:
             if target_kind is not None and self._is_float_kind(target_kind):
                 return c.ConstReal(target_lt, float(int_value))
         if target_kind == LLVMTypeKind.POINTER:
-            value_type = self._type_map.get(expr)
-            if value_type is not None and value_type.is_array():
-                value = self._eval_const_addr(expr)
-                if value is not None:
-                    assert target_lt is not None
-                    return self._const_cast(value, target_lt)
+            value_type: Type | None = self._type_map.get(expr)
+            if value_type is not None:  # noqa: SIM102  # pragma: no branch
+                if value_type.is_array():
+                    value = self._eval_const_addr(expr)
+                    if value is not None:
+                        assert target_lt is not None
+                        return self._const_cast(value, target_lt)
         if isinstance(expr, CompoundLiteralExpr):
             value = self._const_compound_literal_addr(expr)
             if target_lt is not None:
@@ -4478,7 +4607,8 @@ class _LLVMGen:
                     return None
                 text = expr.operand.value.rstrip("fFlL")
                 float_value = float.fromhex(text) if text.startswith(("0x", "0X")) else float(text)
-                return c.ConstReal(target_lt, -float_value)
+                negative_value = 0.0 - float_value
+                return c.ConstReal(target_lt, negative_value)
         if isinstance(expr, CastExpr):
             result_type = self._resolve_type(expr.type_spec)
             result_lt = self._type_to_llvm(result_type)
@@ -4517,7 +4647,9 @@ class _LLVMGen:
             symbol = self._sema.file_scope.lookup(name)
             if isinstance(symbol, EnumConstSymbol):
                 return c.ConstInt(c.Int32Type(), symbol.value, symbol.value < 0)
-        value_type = self._type_map.get(expr) or self._lookup_symbol_type(name)
+        value_type: Type | None = self._type_map.get(expr)
+        if value_type is None:
+            value_type = self._lookup_symbol_type(name)
         if value_type is None:
             return None
         if self._is_function_designator_type(value_type):
@@ -4533,7 +4665,9 @@ class _LLVMGen:
             local = self._lookup_local(name)
             if local is not None and local in self._static_local_global_values:
                 return local
-            value_type = self._type_map.get(expr) or self._lookup_symbol_type(name)
+            value_type: Type | None = self._type_map.get(expr)
+            if value_type is None:
+                value_type = self._lookup_symbol_type(name)
             if value_type is not None:
                 if self._is_function_designator_type(value_type):
                     return self._function_designator(name, value_type)

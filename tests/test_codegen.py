@@ -38,6 +38,7 @@ from xcc.ast import (
     MemberExpr,
     NullStmt,
     Param,
+    ReturnStmt,
     SizeofExpr,
     StatementExpr,
     StaticAssertDecl,
@@ -3139,6 +3140,24 @@ int f(void) { return 0; }
                 return None
 
         self.assertFalse(_LLVMGen(result)._bb_needs_term())
+        fallback_result = compile_source(
+            "int fallback_global; int fallback_fn(void) { return 0; }",
+            filename="globals_fallback.c",
+            options=FrontendOptions(std="gnu11"),
+        )
+        fallback_gen = _LLVMGen(fallback_result)
+        fallback_gen._unit.externals.clear()
+        fallback_gen._emit_globals()
+
+        ret_fn_type = c.FunctionType(c.Int32Type(), None, 0, False)
+        ret_fn = c.AddFunction(gen._mod, b"probe_default_return_type", ret_fn_type)
+        c.PositionBuilderAtEnd(gen._builder, c.AppendBasicBlock(ret_fn, b"entry"))
+        ret_expr = IntLiteral("1")
+        gen._type_map.set(ret_expr, INT)
+        gen._func_sym = None
+        gen._emit_return(ReturnStmt(ret_expr))
+
+        c.PositionBuilderAtEnd(gen._builder, block)
         gen._emit_stmt(TypedefDecl(TypeSpec("int"), "Alias"))
         gen._emit_stmt(StaticAssertDecl(IntLiteral("1"), StringLiteral('"ok"')))
         gen._locals = [{}]
@@ -3514,6 +3533,9 @@ int define_duplicate(int dup) { return dup; }
         def typed_int(value: str = "1", type_: Type = INT) -> IntLiteral:
             return typed_expr(IntLiteral(value), type_)
 
+        def typed_float(value: str = "1.0", type_: Type = FLOAT) -> FloatLiteral:
+            return typed_expr(FloatLiteral(value), type_)
+
         def init_list(items: list[InitItem]) -> InitList:
             return InitList(tuple(items))
 
@@ -3859,6 +3881,124 @@ int define_duplicate(int dup) { return dup; }
             999,
         ):
             self.assertNotEqual(gen._atomic_rmw_new_value(op, old, value), 0)
+        for name in (
+            "__atomic_fetch_sub",
+            "__atomic_fetch_and",
+            "__atomic_fetch_or",
+            "__atomic_fetch_xor",
+            "__atomic_fetch_nand",
+        ):
+            self.assertNotEqual(gen._atomic_builtin_call(name, atomic_fetch_add.args), 0)
+
+        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.HALF), 1)
+        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.FLOAT), 2)
+        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.DOUBLE), 3)
+        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.X86_FP80), 4)
+        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.FP128), 5)
+        self.assertEqual(_LLVMGen._float_rank(0), 0)
+
+        for op in ("-", "*", "/"):
+            expr = BinaryExpr(op, typed_float("4.0"), typed_float("2.0"))
+            typed_expr(expr, FLOAT)
+            self.assertNotEqual(gen._binary(expr), 0)
+        unsigned_int = Type("unsigned int")
+        for op in ("/", "%", "&", "|", "^", "<<", ">>"):
+            expr = BinaryExpr(op, typed_int("8", unsigned_int), typed_int("2", unsigned_int))
+            typed_expr(expr, unsigned_int)
+            self.assertNotEqual(gen._binary(expr), 0)
+        signed_mod = BinaryExpr("%", typed_int("8"), typed_int("3"))
+        typed_expr(signed_mod, INT)
+        self.assertNotEqual(gen._binary(signed_mod), 0)
+        signed_shift = BinaryExpr(">>", typed_int("8"), typed_int("1"))
+        typed_expr(signed_shift, INT)
+        self.assertNotEqual(gen._binary(signed_shift), 0)
+
+        for op in ("<", ">", "<=", ">="):
+            self.assertNotEqual(
+                gen._compare(
+                    op,
+                    c.ConstReal(c.FloatType(), 1.0),
+                    c.ConstReal(c.FloatType(), 2.0),
+                    FLOAT,
+                    FLOAT,
+                ),
+                0,
+            )
+            self.assertNotEqual(
+                gen._compare(
+                    op,
+                    c.ConstInt(c.Int32Type(), 1, False),
+                    c.ConstInt(c.Int32Type(), 2, False),
+                    unsigned_int,
+                    unsigned_int,
+                ),
+                0,
+            )
+            self.assertNotEqual(
+                gen._compare(
+                    op,
+                    c.ConstInt(c.Int32Type(), 1, True),
+                    c.ConstInt(c.Int32Type(), 2, True),
+                    INT,
+                    INT,
+                ),
+                0,
+            )
+        with self.assertRaises(CodegenError):
+            gen._compare(
+                "??",
+                c.ConstReal(c.FloatType(), 1.0),
+                c.ConstReal(c.FloatType(), 2.0),
+                FLOAT,
+                FLOAT,
+            )
+        with self.assertRaises(CodegenError):
+            gen._compare(
+                "??",
+                c.ConstInt(c.Int32Type(), 1, True),
+                c.ConstInt(c.Int32Type(), 2, True),
+                INT,
+                INT,
+            )
+
+        def bind_local(name: str, type_: Type, value_ref: int) -> None:
+            addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(type_), name.encode())
+            c.BuildStore(gen._builder, value_ref, addr)
+            gen._locals[-1][name] = addr
+
+        for op in ("-=", "*=", "/="):
+            slot = "float_" + op[0]
+            bind_local(slot, FLOAT, c.ConstReal(c.FloatType(), 8.0))
+            self.assertNotEqual(
+                gen._assign(AssignExpr(op, typed_identifier(slot, FLOAT), typed_float("2.0"))),
+                0,
+            )
+        bind_local("float_add", FLOAT, c.ConstReal(c.FloatType(), 8.0))
+        self.assertNotEqual(
+            gen._assign(AssignExpr("+=", typed_identifier("float_add", FLOAT), typed_float("2.0"))),
+            0,
+        )
+        for index, op in enumerate(("/=", "%=", "&=", "|=", "^=", "<<=", ">>=")):
+            slot = f"uint_compound_{index}"
+            bind_local(slot, unsigned_int, c.ConstInt(c.Int32Type(), 8, False))
+            self.assertNotEqual(
+                gen._assign(
+                    AssignExpr(op, typed_identifier(slot, unsigned_int), typed_int("2", unsigned_int))
+                ),
+                0,
+            )
+        bind_local("signed_mod_assign", INT, c.ConstInt(c.Int32Type(), 8, True))
+        self.assertNotEqual(
+            gen._assign(AssignExpr("%=", typed_identifier("signed_mod_assign", INT), typed_int("3"))),
+            0,
+        )
+        for index, op in enumerate(("-=", "*=", "/=", ">>=")):
+            slot = f"signed_compound_{index}"
+            bind_local(slot, INT, c.ConstInt(c.Int32Type(), 8, True))
+            self.assertNotEqual(
+                gen._assign(AssignExpr(op, typed_identifier(slot, INT), typed_int("2"))),
+                0,
+            )
 
     def test_codegen_helper_expression_control_and_call_edges_without_llc(self) -> None:
         result = compile_source(
@@ -4608,6 +4748,22 @@ int f(void) { return 0; }
         self.assertIsNotNone(pair_const)
         assert pair_const is not None
         self.assertEqual(len(gen._const_value_bytes(pair_const, Type("struct Pair")) or b""), 8)
+        gen._sema.record_definitions["struct PaddedTail"] = (
+            RecordMemberInfo("tag", Type("char")),
+            RecordMemberInfo("word", INT),
+            RecordMemberInfo("tail", Type("char")),
+        )
+        padded_const = gen._const_struct(
+            Type("struct PaddedTail"),
+            [
+                c.ConstInt(c.Int8Type(), 1, False),
+                c.ConstInt(c.Int32Type(), 2, False),
+                c.ConstInt(c.Int8Type(), 3, False),
+            ],
+        )
+        padded_bytes = gen._const_struct_bytes(padded_const, "struct PaddedTail")
+        self.assertIsNotNone(padded_bytes)
+        self.assertEqual(len(padded_bytes or b""), gen._record_size("struct PaddedTail"))
         self.assertEqual(
             gen._const_value_bytes(c.ConstInt(c.Int32Type(), 0, False), Type("void")),
             b"",
@@ -4654,6 +4810,8 @@ int f(void) { return 0; }
         self.assertNotEqual(gen._eval_const_expr(typed_int("7"), Type("double")), 0)
         self.assertNotEqual(gen._eval_const_expr(typed_int("7"), INT), 0)
         self.assertIsNone(gen._eval_const_expr(typed_int("7"), Type("struct Pair")))
+        non_array_pointer_expr = typed_expr(Identifier("non_array_pointer_expr"), INT)
+        self.assertIsNone(gen._eval_const_expr(non_array_pointer_expr, INT.pointer_to()))
 
         compound_literal = CompoundLiteralExpr(
             TypeSpec("int"),

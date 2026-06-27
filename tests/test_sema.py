@@ -69,6 +69,8 @@ from xcc.types import (
     BOOL,
     CHAR,
     DOUBLE,
+    EVM_ADDRESS,
+    EVM_UINT256,
     FLOAT,
     INT,
     INT128,
@@ -128,6 +130,67 @@ class SemaTests(unittest.TestCase):
         self.assertTrue(analyzer._signed_can_represent_unsigned(LONG, UINT))
         self.assertEqual(analyzer._usual_arithmetic_conversion(UINT, LONG), LONG)
         self.assertTrue(analyzer._qualifiers_contain(const_int, INT))
+
+    def test_integer_type_helper_branch_tables(self) -> None:
+        rank_cases = (
+            (BOOL, 1),
+            (CHAR, 2),
+            (UCHAR, 2),
+            (SHORT, 3),
+            (USHORT, 3),
+            (INT, 4),
+            (UINT, 4),
+            (LONG, 5),
+            (ULONG, 5),
+            (LLONG, 6),
+            (ULLONG, 6),
+            (Type("__int128"), 7),
+            (Type("unsigned __int128"), 7),
+            (EVM_ADDRESS, 8),
+            (EVM_UINT256, 9),
+            (VOID, 0),
+        )
+        for type_, rank in rank_cases:
+            with self.subTest(rank=type_.name):
+                self.assertEqual(sema_types.integer_rank(type_), rank)
+
+        self.assertEqual(sema_types.signed_range(LONG), (-(1 << 63), (1 << 63) - 1))
+        self.assertEqual(sema_types.signed_range(LLONG), (-(1 << 63), (1 << 63) - 1))
+        self.assertEqual(sema_types.signed_range(Type("__int128")), (-(1 << 127), (1 << 127) - 1))
+        self.assertIsNone(sema_types.signed_range(UINT))
+        self.assertEqual(sema_types.unsigned_max(ULONG), (1 << 64) - 1)
+        self.assertEqual(sema_types.unsigned_max(ULLONG), (1 << 64) - 1)
+        self.assertEqual(sema_types.unsigned_max(Type("unsigned __int128")), (1 << 128) - 1)
+        self.assertEqual(sema_types.unsigned_max(EVM_UINT256), (1 << 256) - 1)
+        self.assertEqual(sema_types.unsigned_max(EVM_ADDRESS), (1 << 160) - 1)
+        self.assertIsNone(sema_types.unsigned_max(INT))
+
+        self.assertIsNone(sema_types._integer_promotion_type("int"))
+        for type_ in (
+            BOOL,
+            CHAR,
+            UCHAR,
+            SHORT,
+            USHORT,
+            INT,
+            UINT,
+            LONG,
+            ULONG,
+            LLONG,
+            ULLONG,
+            EVM_ADDRESS,
+            EVM_UINT256,
+        ):
+            with self.subTest(canonical=type_.name):
+                self.assertEqual(sema_types._canonical_integer_type(type_.name), type_)
+        self.assertEqual(sema_types._canonical_integer_type("__int128"), INT128)
+        self.assertEqual(sema_types._canonical_integer_type("unsigned __int128"), UINT128)
+        self.assertIsNone(sema_types._canonical_integer_type("void"))
+        self.assertEqual(sema_types._unsigned_counterpart("int"), UINT)
+        self.assertEqual(sema_types._unsigned_counterpart("long"), ULONG)
+        self.assertEqual(sema_types._unsigned_counterpart("long long"), ULLONG)
+        self.assertEqual(sema_types._unsigned_counterpart("__int128"), UINT128)
+        self.assertIsNone(sema_types._unsigned_counterpart("short"))
 
     def test_scope_merges_compatible_extern_definition(self) -> None:
         scope = Scope()

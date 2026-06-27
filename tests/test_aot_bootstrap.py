@@ -1,3 +1,4 @@
+import ast
 import subprocess
 import unittest
 from pathlib import Path
@@ -400,6 +401,418 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         )
         self.assertEqual([function.name for function in module.functions], ["_LLVMGen._walk_allocas"])
         self.assertIn("IrRecordType(name='VarSymbol')", repr(module.functions[0].body))
+
+    def test_codegen_atomic_builtin_call_lowers_without_opcode_dicts(self) -> None:
+        class_types = {}
+        function_types = {}
+        for module_path in (
+            ROOT / "src/xcc/ast.py",
+            ROOT / "src/xcc/codegen.py",
+            ROOT / "src/xcc/sema/symbols.py",
+            ROOT / "src/xcc/types.py",
+        ):
+            analysis = analyze_path(module_path)
+            class_types.update(analysis.types.classes)
+            function_types.update(analysis.types.functions)
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._atomic_builtin_call"},
+            extra_classes=class_types,
+            extra_functions=function_types,
+        )
+        self.assertEqual(
+            [function.name for function in module.functions],
+            ["_LLVMGen._atomic_builtin_call"],
+        )
+        self.assertNotIn("Dict", repr(module.functions[0].body))
+
+    def test_codegen_atomic_rmw_new_value_lowers_without_unary_all_ones(self) -> None:
+        class_types = analyze_path(ROOT / "src/xcc/codegen.py").types.classes
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._atomic_rmw_new_value"},
+            extra_classes=class_types,
+        )
+        self.assertEqual(
+            [function.name for function in module.functions],
+            ["_LLVMGen._atomic_rmw_new_value"],
+        )
+        self.assertNotIn("UnaryOp", repr(module.functions[0].body))
+
+    def test_codegen_assign_lowers_without_compound_operator_dicts(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        assign_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_assign"
+        ]
+        self.assertEqual(len(assign_methods), 1)
+        self.assertFalse(
+            any(isinstance(node, ast.Dict) for node in ast.walk(assign_methods[0])),
+            "_LLVMGen._assign should not use dict literal operator dispatch",
+        )
+
+    def test_codegen_binary_lowers_without_operator_dicts(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        binary_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_binary"
+        ]
+        self.assertEqual(len(binary_methods), 1)
+        self.assertFalse(
+            any(isinstance(node, ast.Dict) for node in ast.walk(binary_methods[0])),
+            "_LLVMGen._binary should not use dict literal operator dispatch",
+        )
+
+    def test_codegen_float_rank_lowers_without_rank_dict(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        rank_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_float_rank"
+        ]
+        self.assertEqual(len(rank_methods), 1)
+        self.assertFalse(
+            any(isinstance(node, ast.Dict) for node in ast.walk(rank_methods[0])),
+            "_LLVMGen._float_rank should not use dict literal rank dispatch",
+        )
+
+    def test_codegen_compare_lowers_without_predicate_dicts(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        compare_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_compare"
+        ]
+        self.assertEqual(len(compare_methods), 1)
+        self.assertFalse(
+            any(isinstance(node, ast.Dict) for node in ast.walk(compare_methods[0])),
+            "_LLVMGen._compare should not use dict literal predicate dispatch",
+        )
+
+    def test_codegen_unary_lowers_without_negative_constint_literals(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        unary_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_unary"
+        ]
+        self.assertEqual(len(unary_methods), 1)
+        self.assertFalse(
+            any(isinstance(node, ast.UnaryOp) for node in ast.walk(unary_methods[0])),
+            "_LLVMGen._unary should not use Python unary literals in LLVM API args",
+        )
+
+    def test_codegen_function_designator_lowers_without_setdefault(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        function_designator_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_function_designator"
+        ]
+        self.assertEqual(len(function_designator_methods), 1)
+        self.assertNotIn("setdefault", ast.unparse(function_designator_methods[0]))
+
+    def test_codegen_const_from_bytes_lowers_without_any_call(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        const_from_bytes_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_const_from_bytes"
+        ]
+        self.assertEqual(len(const_from_bytes_methods), 1)
+        self.assertNotIn("any(", ast.unparse(const_from_bytes_methods[0]))
+        self.assertNotIn("int.from_bytes", ast.unparse(const_from_bytes_methods[0]))
+
+    def test_codegen_const_value_bytes_lowers_with_typed_integer_locals(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        const_value_bytes_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_const_value_bytes"
+        ]
+        self.assertEqual(len(const_value_bytes_methods), 1)
+        annotated_names = {
+            node.target.id
+            for node in ast.walk(const_value_bytes_methods[0])
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        self.assertIn("raw", annotated_names)
+        self.assertIn("mask", annotated_names)
+        self.assertIn("masked", annotated_names)
+
+    def test_codegen_const_struct_bytes_lowers_without_mutable_bytearray(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        const_struct_bytes_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_const_struct_bytes"
+        ]
+        self.assertEqual(len(const_struct_bytes_methods), 1)
+        method = const_struct_bytes_methods[0]
+        self.assertNotIn("bytearray", ast.unparse(method))
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Subscript) for target in node.targets)
+                for node in ast.walk(method)
+            ),
+            "_const_struct_bytes should stay inside the immutable bytes subset",
+        )
+
+    def test_codegen_eval_const_expr_lowers_negative_float_without_unary_op(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        eval_const_expr_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_eval_const_expr"
+        ]
+        self.assertEqual(len(eval_const_expr_methods), 1)
+        self.assertFalse(
+            any(
+                isinstance(node, ast.UnaryOp)
+                and isinstance(node.op, ast.USub)
+                and isinstance(node.operand, ast.Name)
+                and node.operand.id == "float_value"
+                for node in ast.walk(eval_const_expr_methods[0])
+            ),
+            "_eval_const_expr should express negative float constants as binary subtraction",
+        )
+
+    def test_codegen_eval_const_expr_lowers_optional_array_guard_without_boolop(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        eval_const_expr_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_eval_const_expr"
+        ]
+        self.assertEqual(len(eval_const_expr_methods), 1)
+        method = eval_const_expr_methods[0]
+        method_source = ast.unparse(method)
+        self.assertNotIn("value_type is not None and value_type.is_array()", method_source)
+        self.assertTrue(
+            any(
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "value_type"
+                for node in ast.walk(method)
+            ),
+            "_eval_const_expr should annotate value_type before Optional narrowing",
+        )
+
+    def test_codegen_const_identifier_addr_lowers_type_lookup_without_bool_or(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name in {"_eval_const_identifier", "_eval_const_addr"}
+        ]
+        self.assertEqual({method.name for method in methods}, {"_eval_const_identifier", "_eval_const_addr"})
+        for method in methods:
+            with self.subTest(method=method.name):
+                method_source = ast.unparse(method)
+                self.assertNotIn("or self._lookup_symbol_type", method_source)
+                self.assertTrue(
+                    any(
+                        isinstance(node, ast.AnnAssign)
+                        and isinstance(node.target, ast.Name)
+                        and node.target.id == "value_type"
+                        for node in ast.walk(method)
+                    ),
+                    f"{method.name} should annotate value_type before Optional narrowing",
+                )
+
+    def test_codegen_eval_record_init_lowers_without_nested_function(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        eval_record_init_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_eval_record_init"
+        ]
+        self.assertEqual(len(eval_record_init_methods), 1)
+        nested_functions = [
+            node
+            for node in ast.walk(eval_record_init_methods[0])
+            if isinstance(node, ast.FunctionDef) and node.name != "_eval_record_init"
+        ]
+        self.assertEqual(nested_functions, [])
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "append"
+                and isinstance(node.func.value, ast.Subscript)
+                for node in ast.walk(eval_record_init_methods[0])
+            ),
+            "_eval_record_init should append through typed local list variables",
+        )
+
+    def test_codegen_eval_record_path_init_lowers_typed_path_unpack(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        eval_record_path_init_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_eval_record_path_init"
+        ]
+        self.assertEqual(len(eval_record_path_init_methods), 1)
+        method = eval_record_path_init_methods[0]
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Tuple) for target in node.targets)
+                and isinstance(node.value, ast.Subscript)
+                and ast.unparse(node.value) == "path[0]"
+                for node in ast.walk(method)
+            ),
+            "_eval_record_path_init should unpack path entries through typed locals",
+        )
+        annotated_names = {
+            node.target.id
+            for node in ast.walk(method)
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        self.assertIn("record_name", annotated_names)
+        self.assertIn("field_index", annotated_names)
+        self.assertIn("member", annotated_names)
+
+    def test_codegen_llvmgen_lowers_without_dead_term_flag(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        self.assertNotIn("self._term", source)
+
+    def test_codegen_emit_return_lowers_func_sym_return_type_without_ifexp(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        emit_return_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_emit_return"
+        ]
+        self.assertEqual(len(emit_return_methods), 1)
+        method_source = ast.unparse(emit_return_methods[0])
+        self.assertNotIn("if self._func_sym else", method_source)
+        self.assertTrue(
+            any(
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "return_type"
+                for node in ast.walk(emit_return_methods[0])
+            ),
+            "_emit_return should use a typed local for optional function return type",
+        )
+
+    def test_codegen_emit_globals_lowers_without_starred_fallback_list(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        emit_globals_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_emit_globals"
+        ]
+        self.assertEqual(len(emit_globals_methods), 1)
+        method = emit_globals_methods[0]
+        self.assertFalse(any(isinstance(node, ast.Starred) for node in ast.walk(method)))
+        annotated_names = {
+            node.target.id
+            for node in ast.walk(method)
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        self.assertIn("externals", annotated_names)
+
+    def test_codegen_struct_type_overrides_lowers_dict_get_without_default(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_struct_type_with_member_overrides"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertNotIn("member_type_overrides.get(index, member.type_)", method_source)
+        annotated_names = {
+            node.target.id
+            for node in ast.walk(methods[0])
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        self.assertIn("member_type", annotated_names)
+
+    def test_codegen_flexible_array_overrides_lowers_typed_last_index(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_flexible_array_member_overrides"
+        ]
+        self.assertEqual(len(methods), 1)
+        annotated_names = {
+            node.target.id
+            for node in ast.walk(methods[0])
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        self.assertIn("last_index", annotated_names)
+        self.assertIn("result", annotated_names)
+        self.assertFalse(
+            any(isinstance(node, ast.Dict) and node.keys for node in ast.walk(methods[0])),
+            "_flexible_array_member_overrides should build non-empty dicts by assignment",
+        )
+
+    def test_codegen_identifier_lowers_without_fstring_literal(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        identifier_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_identifier"
+        ]
+        self.assertEqual(len(identifier_methods), 1)
+        self.assertFalse(
+            any(isinstance(node, ast.JoinedStr) for node in ast.walk(identifier_methods[0])),
+            "_LLVMGen._identifier should not build __func__ string literals with f-strings",
+        )
+        self.assertNotIn(
+            "name == '__func__' and",
+            ast.unparse(identifier_methods[0]),
+        )
+        self.assertNotIn("self._func_sym and", ast.unparse(identifier_methods[0]))
+
+    def test_type_helpers_usual_arithmetic_conversion_lowers_global_type_name_checks(
+        self,
+    ) -> None:
+        class_types = analyze_path(ROOT / "src/xcc/types.py").types.classes
+        source = (ROOT / "src/xcc/sema/type_helpers.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/sema/type_helpers.py"),
+            include_records=frozenset(),
+            include_functions={"usual_arithmetic_conversion"},
+            extra_classes=class_types,
+        )
+        self.assertEqual([function.name for function in module.functions], ["usual_arithmetic_conversion"])
+        self.assertNotIn("LONGDOUBLE.name", repr(module.functions[0].body))
+        self.assertNotIn("DOUBLE.name", repr(module.functions[0].body))
 
     def test_codegen_union_size_lowers_without_generator_max(self) -> None:
         class_types = {}

@@ -7,22 +7,26 @@
   shifts/bitwise ops, `try/finally` and normal-path `except CodegenError` /
   `except Exception`, two-argument integer `min`/`max`, `range(...)`,
   `chr(...)`, `float(...)`, `float.fromhex(...)`, `str.find(...)`,
-  `str.split(...)`, `zip(..., strict=True)`, tuple-backed `dict.items()`,
-  empty container constructors, `tuple(x)` identity conversion, tuple-backed
-  `set.add()`/`list.append()` item typing, list/generator-comprehension
-  expected-type preservation, optional tuple-backed `X | None` annotations,
-  attribute-aware `isinstance(...)` narrowing, `is not None` narrowing in
-  `if`/`if` expressions, fallthrough narrowing after exiting
-  `not isinstance(...)` guards, and common-field access across record unions.
+  `str.split(...)`, `str.endswith(...)`, `str.ljust(...)`, `str.rstrip(...)`,
+  `int.to_bytes(...)`, `bytes(...)`, `id(...)`, `zip(..., strict=True)`,
+  tuple-backed `dict.items()`, empty container constructors, `tuple(x)`
+  identity conversion, tuple-backed `set.add()`/`list.append()` item typing,
+  list/generator-comprehension expected-type preservation, optional
+  tuple-backed `X | None` annotations, attribute-aware `isinstance(...)`
+  narrowing, `is not None` narrowing in `if`/`if` expressions, fallthrough
+  narrowing after exiting `not isinstance(...)` guards, and common-field access
+  across record unions.
   Codegen source now avoids several bootstrap-hostile dynamic shapes with
   CPython-equivalent explicit branches or annotations: callable/dict dispatch
   in base type and size helpers, generator `max(...)`, union storage key
-  callbacks, small local lookup dicts, starred list literals, and an untyped
-  optional symbol lookup; AOT lowering also supports tuple-of-class
-  `isinstance` narrowing for common record-field access. The
-  broader source-to-LLVM unchecked slice now advances past the previous
-  `left // right` blocker; the latest observed blocker is the existing atomic
-  RMW opcode mapping dict at `src/xcc/codegen.py:2508`.
+  callbacks, small local lookup dicts, starred list literals, untyped optional
+  symbol lookups, compound operator dictionaries, nested helper functions,
+  subscript-target mutating calls, non-empty dict literals, bytearray-backed
+  constant assembly, dead `_term` writes, and Optional if-expression field
+  access; AOT lowering also supports tuple-of-class `isinstance` narrowing for
+  common record-field access. The broader source-to-LLVM unchecked slice from
+  `xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked` now lowers to AOT IR
+  successfully, currently covering 237 functions and 62 records.
 - Expanded Milestone 6 AOT bootstrap admission by validating ordinary
   container, private project-type, dotted type, and `Callable[[...], ...]`
   annotations structurally, plus read-only `Sequence[...]` and `Iterable[...]`

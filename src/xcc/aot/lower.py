@@ -49,8 +49,10 @@ from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType, annotation_nam
 
 _ALLOWED_BUILTIN_CALLS = {
     "bool",
+    "bytes",
     "chr",
     "float",
+    "id",
     "isinstance",
     "len",
     "range",
@@ -726,6 +728,10 @@ class _Lowerer:
             )
         if isinstance(expr.func, ast.Name) and expr.func.id == "int":
             return self._lower_int_call(expr, names)
+        if isinstance(expr.func, ast.Name) and expr.func.id == "bytes":
+            return self._lower_bytes_call(expr, names)
+        if isinstance(expr.func, ast.Name) and expr.func.id == "id":
+            return self._lower_id_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id == "chr":
             return self._lower_chr_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id == "float":
@@ -771,6 +777,23 @@ class _Lowerer:
             receiver = self._lower_expr(expr.func.value, names, IrStringType())
             if isinstance(receiver.type, IrStringType):
                 return self._lower_string_startswith_call(expr, receiver, names)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == "endswith":
+            receiver = self._lower_expr(expr.func.value, names, IrStringType())
+            if isinstance(receiver.type, IrStringType):
+                return self._lower_string_endswith_call(expr, receiver, names)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == "ljust":
+            receiver = self._lower_expr(expr.func.value, names, IrStringType())
+            if isinstance(receiver.type, IrStringType):
+                return self._lower_string_ljust_call(expr, receiver, names)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == "rstrip":
+            receiver = self._lower_expr(expr.func.value, names, IrStringType())
+            if isinstance(receiver.type, IrStringType):
+                return self._lower_string_rstrip_call(expr, receiver, names)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == "to_bytes":
+            int64 = IrIntType(64, signed=True)
+            receiver = self._lower_expr(expr.func.value, names, int64)
+            if isinstance(receiver.type, IrIntType):
+                return self._lower_int_to_bytes_call(expr, receiver, names)
         if isinstance(expr.func, ast.Attribute) and expr.func.attr == "split":
             receiver = self._lower_expr(expr.func.value, names, IrStringType())
             if isinstance(receiver.type, IrStringType):
@@ -893,6 +916,55 @@ class _Lowerer:
             IrStringType(),
         )
 
+    def _lower_bytes_call(self, expr: ast.Call, names: dict[str, IrType]) -> IrExpr:
+        if expr.keywords or len(expr.args) != 1:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        return IrCall(
+            "__bytes",
+            (self._lower_expr(expr.args[0], names, IrRecordType("object")),),
+            IrStringType(),
+        )
+
+    def _lower_int_to_bytes_call(
+        self,
+        expr: ast.Call,
+        receiver: IrExpr,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if expr.keywords or len(expr.args) != 2:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        int64 = IrIntType(64, signed=True)
+        return IrCall(
+            "__int_to_bytes",
+            (
+                receiver,
+                self._lower_expr(expr.args[0], names, int64),
+                self._lower_expr(expr.args[1], names, IrStringType()),
+            ),
+            IrStringType(),
+        )
+
+    def _lower_id_call(self, expr: ast.Call, names: dict[str, IrType]) -> IrExpr:
+        if expr.keywords or len(expr.args) != 1:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        return IrCall(
+            "__id",
+            (self._lower_expr(expr.args[0], names, IrRecordType("object")),),
+            IrIntType(64, signed=True),
+        )
+
     def _lower_float_call(self, expr: ast.Call, names: dict[str, IrType]) -> IrExpr:
         if expr.keywords or len(expr.args) != 1:
             self._error(
@@ -1013,6 +1085,66 @@ class _Lowerer:
                 start,
             ),
             IrBoolType(),
+        )
+
+    def _lower_string_endswith_call(
+        self,
+        expr: ast.Call,
+        receiver: IrExpr,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if expr.keywords or len(expr.args) != 1:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        return IrCall(
+            "__str_endswith",
+            (receiver, self._lower_expr(expr.args[0], names, IrStringType())),
+            IrBoolType(),
+        )
+
+    def _lower_string_ljust_call(
+        self,
+        expr: ast.Call,
+        receiver: IrExpr,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if expr.keywords or len(expr.args) not in {1, 2}:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        int64 = IrIntType(64, signed=True)
+        fill = (
+            self._lower_expr(expr.args[1], names, IrStringType())
+            if len(expr.args) == 2
+            else IrConstString(" ")
+        )
+        return IrCall(
+            "__str_ljust",
+            (receiver, self._lower_expr(expr.args[0], names, int64), fill),
+            IrStringType(),
+        )
+
+    def _lower_string_rstrip_call(
+        self,
+        expr: ast.Call,
+        receiver: IrExpr,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if expr.keywords or len(expr.args) != 1:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        return IrCall(
+            "__str_rstrip",
+            (receiver, self._lower_expr(expr.args[0], names, IrStringType())),
+            IrStringType(),
         )
 
     def _lower_string_split_call(
