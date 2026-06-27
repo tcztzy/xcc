@@ -859,9 +859,12 @@ and LLVM emission now support enum member constants such as `TokenKind.EOF`
 with stable per-module constant pointers, the type binder infers ordinary
 instance fields assigned in `__init__` for method field reads such as
 `self._line`, and loop control now lowers/emits `break` and `continue` for
-`while` and tuple-backed `for` loops. The frontend success-path slice now
-advances through these lexer shapes; the next observed blocker is string method
-lowering for calls such as `self._source.startswith(...)`. The generated
+`while` and tuple-backed `for` loops. AOT lowering, LLVM emission, and runtime
+support now handle existing `str.startswith(prefix[, start])` calls, and the
+lowerer handles integer `+=`/`-=`/`*=` assignments to local names and instance
+fields. The frontend success-path slice now advances through these lexer
+shapes; the next observed blocker is the existing `NoReturn` annotation on
+`Lexer._error()`. The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its

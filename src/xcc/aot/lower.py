@@ -274,6 +274,23 @@ class _Lowerer:
             target = statement.targets[0]
             self._bind_assignment_target(target, value.type, names)
             return IrAssign(ast.unparse(target), value)
+        if (
+            isinstance(statement, ast.AugAssign)
+            and isinstance(statement.target, (ast.Name, ast.Attribute))
+            and isinstance(statement.op, (ast.Add, ast.Sub, ast.Mult))
+        ):
+            current = self._lower_expr(statement.target, names, return_type)
+            value = self._lower_expr(statement.value, names, current.type)
+            op: Literal["+", "-", "*"]
+            if isinstance(statement.op, ast.Add):
+                op = "+"
+            elif isinstance(statement.op, ast.Sub):
+                op = "-"
+            else:
+                op = "*"
+            result = IrBinary(op, current, value, current.type)
+            self._bind_assignment_target(statement.target, result.type, names)
+            return IrAssign(ast.unparse(statement.target), result)
         if isinstance(statement, ast.Return):
             if statement.value is None:
                 return IrReturn(IrConstNone())
@@ -495,6 +512,8 @@ class _Lowerer:
         if isinstance(expr.func, ast.Attribute):
             receiver = self._lower_expr(expr.func.value, names, expected)
             receiver_type = receiver.type
+            if isinstance(receiver_type, IrStringType) and expr.func.attr == "startswith":
+                return self._lower_string_startswith_call(expr, receiver, names)
             if isinstance(receiver_type, IrRecordType):
                 target = f"{receiver_type.name}.{expr.func.attr}"
                 args = (receiver,) + tuple(self._lower_call_args(expr, names, expected))
@@ -523,6 +542,34 @@ class _Lowerer:
             "XCC-AOT-LOWER-0003",
             f"Unsupported call target: {ast.unparse(expr.func)}",
             expr,
+        )
+
+    def _lower_string_startswith_call(
+        self,
+        expr: ast.Call,
+        receiver: IrExpr,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if expr.keywords or len(expr.args) not in {1, 2}:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        int64 = IrIntType(64, signed=True)
+        start = (
+            self._lower_expr(expr.args[1], names, int64)
+            if len(expr.args) == 2
+            else IrConstInt(0, int64)
+        )
+        return IrCall(
+            "__str_startswith",
+            (
+                receiver,
+                self._lower_expr(expr.args[0], names, IrStringType()),
+                start,
+            ),
+            IrBoolType(),
         )
 
     def _lower_call_args(

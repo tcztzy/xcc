@@ -622,6 +622,8 @@ class _Emitter:
             and isinstance(expr.args[1], IrTuple)
         ):
             return self._emit_not_in_tuple(expr.args[0], expr.args[1], names, lines)
+        if expr.target == "__str_startswith":
+            return self._emit_string_startswith_call(expr, names, lines)
         if expr.target not in {
             "__bool_and",
             "__bool_or",
@@ -694,6 +696,31 @@ class _Emitter:
         self.needs_runtime_prelude = True
         result = self._tmp("call")
         lines.append(f"  {result} = call i64 @__xcc_aot_tuple_len(ptr {value.value})")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_string_startswith_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 3:
+            self._error("__str_startswith expects three arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        prefix = self._emit_expr(expr.args[1], names, lines)
+        start = self._emit_expr(expr.args[2], names, lines)
+        if not isinstance(value.type, IrStringType) or not isinstance(prefix.type, IrStringType):
+            self._error("__str_startswith expects string receiver and prefix")
+        if not isinstance(start.type, IrIntType) or start.type.bits != 64:
+            self._error("__str_startswith expects an int64 start")
+        if not isinstance(expr.type, IrBoolType):
+            self._error("__str_startswith expects a bool result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("startswith")
+        lines.append(
+            f"  {result} = call i1 @__xcc_aot_string_startswith("
+            f"ptr {value.value}, ptr {prefix.value}, i64 {start.value})"
+        )
         return _EmittedValue(result, expr.type)
 
     def _emit_getitem_call(

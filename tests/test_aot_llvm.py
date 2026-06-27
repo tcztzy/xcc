@@ -558,6 +558,36 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("icmp eq ptr @.enum0, @.enum0", llvm_ir)
         self.assertIn("icmp eq ptr %kind, @.enum0", llvm_ir)
 
+    def test_emits_string_startswith_intrinsic_call(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "startswith.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (),
+                    IrBoolType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__str_startswith",
+                                (
+                                    IrConstString("abcdef"),
+                                    IrConstString("cd"),
+                                    IrConstInt(2, int64),
+                                ),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define i1 @__xcc_aot_string_startswith", llvm_ir)
+        self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 2)", llvm_ir)
+
     def test_emits_intrinsics_tuple_boxes_and_truth_edges(self) -> None:
         int32 = IrIntType(32, signed=True)
         uint32 = IrIntType(32, signed=False)
@@ -829,6 +859,146 @@ class AotLlvmTextTests(unittest.TestCase):
                                     "len",
                                     (
                                         IrTuple((), IrTupleType(())),
+                                        IrConstInt(0, int64),
+                                    ),
+                                    int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_startswith",
+                                    (IrConstString("x"),),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_startswith",
+                                    (
+                                        IrConstInt(1, int64),
+                                        IrConstString("x"),
+                                        IrConstInt(0, int64),
+                                    ),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_startswith",
+                                    (
+                                        IrConstString("x"),
+                                        IrConstInt(1, int64),
+                                        IrConstInt(0, int64),
+                                    ),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_startswith",
+                                    (
+                                        IrConstString("x"),
+                                        IrConstString("x"),
+                                        IrConstBool(False),
+                                    ),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_startswith",
+                                    (
+                                        IrConstString("x"),
+                                        IrConstString("x"),
+                                        IrConstInt(0, IrIntType(32, signed=True)),
+                                    ),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_startswith",
+                                    (
+                                        IrConstString("x"),
+                                        IrConstString("x"),
                                         IrConstInt(0, int64),
                                     ),
                                     int64,

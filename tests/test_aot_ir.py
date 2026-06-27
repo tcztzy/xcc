@@ -9,6 +9,7 @@ from xcc.aot import (
     IrBinary,
     IrBoolType,
     IrBreak,
+    IrCall,
     IrConstBool,
     IrConstInt,
     IrConstNone,
@@ -203,6 +204,105 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(loop.body.statements[1].then_branch.statements[0], IrContinue)
         self.assertIsInstance(loop.body.statements[2], IrBreak)
 
+    def test_lowers_augmented_assignment_statements(self) -> None:
+        module = lower_source_to_ir(
+            "def inc(value: int) -> int:\n"
+            "    value += 1\n"
+            "    return value\n"
+            "def dec(value: int) -> int:\n"
+            "    value -= 1\n"
+            "    return value\n"
+            "def scale(value: int) -> int:\n"
+            "    value *= 2\n"
+            "    return value\n",
+            filename="augassign.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        expected = (
+            ("inc", "+", 1),
+            ("dec", "-", 1),
+            ("scale", "*", 2),
+        )
+        for function, (_, op, constant) in zip(module.functions, expected, strict=True):
+            self.assertEqual(
+                function.body[0],
+                IrAssign(
+                    "value",
+                    IrBinary(
+                        op,
+                        IrName("value", int64),
+                        IrConstInt(constant, int64),
+                        int64,
+                    ),
+                ),
+            )
+
+    def test_lowers_augmented_assignment_to_instance_field(self) -> None:
+        module = lower_source_to_ir(
+            "class Counter:\n"
+            "    def __init__(self) -> None:\n"
+            "        self.count = 0\n"
+            "    def bump(self) -> int:\n"
+            "        self.count += 1\n"
+            "        return self.count\n",
+            filename="augassign_field.py",
+            include_records={"Counter"},
+            include_functions={"Counter.bump"},
+        )
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            module.functions[0].body[0],
+            IrAssign(
+                "self.count",
+                IrBinary(
+                    "+",
+                    IrGetField(IrName("self", IrRecordType("Counter")), "count", int64),
+                    IrConstInt(1, int64),
+                    int64,
+                ),
+            ),
+        )
+
+    def test_lowers_string_startswith_method_call(self) -> None:
+        module = lower_source_to_ir(
+            "def check(text: str, prefix: str, start: int) -> bool:\n"
+            "    return text.startswith(prefix, start)\n",
+            filename="startswith.py",
+        )
+        returned = module.functions[0].body[0].value
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__str_startswith",
+                (
+                    IrName("text", IrStringType()),
+                    IrName("prefix", IrStringType()),
+                    IrName("start", int64),
+                ),
+                IrBoolType(),
+            ),
+        )
+
+        default_start = lower_source_to_ir(
+            "def check(text: str, prefix: str) -> bool:\n"
+            "    return text.startswith(prefix)\n",
+            filename="startswith_default.py",
+        )
+        returned = default_start.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__str_startswith",
+                (
+                    IrName("text", IrStringType()),
+                    IrName("prefix", IrStringType()),
+                    IrConstInt(0, int64),
+                ),
+                IrBoolType(),
+            ),
+        )
+
     def test_lowers_enum_member_attribute(self) -> None:
         module = lower_source_to_ir(
             "from enum import Enum, auto\n"
@@ -340,6 +440,12 @@ class AotScalarLoweringTests(unittest.TestCase):
             ("def f() -> int:\n    return 1.5\n", "XCC-AOT-LOWER-0002"),
             ("def f() -> int:\n    return helper()\n", "XCC-AOT-LOWER-0003"),
             ("def f(values: tuple[str, ...]) -> str:\n    return str(**values)\n", "XCC-AOT-LOWER-0003"),
+            ("def f(text: str) -> bool:\n    return text.startswith()\n", "XCC-AOT-LOWER-0003"),
+            (
+                "def f(text: str) -> bool:\n"
+                "    return text.startswith('x', start=0)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
             ("def f(value: int) -> int:\n    return value.real\n", "XCC-AOT-LOWER-0002"),
             ("def build() -> int:\n    return 1\n"
              "def f() -> int:\n    return build().real\n", "XCC-AOT-LOWER-0002"),

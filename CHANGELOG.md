@@ -185,8 +185,13 @@
   without adding class-level annotations. Loop control now lowers and emits
   `break` and `continue` for `while` and tuple-backed `for` loops. The
   cross-module frontend success-path slice now advances through enum constants,
-  lexer instance fields, and loop control; the next observed blocker is string
-  method lowering for calls such as `self._source.startswith(...)`.
+  lexer instance fields, and loop control.
+- Added AOT lowering, LLVM emission, and runtime support for existing
+  `str.startswith(prefix[, start])` calls, plus lowering for integer
+  `+=`/`-=`/`*=` assignments to local names and instance fields. The
+  cross-module frontend success-path slice now advances past
+  `self._source.startswith(...)` and lexer index/column increments; the next
+  observed blocker is the existing `NoReturn` annotation on `Lexer._error()`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation
