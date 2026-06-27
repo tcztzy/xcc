@@ -126,7 +126,7 @@ class _LoopCtx:
 
 
 class _LLVMGen:
-    def __init__(self, result: FrontendResult):
+    def __init__(self, result: FrontendResult) -> None:
         self._result = result
         self._unit = result.unit
         self._type_map = result.sema.type_map
@@ -3424,7 +3424,7 @@ class _LLVMGen:
 
     # ── helpers ──────────────────────────────────────────────
 
-    def _build_memcpy_call(self, dst_arg, src_arg, len_arg) -> int:
+    def _build_memcpy_call(self, dst_arg: Expr, src_arg: Expr, len_arg: Expr) -> int:
         """Lower memcpy-like intrinsic to LLVM memcpy."""
         c = llvm()
         dst = self._emit_expr(dst_arg)
@@ -3570,11 +3570,7 @@ class _LLVMGen:
             self._walk_allocas(stmt.then_body, result, seen)
             if stmt.else_body:
                 self._walk_allocas(stmt.else_body, result, seen)
-        elif isinstance(stmt, (WhileStmt, DoWhileStmt, ForStmt)):
-            body = getattr(stmt, "body", None)
-            if body:
-                self._walk_allocas(body, result, seen)
-        elif isinstance(stmt, (SwitchStmt, LabelStmt)):
+        elif isinstance(stmt, (WhileStmt, DoWhileStmt, ForStmt, SwitchStmt, LabelStmt)):
             self._walk_allocas(stmt.body, result, seen)
         elif isinstance(stmt, ExprStmt):
             self._walk_allocas_expr(stmt.expr, result, seen)

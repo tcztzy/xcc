@@ -26,7 +26,9 @@
   the `defined` operator without runtime `re.search`, admitting
   `preprocessor/pragmas.py`. The native AOT smoke harness now runs CPython
   oracle fixtures through generated temporary scripts instead of parent-process
-  `exec`, admitting `aot/native.py`. The all-`src/xcc` probe now reaches 50/57
+  `exec`, admitting `aot/native.py`. Codegen loop alloca collection now uses
+  static loop-statement dispatch instead of reflection-style `getattr`,
+  admitting `codegen.py`. The all-`src/xcc` probe now reaches 51/57
   modules, up from 19/57 before this milestone slice, with remaining blockers
   concentrated in dynamic calls, lambdas/nonlocals/globals, and rejected
   runtime `re` shims.

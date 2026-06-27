@@ -7,6 +7,7 @@ from xcc.aot import analyze_path, analyze_source
 
 ROOT = Path(__file__).resolve().parents[1]
 CC_DRIVER_PATH = ROOT / "src/xcc/cc_driver.py"
+CODEGEN_PATH = ROOT / "src/xcc/codegen.py"
 PARSER_EXPRESSIONS_PATH = ROOT / "src/xcc/parser/expressions.py"
 PARSER_EXTENSIONS_PATH = ROOT / "src/xcc/parser/extensions.py"
 PREPROCESSOR_CONDITIONALS_PATH = ROOT / "src/xcc/preprocessor/conditionals.py"
@@ -125,6 +126,10 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
     def test_admits_driver_without_lambda_callbacks(self) -> None:
         analysis = analyze_path(CC_DRIVER_PATH)
         self.assertIn("main", analysis.types.functions)
+
+    def test_admits_codegen_without_dynamic_loop_body_getattr(self) -> None:
+        analysis = analyze_path(CODEGEN_PATH)
+        self.assertIn("_LLVMGen._walk_allocas", analysis.types.functions)
 
     def test_admits_parser_and_sema_helpers_without_lambda_callbacks(self) -> None:
         for path in (PARSER_EXTENSIONS_PATH, SEMA_INIT_PATH):
