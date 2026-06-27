@@ -454,7 +454,7 @@ def resolve_member_type(
             # edge cases where a typedef-to-pointer is resolved as the
             # underlying record type.
             if (
-                getattr(self, "_std", "c11") == "gnu11"
+                self._std == "gnu11"
                 and not base_type.declarator_ops
                 and self._is_record_name(base_type.name)
             ):

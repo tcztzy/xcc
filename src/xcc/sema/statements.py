@@ -32,6 +32,10 @@ from xcc.types import VOID, Type
 from .symbols import Scope, SemaError, SwitchContext, VarSymbol
 
 
+def _is_gnu_mode(analyzer: object) -> bool:
+    return analyzer._std == "gnu11"  # type: ignore
+
+
 def _is_call_to_generic_builtin(analyzer: object, expr: Expr) -> bool:
     """Check if expr is a call to a builtin with params=None (generic return)."""
     if not isinstance(expr, CallExpr) or not isinstance(expr.callee, Identifier):
@@ -143,7 +147,7 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
             return
         if return_type is VOID:
             value_type = a._decay_array_value(a._analyze_expr(stmt.value, scope))
-            if value_type != VOID and getattr(a, "_std", "c11") != "gnu11":
+            if value_type != VOID and not _is_gnu_mode(a):
                 raise SemaError("Void function should not return a value")
             return
         value_type = a._decay_array_value(a._analyze_expr(stmt.value, scope))

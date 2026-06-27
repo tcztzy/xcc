@@ -4,6 +4,10 @@ from xcc.types import Type
 from .symbols import RecordMemberInfo, Scope, SemaError
 
 
+def _is_gnu_mode(analyzer: object) -> bool:
+    return analyzer._std == "gnu11"  # type: ignore
+
+
 def is_initializer_compatible(
     analyzer: object,
     target_type: Type,
@@ -52,7 +56,7 @@ def analyze_initializer(
             return
     # In GNU mode, allow pointer↔integer and cross-pointer initializer
     # conversions (GCC -fpermissive).  At least one side must be a pointer.
-    if getattr(analyzer, "_std", "c11") == "gnu11" and _either_is_pointer(target_type, init_type):
+    if _is_gnu_mode(analyzer) and _either_is_pointer(target_type, init_type):
         return
     raise SemaError("Initializer type mismatch")
 
@@ -224,7 +228,7 @@ def analyze_record_initializer_list(
         raise SemaError("Initializer type mismatch")
     if not any(_record_member_takes_initializer(analyzer, member) for member in all_members):
         # In GNU mode, empty/anonymous struct init is silently accepted.
-        if getattr(analyzer, "_std", "c11") == "gnu11":
+        if _is_gnu_mode(analyzer):
             return
         raise SemaError("Initializer type mismatch")
     is_union = target_type.name.startswith("union ")
@@ -282,7 +286,7 @@ def analyze_record_initializer_list(
                 item_index += 1
                 continue
             # In GNU mode, excess initializer elements are silently ignored.
-            if getattr(analyzer, "_std", "c11") == "gnu11":
+            if _is_gnu_mode(analyzer):
                 item_index += 1
                 continue
             raise SemaError("Initializer type mismatch")
@@ -439,7 +443,7 @@ def _record_member_takes_initializer(
     member: RecordMemberInfo,
 ) -> bool:
     return bool(
-        getattr(member, "name", None) is not None or analyzer._is_anonymous_record_member(member)  # type: ignore
+        member.name is not None or analyzer._is_anonymous_record_member(member)  # type: ignore
     )
 
 

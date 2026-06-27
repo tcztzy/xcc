@@ -16,10 +16,14 @@
   helpers instead of lambdas for generated object/link and EVM text emission,
   admitting `cc_driver.py`. Parser extension predicates and sema overload
   ranking now use named helpers instead of lambdas, admitting
-  `parser/extensions.py` and `sema/__init__.py`. The all-`src/xcc` probe now
-  reaches 41/57 modules, up from 19/57 before this milestone slice, with
-  remaining blockers concentrated in dynamic calls, lambdas/nonlocals/globals,
-  and rejected runtime `re` shims.
+  `parser/extensions.py` and `sema/__init__.py`. Sema helper modules now use
+  fixed Analyzer state and static helper access instead of reflection-style
+  `getattr`, admitting `sema/constants.py`, `sema/conversions.py`,
+  `sema/expressions.py`, `sema/initializers.py`, `sema/statements.py`, and
+  `sema/type_resolution.py`. The all-`src/xcc` probe now reaches 47/57
+  modules, up from 19/57 before this milestone slice, with remaining blockers
+  concentrated in dynamic calls, lambdas/nonlocals/globals, and rejected
+  runtime `re` shims.
 - Added Milestone 5 AOT parser/sema slice support, including class method
   signature binding, nested container annotation admission, parser helper subset
   cleanup, cross-module record type resolution, and native parser/sema oracle

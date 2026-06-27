@@ -423,7 +423,7 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
                 self._usual_arithmetic_conversion(left_type, right_type) is not None
                 or self._is_pointer_relational_compatible(left_type, right_type)
                 or (
-                    getattr(self, "_std", "c11") == "gnu11"
+                    self._std == "gnu11"
                     and left_type.pointee() is not None
                     and right_type.pointee() is not None
                 )

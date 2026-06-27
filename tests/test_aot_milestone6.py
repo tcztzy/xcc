@@ -11,7 +11,13 @@ PARSER_EXTENSIONS_PATH = ROOT / "src/xcc/parser/extensions.py"
 PREPROCESSOR_CONDITIONALS_PATH = ROOT / "src/xcc/preprocessor/conditionals.py"
 PREPROCESSOR_INCLUDES_PATH = ROOT / "src/xcc/preprocessor/includes.py"
 PREPROCESSOR_MACROS_PATH = ROOT / "src/xcc/preprocessor/macros.py"
+SEMA_CONSTANTS_PATH = ROOT / "src/xcc/sema/constants.py"
+SEMA_CONVERSIONS_PATH = ROOT / "src/xcc/sema/conversions.py"
+SEMA_EXPRESSIONS_PATH = ROOT / "src/xcc/sema/expressions.py"
 SEMA_INIT_PATH = ROOT / "src/xcc/sema/__init__.py"
+SEMA_INITIALIZERS_PATH = ROOT / "src/xcc/sema/initializers.py"
+SEMA_STATEMENTS_PATH = ROOT / "src/xcc/sema/statements.py"
+SEMA_TYPE_RESOLUTION_PATH = ROOT / "src/xcc/sema/type_resolution.py"
 XCC_INIT_PATH = ROOT / "src/xcc/__init__.py"
 HOST_INCLUDES_PATH = ROOT / "src/xcc/host_includes.py"
 AOT_BINDER_PATH = ROOT / "src/xcc/aot/binder.py"
@@ -115,6 +121,19 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
 
     def test_admits_parser_and_sema_helpers_without_lambda_callbacks(self) -> None:
         for path in (PARSER_EXTENSIONS_PATH, SEMA_INIT_PATH):
+            with self.subTest(path=path.name):
+                analysis = analyze_path(path)
+                self.assertGreater(len(analysis.types.functions), 0)
+
+    def test_admits_sema_helpers_without_dynamic_getattr(self) -> None:
+        for path in (
+            SEMA_CONSTANTS_PATH,
+            SEMA_CONVERSIONS_PATH,
+            SEMA_EXPRESSIONS_PATH,
+            SEMA_INITIALIZERS_PATH,
+            SEMA_STATEMENTS_PATH,
+            SEMA_TYPE_RESOLUTION_PATH,
+        ):
             with self.subTest(path=path.name):
                 analysis = analyze_path(path)
                 self.assertGreater(len(analysis.types.functions), 0)

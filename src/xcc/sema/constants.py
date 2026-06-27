@@ -67,6 +67,10 @@ NON_DECIMAL_LITERAL_CANDIDATES: dict[str, tuple[Type, ...]] = {
 }
 
 
+def _allows_const_var_folding(analyzer: object) -> bool:
+    return analyzer._allow_const_var_folding  # type: ignore
+
+
 def parse_int_literal(analyzer: object, lexeme: str | int) -> tuple[int, Type] | None:
     if isinstance(lexeme, int):
         return lexeme, INT
@@ -198,11 +202,11 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
         if (
             isinstance(symbol, VarSymbol)
             and symbol.constant_value is not None
-            and getattr(analyzer, "_allow_const_var_folding", False)
+            and _allows_const_var_folding(analyzer)
         ):
             return symbol.constant_value
     if isinstance(expr, SubscriptExpr):
-        if not getattr(analyzer, "_allow_const_var_folding", False):
+        if not _allows_const_var_folding(analyzer):
             return None
         index = analyzer._eval_int_constant_expr(expr.index, scope)  # type: ignore
         if index is None:
@@ -220,7 +224,7 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
                         return None
                     return analyzer._eval_int_constant_expr(init_val, scope)  # type: ignore
     if isinstance(expr, MemberExpr):
-        if not getattr(analyzer, "_allow_const_var_folding", False):
+        if not _allows_const_var_folding(analyzer):
             return None
         return _eval_member_expr(analyzer, expr, scope)
     return None

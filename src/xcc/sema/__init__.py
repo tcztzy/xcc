@@ -150,6 +150,7 @@ class Analyzer:
         self._std = std
         self._excess_init_ok = excess_init_ok
         self._pack_changes = pack_changes
+        self._allow_const_var_folding = False
         # Derive effective global pack from pack changes (for Mach headers).
         _pack = None
         for _fn, _ln, _p in pack_changes:

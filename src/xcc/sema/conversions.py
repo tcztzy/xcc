@@ -56,6 +56,10 @@ def _is_pointer_arithmetic_type(analyzer: object, type_: Type) -> bool:
     return pointee is not None and pointee.name == VOID.name and not pointee.declarator_ops
 
 
+def _is_gnu_mode(analyzer: object) -> bool:
+    return analyzer._std == "gnu11"  # type: ignore
+
+
 def analyze_additive_types(
     analyzer: object,
     left_type: Type,
@@ -85,7 +89,7 @@ def analyze_additive_types(
         return INT
     # In GNU mode, allow subtraction of any two complete object pointer types
     if (
-        getattr(analyzer, "_std", "c11") == "gnu11"
+        _is_gnu_mode(analyzer)
         and analyzer._is_complete_object_pointer_type(left_type)  # type: ignore
         and analyzer._is_complete_object_pointer_type(right_type)  # type: ignore
     ):
@@ -103,9 +107,9 @@ def is_compatible_nonvoid_object_pointer_pair(
     if left_pointee is None or right_pointee is None:
         return False
     if left_pointee.name == VOID.name or right_pointee.name == VOID.name:
-        return getattr(analyzer, "_std", "c11") == "gnu11"
+        return _is_gnu_mode(analyzer)
     # Function pointer comparison is a GNU extension (accepted in gnu11 mode).
-    gnu = getattr(analyzer, "_std", "c11") == "gnu11"
+    gnu = _is_gnu_mode(analyzer)
     if left_pointee.declarator_ops and left_pointee.declarator_ops[0][0] == "fn" and not gnu:
         return False
     if right_pointee.declarator_ops and right_pointee.declarator_ops[0][0] == "fn" and not gnu:
@@ -215,7 +219,7 @@ def conditional_pointer_result(
             )
         # In GNU mode, any two incompatible pointer types in a
         # conditional expression yield void* (GCC -fpermissive).
-        if getattr(analyzer, "_std", "c11") == "gnu11":
+        if _is_gnu_mode(analyzer):
             return Type(VOID.name, declarator_ops=(("ptr", 0),))
         return None
     return None
