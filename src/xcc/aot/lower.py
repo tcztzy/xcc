@@ -407,7 +407,7 @@ class _Lowerer:
             return width_type
         if name.startswith("Literal["):
             return IrStringType()
-        if name.startswith(("list[", "tuple[")):
+        if _is_tuple_backed_container_type(name):
             return IrTupleType(())
         if _is_optional_int(name):
             return IrIntType(64, signed=True)
@@ -568,7 +568,7 @@ class _Lowerer:
             return IrRecordType(type_info.name)
         if type_info.name.startswith("Literal["):
             return IrStringType()
-        if type_info.name.startswith(("list[", "tuple[")):
+        if _is_tuple_backed_container_type(type_info.name):
             return IrTupleType(())
         if _is_optional_int(type_info.name):
             return IrIntType(64, signed=True)
@@ -685,6 +685,20 @@ def _lowered_function_name(name: str, owner: str | None) -> str:
 
 def _is_optional_int(name: str) -> bool:
     return name in {"int | None", "None | int"}
+
+
+def _is_tuple_backed_container_type(name: str) -> bool:
+    return name.startswith(
+        (
+            "Iterable[",
+            "Sequence[",
+            "dict[",
+            "frozenset[",
+            "list[",
+            "set[",
+            "tuple[",
+        )
+    )
 
 
 def _collect_global_names(tree: ast.Module) -> set[str]:

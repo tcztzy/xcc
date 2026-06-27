@@ -848,8 +848,12 @@ The frontend success path is split into
 and `FrontendResult(...)` without changing `compile_source()`'s diagnostic
 wrappers. The AOT lower/slice path now admits imported project call names,
 rewrites `from xcc... import ...` calls to fully qualified slice targets, and
-retains keyword argument values in lowered calls. The generated `main(argc,
-argv)` now
+retains keyword argument values in lowered calls. AOT lowering now maps existing
+`dict[...]`, `set[...]`, `frozenset[...]`, `Iterable[...]`, and `Sequence[...]`
+annotations to the current tuple-backed opaque runtime shape, allowing the
+cross-module frontend success-path slice to get past `SemaUnit`'s container
+fields; the next observed blocker is lowering the `while` loop shape in
+`xcc.lexer.lex()`. The generated `main(argc, argv)` now
 converts the platform C `argv` array into the AOT tuple ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its
 Python-level `argv` through `__xcc_aot_tuple_get()`, source reading goes through

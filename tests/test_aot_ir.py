@@ -25,6 +25,7 @@ from xcc.aot import (
     IrStringJoin,
     IrStringType,
     IrTuple,
+    IrTupleType,
     lower_source_to_ir,
 )
 from xcc.aot.lower import _collect_global_names, _Lowerer
@@ -125,6 +126,28 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertEqual([record.name for record in module.records], ["Wanted"])
         self.assertEqual([function.name for function in module.functions], ["wanted"])
+
+    def test_lowers_supported_container_annotation_shapes(self) -> None:
+        module = lower_source_to_ir(
+            "from collections.abc import Iterable, Sequence\n"
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Containers:\n"
+            "    lookup: dict[str, int]\n"
+            "    names: set[str]\n"
+            "    frozen_names: frozenset[str]\n"
+            "    iterable_names: Iterable[str]\n"
+            "    sequence_names: Sequence[str]\n"
+            "def build(value: Containers) -> tuple[str, ...]:\n"
+            "    return ()\n",
+            filename="containers.py",
+        )
+        record = module.records[0]
+        self.assertEqual(
+            [field.name for field in record.fields],
+            ["lookup", "names", "frozen_names", "iterable_names", "sequence_names"],
+        )
+        self.assertTrue(all(isinstance(field.type, IrTupleType) for field in record.fields))
 
     def test_lowers_bodyless_requested_function_signature(self) -> None:
         module = lower_source_to_ir(

@@ -168,6 +168,12 @@
   frontend success helper before `generate_llvm_ir()`, while the public
   source-to-LLVM wrapper still converts frontend/backend failures to an empty
   string for the current smoke compiler bridge.
+- Extended AOT lowering for admitted container annotations by mapping
+  `dict[...]`, `set[...]`, `frozenset[...]`, `Iterable[...]`, and
+  `Sequence[...]` to the existing tuple-backed opaque runtime shape. This lets
+  the cross-module frontend success-path slice get past `SemaUnit`'s existing
+  `dict[...]` and `set[...]` fields; the next observed blocker is lowering the
+  `while` loop shape in `xcc.lexer.lex()`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation
