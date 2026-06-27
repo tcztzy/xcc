@@ -97,7 +97,7 @@ Run:
 uv run python -m unittest tests.test_aot_milestone6.AotMilestone6AdmissionTests.test_all_src_xcc_modules_are_aot_admitted -v
 ```
 
-Expected before cleanup: the test reports any remaining modules rejected by the AOT subset or type binder. Expected after this milestone's admission cleanup: the test passes for all 57 modules.
+Expected before cleanup: the test reports any remaining modules rejected by the AOT subset or type binder. Expected after this milestone's admission cleanup: the test passes for every module under `src/xcc`.
 
 - [ ] **Step 3: Record the admission target**
 
@@ -292,7 +292,7 @@ git commit -m "feat: admit AOT AArch64 assembler"
 - Modify: `src/xcc/aot/__init__.py`
 - Create: `tests/test_aot_bootstrap.py`
 
-- [ ] **Step 1: Write failing bootstrap graph tests**
+- [x] **Step 1: Write failing bootstrap graph tests**
 
 Create `tests/test_aot_bootstrap.py`:
 
@@ -310,8 +310,10 @@ ROOT = Path(__file__).resolve().parents[1]
 class AotBootstrapGraphTests(unittest.TestCase):
     def test_collects_all_src_xcc_modules_in_deterministic_order(self) -> None:
         modules = collect_bootstrap_sources(ROOT)
-        self.assertEqual(len(modules), 57)
+        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py")))
+        self.assertEqual(len(modules), expected_count)
         self.assertEqual(modules[0].name, "xcc.__init__")
+        self.assertIn("xcc.aot.bootstrap", {module.name for module in modules})
         self.assertEqual(modules[-1].name, "xcc.x86_64_asm")
 
     def test_rejects_non_repository_root(self) -> None:
@@ -321,11 +323,12 @@ class AotBootstrapGraphTests(unittest.TestCase):
 
     def test_summarizes_bootstrap_admission(self) -> None:
         report = summarize_bootstrap_admission(ROOT)
-        self.assertEqual(report.total, 57)
+        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py")))
+        self.assertEqual(report.total, expected_count)
         self.assertEqual(report.failed, ())
 ```
 
-- [ ] **Step 2: Run the tests and verify they fail**
+- [x] **Step 2: Run the tests and verify they fail**
 
 Run:
 
@@ -335,7 +338,7 @@ uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapGraphTests -v
 
 Expected: import failure for `collect_bootstrap_sources`.
 
-- [ ] **Step 3: Implement bootstrap graph collection**
+- [x] **Step 3: Implement bootstrap graph collection**
 
 Create `src/xcc/aot/bootstrap.py`:
 
@@ -345,7 +348,7 @@ from pathlib import Path
 
 from xcc.aot.analysis import analyze_path
 from xcc.aot.diag import AotDiagnostic, AotError
-from xcc.aot.slice import AotSliceInput, collect_slice_inputs
+from xcc.aot.slice import AotSliceInput
 
 
 @dataclass(frozen=True)
@@ -366,7 +369,14 @@ def collect_bootstrap_sources(root: Path) -> tuple[AotSliceInput, ...]:
                 ),
             )
         )
-    return collect_slice_inputs(tuple(sorted(src_xcc.rglob("*.py"))))
+    src_xcc = src_xcc.resolve()
+    modules: list[AotSliceInput] = []
+    for path in sorted(src_xcc.rglob("*.py")):
+        resolved = path.resolve()
+        relative = resolved.relative_to(src_xcc)
+        modules.append(AotSliceInput(_bootstrap_module_name(relative), resolved))
+    modules.sort(key=_bootstrap_input_name)
+    return tuple(modules)
 
 
 def summarize_bootstrap_admission(root: Path) -> AotBootstrapAdmissionReport:
@@ -378,11 +388,19 @@ def summarize_bootstrap_admission(root: Path) -> AotBootstrapAdmissionReport:
         except AotError as exc:
             failures.append(f"{module.name}: {exc}")
     return AotBootstrapAdmissionReport(len(modules), tuple(failures))
+
+
+def _bootstrap_module_name(relative: Path) -> str:
+    return "xcc." + ".".join(relative.with_suffix("").parts)
+
+
+def _bootstrap_input_name(module: AotSliceInput) -> str:
+    return module.name
 ```
 
 Export `AotBootstrapAdmissionReport`, `collect_bootstrap_sources`, and `summarize_bootstrap_admission` from `src/xcc/aot/__init__.py`.
 
-- [ ] **Step 4: Run bootstrap graph tests**
+- [x] **Step 4: Run bootstrap graph tests**
 
 Run:
 
@@ -392,7 +410,7 @@ uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapGraphTests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit bootstrap graph reporting**
+- [x] **Step 5: Commit bootstrap graph reporting**
 
 Run:
 
