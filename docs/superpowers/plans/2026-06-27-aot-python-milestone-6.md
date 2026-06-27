@@ -73,7 +73,7 @@ Use existing AOT diagnostics when they match the failure category. Add these onl
 - Modify: `tests/test_aot_milestone6.py`
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step 1: Add the all-source admission regression test**
+- [x] **Step 1: Add the all-source admission regression test**
 
 Add this method to `AotMilestone6AdmissionTests` in `tests/test_aot_milestone6.py`:
 
@@ -89,7 +89,7 @@ Add this method to `AotMilestone6AdmissionTests` in `tests/test_aot_milestone6.p
         self.assertEqual([], failures)
 ```
 
-- [ ] **Step 2: Run the focused test and verify it fails before the final cleanup**
+- [x] **Step 2: Run the focused test and verify it fails before the final cleanup**
 
 Run:
 
@@ -99,7 +99,7 @@ uv run python -m unittest tests.test_aot_milestone6.AotMilestone6AdmissionTests.
 
 Expected before cleanup: the test reports any remaining modules rejected by the AOT subset or type binder. Expected after this milestone's admission cleanup: the test passes for every module under `src/xcc`.
 
-- [ ] **Step 3: Record the admission target**
+- [x] **Step 3: Record the admission target**
 
 Add a `CHANGELOG.md` current entry sentence after the existing Milestone 6 admission status:
 
@@ -108,7 +108,7 @@ Add a `CHANGELOG.md` current entry sentence after the existing Milestone 6 admis
   that analyzes every Python source file instead of relying on an ad hoc probe.
 ```
 
-- [ ] **Step 4: Run the full Milestone 6 admission suite**
+- [x] **Step 4: Run the full Milestone 6 admission suite**
 
 Run:
 
@@ -118,7 +118,7 @@ uv run python -m unittest tests.test_aot_milestone6 -v
 
 Expected: all Milestone 6 admission tests pass.
 
-- [ ] **Step 5: Commit all-source admission gate**
+- [x] **Step 5: Commit all-source admission gate**
 
 Run:
 
@@ -136,7 +136,7 @@ git commit -m "test: gate AOT all-source admission"
 - Modify: `tests/test_aot_milestone6.py`
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step 1: Add the focused AArch64 admission assertion**
+- [x] **Step 1: Add the focused AArch64 admission assertion**
 
 Add this constant beside the other path constants in `tests/test_aot_milestone6.py`:
 
@@ -153,7 +153,7 @@ Add this test to `AotMilestone6AdmissionTests`:
         self.assertIn("_AArch64AsmGen._walk_ast_children", analysis.types.functions)
 ```
 
-- [ ] **Step 2: Replace reflection-style AST traversal**
+- [x] **Step 2: Replace reflection-style AST traversal**
 
 In `src/xcc/aarch64_asm.py`, remove `fields` and `is_dataclass` from the dataclass import:
 
@@ -198,7 +198,7 @@ Add explicit child traversal to `_AArch64AsmGen`:
 
 Extend the helper in the implementation to cover every AST node shape imported by `aarch64_asm.py`: declarations, statements, initializer lists, type specs, expressions, GNU statement expressions, generic selections, label-address expressions, and indirect gotos. Do not fall back to `getattr`, `fields`, or `is_dataclass`.
 
-- [ ] **Step 3: Replace `nonlocal` layout/global state**
+- [x] **Step 3: Replace `nonlocal` layout/global state**
 
 Add small state containers near the existing local dataclasses:
 
@@ -225,7 +225,7 @@ class _GlobalRecordBitfieldState:
 
 Use these objects in `_prepare_frame()`, `_emit_global_data()`, and `_emit_global_record_initializer()` so nested helpers mutate fields instead of rebinding outer-scope variables.
 
-- [ ] **Step 4: Test explicit traversal edge nodes**
+- [x] **Step 4: Test explicit traversal edge nodes**
 
 Add this test to `tests/test_aarch64_asm.py`:
 
@@ -265,7 +265,7 @@ Add this test to `tests/test_aarch64_asm.py`:
 
 Import the AST node classes used by the test from `xcc.ast`.
 
-- [ ] **Step 5: Verify AArch64 admission and backend tests**
+- [x] **Step 5: Verify AArch64 admission and backend tests**
 
 Run:
 
@@ -275,7 +275,7 @@ uv run python -m unittest tests.test_aot_milestone6 tests.test_aarch64_asm -v
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit AArch64 admission cleanup**
+- [x] **Step 6: Commit AArch64 admission cleanup**
 
 Run:
 
@@ -424,11 +424,10 @@ git commit -m "feat: add AOT bootstrap source graph"
 **Files:**
 
 - Modify: `src/xcc/aot/bootstrap.py`
-- Modify: `src/xcc/aot/slice.py`
-- Modify: `src/xcc/aot/lower.py`
+- Modify: `src/xcc/aot/__init__.py`
 - Modify: `tests/test_aot_bootstrap.py`
 
-- [ ] **Step 1: Add failing entry-plan tests**
+- [x] **Step 1: Add failing entry-plan tests**
 
 Append to `tests/test_aot_bootstrap.py`:
 
@@ -452,17 +451,17 @@ class AotBootstrapEntryTests(unittest.TestCase):
         self.assertIn("xcc.llvm_api", plan.modules)
 ```
 
-- [ ] **Step 2: Run entry-plan tests and verify they fail**
+- [x] **Step 2: Run entry-plan tests and verify they fail**
 
 Run:
 
 ```bash
-uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapEntryTests -v
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapEntryTests tests.test_aot_bootstrap.AotBootstrapLoweringTests -v
 ```
 
-Expected: import failure for `plan_bootstrap_entry`.
+Expected: import failure for `lower_bootstrap_entry_smoke`.
 
-- [ ] **Step 3: Implement bootstrap entry planning**
+- [x] **Step 3: Implement bootstrap entry planning**
 
 Add to `src/xcc/aot/bootstrap.py`:
 
@@ -510,7 +509,7 @@ def plan_bootstrap_entry(root: Path) -> AotBootstrapEntryPlan:
 
 Export `AotBootstrapEntryPlan` and `plan_bootstrap_entry` from `src/xcc/aot/__init__.py`.
 
-- [ ] **Step 4: Run entry-plan tests**
+- [x] **Step 4: Run entry-plan tests**
 
 Run:
 
@@ -520,9 +519,9 @@ uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapEntryTests -v
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Lower one bootstrap-reachable wrapper**
+- [x] **Step 5: Lower one bootstrap-reachable wrapper**
 
-Extend `src/xcc/aot/slice.py` and `src/xcc/aot/lower.py` only as needed to lower a wrapper that calls a bootstrap-reachable leaf, for example a diagnostic or options path. Add a test that proves the wrapper is lowered by name rather than hard-coded output:
+Reuse the existing core entry lowering helpers to lower a wrapper that calls a bootstrap-reachable leaf, in this slice `xcc.options.FrontendOptions.__post_init__`. Add a test that proves the wrapper is lowered by name rather than hard-coded output:
 
 ```python
 from xcc.aot import lower_bootstrap_entry_smoke
@@ -531,7 +530,14 @@ from xcc.aot import lower_bootstrap_entry_smoke
 class AotBootstrapLoweringTests(unittest.TestCase):
     def test_lowers_bootstrap_entry_smoke_wrapper(self) -> None:
         module = lower_bootstrap_entry_smoke(ROOT)
-        self.assertIn("aot_bootstrap_smoke_main", {function.name for function in module.functions})
+        functions = {function.name: function for function in module.functions}
+        self.assertIn("aot_bootstrap_smoke_main", functions)
+        self.assertIn("xcc.options.FrontendOptions.__post_init__", functions)
+        self.assertIn("FrontendOptions", {record.name for record in module.records})
+        self.assertIn(
+            "target='xcc.options.FrontendOptions.__post_init__'",
+            repr(functions["aot_bootstrap_smoke_main"].body),
+        )
 ```
 
 Run:
@@ -542,12 +548,12 @@ uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapLoweringTests -v
 
 Expected: the smoke wrapper lowers to AOT IR.
 
-- [ ] **Step 6: Commit bootstrap entry planning**
+- [x] **Step 6: Commit bootstrap entry planning**
 
 Run:
 
 ```bash
-git add src/xcc/aot/__init__.py src/xcc/aot/bootstrap.py src/xcc/aot/slice.py src/xcc/aot/lower.py tests/test_aot_bootstrap.py
+git add CHANGELOG.md docs/superpowers/plans/2026-06-27-aot-python-milestone-6.md src/xcc/aot/__init__.py src/xcc/aot/bootstrap.py tests/test_aot_bootstrap.py
 git commit -m "feat: plan AOT bootstrap entry"
 ```
 

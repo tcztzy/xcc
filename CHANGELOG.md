@@ -48,14 +48,19 @@
   admitting `x86_64_asm.py`. The AArch64 backend now uses explicit AST child
   dispatch instead of dataclass reflection and explicit state containers instead
   of `nonlocal` frame/global-data/analysis-state rebinding, admitting
-  `aarch64_asm.py`. The all-`src/xcc` probe now reaches 57/57 modules, up from
-  19/57 before this milestone slice. The Milestone 6 test gate now includes an
-  all-`src/xcc` admission regression that analyzes every Python source file
-  instead of relying on an ad hoc probe.
+  `aarch64_asm.py`. The all-`src/xcc` probe now reaches every module, currently
+  58/58 after adding the bootstrap helper, up from 19/57 before this milestone
+  slice. The Milestone 6 test gate now includes an all-`src/xcc` admission
+  regression that analyzes every Python source file instead of relying on an ad
+  hoc probe.
 - Added Milestone 6 bootstrap source graph reporting. `xcc.aot.bootstrap` now
   collects the repository's `src/xcc` module graph from an explicit root and
   summarizes per-module AOT admission failures without falling back to CPython
   execution.
+- Added Milestone 6 bootstrap entry planning for `xcc.cc_driver.main`, including
+  required frontend/backend module checks and a first bootstrap-reachable
+  lowering smoke wrapper that calls the real lowered
+  `xcc.options.FrontendOptions.__post_init__` symbol.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

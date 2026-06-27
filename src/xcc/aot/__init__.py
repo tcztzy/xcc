@@ -2,7 +2,10 @@ from xcc.aot.analysis import AotAnalysis, analyze_path, analyze_source
 from xcc.aot.binder import bind_types
 from xcc.aot.bootstrap import (
     AotBootstrapAdmissionReport,
+    AotBootstrapEntryPlan,
     collect_bootstrap_sources,
+    lower_bootstrap_entry_smoke,
+    plan_bootstrap_entry,
     summarize_bootstrap_admission,
 )
 from xcc.aot.diag import AotDiagnostic, AotError
@@ -60,6 +63,7 @@ from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType, AotTypeAnalysi
 __all__ = (
     "AotAnalysis",
     "AotBootstrapAdmissionReport",
+    "AotBootstrapEntryPlan",
     "AotClassInfo",
     "AotDiagnostic",
     "AotError",
@@ -115,9 +119,11 @@ __all__ = (
     "core_slice_entry_module",
     "emit_llvm_text",
     "lower_core_slice",
+    "lower_bootstrap_entry_smoke",
     "lower_source_to_ir",
     "parse_path",
     "parse_source",
+    "plan_bootstrap_entry",
     "run_native_core_smoke",
     "run_native_smoke",
     "summarize_bootstrap_admission",

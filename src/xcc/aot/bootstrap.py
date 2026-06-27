@@ -3,13 +3,53 @@ from pathlib import Path
 
 from xcc.aot.analysis import analyze_path
 from xcc.aot.diag import AotDiagnostic, AotError
-from xcc.aot.slice import AotSliceInput
+from xcc.aot.ir import (
+    IrAssign,
+    IrCall,
+    IrConstBool,
+    IrConstInt,
+    IrConstNone,
+    IrConstructRecord,
+    IrConstString,
+    IrFunction,
+    IrIntType,
+    IrModule,
+    IrNoneType,
+    IrRecordType,
+    IrReturn,
+)
+from xcc.aot.slice import AotSliceInput, lower_core_entry_slice
 
 
 @dataclass(frozen=True)
 class AotBootstrapAdmissionReport:
     total: int
     failed: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AotBootstrapEntryPlan:
+    entry_symbol: str
+    modules: tuple[str, ...]
+
+
+_BOOTSTRAP_REQUIRED_MODULES = (
+    "xcc.__init__",
+    "xcc.aarch64_asm",
+    "xcc.ast",
+    "xcc.cc_driver",
+    "xcc.codegen",
+    "xcc.diag",
+    "xcc.frontend",
+    "xcc.lexer",
+    "xcc.llvm_api",
+    "xcc.options",
+    "xcc.parser.__init__",
+    "xcc.preprocessor.__init__",
+    "xcc.sema.__init__",
+    "xcc.types",
+    "xcc.x86_64_asm",
+)
 
 
 def collect_bootstrap_sources(root: Path) -> tuple[AotSliceInput, ...]:
@@ -45,9 +85,83 @@ def summarize_bootstrap_admission(root: Path) -> AotBootstrapAdmissionReport:
     return AotBootstrapAdmissionReport(len(modules), tuple(failures))
 
 
+def plan_bootstrap_entry(root: Path) -> AotBootstrapEntryPlan:
+    available = {module.name for module in collect_bootstrap_sources(root)}
+    missing = tuple(name for name in _BOOTSTRAP_REQUIRED_MODULES if name not in available)
+    if missing:
+        raise AotError(
+            (
+                AotDiagnostic(
+                    "XCC-AOT-BOOTSTRAP-0002",
+                    f"Missing bootstrap modules: {', '.join(missing)}",
+                    filename=str(root),
+                ),
+            )
+        )
+    return AotBootstrapEntryPlan("xcc.cc_driver.main", _BOOTSTRAP_REQUIRED_MODULES)
+
+
+def lower_bootstrap_entry_smoke(root: Path) -> IrModule:
+    plan_bootstrap_entry(root)
+    return lower_core_entry_slice(
+        (root / "src/xcc/options.py",),
+        _bootstrap_entry_smoke_wrapper(),
+    )
+
+
 def _bootstrap_module_name(relative: Path) -> str:
     return "xcc." + ".".join(relative.with_suffix("").parts)
 
 
 def _bootstrap_input_name(module: AotSliceInput) -> str:
     return module.name
+
+
+def _bootstrap_entry_smoke_wrapper() -> IrFunction:
+    int32 = IrIntType(32, signed=True)
+    options_type = IrRecordType("FrontendOptions")
+    empty_tuple = IrConstNone()
+    return IrFunction(
+        "aot_bootstrap_smoke_main",
+        (),
+        int32,
+        (
+            IrAssign(
+                "__expr",
+                IrCall(
+                    "xcc.options.FrontendOptions.__post_init__",
+                    (
+                        IrConstructRecord(
+                            "FrontendOptions",
+                            (
+                                IrConstString("c11"),
+                                IrConstBool(True),
+                                empty_tuple,
+                                empty_tuple,
+                                empty_tuple,
+                                empty_tuple,
+                                empty_tuple,
+                                empty_tuple,
+                                empty_tuple,
+                                empty_tuple,
+                                empty_tuple,
+                                IrConstBool(False),
+                                IrConstString("human"),
+                                IrConstBool(False),
+                                IrConstNone(),
+                                IrConstNone(),
+                                IrConstBool(True),
+                            ),
+                            options_type,
+                        ),
+                    ),
+                    IrNoneType(),
+                ),
+            ),
+            IrAssign(
+                "__entry",
+                IrConstString("xcc.cc_driver.main"),
+            ),
+            IrReturn(IrConstInt(0, int32)),
+        ),
+    )
