@@ -24,6 +24,7 @@ from xcc.aot import (
     IrName,
     IrNoneType,
     IrParam,
+    IrRaise,
     IrRecordType,
     IrReturn,
     IrStringConcat,
@@ -263,6 +264,68 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_assignment_value_using_existing_target_type(self) -> None:
+        module = lower_source_to_ir(
+            "class Cursor:\n"
+            "    def __init__(self) -> None:\n"
+            "        self.column = 0\n"
+            "    def reset(self) -> str:\n"
+            "        self.column = 1\n"
+            "        return ''\n"
+            "def local() -> str:\n"
+            "    count: int = 0\n"
+            "    count = 1\n"
+            "    return ''\n",
+            filename="assignment_context.py",
+            include_records={"Cursor"},
+            include_functions={"Cursor.reset", "local"},
+        )
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(module.functions[0].body[0], IrAssign("self.column", IrConstInt(1, int64)))
+        self.assertEqual(module.functions[1].body[1], IrAssign("count", IrConstInt(1, int64)))
+
+    def test_lowers_assignment_value_using_literal_ifexp_type(self) -> None:
+        module = lower_source_to_ir(
+            "def choose(kind: str) -> None:\n"
+            "    count = 4 if kind == 'u' else 8\n",
+            filename="assignment_ifexp.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            module.functions[0].body[0],
+            IrAssign(
+                "count",
+                IrCall(
+                    "__ifexp",
+                    (
+                        IrCall(
+                            "__cmp_Eq",
+                            (IrName("kind", IrStringType()), IrConstString("u")),
+                            IrBoolType(),
+                        ),
+                        IrConstInt(4, int64),
+                        IrConstInt(8, int64),
+                    ),
+                    int64,
+                ),
+            ),
+        )
+
+        inferred = lower_source_to_ir(
+            "def infer() -> None:\n"
+            "    flag = True\n"
+            "    empty = None\n"
+            "    text = 'x'\n"
+            "    alias = text\n"
+            "    values = []\n",
+            filename="assignment_literals.py",
+        )
+        self.assertEqual(inferred.functions[0].body[0], IrAssign("flag", IrConstBool(True)))
+        self.assertEqual(inferred.functions[0].body[1], IrAssign("empty", IrConstNone()))
+        self.assertEqual(inferred.functions[0].body[2], IrAssign("text", IrConstString("x")))
+        self.assertEqual(inferred.functions[0].body[3], IrAssign("alias", IrName("text", IrStringType())))
+        self.assertEqual(inferred.functions[0].body[4], IrAssign("values", IrTuple((), IrTupleType(()))))
+
     def test_lowers_string_startswith_method_call(self) -> None:
         module = lower_source_to_ir(
             "def check(text: str, prefix: str, start: int) -> bool:\n"
@@ -298,6 +361,94 @@ class AotScalarLoweringTests(unittest.TestCase):
                     IrName("text", IrStringType()),
                     IrName("prefix", IrStringType()),
                     IrConstInt(0, int64),
+                ),
+                IrBoolType(),
+            ),
+        )
+
+    def test_lowers_string_predicate_method_calls(self) -> None:
+        module = lower_source_to_ir(
+            "def alpha(ch: str) -> bool:\n"
+            "    return ch.isalpha()\n"
+            "def digit(ch: str) -> bool:\n"
+            "    return ch.isdigit()\n"
+            "def alnum(ch: str) -> bool:\n"
+            "    return ch.isalnum()\n"
+            "def space(ch: str) -> bool:\n"
+            "    return ch.isspace()\n",
+            filename="string_predicates.py",
+        )
+        expected = (
+            "__str_isalpha",
+            "__str_isdigit",
+            "__str_isalnum",
+            "__str_isspace",
+        )
+        for function, target in zip(module.functions, expected, strict=True):
+            self.assertEqual(
+                function.body[0].value,
+                IrCall(target, (IrName("ch", IrStringType()),), IrBoolType()),
+            )
+
+    def test_lowers_int_parse_call(self) -> None:
+        module = lower_source_to_ir(
+            "def parse(text: str) -> int:\n"
+            "    return int(text, 16)\n",
+            filename="int_parse.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            module.functions[0].body[0].value,
+            IrCall(
+                "__int_parse",
+                (IrName("text", IrStringType()), IrConstInt(16, int64)),
+                int64,
+            ),
+        )
+
+    def test_lowers_project_method_call_with_analyzed_signature_types(self) -> None:
+        module = lower_source_to_ir(
+            "class Scanner:\n"
+            "    def _peek(self, offset: int = 0) -> str:\n"
+            "        return ''\n"
+            "    def _accept(self, *, flag: bool) -> bool:\n"
+            "        return flag\n"
+            "    def check(self) -> bool:\n"
+            "        ch = self._peek()\n"
+            "        return ch.isalpha() or self._peek(1).isdigit() or self._accept(flag=True)\n",
+            filename="method_signature.py",
+            include_records={"Scanner"},
+            include_functions={"Scanner.check"},
+        )
+        int64 = IrIntType(64, signed=True)
+        scanner = IrName("self", IrRecordType("Scanner"))
+        self.assertEqual(
+            module.functions[0].body[0],
+            IrAssign("ch", IrCall("Scanner._peek", (scanner,), IrStringType())),
+        )
+        returned = module.functions[0].body[1].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__bool_or",
+                (
+                    IrCall("__str_isalpha", (IrName("ch", IrStringType()),), IrBoolType()),
+                    IrCall(
+                        "__str_isdigit",
+                        (
+                            IrCall(
+                                "Scanner._peek",
+                                (scanner, IrConstInt(1, int64)),
+                                IrStringType(),
+                            ),
+                        ),
+                        IrBoolType(),
+                    ),
+                    IrCall(
+                        "Scanner._accept",
+                        (scanner, IrConstBool(True)),
+                        IrBoolType(),
+                    ),
                 ),
                 IrBoolType(),
             ),
@@ -425,6 +576,33 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(module.functions[2].body[0].value.op, "*")
         self.assertEqual(module.functions[3].return_type, IrIntType(64, signed=False))
 
+    def test_lowers_chained_comparison_as_boolean_and(self) -> None:
+        module = lower_source_to_ir(
+            "def in_range(value: int) -> bool:\n"
+            "    return 1 <= value <= 3\n",
+            filename="chained_compare.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            module.functions[0].body[0].value,
+            IrCall(
+                "__bool_and",
+                (
+                    IrCall(
+                        "__cmp_LtE",
+                        (IrConstInt(1, int64), IrName("value", int64)),
+                        IrBoolType(),
+                    ),
+                    IrCall(
+                        "__cmp_LtE",
+                        (IrName("value", int64), IrConstInt(3, int64)),
+                        IrBoolType(),
+                    ),
+                ),
+                IrBoolType(),
+            ),
+        )
+
     def test_rejects_unsupported_expression(self) -> None:
         with self.assertRaises(AotError) as ctx:
             lower_source_to_ir(
@@ -439,8 +617,21 @@ class AotScalarLoweringTests(unittest.TestCase):
             ("def f() -> int:\n    return missing\n", "XCC-AOT-LOWER-0002"),
             ("def f() -> int:\n    return 1.5\n", "XCC-AOT-LOWER-0002"),
             ("def f() -> int:\n    return helper()\n", "XCC-AOT-LOWER-0003"),
+            ("def f() -> int:\n    return int()\n", "XCC-AOT-LOWER-0003"),
+            ("def f() -> int:\n    return int('1', base=10)\n", "XCC-AOT-LOWER-0003"),
+            (
+                "def helper(value: int) -> int:\n"
+                "    return value\n"
+                "def f(values: tuple[str, ...]) -> int:\n"
+                "    return helper(**values)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
             ("def f(values: tuple[str, ...]) -> str:\n    return str(**values)\n", "XCC-AOT-LOWER-0003"),
             ("def f(text: str) -> bool:\n    return text.startswith()\n", "XCC-AOT-LOWER-0003"),
+            ("def f(value: int) -> bool:\n    return value.startswith('x')\n", "XCC-AOT-LOWER-0003"),
+            ("def f(text: str) -> bool:\n    return text.isalpha('x')\n", "XCC-AOT-LOWER-0003"),
+            ("def f(text: str) -> bool:\n    return text.isspace(kind=True)\n", "XCC-AOT-LOWER-0003"),
+            ("def f(value: int) -> bool:\n    return value.isalpha()\n", "XCC-AOT-LOWER-0003"),
             (
                 "def f(text: str) -> bool:\n"
                 "    return text.startswith('x', start=0)\n",
@@ -512,11 +703,13 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer.lower_function(missing_kwonly, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
 
-        chained_compare = ast.parse(
-            "def f(left: int, middle: int, right: int) -> bool:\n    return left < middle < right\n"
-        ).body[0]
+        malformed_compare = ast.Compare(
+            left=ast.Name("left", ast.Load()),
+            ops=(),
+            comparators=(),
+        )
         with self.assertRaises(AotError) as ctx:
-            lowerer.lower_function(chained_compare, owner=None)
+            lowerer._lower_compare(malformed_compare, {})
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0004")
 
         malformed_fstring = ast.JoinedStr([ast.Name("value", ast.Load())])
@@ -554,6 +747,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer._record_field_types("Node"),
             (IrStringType(), IrIntType(64, signed=True), IrRecordType("Node")),
         )
+        self.assertEqual(lowerer._aot_type_to_ir_type(AotType("NoReturn")), IrNoneType())
         with self.assertRaises(AotError) as ctx:
             lowerer._record_field_type(IrIntType(64, signed=True), "value", ast.Pass())
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
@@ -564,7 +758,7 @@ class AotScalarLoweringTests(unittest.TestCase):
     def test_lowers_core_default_literal_and_runtime_shapes(self) -> None:
         source = (
             "from dataclasses import dataclass\n"
-            "from typing import Literal\n"
+            "from typing import Literal, NoReturn\n"
             "Mode = Literal['fast', 'slow']\n"
             "@dataclass(frozen=True)\n"
             "class Defaults:\n"
@@ -583,6 +777,8 @@ class AotScalarLoweringTests(unittest.TestCase):
             "    return Defaults()\n"
             "def raise_empty() -> None:\n"
             "    raise ValueError()\n"
+            "def abort() -> NoReturn:\n"
+            "    raise ValueError('stop')\n"
         )
         module = lower_source_to_ir(source, filename="defaults.py")
         functions = {function.name: function for function in module.functions}
@@ -599,6 +795,9 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(constructed.args[4], IrConstNone)
         self.assertIsInstance(functions["raise_empty"].return_type, IrNoneType)
         self.assertEqual(functions["raise_empty"].body[0].message.value, "")
+        self.assertIsInstance(functions["abort"].return_type, IrNoneType)
+        self.assertIsInstance(functions["abort"].body[0], IrRaise)
+        self.assertEqual(functions["abort"].body[0].message.value, "stop")
 
     def test_direct_lowerer_covers_assignment_and_global_name_edges(self) -> None:
         lowerer = _Lowerer("direct.py", {})
@@ -627,6 +826,27 @@ class AotScalarLoweringTests(unittest.TestCase):
                 IrStringType(),
             ),
             IrStringJoin,
+        )
+        int64 = IrIntType(64, signed=True)
+        fallback = IrRecordType("object")
+        field_target = ast.parse("value.field = None\n").body[0].targets[0]
+        self.assertEqual(
+            lowerer._assignment_value_type(
+                field_target,
+                ast.Constant(None),
+                {"value": int64},
+                fallback,
+            ),
+            fallback,
+        )
+        self.assertEqual(
+            lowerer._infer_assignment_expr_type(ast.Constant(1.5), {}, fallback),
+            fallback,
+        )
+        mixed_ifexp = ast.parse("1 if flag else 'x'").body[0].value
+        self.assertEqual(
+            lowerer._infer_assignment_expr_type(mixed_ifexp, {"flag": IrBoolType()}, fallback),
+            fallback,
         )
 
     def test_lowers_dataclass_record_layout_and_field_read(self) -> None:

@@ -862,9 +862,15 @@ instance fields assigned in `__init__` for method field reads such as
 `while` and tuple-backed `for` loops. AOT lowering, LLVM emission, and runtime
 support now handle existing `str.startswith(prefix[, start])` calls, and the
 lowerer handles integer `+=`/`-=`/`*=` assignments to local names and instance
-fields. The frontend success-path slice now advances through these lexer
-shapes; the next observed blocker is the existing `NoReturn` annotation on
-`Lexer._error()`. The generated
+fields. AOT lowering now handles existing `NoReturn` annotations, no-argument
+string predicates (`isalpha`, `isdigit`, `isalnum`, `isspace`),
+signature-aware project method return/argument types, target-aware assignment
+value lowering, literal assignment inference, `int(text, base)` parsing, and
+chained comparisons. LLVM emission now lowers the string predicates and integer
+parse calls through runtime helpers. The frontend success-path slice now
+advances through these lexer shapes and UCN parsing; the next observed blocker
+is the existing `HEX_FLOAT_RE.fullmatch(...)` runtime regex call in lexer
+number classification. The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its

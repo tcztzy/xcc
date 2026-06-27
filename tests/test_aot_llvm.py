@@ -588,6 +588,71 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("define i1 @__xcc_aot_string_startswith", llvm_ir)
         self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 2)", llvm_ir)
 
+    def test_emits_string_predicate_intrinsic_calls(self) -> None:
+        bool_type = IrBoolType()
+        module = IrModule(
+            "string_predicates.py",
+            (),
+            (
+                IrFunction(
+                    "alpha",
+                    (),
+                    bool_type,
+                    (IrReturn(IrCall("__str_isalpha", (IrConstString("a"),), bool_type)),),
+                ),
+                IrFunction(
+                    "digit",
+                    (),
+                    bool_type,
+                    (IrReturn(IrCall("__str_isdigit", (IrConstString("1"),), bool_type)),),
+                ),
+                IrFunction(
+                    "alnum",
+                    (),
+                    bool_type,
+                    (IrReturn(IrCall("__str_isalnum", (IrConstString("a1"),), bool_type)),),
+                ),
+                IrFunction(
+                    "space",
+                    (),
+                    bool_type,
+                    (IrReturn(IrCall("__str_isspace", (IrConstString(" "),), bool_type)),),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define i1 @__xcc_aot_string_predicate", llvm_ir)
+        self.assertIn("call i1 @__xcc_aot_string_predicate(ptr @.str0, i64 1)", llvm_ir)
+        self.assertIn("call i1 @__xcc_aot_string_predicate(ptr @.str1, i64 2)", llvm_ir)
+        self.assertIn("call i1 @__xcc_aot_string_predicate(ptr @.str2, i64 3)", llvm_ir)
+        self.assertIn("call i1 @__xcc_aot_string_predicate(ptr @.str3, i64 4)", llvm_ir)
+
+    def test_emits_int_parse_intrinsic_call(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "int_parse.py",
+            (),
+            (
+                IrFunction(
+                    "parse",
+                    (),
+                    int64,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__int_parse",
+                                (IrConstString("ff"), IrConstInt(16, int64)),
+                                int64,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define i64 @__xcc_aot_parse_int", llvm_ir)
+        self.assertIn("call i64 @__xcc_aot_parse_int(ptr @.str0, i64 16)", llvm_ir)
+
     def test_emits_intrinsics_tuple_boxes_and_truth_edges(self) -> None:
         int32 = IrIntType(32, signed=True)
         uint32 = IrIntType(32, signed=False)
@@ -865,6 +930,114 @@ class AotLlvmTextTests(unittest.TestCase):
                                 )
                             ),
                         ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (IrReturn(IrCall("__int_parse", (IrConstString("1"),), int64)),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__int_parse",
+                                    (IrConstInt(1, int64), IrConstInt(10, int64)),
+                                    int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__int_parse",
+                                    (IrConstString("1"), IrConstBool(True)),
+                                    int64,
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__int_parse",
+                                    (IrConstString("1"), IrConstInt(10, int64)),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (IrReturn(IrCall("__str_isalpha", (), IrBoolType())),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (IrReturn(IrCall("__str_isalpha", (IrConstInt(1, int64),), IrBoolType())),),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        int64,
+                        (IrReturn(IrCall("__str_isalpha", (IrConstString("x"),), int64)),),
                     ),
                 ),
             ),

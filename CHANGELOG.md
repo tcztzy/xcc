@@ -192,6 +192,14 @@
   cross-module frontend success-path slice now advances past
   `self._source.startswith(...)` and lexer index/column increments; the next
   observed blocker is the existing `NoReturn` annotation on `Lexer._error()`.
+- Added AOT lowering for existing `NoReturn` annotations, no-argument string
+  predicates (`isalpha`, `isdigit`, `isalnum`, `isspace`), signature-aware
+  project method return/argument types, target-aware assignment value lowering,
+  literal assignment inference, `int(text, base)` parsing, and chained
+  comparisons. LLVM emission now lowers the string predicates and integer parse
+  calls through runtime helpers. The cross-module frontend success-path slice
+  now advances through lexer UCN parsing and stops at the existing
+  `HEX_FLOAT_RE.fullmatch(...)` runtime regex call in number classification.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

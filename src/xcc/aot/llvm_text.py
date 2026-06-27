@@ -43,6 +43,12 @@ from xcc.aot.ir import (
 )
 
 _BUILTIN_VALUE_NAMES = {"bool", "int", "object", "str", "tuple"}
+_STRING_PREDICATE_INTRINSICS = {
+    "__str_isalpha": 1,
+    "__str_isdigit": 2,
+    "__str_isalnum": 3,
+    "__str_isspace": 4,
+}
 
 
 @dataclass(frozen=True)
@@ -624,6 +630,11 @@ class _Emitter:
             return self._emit_not_in_tuple(expr.args[0], expr.args[1], names, lines)
         if expr.target == "__str_startswith":
             return self._emit_string_startswith_call(expr, names, lines)
+        predicate_mode = _STRING_PREDICATE_INTRINSICS.get(expr.target)
+        if predicate_mode is not None:
+            return self._emit_string_predicate_call(expr, predicate_mode, names, lines)
+        if expr.target == "__int_parse":
+            return self._emit_int_parse_call(expr, names, lines)
         if expr.target not in {
             "__bool_and",
             "__bool_or",
@@ -720,6 +731,50 @@ class _Emitter:
         lines.append(
             f"  {result} = call i1 @__xcc_aot_string_startswith("
             f"ptr {value.value}, ptr {prefix.value}, i64 {start.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_int_parse_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__int_parse expects two arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        base = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(value.type, IrStringType):
+            self._error("__int_parse expects a string value")
+        if not isinstance(base.type, IrIntType) or base.type.bits != 64:
+            self._error("__int_parse expects an int64 base")
+        if not isinstance(expr.type, IrIntType) or expr.type.bits != 64:
+            self._error("__int_parse expects an int64 result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("parseint")
+        lines.append(
+            f"  {result} = call i64 @__xcc_aot_parse_int(ptr {value.value}, i64 {base.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_string_predicate_call(
+        self,
+        expr: IrCall,
+        mode: int,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error(f"{expr.target} expects one argument")
+        value = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(value.type, IrStringType):
+            self._error(f"{expr.target} expects a string receiver")
+        if not isinstance(expr.type, IrBoolType):
+            self._error(f"{expr.target} expects a bool result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("strpred")
+        lines.append(
+            f"  {result} = call i1 @__xcc_aot_string_predicate(ptr {value.value}, i64 {mode})"
         )
         return _EmittedValue(result, expr.type)
 

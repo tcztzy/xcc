@@ -42,7 +42,7 @@ from xcc.aot.ir import (
     IrType,
     IrWhile,
 )
-from xcc.aot.types import AotClassInfo, AotType, annotation_name
+from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType, annotation_name
 
 _ALLOWED_BUILTIN_CALLS = {
     "bool",
@@ -57,6 +57,7 @@ _ALLOWED_BUILTIN_CALLS = {
 }
 _ALLOWED_BUILTIN_VALUES = {"bool", "int", "object", "str", "tuple"}
 _ALLOWED_MUTATING_TUPLE_CALLS = {"append", "extend"}
+_STRING_PREDICATE_METHODS = frozenset({"isalpha", "isdigit", "isalnum", "isspace"})
 
 
 def lower_source_to_ir(
@@ -75,6 +76,7 @@ def lower_source_to_ir(
     lowerer = _Lowerer(
         filename,
         class_types,
+        analysis.types.functions,
         analysis.types.aliases,
         _collect_global_names(analysis.module.tree),
     )
@@ -118,11 +120,13 @@ class _Lowerer:
         self,
         filename: str,
         class_types: dict[str, AotClassInfo],
+        function_types: dict[str, AotFunctionInfo] | None = None,
         aliases: dict[str, AotType] | None = None,
         global_names: set[str] | None = None,
     ) -> None:
         self.filename = filename
         self.class_types = class_types
+        self.function_types = function_types or {}
         self.aliases = aliases or {}
         self.global_names = global_names or set()
 
@@ -270,8 +274,12 @@ class _Lowerer:
             and len(statement.targets) == 1
             and isinstance(statement.targets[0], (ast.Name, ast.Attribute, ast.Tuple))
         ):
-            value = self._lower_expr(statement.value, names, return_type)
             target = statement.targets[0]
+            value = self._lower_expr(
+                statement.value,
+                names,
+                self._assignment_value_type(target, statement.value, names, return_type),
+            )
             self._bind_assignment_target(target, value.type, names)
             return IrAssign(ast.unparse(target), value)
         if (
@@ -433,6 +441,9 @@ class _Lowerer:
                 f"Unsupported lowered annotation: {name}",
                 annotation,
             )
+        return self._type_name_to_ir_type(name, annotation)
+
+    def _type_name_to_ir_type(self, name: str, node: ast.AST) -> IrType:
         alias = self.aliases.get(name)
         if alias is not None:
             return self._aot_type_to_ir_type(alias)
@@ -443,6 +454,8 @@ class _Lowerer:
         if name == "bool":
             return IrBoolType()
         if name == "None":
+            return IrNoneType()
+        if name == "NoReturn":
             return IrNoneType()
         if name == "Enum":
             return IrRecordType("Enum")
@@ -462,7 +475,7 @@ class _Lowerer:
         self._error(
             "XCC-AOT-LOWER-0002",
             f"Unsupported lowered annotation: {name}",
-            annotation,
+            node,
         )
 
     def _lower_call(
@@ -477,6 +490,8 @@ class _Lowerer:
                 (self._lower_expr(expr.args[0], names, IrTupleType(())),),
                 IrIntType(64, signed=True),
             )
+        if isinstance(expr.func, ast.Name) and expr.func.id == "int":
+            return self._lower_int_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id in self.class_types:
             record_name = expr.func.id
             record_type = IrRecordType(record_name)
@@ -489,10 +504,11 @@ class _Lowerer:
                     f"Unsupported call target: {ast.unparse(expr.func)}",
                     expr,
                 )
+            return_type = self._function_return_type(expr.func.id, expected)
             return IrCall(
                 expr.func.id,
-                self._lower_call_args(expr, names, expected),
-                expected,
+                self._lower_call_args_for_signature(expr, names, expr.func.id, 0, expected),
+                return_type,
             )
         if isinstance(expr.func, ast.Attribute) and _is_string_join_call(expr.func):
             receiver = self._lower_expr(expr.func.value, names, IrStringType())
@@ -509,15 +525,24 @@ class _Lowerer:
                 else IrConstNone()
             )
             return IrCall("object.__setattr__", (value,), value.type)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == "startswith":
+            receiver = self._lower_expr(expr.func.value, names, IrStringType())
+            if isinstance(receiver.type, IrStringType):
+                return self._lower_string_startswith_call(expr, receiver, names)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr in _STRING_PREDICATE_METHODS:
+            receiver = self._lower_expr(expr.func.value, names, IrStringType())
+            if isinstance(receiver.type, IrStringType):
+                return self._lower_string_predicate_call(expr, expr.func.attr, receiver)
         if isinstance(expr.func, ast.Attribute):
             receiver = self._lower_expr(expr.func.value, names, expected)
             receiver_type = receiver.type
-            if isinstance(receiver_type, IrStringType) and expr.func.attr == "startswith":
-                return self._lower_string_startswith_call(expr, receiver, names)
             if isinstance(receiver_type, IrRecordType):
                 target = f"{receiver_type.name}.{expr.func.attr}"
-                args = (receiver,) + tuple(self._lower_call_args(expr, names, expected))
-                return IrCall(target, args, expected)
+                return_type = self._function_return_type(target, expected)
+                args = (receiver,) + tuple(
+                    self._lower_call_args_for_signature(expr, names, target, 1, expected)
+                )
+                return IrCall(target, args, return_type)
             if (
                 isinstance(receiver_type, IrTupleType)
                 and expr.func.attr in _ALLOWED_MUTATING_TUPLE_CALLS
@@ -542,6 +567,27 @@ class _Lowerer:
             "XCC-AOT-LOWER-0003",
             f"Unsupported call target: {ast.unparse(expr.func)}",
             expr,
+        )
+
+    def _lower_int_call(
+        self,
+        expr: ast.Call,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if expr.keywords or len(expr.args) != 2:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        int64 = IrIntType(64, signed=True)
+        return IrCall(
+            "__int_parse",
+            (
+                self._lower_expr(expr.args[0], names, IrStringType()),
+                self._lower_expr(expr.args[1], names, int64),
+            ),
+            int64,
         )
 
     def _lower_string_startswith_call(
@@ -572,6 +618,20 @@ class _Lowerer:
             IrBoolType(),
         )
 
+    def _lower_string_predicate_call(
+        self,
+        expr: ast.Call,
+        method: str,
+        receiver: IrExpr,
+    ) -> IrExpr:
+        if expr.args or expr.keywords:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        return IrCall(f"__str_{method}", (receiver,), IrBoolType())
+
     def _lower_call_args(
         self,
         expr: ast.Call,
@@ -588,6 +648,56 @@ class _Lowerer:
                 )
             args.append(self._lower_expr(keyword.value, names, expected))
         return tuple(args)
+
+    def _lower_call_args_for_signature(
+        self,
+        expr: ast.Call,
+        names: dict[str, IrType],
+        target: str,
+        skip_parameters: int,
+        fallback: IrType,
+    ) -> tuple[IrExpr, ...]:
+        function_info = self.function_types.get(target)
+        if function_info is None:
+            return self._lower_call_args(expr, names, fallback)
+        parameters = function_info.parameters[skip_parameters:]
+        args: list[IrExpr] = []
+        for index, arg in enumerate(expr.args):
+            arg_type = (
+                self._type_name_to_ir_type(parameters[index][1], arg)
+                if index < len(parameters)
+                else fallback
+            )
+            args.append(self._lower_expr(arg, names, arg_type))
+        parameter_types = {
+            parameter_name: self._type_name_to_ir_type(parameter_type, expr)
+            for parameter_name, parameter_type in parameters
+        }
+        for keyword in expr.keywords:
+            if keyword.arg is None:
+                self._error(
+                    "XCC-AOT-LOWER-0003",
+                    "Unsupported call target: **kwargs",
+                    keyword,
+                )
+            args.append(
+                self._lower_expr(
+                    keyword.value,
+                    names,
+                    parameter_types.get(keyword.arg, fallback),
+                )
+            )
+        return tuple(args)
+
+    def _function_return_type(
+        self,
+        target: str,
+        fallback: IrType,
+    ) -> IrType:
+        function_info = self.function_types.get(target)
+        if function_info is None:
+            return fallback
+        return self._aot_type_to_ir_type(function_info.return_type)
 
     def _lower_constructor_args(
         self,
@@ -638,6 +748,8 @@ class _Lowerer:
             return IrBoolType()
         if type_info.name == "None":
             return IrNoneType()
+        if type_info.name == "NoReturn":
+            return IrNoneType()
         if type_info.name == "Enum":
             return IrRecordType("Enum")
         if type_info.name in self.class_types:
@@ -678,6 +790,45 @@ class _Lowerer:
             target,
         )
 
+    def _assignment_value_type(
+        self,
+        target: ast.expr,
+        value: ast.expr,
+        names: dict[str, IrType],
+        fallback: IrType,
+    ) -> IrType:
+        if isinstance(target, ast.Name):
+            return names.get(target.id) or self._infer_assignment_expr_type(value, names, fallback)
+        if isinstance(target, ast.Attribute):
+            receiver = self._lower_expr(target.value, names, IrRecordType("object"))
+            if isinstance(receiver.type, IrRecordType) and receiver.type.name in self.class_types:
+                return self._record_field_type(receiver.type, target.attr, target)
+        return fallback
+
+    def _infer_assignment_expr_type(
+        self,
+        expr: ast.expr,
+        names: dict[str, IrType],
+        fallback: IrType,
+    ) -> IrType:
+        if isinstance(expr, ast.Constant):
+            if isinstance(expr.value, bool):
+                return IrBoolType()
+            if expr.value is None:
+                return IrNoneType()
+            if isinstance(expr.value, int):
+                return IrIntType(64, signed=True)
+            if isinstance(expr.value, str):
+                return IrStringType()
+        if isinstance(expr, ast.IfExp):
+            body_type = self._infer_assignment_expr_type(expr.body, names, fallback)
+            orelse_type = self._infer_assignment_expr_type(expr.orelse, names, fallback)
+            if body_type == orelse_type:
+                return body_type
+        if isinstance(expr, ast.Name):
+            return names.get(expr.id, fallback)
+        return fallback
+
     def _default_expr(self, type_info: IrType) -> IrExpr:
         if isinstance(type_info, IrIntType):
             return IrConstInt(0, type_info)
@@ -692,20 +843,29 @@ class _Lowerer:
         return IrConstNone()
 
     def _lower_compare(self, expr: ast.Compare, names: dict[str, IrType]) -> IrExpr:
-        if len(expr.ops) != 1 or len(expr.comparators) != 1:
+        if len(expr.ops) != len(expr.comparators) or not expr.ops:
             self._error(
                 "XCC-AOT-LOWER-0004",
-                "Unsupported control-flow lowering: chained compare",
+                "Unsupported control-flow lowering: malformed compare",
                 expr,
             )
-        return IrCall(
-            f"__cmp_{type(expr.ops[0]).__name__}",
-            (
-                self._lower_expr(expr.left, names, IrRecordType("object")),
-                self._lower_expr(expr.comparators[0], names, IrRecordType("object")),
-            ),
-            IrBoolType(),
-        )
+        comparisons: list[IrExpr] = []
+        left = expr.left
+        for op, right in zip(expr.ops, expr.comparators, strict=True):
+            comparisons.append(
+                IrCall(
+                    f"__cmp_{type(op).__name__}",
+                    (
+                        self._lower_expr(left, names, IrRecordType("object")),
+                        self._lower_expr(right, names, IrRecordType("object")),
+                    ),
+                    IrBoolType(),
+                )
+            )
+            left = right
+        if len(comparisons) == 1:
+            return comparisons[0]
+        return IrCall("__bool_and", tuple(comparisons), IrBoolType())
 
     def _lower_bool_op(self, expr: ast.BoolOp, names: dict[str, IrType]) -> IrExpr:
         target = "__bool_and" if isinstance(expr.op, ast.And) else "__bool_or"
