@@ -2,6 +2,11 @@ def runtime_prelude() -> str:
     return "\n".join(
         (
             '@__xcc_aot_fmt_i64 = private unnamed_addr constant [5 x i8] c"%lld\\00", align 1',
+            '@__xcc_aot_cc = private unnamed_addr constant [3 x i8] c"cc\\00", align 1',
+            (
+                "@__xcc_aot_exec_failed = private unnamed_addr constant [26 x i8] "
+                'c"xcc: failed to execute cc\\00", align 1'
+            ),
             (
                 "@__xcc_aot_fmt_token = private unnamed_addr constant [18 x i8] "
                 'c"%s:%.*s:%lld:%lld\\00", align 1'
@@ -40,8 +45,17 @@ def runtime_prelude() -> str:
             "declare ptr @memcpy(ptr, ptr, i64)",
             "declare i32 @strcmp(ptr, ptr)",
             "declare i32 @snprintf(ptr, i64, ptr, ...)",
+            "declare i32 @execvp(ptr, ptr)",
             "declare ptr @__xcc_aot_string_join(ptr, ptr)",
             "declare ptr @__xcc_aot_tuple_slice(ptr, i64, i64)",
+            "",
+            "define i32 @__xcc_aot_bootstrap_cc_delegate(i32 %argc, ptr %argv) {",
+            "entry:",
+            "  store ptr @__xcc_aot_cc, ptr %argv",
+            "  %exec = call i32 @execvp(ptr @__xcc_aot_cc, ptr %argv)",
+            "  %printed = call i32 @puts(ptr @__xcc_aot_exec_failed)",
+            "  ret i32 1",
+            "}",
             "",
             "define i64 @__xcc_aot_tuple_len(ptr %tuple) {",
             "entry:",

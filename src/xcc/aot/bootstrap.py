@@ -8,16 +8,18 @@ from xcc.aot.ir import (
     IrAssign,
     IrCall,
     IrConstBool,
-    IrConstInt,
     IrConstNone,
     IrConstructRecord,
     IrConstString,
     IrFunction,
     IrIntType,
     IrModule,
+    IrName,
     IrNoneType,
+    IrParam,
     IrRecordType,
     IrReturn,
+    IrTupleType,
 )
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.native import compile_llvm_executable
@@ -179,10 +181,11 @@ def _bootstrap_input_name(module: AotSliceInput) -> str:
 def _bootstrap_entry_smoke_wrapper() -> IrFunction:
     int32 = IrIntType(32, signed=True)
     options_type = IrRecordType("FrontendOptions")
+    argv_type = IrTupleType(())
     empty_tuple = IrConstNone()
     return IrFunction(
         "aot_bootstrap_smoke_main",
-        (),
+        (IrParam("argc", int32), IrParam("argv", argv_type)),
         int32,
         (
             IrAssign(
@@ -221,6 +224,12 @@ def _bootstrap_entry_smoke_wrapper() -> IrFunction:
                 "__entry",
                 IrConstString("xcc.cc_driver.main"),
             ),
-            IrReturn(IrConstInt(0, int32)),
+            IrReturn(
+                IrCall(
+                    "__xcc_aot_bootstrap_cc_delegate",
+                    (IrName("argc", int32), IrName("argv", argv_type)),
+                    int32,
+                )
+            ),
         ),
     )

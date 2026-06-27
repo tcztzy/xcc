@@ -758,9 +758,9 @@ reports `missing output object`. This is not final self-host success; it is the
 correct current signal until native lowering emits a real compiler entry that
 can produce an object file.
 
-- [ ] **Step 4b: Validate project-owned self-host smoke success**
+- [x] **Step 4b: Validate native argv bridge self-host smoke success**
 
-Run after the generated native executable has real compiler behavior:
+Run after the generated native executable has a real argv-aware native entry:
 
 ```bash
 uv run python - <<'PY'
@@ -769,15 +769,39 @@ from xcc.aot import run_bootstrap_self_host_smoke
 result = run_bootstrap_self_host_smoke(Path('.').resolve())
 assert result.returncode == 0, result
 assert result.stderr == "", result
+assert Path('build/aot/self-host-smoke.o').exists()
+PY
+```
+
+Verified current result: the generated native `xcc` exposes `main(argc, argv)`
+and runs a compiled `execvp("cc", argv)` delegate, so the self-host smoke returns
+0 and produces `build/aot/self-host-smoke.o` without entering the CPython runtime.
+This is not final project-owned compiler behavior; it is a transition bridge for
+argv handling and native process execution.
+
+- [ ] **Step 4c: Validate project-owned frontend/backend self-host smoke success**
+
+Run after the bootstrap entry no longer delegates to host `cc` and instead uses
+lowered project-owned frontend/backend code for the smoke input:
+
+```bash
+uv run python - <<'PY'
+from pathlib import Path
+from xcc.aot import run_bootstrap_self_host_smoke
+result = run_bootstrap_self_host_smoke(Path('.').resolve())
+assert result.returncode == 0, result
+assert result.stderr == "", result
+assert Path('build/aot/self-host-smoke.o').exists()
 PY
 ```
 
 Expected final result: the generated native `xcc` compiles the smoke input with
-return code 0 and produces `build/aot/self-host-smoke.o`.
+project-owned lowered compiler code, returns 0, and produces
+`build/aot/self-host-smoke.o`.
 
 - [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
 
-Run this only after the project-owned self-host smoke passes:
+Run this only after Step 4c passes:
 
 ```bash
 tmpdir="$(mktemp -d /private/tmp/xcc-cpython-aot.XXXXXX)"
@@ -792,7 +816,7 @@ Expected: `configure` and `make` complete with `CC` pointing at the generated na
 
 - [ ] **Step 6: Record final Milestone 6 status**
 
-Add to `CHANGELOG.md` only after Step 4 passes:
+Add to `CHANGELOG.md` only after Step 4c passes:
 
 ```markdown
 - Completed Milestone 6 native bootstrap smoke: the generated native `xcc`

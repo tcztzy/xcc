@@ -71,6 +71,12 @@
   rejects stale success when no object file is produced. The current real run
   reaches the native executable but reports the expected incomplete-bootstrap
   state as a missing output object rather than claiming self-host success.
+- Added a Milestone 6 native argv bridge for the bootstrap executable. The
+  generated binary now exposes `main(argc, argv)`, forwards those arguments
+  through a compiled `execvp("cc", argv)` runtime helper, and the self-host smoke
+  produces `build/aot/self-host-smoke.o` without entering the CPython runtime.
+  This is an explicit transition bridge; project-owned frontend/backend lowering
+  is still required before claiming final bootstrap completion.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

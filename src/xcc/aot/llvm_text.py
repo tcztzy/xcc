@@ -495,6 +495,8 @@ class _Emitter:
         intrinsic = self._emit_intrinsic_call(expr, names, lines)
         if intrinsic is not None:
             return intrinsic
+        if expr.target == "__xcc_aot_bootstrap_cc_delegate":
+            self.needs_runtime_prelude = True
         args = [self._emit_expr(arg, names, lines) for arg in expr.args]
         rendered_args = ", ".join(f"{self._param_llvm_type(arg.type)} {arg.value}" for arg in args)
         target = _llvm_symbol(expr.target)
@@ -926,13 +928,14 @@ class _Emitter:
             return None
         function = self.functions[self.module.entry]
         return_type = function.return_type
-        lines = ["define i32 @main() {", "entry:"]
+        signature, args = self._main_signature_and_args(function)
+        lines = [signature + " {", "entry:"]
         result_type = self._llvm_type(return_type)
         if isinstance(return_type, IrNoneType):
-            lines.append(f"  call {result_type} {_llvm_symbol(function.name)}()")
+            lines.append(f"  call {result_type} {_llvm_symbol(function.name)}({args})")
             lines.append("  ret i32 0")
         else:
-            lines.append(f"  %result = call {result_type} {_llvm_symbol(function.name)}()")
+            lines.append(f"  %result = call {result_type} {_llvm_symbol(function.name)}({args})")
         if isinstance(return_type, IrStringType):
             self.needs_puts = True
             lines.append("  %printed = call i32 @puts(ptr %result)")
@@ -952,6 +955,24 @@ class _Emitter:
             self._error(f"Unsupported main return type: {type(return_type).__name__}")
         lines.append("}")
         return "\n".join(lines)
+
+    def _main_signature_and_args(self, function: IrFunction) -> tuple[str, str]:
+        if not function.params:
+            return "define i32 @main()", ""
+        if (
+            len(function.params) == 2
+            and function.params[0].name == "argc"
+            and isinstance(function.params[0].type, IrIntType)
+            and function.params[0].type.bits == 32
+            and function.params[1].name == "argv"
+            and isinstance(function.params[1].type, IrTupleType)
+        ):
+            return "define i32 @main(i32 %argc, ptr %argv)", "i32 %argc, ptr %argv"
+        args = ", ".join(
+            f"{self._param_llvm_type(param.type)} {self._default_value(param.type)}"
+            for param in function.params
+        )
+        return "define i32 @main()", args
 
     def _emit_status_return(self, lines: list[str], return_type: IrType) -> None:
         if isinstance(return_type, IrIntType):
