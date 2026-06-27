@@ -491,6 +491,16 @@ def _aot_write_text_file(path: str, text: str) -> bool:
     return True
 
 
+def _aot_exec_argv(argv: tuple[str, ...]) -> int32:
+    completed = subprocess.run(
+        argv,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return completed.returncode
+
+
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
     if argc != 5 or len(argv) != 5:
         return 1
@@ -503,13 +513,7 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
     llvm_path = _aot_smoke_llvm_path(str(object_path))
     if not _aot_write_text_file(llvm_path, _aot_smoke_llvm_ir()):
         return 1
-    completed = subprocess.run(
-        _aot_smoke_llc_argv(llvm_path, str(object_path)),
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return completed.returncode
+    return _aot_exec_argv(_aot_smoke_llc_argv(llvm_path, str(object_path)))
 
 
 def _compile_frontend_inputs(

@@ -92,6 +92,8 @@ class _Emitter:
     def _emit_function(self, function: IrFunction) -> str:
         if function.name == "xcc.cc_driver._aot_compile_smoke_source_to_object":
             return self._emit_bootstrap_smoke_compiler_function(function)
+        if function.name == "xcc.cc_driver._aot_exec_argv":
+            return self._emit_aot_exec_argv_function(function)
         if function.name == "xcc.cc_driver._aot_read_text_file":
             return self._emit_aot_read_text_file_function(function)
         if function.name == "xcc.cc_driver._aot_write_text_file":
@@ -760,9 +762,30 @@ class _Emitter:
                     "  %llc_argv = call ptr @xcc.cc_driver._aot_smoke_llc_argv("
                     "ptr %ll_path, ptr %object_path)"
                 ),
-                "  %exec = call i32 @__xcc_aot_execvp_tuple(ptr %llc_argv)",
-                "  ret i32 1",
+                "  %llc_status = call i32 @xcc.cc_driver._aot_exec_argv(ptr %llc_argv)",
+                "  ret i32 %llc_status",
                 "fail:",
+                "  ret i32 1",
+                "}",
+            )
+        )
+
+    def _emit_aot_exec_argv_function(self, function: IrFunction) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if (
+            len(function.params) != 1
+            or not isinstance(function.params[0].type, IrTupleType)
+            or not isinstance(function.return_type, IrIntType)
+            or function.return_type.bits != 32
+        ):
+            self._error("AOT exec argv helper expects tuple[str, ...] -> int32")
+        param = function.params[0]
+        return "\n".join(
+            (
+                f"define i32 {_llvm_symbol(function.name)}(ptr %{param.name}) {{",
+                "entry:",
+                f"  %exec = call i32 @__xcc_aot_execvp_tuple(ptr %{param.name})",
                 "  ret i32 1",
                 "}",
             )

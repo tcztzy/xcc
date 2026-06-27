@@ -125,6 +125,10 @@
   The native smoke compiler leaf now calls `xcc.cc_driver._aot_write_text_file()`
   and a generic `__xcc_aot_write_text_file()` runtime shim instead of owning the
   `.ll` `fopen`/`fwrite`/`fclose` sequence directly.
+- Moved bootstrap smoke process execution behind a CPython-valid project helper.
+  The native smoke compiler leaf now calls `xcc.cc_driver._aot_exec_argv()` for
+  the generated `llc` command instead of invoking the tuple-to-`execvp` runtime
+  shim directly from the outer compiler helper.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

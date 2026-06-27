@@ -147,6 +147,27 @@ class AotLlvmTextTests(unittest.TestCase):
             ctx.exception.diagnostics[0].message,
         )
 
+    def test_rejects_malformed_aot_exec_argv_leaf(self) -> None:
+        module = IrModule(
+            "bad.py",
+            (),
+            (
+                IrFunction(
+                    "xcc.cc_driver._aot_exec_argv",
+                    (),
+                    IrIntType(32, signed=True),
+                    (),
+                ),
+            ),
+        )
+        with self.assertRaises(AotError) as ctx:
+            emit_llvm_text(module)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        self.assertIn(
+            "AOT exec argv helper expects tuple[str, ...] -> int32",
+            ctx.exception.diagnostics[0].message,
+        )
+
     def test_emits_record_type_and_method_call(self) -> None:
         source = (
             "from dataclasses import dataclass\n"

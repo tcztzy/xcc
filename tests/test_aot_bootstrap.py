@@ -118,6 +118,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("xcc.cc_driver._aot_smoke_llc_argv", functions)
         self.assertIn("xcc.cc_driver._aot_read_text_file", functions)
         self.assertIn("xcc.cc_driver._aot_write_text_file", functions)
+        self.assertIn("xcc.cc_driver._aot_exec_argv", functions)
 
         llvm_ir = emit_llvm_text(module)
 
@@ -194,8 +195,15 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "call ptr @xcc.cc_driver._aot_smoke_llc_argv(ptr %ll_path, ptr %object_path)",
             llvm_ir,
         )
+        self.assertIn("define i32 @xcc.cc_driver._aot_exec_argv(ptr %argv)", llvm_ir)
         self.assertIn("define i32 @__xcc_aot_execvp_tuple(ptr %argv_tuple)", llvm_ir)
-        self.assertIn("call i32 @__xcc_aot_execvp_tuple(ptr %llc_argv)", llvm_ir)
+        self.assertIn(
+            "%llc_status = call i32 @xcc.cc_driver._aot_exec_argv(ptr %llc_argv)",
+            llvm_ir,
+        )
+        self.assertIn("ret i32 %llc_status", llvm_ir)
+        self.assertIn("call i32 @__xcc_aot_execvp_tuple(ptr %argv)", llvm_ir)
+        self.assertNotIn("call i32 @__xcc_aot_execvp_tuple(ptr %llc_argv)", llvm_ir)
         self.assertNotIn("%llc_argv = alloca ptr, i64 6", llvm_ir)
         self.assertNotIn("call i32 @execvp(ptr @.str", llvm_ir)
         self.assertIn("/opt/homebrew/opt/llvm/bin/llc", llvm_ir)
