@@ -85,7 +85,7 @@ def collect_slice_inputs(paths: tuple[Path, ...]) -> tuple[AotSliceInput, ...]:
                 )
             )
         modules.append(AotSliceInput("xcc." + ".".join(relative.with_suffix("").parts), resolved))
-    return tuple(sorted(modules, key=lambda module: module.name))
+    return tuple(sorted(modules, key=_slice_input_name))
 
 
 def lower_core_slice(
@@ -283,11 +283,19 @@ def _split_module_function(
     target: str,
     inputs_by_name: dict[str, AotSliceInput],
 ) -> tuple[str | None, str | None]:
-    for module_name in sorted(inputs_by_name, key=lambda name: len(name), reverse=True):
+    for module_name in sorted(inputs_by_name, key=_string_length, reverse=True):
         prefix = f"{module_name}."
         if target.startswith(prefix):
             return module_name, target[len(prefix) :]
     return None, None
+
+
+def _slice_input_name(module: AotSliceInput) -> str:
+    return module.name
+
+
+def _string_length(value: str) -> int:
+    return len(value)
 
 
 def core_slice_entry_module(module: IrModule, wrapper: IrFunction) -> IrModule:

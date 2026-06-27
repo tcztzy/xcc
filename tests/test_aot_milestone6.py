@@ -13,6 +13,7 @@ XCC_INIT_PATH = ROOT / "src/xcc/__init__.py"
 HOST_INCLUDES_PATH = ROOT / "src/xcc/host_includes.py"
 AOT_BINDER_PATH = ROOT / "src/xcc/aot/binder.py"
 AOT_LOWER_PATH = ROOT / "src/xcc/aot/lower.py"
+AOT_SLICE_PATH = ROOT / "src/xcc/aot/slice.py"
 AOT_SUBSET_PATH = ROOT / "src/xcc/aot/subset.py"
 
 
@@ -88,7 +89,7 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
         self.assertIn("cached", analysis.types.functions)
 
     def test_admits_aot_diagnostic_modules_without_dynamic_getattr(self) -> None:
-        for path in (AOT_BINDER_PATH, AOT_LOWER_PATH, AOT_SUBSET_PATH):
+        for path in (AOT_BINDER_PATH, AOT_LOWER_PATH, AOT_SLICE_PATH, AOT_SUBSET_PATH):
             with self.subTest(path=path.name):
                 analysis = analyze_path(path)
                 self.assertGreater(len(analysis.types.functions), 0)
