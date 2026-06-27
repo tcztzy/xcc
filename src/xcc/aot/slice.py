@@ -43,6 +43,7 @@ from xcc.aot.types import AotClassInfo
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.cc_driver._aot_compile_smoke_source_to_object",
     "xcc.cc_driver._aot_read_text_file",
+    "xcc.cc_driver._aot_write_text_file",
     "xcc.lexer._aot_error_summary_for_source",
     "xcc.lexer._aot_header_summary_for_source",
     "xcc.lexer._aot_token_summary_for_source",
@@ -59,6 +60,7 @@ _NATIVE_EMITTED_LEAF_DEPENDENCIES = {
         "xcc.cc_driver._aot_smoke_llc_argv",
         "xcc.cc_driver._aot_smoke_llvm_ir",
         "xcc.cc_driver._aot_read_text_file",
+        "xcc.cc_driver._aot_write_text_file",
     ),
 }
 

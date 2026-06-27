@@ -117,6 +117,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("xcc.cc_driver._aot_smoke_llvm_ir", functions)
         self.assertIn("xcc.cc_driver._aot_smoke_llc_argv", functions)
         self.assertIn("xcc.cc_driver._aot_read_text_file", functions)
+        self.assertIn("xcc.cc_driver._aot_write_text_file", functions)
 
         llvm_ir = emit_llvm_text(module)
 
@@ -171,6 +172,19 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("%s.ll", llvm_ir)
         self.assertIn("define ptr @xcc.cc_driver._aot_smoke_llvm_ir()", llvm_ir)
         self.assertIn("call ptr @xcc.cc_driver._aot_smoke_llvm_ir()", llvm_ir)
+        self.assertIn(
+            "define i1 @xcc.cc_driver._aot_write_text_file(ptr %path, ptr %text)",
+            llvm_ir,
+        )
+        self.assertIn("define i1 @__xcc_aot_write_text_file(ptr %path, ptr %text)", llvm_ir)
+        self.assertIn(
+            "%llvm_written_ok = call i1 @xcc.cc_driver._aot_write_text_file("
+            "ptr %ll_path, ptr %llvm_smoke)",
+            llvm_ir,
+        )
+        self.assertNotIn("%ll_file = call ptr @fopen", llvm_ir)
+        self.assertNotIn("%llvm_written = call i64 @fwrite", llvm_ir)
+        self.assertNotIn("%ll_closed = call i32 @fclose", llvm_ir)
         self.assertIn(
             "define ptr @xcc.cc_driver._aot_smoke_llc_argv("
             "ptr %llvm_path, ptr %object_path)",

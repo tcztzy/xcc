@@ -94,6 +94,8 @@ class _Emitter:
             return self._emit_bootstrap_smoke_compiler_function(function)
         if function.name == "xcc.cc_driver._aot_read_text_file":
             return self._emit_aot_read_text_file_function(function)
+        if function.name == "xcc.cc_driver._aot_write_text_file":
+            return self._emit_aot_write_text_file_function(function)
         if function.name == "xcc.lexer._aot_error_summary_for_source":
             return self._emit_core_lexer_string_helper_function(
                 function,
@@ -724,7 +726,6 @@ class _Emitter:
             self._error("bootstrap smoke compiler expects (int32, tuple[str, ...]) -> int32")
         argc = function.params[0].name
         argv = function.params[1].name
-        write_mode = self._string_constant("w")
         return "\n".join(
             (
                 f"define i32 {_llvm_symbol(function.name)}(i32 %{argc}, ptr %{argv}) {{",
@@ -748,18 +749,11 @@ class _Emitter:
                 "  br i1 %source_ok, label %write_llvm_path, label %fail",
                 "write_llvm_path:",
                 "  %ll_path = call ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %object_path)",
-                f"  %ll_file = call ptr @fopen(ptr %ll_path, ptr {write_mode})",
-                "  %ll_open = icmp ne ptr %ll_file, null",
-                "  br i1 %ll_open, label %write_llvm, label %fail",
-                "write_llvm:",
                 "  %llvm_smoke = call ptr @xcc.cc_driver._aot_smoke_llvm_ir()",
-                "  %llvm_len = call i64 @strlen(ptr %llvm_smoke)",
                 (
-                    "  %llvm_written = call i64 @fwrite(ptr %llvm_smoke, i64 1, "
-                    "i64 %llvm_len, ptr %ll_file)"
+                    "  %llvm_written_ok = call i1 @xcc.cc_driver._aot_write_text_file("
+                    "ptr %ll_path, ptr %llvm_smoke)"
                 ),
-                "  %ll_closed = call i32 @fclose(ptr %ll_file)",
-                "  %llvm_written_ok = icmp eq i64 %llvm_written, %llvm_len",
                 "  br i1 %llvm_written_ok, label %exec_llc, label %fail",
                 "exec_llc:",
                 (
@@ -770,6 +764,31 @@ class _Emitter:
                 "  ret i32 1",
                 "fail:",
                 "  ret i32 1",
+                "}",
+            )
+        )
+
+    def _emit_aot_write_text_file_function(self, function: IrFunction) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if (
+            len(function.params) != 2
+            or not isinstance(function.params[0].type, IrStringType)
+            or not isinstance(function.params[1].type, IrStringType)
+            or not isinstance(function.return_type, IrBoolType)
+        ):
+            self._error("AOT write_text helper expects (str, str) -> bool")
+        path = function.params[0]
+        text = function.params[1]
+        return "\n".join(
+            (
+                f"define i1 {_llvm_symbol(function.name)}(ptr %{path.name}, ptr %{text.name}) {{",
+                "entry:",
+                (
+                    f"  %result = call i1 @__xcc_aot_write_text_file("
+                    f"ptr %{path.name}, ptr %{text.name})"
+                ),
+                "  ret i1 %result",
                 "}",
             )
         )

@@ -77,6 +77,29 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(output.read_bytes(), b"object")
 
+    def test_aot_smoke_compiler_rejects_failed_llvm_write_under_cpython(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "smoke.c"
+            output = root / "smoke.o"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+
+            with (
+                patch("xcc.cc_driver._aot_write_text_file", return_value=False) as write_text,
+                patch("subprocess.run") as run,
+            ):
+                code = cc_driver._aot_compile_smoke_source_to_object(
+                    5,
+                    ("xcc", "-c", str(source), "-o", str(output)),
+                )
+
+            self.assertEqual(code, 1)
+            write_text.assert_called_once_with(
+                str(output) + ".ll",
+                "define i32 @main() {\nentry:\n  ret i32 0\n}\n",
+            )
+            run.assert_not_called()
+
     def test_aot_smoke_compiler_rejects_non_smoke_inputs_under_cpython(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -121,6 +121,10 @@
   `xcc.cc_driver._aot_read_text_file()` and a generic
   `__xcc_aot_read_text_file()` runtime shim instead of hand-writing the fixed
   source `fopen`/`fread` envelope in the outer compiler helper.
+- Moved bootstrap smoke LLVM file writing behind a CPython-valid project helper.
+  The native smoke compiler leaf now calls `xcc.cc_driver._aot_write_text_file()`
+  and a generic `__xcc_aot_write_text_file()` runtime shim instead of owning the
+  `.ll` `fopen`/`fwrite`/`fclose` sequence directly.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

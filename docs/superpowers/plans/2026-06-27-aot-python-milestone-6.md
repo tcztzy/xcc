@@ -829,18 +829,19 @@ smoke-source validation to lowered project helper
 project helper `xcc.cc_driver._aot_smoke_llvm_path()`, fixed `llc` argv
 construction to lowered project helper `xcc.cc_driver._aot_smoke_llc_argv()`,
 source-file reading to project helper `xcc.cc_driver._aot_read_text_file()`,
-writes the minimal `.ll`, and invokes `/opt/homebrew/opt/llvm/bin/llc` through a
-generic AOT tuple-to-`execvp` runtime shim. The fixed smoke LLVM text has also
-moved into lowered project helper `xcc.cc_driver._aot_smoke_llvm_ir()`. The
-generated `main(argc, argv)` now converts the platform C `argv` array into the
-AOT tuple ABI with `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf
-reads its Python-level `argv` through `__xcc_aot_tuple_get()`, and source reading
-goes through a generic `__xcc_aot_read_text_file()` runtime shim instead of an
-outer fixed `fopen`/`fread` envelope. The native bridge still emits the outer
-compiler helper as a specialized leaf rather than lowering the helper's Python
-body or the general frontend/backend path, so the remaining native
-specialization is `.ll` file writing and the fixed smoke compiler shell around
-the lowered project-owned helpers.
+LLVM file writing to project helper `xcc.cc_driver._aot_write_text_file()`, and
+invokes `/opt/homebrew/opt/llvm/bin/llc` through a generic AOT tuple-to-`execvp`
+runtime shim. The fixed smoke LLVM text has also moved into lowered project
+helper `xcc.cc_driver._aot_smoke_llvm_ir()`. The generated `main(argc, argv)`
+now converts the platform C `argv` array into the AOT tuple ABI with
+`__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its
+Python-level `argv` through `__xcc_aot_tuple_get()`, source reading goes through
+a generic `__xcc_aot_read_text_file()` runtime shim, and LLVM file writing goes
+through a generic `__xcc_aot_write_text_file()` runtime shim. The native bridge
+still emits the outer compiler helper as a specialized leaf rather than lowering
+the helper's Python body or the general frontend/backend path, so the remaining
+native specialization is the fixed smoke compiler shell around the lowered
+project-owned helpers.
 
 - [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
 
