@@ -12,6 +12,7 @@ PARSER_EXTENSIONS_PATH = ROOT / "src/xcc/parser/extensions.py"
 PREPROCESSOR_CONDITIONALS_PATH = ROOT / "src/xcc/preprocessor/conditionals.py"
 PREPROCESSOR_INCLUDES_PATH = ROOT / "src/xcc/preprocessor/includes.py"
 PREPROCESSOR_MACROS_PATH = ROOT / "src/xcc/preprocessor/macros.py"
+PREPROCESSOR_PRAGMAS_PATH = ROOT / "src/xcc/preprocessor/pragmas.py"
 SEMA_CONSTANTS_PATH = ROOT / "src/xcc/sema/constants.py"
 SEMA_CONVERSIONS_PATH = ROOT / "src/xcc/sema/conversions.py"
 SEMA_EXPRESSIONS_PATH = ROOT / "src/xcc/sema/expressions.py"
@@ -129,6 +130,10 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
     def test_admits_parser_expressions_without_dynamic_getattr(self) -> None:
         analysis = analyze_path(PARSER_EXPRESSIONS_PATH)
         self.assertIn("parse_expression", analysis.types.functions)
+
+    def test_admits_preprocessor_pragmas_without_runtime_regex_search(self) -> None:
+        analysis = analyze_path(PREPROCESSOR_PRAGMAS_PATH)
+        self.assertIn("_validate_pragma", analysis.types.functions)
 
     def test_admits_sema_helpers_without_dynamic_getattr(self) -> None:
         for path in (

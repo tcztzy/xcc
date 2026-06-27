@@ -14,6 +14,7 @@ _DIAGNOSTIC_PRAGMA_ACTIONS = frozenset({"error", "warning", "ignored", "fatal", 
 _MODULE_NAME_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
 _PRAGMA_FP_OPTION_RE = re.compile(r"([A-Za-z_]\w*)\s*\(([^()]*)\)")
 _STRING_LITERAL_RE = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+_DEFINED_OPERATOR = "defined"
 
 
 def _raise_pragma_error(message: str, location: _SourceLocation) -> NoReturn:
@@ -26,13 +27,30 @@ def _raise_pragma_error(message: str, location: _SourceLocation) -> NoReturn:
     )
 
 
+def _is_pp_identifier_character(ch: str) -> bool:
+    return ch == "_" or ch.isalnum()
+
+
+def _find_defined_operator_end(expr: str, cursor: int) -> int | None:
+    while True:
+        start = expr.find(_DEFINED_OPERATOR, cursor)
+        if start < 0:
+            return None
+        end = start + len(_DEFINED_OPERATOR)
+        has_leading_boundary = start == 0 or not _is_pp_identifier_character(expr[start - 1])
+        has_trailing_boundary = end == len(expr) or not _is_pp_identifier_character(expr[end])
+        if has_leading_boundary and has_trailing_boundary:
+            return end
+        cursor = end
+
+
 def _validate_defined_syntax(expr: str, location: _SourceLocation) -> None:
     cursor = 0
     while True:
-        match = re.search(r"\bdefined\b", expr[cursor:])
-        if match is None:
+        defined_end = _find_defined_operator_end(expr, cursor)
+        if defined_end is None:
             return
-        cursor += match.end()
+        cursor = defined_end
         while cursor < len(expr) and expr[cursor].isspace():
             cursor += 1
         if cursor >= len(expr) or expr[cursor] != "(":

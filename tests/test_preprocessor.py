@@ -3906,6 +3906,7 @@ A(0)
         location = _SourceLocation("if.c", 1)
         _validate_defined_syntax("defined FLAG", location)
         _validate_defined_syntax("defined(FLAG)", location)
+        _validate_defined_syntax("undefined FLAG defined_suffix defined(FLAG)", location)
         with self.assertRaises(PreprocessorError) as ctx:
             _validate_defined_syntax("defined( FLAG", location)
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
