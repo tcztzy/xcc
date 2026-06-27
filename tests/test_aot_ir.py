@@ -813,8 +813,16 @@ class AotScalarLoweringTests(unittest.TestCase):
                 names,
             )
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
-        tree = ast.parse("left, right = (1, 2)\nname: int = 1\nclass Box:\n    pass\n")
-        self.assertEqual(_collect_global_names(tree), {"name", "Box"})
+        tree = ast.parse(
+            "import os as operating_system\n"
+            "import sys\n"
+            "left, right = (1, 2)\n"
+            "name: int = 1\n"
+            "class Box:\n"
+            "    pass\n"
+            "42\n"
+        )
+        self.assertEqual(_collect_global_names(tree), {"operating_system", "sys", "name", "Box"})
         self.assertIsInstance(
             lowerer._default_expr(IrRecordType("Unknown")),
             IrConstNone,

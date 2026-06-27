@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import NoReturn, cast
@@ -146,42 +145,6 @@ SIMPLE_ESCAPES = {
     "t",
     "v",
 }
-
-DECIMAL_FLOAT_RE = re.compile(
-    r"^(?:"
-    r"(?:[0-9]+\.[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?"
-    r"|"
-    r"[0-9]+[eE][+-]?[0-9]+"
-    r")"
-    r"[fFlL]?$"
-)
-
-HEX_FLOAT_RE = re.compile(
-    r"^0[xX](?:"
-    r"(?:[0-9A-Fa-f]+\.[0-9A-Fa-f]*|\.[0-9A-Fa-f]+)"
-    r"|"
-    r"[0-9A-Fa-f]+"
-    r")"
-    r"[pP][+-]?[0-9]+"
-    r"[fFlL]?$"
-)
-
-INTEGER_SUFFIX_RE = r"(?:"
-INTEGER_SUFFIX_RE += r"[uU](?:ll|LL|[lL])?"
-INTEGER_SUFFIX_RE += r"|"
-INTEGER_SUFFIX_RE += r"(?:ll|LL|[lL])[uU]?"
-INTEGER_SUFFIX_RE += r")?"
-
-INTEGER_RE = re.compile(
-    rf"^(?:"
-    rf"[1-9][0-9]*"
-    rf"|"
-    rf"0[0-7]*"
-    rf"|"
-    rf"0[xX][0-9A-Fa-f]+"
-    rf")"
-    rf"{INTEGER_SUFFIX_RE}$"
-)
 
 
 class TokenKind(Enum):
@@ -371,13 +334,15 @@ class Lexer:
             if ch == "/" and self._peek(1) == "*":
                 self._advance()
                 self._advance()
+                closed = False
                 while not self._eof():
                     if self._peek() == "*" and self._peek(1) == "/":
                         self._advance()
                         self._advance()
+                        closed = True
                         break
                     self._advance()
-                else:
+                if not closed:
                     self._error("Unterminated block comment")
                 continue
             break
@@ -546,9 +511,9 @@ class Lexer:
         return self._source[start : self._index]
 
     def _classify_number(self, lexeme: str, line: int, column: int) -> TokenKind:
-        if HEX_FLOAT_RE.fullmatch(lexeme) or DECIMAL_FLOAT_RE.fullmatch(lexeme):
+        if _is_hex_float_literal(lexeme) or _is_decimal_float_literal(lexeme):
             return TokenKind.FLOAT_CONST
-        if INTEGER_RE.fullmatch(lexeme):
+        if _is_integer_literal(lexeme):
             return TokenKind.INT_CONST
         return TokenKind.PP_NUMBER
 
@@ -592,3 +557,163 @@ def _is_hex_digit(ch: str) -> bool:
 
 def _is_octal_digit(ch: str) -> bool:
     return "0" <= ch <= "7"
+
+
+def _is_float_suffix(ch: str) -> bool:
+    return ch in {"f", "F", "l", "L"}
+
+
+def _is_sign(ch: str) -> bool:
+    return ch == "+" or ch == "-"
+
+
+def _is_x_marker(ch: str) -> bool:
+    return ch == "x" or ch == "X"
+
+
+def _is_p_marker(ch: str) -> bool:
+    return ch == "p" or ch == "P"
+
+
+def _is_e_marker(ch: str) -> bool:
+    return ch == "e" or ch == "E"
+
+
+def _is_u_suffix(ch: str) -> bool:
+    return ch == "u" or ch == "U"
+
+
+def _is_l_suffix(ch: str) -> bool:
+    return ch == "l" or ch == "L"
+
+
+def _has_long_long_suffix(text: str, index: int) -> bool:
+    return index + 1 < len(text) and (
+        (text[index] == "l" and text[index + 1] == "l")
+        or (text[index] == "L" and text[index + 1] == "L")
+    )
+
+
+def _is_integer_suffix(text: str, index: int) -> bool:
+    length = len(text)
+    if index == length:
+        return True
+    if index > length:
+        return False
+    ch = text[index]
+    if _is_u_suffix(ch):
+        index += 1
+        if index == length:
+            return True
+        if _has_long_long_suffix(text, index):
+            return index + 2 == length
+        if _is_l_suffix(text[index]):
+            return index + 1 == length
+        return False
+    if _has_long_long_suffix(text, index):
+        index += 2
+        if index == length:
+            return True
+        return _is_u_suffix(text[index]) and index + 1 == length
+    if _is_l_suffix(ch):
+        index += 1
+        if index == length:
+            return True
+        return _is_u_suffix(text[index]) and index + 1 == length
+    return False
+
+
+def _is_integer_literal(text: str) -> bool:
+    length = len(text)
+    if length == 0:
+        return False
+    if text[0] == "0":
+        if length > 1 and _is_x_marker(text[1]):
+            index = 2
+            digits = 0
+            while index < length and _is_hex_digit(text[index]):
+                index += 1
+                digits += 1
+            return digits > 0 and _is_integer_suffix(text, index)
+        index = 1
+        while index < length and _is_octal_digit(text[index]):
+            index += 1
+        return _is_integer_suffix(text, index)
+    if "1" <= text[0] <= "9":
+        index = 1
+        while index < length and text[index].isdigit():
+            index += 1
+        return _is_integer_suffix(text, index)
+    return False
+
+
+def _is_decimal_float_literal(text: str) -> bool:
+    end = len(text)
+    if end == 0:
+        return False
+    if _is_float_suffix(text[end - 1]):
+        end -= 1
+    if end == 0:
+        return False
+    index = 0
+    whole_digits = 0
+    while index < end and text[index].isdigit():
+        index += 1
+        whole_digits += 1
+    saw_dot = False
+    fraction_digits = 0
+    if index < end and text[index] == ".":
+        saw_dot = True
+        index += 1
+        while index < end and text[index].isdigit():
+            index += 1
+            fraction_digits += 1
+    if index < end and _is_e_marker(text[index]):
+        if whole_digits == 0 and not saw_dot:
+            return False
+        index += 1
+        if index < end and _is_sign(text[index]):
+            index += 1
+        exponent_digits = 0
+        while index < end and text[index].isdigit():
+            index += 1
+            exponent_digits += 1
+        return exponent_digits > 0 and index == end
+    if saw_dot:
+        return whole_digits + fraction_digits > 0 and index == end
+    return False
+
+
+def _is_hex_float_literal(text: str) -> bool:
+    end = len(text)
+    if end == 0:
+        return False
+    if _is_float_suffix(text[end - 1]):
+        end -= 1
+    if end < 4:
+        return False
+    if text[0] != "0" or not _is_x_marker(text[1]):
+        return False
+    index = 2
+    whole_digits = 0
+    while index < end and _is_hex_digit(text[index]):
+        index += 1
+        whole_digits += 1
+    fraction_digits = 0
+    if index < end and text[index] == ".":
+        index += 1
+        while index < end and _is_hex_digit(text[index]):
+            index += 1
+            fraction_digits += 1
+    if whole_digits + fraction_digits == 0:
+        return False
+    if index >= end or not _is_p_marker(text[index]):
+        return False
+    index += 1
+    if index < end and _is_sign(text[index]):
+        index += 1
+    exponent_digits = 0
+    while index < end and text[index].isdigit():
+        index += 1
+        exponent_digits += 1
+    return exponent_digits > 0 and index == end

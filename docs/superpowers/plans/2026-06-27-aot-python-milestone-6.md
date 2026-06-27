@@ -867,10 +867,13 @@ string predicates (`isalpha`, `isdigit`, `isalnum`, `isspace`),
 signature-aware project method return/argument types, target-aware assignment
 value lowering, literal assignment inference, `int(text, base)` parsing, and
 chained comparisons. LLVM emission now lowers the string predicates and integer
-parse calls through runtime helpers. The frontend success-path slice now
-advances through these lexer shapes and UCN parsing; the next observed blocker
-is the existing `HEX_FLOAT_RE.fullmatch(...)` runtime regex call in lexer
-number classification. The generated
+parse calls through runtime helpers. Lexer number classification now uses
+ordinary scanner helpers instead of runtime regex `fullmatch`, and block-comment
+scanning no longer uses `while ... else`. The frontend success-path slice now
+lowers through lexer number classification and comment skipping. The broader
+source-to-LLVM unchecked slice now advances into `codegen.py`; the next
+observed blocker is the existing `c.PrintModuleToString(...)` LLVM API
+boundary. The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its

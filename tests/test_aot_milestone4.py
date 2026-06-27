@@ -132,6 +132,26 @@ class AotMilestone4SliceTests(unittest.TestCase):
                 summary = next(function for function in module.functions if function.name == target)
                 self.assertEqual(summary.body, ())
 
+    def test_lowers_lexer_number_classifier_without_runtime_regex(self) -> None:
+        module = lower_core_slice(
+            LEXER_SLICE,
+            root_targets=("xcc.lexer.Lexer._classify_number",),
+        )
+        names = {function.name for function in module.functions}
+        self.assertIn("xcc.lexer.Lexer._classify_number", names)
+        self.assertIn("xcc.lexer._is_hex_float_literal", names)
+        self.assertIn("xcc.lexer._is_decimal_float_literal", names)
+        self.assertIn("xcc.lexer._is_integer_literal", names)
+        self.assertFalse(any("fullmatch" in repr(function.body) for function in module.functions))
+
+    def test_lowers_lexer_comment_skip_without_while_else(self) -> None:
+        module = lower_core_slice(
+            LEXER_SLICE,
+            root_targets=("xcc.lexer.Lexer._skip_whitespace_and_comments",),
+        )
+        names = {function.name for function in module.functions}
+        self.assertIn("xcc.lexer.Lexer._skip_whitespace_and_comments", names)
+
     def test_entry_driven_core_slice_handles_duplicate_roots_and_record_discovery(self) -> None:
         module = lower_core_slice(
             (ROOT / "src/xcc/options.py",),

@@ -200,6 +200,12 @@
   calls through runtime helpers. The cross-module frontend success-path slice
   now advances through lexer UCN parsing and stops at the existing
   `HEX_FLOAT_RE.fullmatch(...)` runtime regex call in number classification.
+- Replaced lexer number-classification runtime regex matching with ordinary
+  scanner helpers and reshaped block-comment scanning away from `while ...
+  else`. The frontend success-path slice now lowers through lexer number
+  classification and comment skipping without runtime regex or `while else`.
+  The broader source-to-LLVM unchecked slice now advances into `codegen.py` and
+  stops at the existing `c.PrintModuleToString(...)` LLVM API boundary.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation
