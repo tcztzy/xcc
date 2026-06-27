@@ -832,7 +832,13 @@ source-file reading to project helper `xcc.cc_driver._aot_read_text_file()`,
 LLVM file writing to project helper `xcc.cc_driver._aot_write_text_file()`, and
 `llc` process execution to project helper `xcc.cc_driver._aot_exec_argv()`. The
 fixed smoke LLVM text has also moved into lowered project helper
-`xcc.cc_driver._aot_smoke_llvm_ir()`. The generated `main(argc, argv)` now
+`xcc.cc_driver._aot_smoke_llvm_ir()`. The smoke compiler body now delegates the
+source text to LLVM IR step to project helper
+`xcc.cc_driver._aot_compile_source_to_llvm_ir()` instead of directly calling
+the fixed smoke source validator and fixed smoke IR helper. Under CPython, that
+new helper runs the real frontend and LLVM backend for the provided source text;
+under native AOT it is still a temporary smoke-only leaf that calls the existing
+validator and fixed smoke IR helper. The generated `main(argc, argv)` now
 converts the platform C `argv` array into the AOT tuple ABI with
 `__xcc_aot_c_argv_to_tuple()`, the native smoke compiler leaf reads its
 Python-level `argv` through `__xcc_aot_tuple_get()`, source reading goes through
@@ -851,9 +857,10 @@ locals, and the body lowers and emits through the generic AOT path in isolation.
 The bootstrap slice now selects that generic lowered body instead of emitting a
 native-special smoke compiler shell, so the generated native `xcc` reaches the
 smoke compiler through ordinary lowered tuple length/indexing, branching, and
-project helper calls. The remaining gap for Step 4d is replacing the fixed
-smoke compiler path with the general lowered project-owned frontend/backend
-path for the smoke input.
+project helper calls. The remaining gap for Step 4d is lowering the general
+project-owned frontend/backend implementation behind
+`_aot_compile_source_to_llvm_ir()` in native code instead of smoke-only leaf
+specializing that boundary.
 
 - [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
 

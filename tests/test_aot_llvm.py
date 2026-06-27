@@ -172,6 +172,27 @@ class AotLlvmTextTests(unittest.TestCase):
             ctx.exception.diagnostics[0].message,
         )
 
+    def test_rejects_malformed_aot_compile_source_to_llvm_leaf(self) -> None:
+        module = IrModule(
+            "bad.py",
+            (),
+            (
+                IrFunction(
+                    "xcc.cc_driver._aot_compile_source_to_llvm_ir",
+                    (IrParam("path", IrStringType()),),
+                    IrStringType(),
+                    (),
+                ),
+            ),
+        )
+        with self.assertRaises(AotError) as ctx:
+            emit_llvm_text(module)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        self.assertIn(
+            "AOT source-to-LLVM helper expects (str, str) -> str",
+            ctx.exception.diagnostics[0].message,
+        )
+
     def test_rejects_malformed_aot_exec_argv_leaf(self) -> None:
         module = IrModule(
             "bad.py",

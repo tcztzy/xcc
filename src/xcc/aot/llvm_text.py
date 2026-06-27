@@ -90,6 +90,8 @@ class _Emitter:
         return f"%{record.name} = type {{ {fields} }}"
 
     def _emit_function(self, function: IrFunction) -> str:
+        if function.name == "xcc.cc_driver._aot_compile_source_to_llvm_ir":
+            return self._emit_aot_compile_source_to_llvm_ir_function(function)
         if function.name == "xcc.cc_driver._aot_exec_argv":
             return self._emit_aot_exec_argv_function(function)
         if function.name == "xcc.cc_driver._aot_read_text_file":
@@ -753,6 +755,38 @@ class _Emitter:
         if _is_pointer_type(value.type):
             return value.value
         self._error(f"Unsupported LLVM pointer comparison type: {type(value.type).__name__}")
+
+    def _emit_aot_compile_source_to_llvm_ir_function(self, function: IrFunction) -> str:
+        self.index = 0
+        if (
+            len(function.params) != 2
+            or not isinstance(function.params[0].type, IrStringType)
+            or not isinstance(function.params[1].type, IrStringType)
+            or not isinstance(function.return_type, IrStringType)
+        ):
+            self._error("AOT source-to-LLVM helper expects (str, str) -> str")
+        source_text = function.params[1]
+        empty = self._string_constant("")
+        return "\n".join(
+            (
+                (
+                    f"define ptr {_llvm_symbol(function.name)}("
+                    f"ptr %{function.params[0].name}, ptr %{source_text.name}) {{"
+                ),
+                "entry:",
+                (
+                    "  %source_ok = call i1 @xcc.cc_driver._aot_is_smoke_source("
+                    f"ptr %{source_text.name})"
+                ),
+                "  br i1 %source_ok, label %compile, label %fail",
+                "compile:",
+                "  %llvm_ir = call ptr @xcc.cc_driver._aot_smoke_llvm_ir()",
+                "  ret ptr %llvm_ir",
+                "fail:",
+                f"  ret ptr {empty}",
+                "}",
+            )
+        )
 
     def _emit_aot_exec_argv_function(self, function: IrFunction) -> str:
         self.index = 0

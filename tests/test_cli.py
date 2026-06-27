@@ -43,7 +43,8 @@ class CliTests(unittest.TestCase):
 
         def fake_run(command: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess:
             commands.append(tuple(command))
-            Path(command[-1]).write_bytes(b"object")
+            if command[0] == "/opt/homebrew/opt/llvm/bin/llc" and "-filetype=obj" in command:
+                Path(command[-1]).write_bytes(b"object")
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -60,7 +61,11 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertEqual(
-                commands,
+                [
+                    command
+                    for command in commands
+                    if command[0] == "/opt/homebrew/opt/llvm/bin/llc" and "-filetype=obj" in command
+                ],
                 [
                     (
                         "/opt/homebrew/opt/llvm/bin/llc",
@@ -71,11 +76,28 @@ class CliTests(unittest.TestCase):
                     )
                 ],
             )
-            self.assertEqual(
-                (root / "smoke.o.ll").read_text(encoding="utf-8"),
-                "define i32 @main() {\nentry:\n  ret i32 0\n}\n",
-            )
             self.assertEqual(output.read_bytes(), b"object")
+
+            llvm_ir = (root / "smoke.o.ll").read_text(encoding="utf-8")
+            self.assertIn(f'source_filename = "{source}"', llvm_ir)
+            self.assertIn("define i32 @main()", llvm_ir)
+            self.assertIn("ret i32 0", llvm_ir)
+
+    def test_aot_source_to_llvm_uses_frontend_backend_under_cpython(self) -> None:
+        llvm_ir = cc_driver._aot_compile_source_to_llvm_ir(
+            "smoke.c",
+            "int main(void){return 1;}\n",
+        )
+        self.assertIn('source_filename = "smoke.c"', llvm_ir)
+        self.assertIn("ret i32 1", llvm_ir)
+
+    def test_aot_fixed_smoke_helpers_remain_cpython_callable(self) -> None:
+        self.assertEqual(
+            cc_driver._aot_smoke_llvm_ir(),
+            "define i32 @main() {\nentry:\n  ret i32 0\n}\n",
+        )
+        self.assertTrue(cc_driver._aot_is_smoke_source("int main(void){return 0;}\n"))
+        self.assertFalse(cc_driver._aot_is_smoke_source("int main(void){return 1;}\n"))
 
     def test_aot_smoke_compiler_rejects_failed_llvm_write_under_cpython(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -86,7 +108,7 @@ class CliTests(unittest.TestCase):
 
             with (
                 patch("xcc.cc_driver._aot_write_text_file", return_value=False) as write_text,
-                patch("subprocess.run") as run,
+                patch("xcc.cc_driver._aot_exec_argv") as exec_argv,
             ):
                 code = cc_driver._aot_compile_smoke_source_to_object(
                     5,
@@ -94,18 +116,19 @@ class CliTests(unittest.TestCase):
                 )
 
             self.assertEqual(code, 1)
-            write_text.assert_called_once_with(
-                str(output) + ".ll",
-                "define i32 @main() {\nentry:\n  ret i32 0\n}\n",
-            )
-            run.assert_not_called()
+            write_text.assert_called_once()
+            write_args = write_text.call_args.args
+            self.assertEqual(write_args[0], str(output) + ".ll")
+            self.assertIn("define i32 @main()", write_args[1])
+            self.assertIn("ret i32 0", write_args[1])
+            exec_argv.assert_not_called()
 
-    def test_aot_smoke_compiler_rejects_non_smoke_inputs_under_cpython(self) -> None:
+    def test_aot_smoke_compiler_rejects_invalid_inputs_under_cpython(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "smoke.c"
             output = root / "smoke.o"
-            source.write_text("int main(void){return 1;}\n", encoding="utf-8")
+            source.write_text("int main(void){\n", encoding="utf-8")
 
             with patch("subprocess.run") as run:
                 bad_args = cc_driver._aot_compile_smoke_source_to_object(

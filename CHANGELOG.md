@@ -145,6 +145,13 @@
   generic lowered Python body. The bootstrap slice now discovers the helper
   calls from `_aot_compile_smoke_source_to_object()` itself and emits ordinary
   tuple length/indexing, branching, and project helper calls.
+- Added a project-owned `_aot_compile_source_to_llvm_ir()` boundary for the
+  bootstrap smoke compiler. Under CPython it now runs the real frontend and
+  LLVM backend for the source text, while the native AOT path temporarily
+  specializes that helper as a smoke-only leaf that calls the existing smoke
+  source validator and fixed smoke IR helper. The smoke compiler body now calls
+  this source-to-LLVM boundary instead of directly validating the fixed source
+  and selecting fixed LLVM text.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation
