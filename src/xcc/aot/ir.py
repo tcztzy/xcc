@@ -119,7 +119,7 @@ class IrName:
 
 @dataclass(frozen=True)
 class IrBinary:
-    op: Literal["+", "-", "*"]
+    op: Literal["+", "-", "*", "//", "%", "<<", ">>", "|", "&", "^"]
     left: "IrExpr"
     right: "IrExpr"
     type: IrType

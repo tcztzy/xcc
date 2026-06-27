@@ -84,6 +84,139 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("define double @zero()", llvm_ir)
         self.assertIn("ret double 0.0", llvm_ir)
 
+    def test_emits_signed_integer_floor_division(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "div.py",
+            (),
+            (
+                IrFunction(
+                    "div",
+                    (IrParam("left", int64), IrParam("right", int64)),
+                    int64,
+                    (IrReturn(IrBinary("//", IrName("left", int64), IrName("right", int64), int64)),),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("sdiv i64 %left, %right", llvm_ir)
+        self.assertIn("srem i64 %left, %right", llvm_ir)
+        self.assertIn("select i1", llvm_ir)
+
+    def test_emits_unsigned_integer_floor_division_and_modulo(self) -> None:
+        uint64 = IrIntType(64, signed=False)
+        module = IrModule(
+            "unsigned_div.py",
+            (),
+            (
+                IrFunction(
+                    "ops",
+                    (IrParam("left", uint64), IrParam("right", uint64)),
+                    uint64,
+                    (
+                        IrAssign(
+                            "quotient",
+                            IrBinary(
+                                "//",
+                                IrName("left", uint64),
+                                IrName("right", uint64),
+                                uint64,
+                            ),
+                        ),
+                        IrReturn(
+                            IrBinary(
+                                "%",
+                                IrName("quotient", uint64),
+                                IrName("right", uint64),
+                                uint64,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("udiv i64 %left, %right", llvm_ir)
+        self.assertIn("urem i64 %udiv", llvm_ir)
+
+    def test_rejects_non_integer_floor_division_and_modulo_emission(self) -> None:
+        emitter = _Emitter(IrModule("bad.py", (), ()))
+        with self.assertRaises(AotError) as ctx:
+            emitter._emit_floor_div(
+                IrStringType(),
+                _EmittedValue("%left", IrStringType()),
+                _EmittedValue("%right", IrStringType()),
+                [],
+            )
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        with self.assertRaises(AotError) as ctx:
+            emitter._emit_modulo(
+                IrStringType(),
+                _EmittedValue("%left", IrStringType()),
+                _EmittedValue("%right", IrStringType()),
+                [],
+            )
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+
+    def test_emits_integer_modulo_shifts_and_bitwise_operations(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        cases = (
+            ("mod", "%", "srem i64 %left, %right"),
+            ("lshift", "<<", "shl i64 %left, %right"),
+            ("rshift", ">>", "ashr i64 %left, %right"),
+            ("or_", "|", "or i64 %left, %right"),
+            ("and_", "&", "and i64 %left, %right"),
+            ("xor_", "^", "xor i64 %left, %right"),
+        )
+        for name, op, expected in cases:
+            with self.subTest(op=op):
+                module = IrModule(
+                    f"{name}.py",
+                    (),
+                    (
+                        IrFunction(
+                            name,
+                            (IrParam("left", int64), IrParam("right", int64)),
+                            int64,
+                            (
+                                IrReturn(
+                                    IrBinary(
+                                        op,
+                                        IrName("left", int64),
+                                        IrName("right", int64),
+                                        int64,
+                                    )
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+
+                llvm_ir = emit_llvm_text(module)
+
+                self.assertIn(expected, llvm_ir)
+                if op == "%":
+                    self.assertIn("select i1", llvm_ir)
+
+    def test_emits_two_arg_integer_max_as_select(self) -> None:
+        module = lower_source_to_ir(
+            "int64 = int\n"
+            "def choose(left: int64, right: int64) -> int64:\n"
+            "    return max(left, right)\n",
+            filename="max.py",
+            entry="choose",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("icmp sge i64 %left, %right", llvm_ir)
+        self.assertIn("select i1", llvm_ir)
+        self.assertNotIn("@max", llvm_ir)
+
     def test_emits_string_return_with_puts_wrapper(self) -> None:
         module = lower_source_to_ir(
             'def message() -> str:\n    return "ok"\n',

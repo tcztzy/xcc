@@ -47,11 +47,13 @@ from xcc.aot.lower import (
     _collect_global_names,
     _dict_container_type_names,
     _dict_get_result_type,
+    _isinstance_target_names,
     _Lowerer,
     _llvm_api_call_return_type,
     _none_guard_name,
     _record_extends,
     _tuple_backed_container_element_name,
+    _tuple_subscript_result_type,
 )
 from xcc.aot.module import parse_source
 from xcc.aot.subset import check_subset
@@ -121,6 +123,757 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(returned, IrBinary)
         self.assertEqual(returned.op, "+")
         self.assertEqual(returned.left, IrName("left", function.params[0].type))
+
+    def test_lowers_integer_floor_division_return(self) -> None:
+        module = lower_source_to_ir(
+            "int64 = int\n"
+            "def div(left: int64, right: int64) -> int64:\n"
+            "    return left // right\n",
+            filename="div.py",
+            entry="div",
+        )
+        function = module.functions[0]
+        returned = function.body[0].value
+        self.assertIsInstance(returned, IrBinary)
+        self.assertEqual(returned.op, "//")
+        self.assertEqual(returned.left, IrName("left", function.params[0].type))
+
+    def test_lowers_integer_case_binary_operator_returns(self) -> None:
+        cases = (("%", "%"), ("<<", "<<"), (">>", ">>"), ("|", "|"), ("&", "&"), ("^", "^"))
+        for source_op, ir_op in cases:
+            with self.subTest(op=source_op):
+                module = lower_source_to_ir(
+                    "int64 = int\n"
+                    "def op(left: int64, right: int64) -> int64:\n"
+                    f"    return left {source_op} right\n",
+                    filename="op.py",
+                    entry="op",
+                )
+                returned = module.functions[0].body[0].value
+                self.assertIsInstance(returned, IrBinary)
+                self.assertEqual(returned.op, ir_op)
+
+    def test_lowers_try_finally_normal_path_as_ordered_branch(self) -> None:
+        module = lower_source_to_ir(
+            "def f() -> int:\n"
+            "    value: int = 1\n"
+            "    try:\n"
+            "        value = 2\n"
+            "    finally:\n"
+            "        value = 3\n"
+            "    return value\n",
+            filename="try_finally.py",
+            entry="f",
+        )
+        branch = module.functions[0].body[1]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertEqual(
+            branch.then_branch.statements,
+            (
+                IrAssign("value", IrConstInt(2, IrIntType(64, signed=True))),
+                IrAssign("value", IrConstInt(3, IrIntType(64, signed=True))),
+            ),
+        )
+        self.assertIsNone(branch.else_branch)
+
+    def test_lowers_codegen_error_try_except_normal_path(self) -> None:
+        module = lower_source_to_ir(
+            "class CodegenError(Exception):\n"
+            "    pass\n"
+            "def f(value: int) -> int:\n"
+            "    try:\n"
+            "        return value\n"
+            "    except CodegenError:\n"
+            "        return 0\n",
+            filename="try_codegen_error.py",
+            entry="f",
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertEqual(
+            branch.then_branch.statements,
+            (IrReturn(IrName("value", IrIntType(64, signed=True))),),
+        )
+
+    def test_lowers_exception_try_except_normal_path(self) -> None:
+        module = lower_source_to_ir(
+            "def f(value: int) -> int:\n"
+            "    try:\n"
+            "        return value\n"
+            "    except Exception:\n"
+            "        return 0\n",
+            filename="try_exception.py",
+            entry="f",
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertEqual(
+            branch.then_branch.statements,
+            (IrReturn(IrName("value", IrIntType(64, signed=True))),),
+        )
+
+    def test_lowers_two_arg_integer_min_max_as_ifexp(self) -> None:
+        for call, cmp_target in (("max", "__cmp_GtE"), ("min", "__cmp_LtE")):
+            with self.subTest(call=call):
+                module = lower_source_to_ir(
+                    "int64 = int\n"
+                    "def choose(left: int64, right: int64) -> int64:\n"
+                    f"    return {call}(left, right)\n",
+                    filename="minmax.py",
+                    entry="choose",
+                )
+                returned = module.functions[0].body[0].value
+                self.assertIsInstance(returned, IrCall)
+                self.assertEqual(returned.target, "__ifexp")
+                condition = returned.args[0]
+                self.assertIsInstance(condition, IrCall)
+                assert isinstance(condition, IrCall)
+                self.assertEqual(condition.target, cmp_target)
+
+    def test_lowers_isinstance_builtin_int_guard_for_minmax_arg(self) -> None:
+        module = lower_source_to_ir(
+            "def clamp(value: int | str) -> int:\n"
+            "    if isinstance(value, int):\n"
+            "        return max(value, 0)\n"
+            "    return 0\n",
+            filename="builtin_int_guard.py",
+            entry="clamp",
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.type, IrIntType(64, signed=True))
+        self.assertEqual(
+            returned.value.args[1],
+            IrName("value", IrIntType(64, signed=True)),
+        )
+
+    def test_lowers_bool_and_with_isinstance_record_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "class Expr:\n"
+            "    pass\n"
+            "@dataclass(frozen=True)\n"
+            "class UnaryExpr(Expr):\n"
+            "    op: str\n"
+            "def is_deref(expr: Expr) -> bool:\n"
+            "    return isinstance(expr, UnaryExpr) and expr.op == '*'\n",
+            filename="bool_and_narrow.py",
+            entry="is_deref",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertIsInstance(returned, IrCall)
+        assert isinstance(returned, IrCall)
+        narrowed_compare = returned.args[1]
+        self.assertIn("IrRecordType(name='UnaryExpr')", repr(narrowed_compare))
+
+    def test_lowers_bool_and_with_not_none_record_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "def same(initializer_type: Type | None, target_type: Type) -> bool:\n"
+            "    return initializer_type is not None and initializer_type.name == target_type.name\n",
+            filename="bool_and_not_none_narrow.py",
+            entry="same",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertIsInstance(returned, IrCall)
+        assert isinstance(returned, IrCall)
+        narrowed_compare = returned.args[1]
+        self.assertIn("IrRecordType(name='Type')", repr(narrowed_compare))
+
+    def test_lowers_bool_or_with_none_record_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "def mismatch(initializer_type: Type | None, target_type: Type) -> bool:\n"
+            "    return initializer_type is None or initializer_type.name != target_type.name\n",
+            filename="bool_or_none_narrow.py",
+            entry="mismatch",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertIsInstance(returned, IrCall)
+        assert isinstance(returned, IrCall)
+        narrowed_compare = returned.args[1]
+        self.assertIn("IrRecordType(name='Type')", repr(narrowed_compare))
+
+    def test_lowers_if_bool_and_isinstance_narrowing_in_body(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "class Expr:\n"
+            "    pass\n"
+            "@dataclass(frozen=True)\n"
+            "class UnaryExpr(Expr):\n"
+            "    op: str\n"
+            "    operand: Expr\n"
+            "def operand(expr: Expr) -> Expr:\n"
+            "    if isinstance(expr, UnaryExpr) and expr.op == '*':\n"
+            "        return expr.operand\n"
+            "    return expr\n",
+            filename="if_bool_and_narrow.py",
+            entry="operand",
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrGetField(IrName("expr", IrRecordType("UnaryExpr")), "operand", IrRecordType("Expr")),
+        )
+
+    def test_lowers_isinstance_attribute_guard_narrowing_in_body(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "class Expr:\n"
+            "    pass\n"
+            "@dataclass(frozen=True)\n"
+            "class Identifier(Expr):\n"
+            "    name: str\n"
+            "@dataclass(frozen=True)\n"
+            "class CallExpr:\n"
+            "    callee: Expr\n"
+            "def callee_name(expr: CallExpr) -> str:\n"
+            "    if isinstance(expr.callee, Identifier):\n"
+            "        return expr.callee.name\n"
+            "    return ''\n",
+            filename="isinstance_attribute_guard.py",
+            entry="callee_name",
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIn("IrRecordType(name='Identifier')", repr(returned.value))
+
+    def test_lowers_exiting_if_bool_or_none_guard_narrowing_after_body(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "    declarator_ops: tuple[str, ...]\n"
+            "def width(elem_type: Type | None) -> int:\n"
+            "    if elem_type is None or elem_type.declarator_ops:\n"
+            "        return 0\n"
+            "    if elem_type.name == 'char':\n"
+            "        return 1\n"
+            "    return 0\n",
+            filename="if_or_none_exit_narrow.py",
+            entry="width",
+        )
+        second_branch = module.functions[0].body[1]
+        self.assertIsInstance(second_branch, IrIf)
+        assert isinstance(second_branch, IrIf)
+        self.assertIn("IrRecordType(name='Type')", repr(second_branch.condition))
+
+    def test_lowers_exiting_if_negative_isinstance_guard_narrowing_after_body(self) -> None:
+        module = lower_source_to_ir(
+            "from typing import Any\n"
+            "def clamp(value: Any) -> int:\n"
+            "    if not isinstance(value, int):\n"
+            "        return 0\n"
+            "    return max(value, 0)\n",
+            filename="if_not_isinstance_exit_narrow.py",
+            entry="clamp",
+        )
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIn("IrIntType(bits=64, signed=True)", repr(returned.value))
+
+    def test_lowers_exiting_if_or_none_and_negative_isinstance_narrowings(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "from typing import Any\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "def clamp(type_: Type | None, value: Any) -> int:\n"
+            "    if type_ is None or not isinstance(value, int):\n"
+            "        return 0\n"
+            "    return max(value, 0)\n",
+            filename="if_or_multiple_exit_narrow.py",
+            entry="clamp",
+        )
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIn("IrIntType(bits=64, signed=True)", repr(returned.value))
+
+    def test_lowers_assert_isinstance_builtin_int_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "def clamp(value: int | str) -> int:\n"
+            "    assert isinstance(value, int)\n"
+            "    return max(value, 0)\n",
+            filename="assert_builtin_int.py",
+            entry="clamp",
+        )
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(
+            returned.value.args[1],
+            IrName("value", IrIntType(64, signed=True)),
+        )
+
+    def test_lowers_dict_items_for_tuple_for_target_types(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Box:\n"
+            "    values: dict[str, int]\n"
+            "def total(box: Box) -> int:\n"
+            "    result: int = 0\n"
+            "    for key, value in box.values.items():\n"
+            "        result = result + value\n"
+            "    return result\n",
+            filename="dict_items.py",
+            entry="total",
+        )
+        loop = module.functions[0].body[1]
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        self.assertEqual(loop.target, "(key, value)")
+        self.assertIn("value', type=IrIntType", repr(loop.body))
+
+    def test_lowers_zip_for_tuple_for_target_types(self) -> None:
+        module = lower_source_to_ir(
+            "def total(names: list[str], values: list[int]) -> int:\n"
+            "    result: int = 0\n"
+            "    for name, value in zip(names, values, strict=True):\n"
+            "        result = result + value\n"
+            "    return result\n",
+            filename="zip_loop.py",
+            entry="total",
+        )
+        loop = module.functions[0].body[1]
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        self.assertIn("target='__zip'", repr(loop.iterable))
+        self.assertIn("value', type=IrIntType", repr(loop.body))
+
+    def test_lowers_string_split_as_tuple_of_strings(self) -> None:
+        module = lower_source_to_ir(
+            "def parts(value: str) -> tuple[str, ...]:\n"
+            "    return value.split('.')\n",
+            filename="split.py",
+            entry="parts",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__str_split",
+                (IrName("value", IrStringType()), IrConstString(".")),
+                IrTupleType((IrStringType(),)),
+            ),
+        )
+
+    def test_lowers_string_find_as_int(self) -> None:
+        default_start = lower_source_to_ir(
+            "def quote(value: str) -> int:\n"
+            "    return value.find('\"')\n",
+            filename="find.py",
+            entry="quote",
+        )
+        returned = default_start.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__str_find",
+                (
+                    IrName("value", IrStringType()),
+                    IrConstString('"'),
+                    IrConstInt(0, IrIntType(64, signed=True)),
+                ),
+                IrIntType(64, signed=True),
+            ),
+        )
+        explicit_start = lower_source_to_ir(
+            "def quote(value: str, start: int) -> int:\n"
+            "    return value.find('\"', start)\n",
+            filename="find_start.py",
+            entry="quote",
+        )
+        returned = explicit_start.functions[0].body[0].value
+        self.assertIsInstance(returned, IrCall)
+        assert isinstance(returned, IrCall)
+        self.assertEqual(returned.target, "__str_find")
+        self.assertEqual(returned.args[2], IrName("start", IrIntType(64, signed=True)))
+
+    def test_lowers_chr_builtin_as_string(self) -> None:
+        module = lower_source_to_ir(
+            "def decoded(text: str) -> str:\n"
+            "    return chr(int(text, 16))\n",
+            filename="chr_builtin.py",
+            entry="decoded",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__chr",
+                (
+                    IrCall(
+                        "__int_parse",
+                        (
+                            IrName("text", IrStringType()),
+                            IrConstInt(16, IrIntType(64, signed=True)),
+                        ),
+                        IrIntType(64, signed=True),
+                    ),
+                ),
+                IrStringType(),
+            ),
+        )
+
+    def test_lowers_float_builtin_and_fromhex_as_float(self) -> None:
+        parsed = lower_source_to_ir(
+            "def parsed(value: int) -> float:\n"
+            "    return float(value)\n",
+            filename="float_builtin.py",
+            entry="parsed",
+        )
+        returned = parsed.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "__float",
+                (IrName("value", IrIntType(64, signed=True)),),
+                IrFloatType(),
+            ),
+        )
+        fromhex = lower_source_to_ir(
+            "def parsed(text: str) -> float:\n"
+            "    return float.fromhex(text)\n",
+            filename="float_fromhex.py",
+            entry="parsed",
+        )
+        returned = fromhex.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall("__float_fromhex", (IrName("text", IrStringType()),), IrFloatType()),
+        )
+
+    def test_lowers_staticmethod_called_through_self_without_receiver_arg(self) -> None:
+        module = lower_source_to_ir(
+            "class Gen:\n"
+            "    @staticmethod\n"
+            "    def encode(body: str, width: int) -> str:\n"
+            "        return body\n"
+            "    def use(self, body: str) -> str:\n"
+            "        return self.encode(body, 2)\n",
+            filename="staticmethod_call.py",
+            entry="Gen.use",
+        )
+        function = next(function for function in module.functions if function.name == "Gen.use")
+        returned = function.body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "Gen.encode",
+                (
+                    IrName("body", IrStringType()),
+                    IrConstInt(2, IrIntType(64, signed=True)),
+                ),
+                IrStringType(),
+            ),
+        )
+
+    def test_lowers_ifexp_not_none_attribute_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Symbol:\n"
+            "    name: str\n"
+            "@dataclass(frozen=True)\n"
+            "class Gen:\n"
+            "    sym: Symbol | None\n"
+            "    def get(self) -> str:\n"
+            "        return self.sym.name if self.sym is not None else ''\n",
+            filename="ifexp_not_none_attr.py",
+            entry="Gen.get",
+        )
+        function = next(function for function in module.functions if function.name == "Gen.get")
+        returned = function.body[0].value
+        self.assertIsInstance(returned, IrCall)
+        assert isinstance(returned, IrCall)
+        self.assertIn("IrRecordType(name='Symbol')", repr(returned.args[1]))
+
+    def test_lowers_common_field_access_on_record_union(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Left:\n"
+            "    value: int\n"
+            "@dataclass(frozen=True)\n"
+            "class Right:\n"
+            "    value: int\n"
+            "def read(expr: Left | Right) -> int:\n"
+            "    return expr.value\n",
+            filename="union_common_field.py",
+            entry="read",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(
+            returned,
+            IrGetField(
+                IrName("expr", IrRecordType("Left | Right")),
+                "value",
+                IrIntType(64, signed=True),
+            ),
+        )
+
+    def test_lowers_nested_field_receiver_without_outer_expected_type(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Item:\n"
+            "    designators: list[str]\n"
+            "@dataclass(frozen=True)\n"
+            "class Init:\n"
+            "    items: list[Item]\n"
+            "def empty(init: Init) -> bool:\n"
+            "    return not init.items[0].designators\n",
+            filename="nested_field.py",
+            entry="empty",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertIn("field='designators'", repr(returned))
+        self.assertIn("IrRecordType(name='Item')", repr(returned))
+
+    def test_infers_subscript_assignment_item_type(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Item:\n"
+            "    names: list[str]\n"
+            "@dataclass(frozen=True)\n"
+            "class Box:\n"
+            "    items: list[Item]\n"
+            "def has_names(box: Box) -> bool:\n"
+            "    item = box.items[0]\n"
+            "    return bool(item.names)\n",
+            filename="subscript_assignment.py",
+            entry="has_names",
+        )
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(assigned.value.type, IrRecordType("Item"))
+
+    def test_lowers_top_level_optional_tuple_return(self) -> None:
+        module = lower_source_to_ir(
+            "def maybe(flag: bool) -> tuple[int, str] | None:\n"
+            "    if flag:\n"
+            "        return 0, 'x'\n"
+            "    return None\n",
+            filename="optional_tuple.py",
+            entry="maybe",
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrTuple(
+                (
+                    IrConstInt(0, IrIntType(64, signed=True)),
+                    IrConstString("x"),
+                ),
+                IrTupleType((IrIntType(64, signed=True), IrStringType())),
+            ),
+        )
+
+    def test_lowers_top_level_optional_tuple_backed_container(self) -> None:
+        module = lower_source_to_ir(
+            "def second(values: list[tuple[int, str]] | None) -> str:\n"
+            "    if values is None:\n"
+            "        return ''\n"
+            "    return values[0][1]\n",
+            filename="optional_list.py",
+            entry="second",
+        )
+        self.assertEqual(
+            module.functions[0].params[0].type,
+            IrTupleType(
+                (
+                    IrTupleType(
+                        (
+                            IrIntType(64, signed=True),
+                            IrStringType(),
+                        )
+                    ),
+                )
+            ),
+        )
+        returned = module.functions[0].body[1].value
+        self.assertEqual(returned.type, IrStringType())
+
+    def test_infers_optional_tuple_backed_method_call_assignment_type(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Member:\n"
+            "    type_: str\n"
+            "class Gen:\n"
+            "    def member_path(self) -> list[tuple[str, int, Member]] | None:\n"
+            "        return None\n"
+            "    def use(self) -> str:\n"
+            "        path = self.member_path()\n"
+            "        if path is None:\n"
+            "            return ''\n"
+            "        return path[-1][2].type_\n",
+            filename="method_optional_container.py",
+            entry="Gen.use",
+        )
+        function = next(function for function in module.functions if function.name == "Gen.use")
+        returned = function.body[2].value
+        self.assertEqual(returned.type, IrStringType())
+
+    def test_lowers_list_literal_with_tuple_backed_expected_item_type(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Member:\n"
+            "    type_: str\n"
+            "def consume(path: list[tuple[str, int, Member]]) -> int:\n"
+            "    return 0\n"
+            "def use(name: str, first: Member) -> int:\n"
+            "    return consume([(name, 0, first)])\n",
+            filename="list_literal_tuple_item.py",
+            entry="use",
+        )
+        function = next(function for function in module.functions if function.name == "use")
+        returned = function.body[0].value
+        self.assertIsInstance(returned, IrCall)
+        assert isinstance(returned, IrCall)
+        self.assertEqual(
+            returned.args[0].type,
+            IrTupleType(
+                (
+                    IrTupleType(
+                        (
+                            IrStringType(),
+                            IrIntType(64, signed=True),
+                            IrRecordType("Member"),
+                        )
+                    ),
+                )
+            ),
+        )
+
+    def test_lowers_listcomp_and_append_with_tuple_backed_item_type(self) -> None:
+        module = lower_source_to_ir(
+            "def values(body: str) -> list[int]:\n"
+            "    result = [1 for ch in body]\n"
+            "    result.append(0)\n"
+            "    return result\n",
+            filename="listcomp_append.py",
+            entry="values",
+        )
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(assigned.value.type, IrTupleType((IrIntType(64, signed=True),)))
+        append = module.functions[0].body[1].value
+        self.assertIsInstance(append, IrCall)
+        assert isinstance(append, IrCall)
+        self.assertEqual(append.args[1], IrConstInt(0, IrIntType(64, signed=True)))
+
+    def test_lowers_empty_container_constructor_with_tuple_backed_expected_type(self) -> None:
+        module = lower_source_to_ir(
+            "def make_seen() -> set[str]:\n"
+            "    seen: set[str] = set()\n"
+            "    return seen\n",
+            filename="empty_set_constructor.py",
+            entry="make_seen",
+        )
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(assigned.value, IrTuple((), IrTupleType((IrStringType(),))))
+
+    def test_lowers_set_add_with_tuple_backed_item_type(self) -> None:
+        module = lower_source_to_ir(
+            "def add_name(name: str) -> set[str]:\n"
+            "    seen: set[str] = set()\n"
+            "    seen.add(name)\n"
+            "    return seen\n",
+            filename="set_add.py",
+            entry="add_name",
+        )
+        add = module.functions[0].body[1].value
+        self.assertIsInstance(add, IrCall)
+        assert isinstance(add, IrCall)
+        self.assertEqual(add.args[1], IrName("name", IrStringType()))
+
+    def test_lowers_tuple_constructor_as_tuple_backed_identity(self) -> None:
+        module = lower_source_to_ir(
+            "def freeze(values: list[int]) -> tuple[int, ...]:\n"
+            "    return tuple(values)\n",
+            filename="tuple_constructor.py",
+            entry="freeze",
+        )
+        returned = module.functions[0].body[0].value
+        self.assertEqual(returned, IrName("values", IrTupleType((IrIntType(64, signed=True),))))
+
+    def test_lowers_range_arguments_as_int_tuple_iterable(self) -> None:
+        module = lower_source_to_ir(
+            "def sum_to(length: int) -> int:\n"
+            "    total = 0\n"
+            "    for index in range(max(length, 0)):\n"
+            "        total += index\n"
+            "    return total\n",
+            filename="range_max.py",
+            entry="sum_to",
+        )
+        loop = module.functions[0].body[1]
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        self.assertEqual(loop.iterable.type, IrTupleType((IrIntType(64, signed=True),)))
+        self.assertEqual(loop.target, "index")
+
+    def test_infers_minmax_assignment_type_independent_of_function_return(self) -> None:
+        module = lower_source_to_ir(
+            "from typing import Any\n"
+            "def positive(value: Any) -> bool:\n"
+            "    if not isinstance(value, int):\n"
+            "        return False\n"
+            "    length = max(value, 0)\n"
+            "    return length > 0\n",
+            filename="minmax_assignment.py",
+            entry="positive",
+        )
+        assigned = module.functions[0].body[1]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(assigned.value.type, IrIntType(64, signed=True))
 
     def test_lowers_only_requested_functions(self) -> None:
         module = lower_source_to_ir(
@@ -388,6 +1141,19 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrName("value", IrIntType(64, signed=True)),
         )
 
+    def test_infers_negative_int_literal_assignment_type(self) -> None:
+        module = lower_source_to_ir(
+            "def f() -> tuple[int, ...]:\n"
+            "    value = -1\n"
+            "    return (value,)\n",
+            filename="negative_assignment.py",
+            entry="f",
+        )
+        self.assertEqual(
+            module.functions[0].body[0],
+            IrAssign("value", IrConstInt(-1, IrIntType(64, signed=True))),
+        )
+
     def test_lowers_unary_int_invert_expression(self) -> None:
         module = lower_source_to_ir(
             "def invert(value: int) -> int:\n"
@@ -551,6 +1317,87 @@ class AotScalarLoweringTests(unittest.TestCase):
                 IrStringType(),
             ),
         )
+
+    def test_lowers_isinstance_tuple_guarded_common_record_field(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "class Stmt:\n"
+            "    pass\n"
+            "@dataclass(frozen=True)\n"
+            "class WhileStmt(Stmt):\n"
+            "    body: list[str]\n"
+            "@dataclass(frozen=True)\n"
+            "class LabelStmt(Stmt):\n"
+            "    body: list[str]\n"
+            "@dataclass(frozen=True)\n"
+            "class ReturnStmt(Stmt):\n"
+            "    value: str\n"
+            "def body_len(stmt: Stmt) -> int:\n"
+            "    if isinstance(stmt, (WhileStmt, LabelStmt)):\n"
+            "        return len(stmt.body)\n"
+            "    return 0\n",
+            filename="isinstance_tuple_if.py",
+        )
+        branch = module.functions[0].body[0]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        returned = branch.then_branch.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "len",
+                (
+                    IrGetField(
+                        IrName("stmt", IrRecordType("WhileStmt | LabelStmt")),
+                        "body",
+                        IrTupleType((IrStringType(),)),
+                    ),
+                ),
+                IrIntType(64, signed=True),
+            ),
+        )
+
+    def test_lowers_for_tuple_target_with_underscore_skip(self) -> None:
+        module = lower_source_to_ir(
+            "def second(pairs: list[tuple[int, int]]) -> int:\n"
+            "    for _, value in pairs:\n"
+            "        return value\n"
+            "    return 0\n",
+            filename="for_tuple_underscore.py",
+        )
+        loop = module.functions[0].body[0]
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        returned = loop.body.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(returned.value, IrName("value", IrIntType(64, signed=True)))
+
+    def test_rejects_for_tuple_target_shape_and_non_name_element(self) -> None:
+        cases = (
+            (
+                "shape",
+                "def bad(pairs: list[tuple[int, int, int]]) -> None:\n"
+                "    for left, right in pairs:\n"
+                "        pass\n",
+            ),
+            (
+                "non_name",
+                "from dataclasses import dataclass\n"
+                "@dataclass(frozen=True)\n"
+                "class Box:\n"
+                "    x: int\n"
+                "def bad(pairs: list[tuple[int, int]], box: Box) -> None:\n"
+                "    for box.x, right in pairs:\n"
+                "        pass\n",
+            ),
+        )
+        for name, source in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(AotError):
+                    lower_source_to_ir(source, filename=f"for_tuple_{name}.py")
 
     def test_lowers_truthy_optional_instance_field_guard(self) -> None:
         module = lower_source_to_ir(
@@ -1346,6 +2193,61 @@ class AotScalarLoweringTests(unittest.TestCase):
                 "XCC-AOT-LOWER-0003",
             ),
             ("def f(value: int) -> str:\n    return value.encode()\n", "XCC-AOT-LOWER-0003"),
+            (
+                "def f(left: str, right: str) -> str:\n"
+                "    return left // right\n",
+                "XCC-AOT-LOWER-0002",
+            ),
+            (
+                "def f(value: int) -> str:\n"
+                "    return chr(value, value)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            ("def f() -> float:\n    return float()\n", "XCC-AOT-LOWER-0003"),
+            ("def f() -> float:\n    return float.fromhex()\n", "XCC-AOT-LOWER-0003"),
+            ("def f() -> int:\n    return len(range(start=1))\n", "XCC-AOT-LOWER-0003"),
+            (
+                "def f(values: list[int]) -> list[int]:\n"
+                "    return list(values)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            (
+                "def f(left: int, right: int) -> int:\n"
+                "    return max(left, right, key=int)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            (
+                "from typing import Any\n"
+                "def f(left: str, right: str) -> Any:\n"
+                "    return max(left, right)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            ("def f(value: str) -> list[str]:\n    return value.split()\n", "XCC-AOT-LOWER-0003"),
+            (
+                "def f(value: str) -> int:\n"
+                "    return value.find('x', 0, 1)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            ("def f(values: list[str]) -> list[str]:\n    return values.split(',')\n", "XCC-AOT-LOWER-0003"),
+            ("def f(values: list[str]) -> int:\n    return values.find('x')\n", "XCC-AOT-LOWER-0003"),
+            ("def f(values: list[str]) -> str:\n    return values.encode()\n", "XCC-AOT-LOWER-0003"),
+            ("def f() -> None:\n    for item in zip():\n        pass\n", "XCC-AOT-LOWER-0003"),
+            (
+                "def f(values: list[int]) -> None:\n"
+                "    for item in zip(values, strict=False):\n"
+                "        pass\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            (
+                "def f(values: dict[str, int]) -> list[tuple[str, int]]:\n"
+                "    return values.items(1)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            (
+                "def f(values: list[int]) -> list[int]:\n"
+                "    return values.items()\n",
+                "XCC-AOT-LOWER-0003",
+            ),
         )
         for source, code in cases:
             with self.subTest(source=source):
@@ -1417,6 +2319,18 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer.lower_function(unsupported_dynamic_call, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
 
+        with self.assertRaises(AotError) as ctx:
+            lowerer._lower_statement(ast.parse("del value\n").body[0], {}, IrNoneType())
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
+
+        with self.assertRaises(AotError) as ctx:
+            lowerer._lower_expr(
+                ast.parse("lambda: 1", mode="eval").body,
+                {},
+                IrRecordType("object"),
+            )
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
+
         missing_kwonly = ast.parse("def f(*, flag) -> int:\n    return 1\n").body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(missing_kwonly, owner=None)
@@ -1440,7 +2354,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             "def f() -> int:\n"
             "    try:\n"
             "        return 1\n"
-            "    except Exception:\n"
+            "    except ValueError:\n"
             "        return 0\n"
         ).body[0]
         with self.assertRaises(AotError) as ctx:
@@ -1477,13 +2391,34 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrTupleType((IrRecordType("Node"),)),
         )
         self.assertEqual(lowerer._aot_type_to_ir_type(AotType("float")), IrFloatType())
+        self.assertEqual(lowerer._aot_type_to_ir_type(AotType("Any")), IrRecordType("object"))
+        self.assertEqual(
+            lowerer._aot_type_to_ir_type(AotType("list[tuple[str, int]]")),
+            IrTupleType((IrTupleType((IrStringType(), IrIntType(64, signed=True))),)),
+        )
         self.assertEqual(
             lowerer._aot_type_to_ir_type(AotType("tuple[TypeOp, ...]")),
-            IrTupleType(()),
+            IrTupleType((IrTupleType((IrStringType(), IrRecordType("object"))),)),
+        )
+        self.assertEqual(
+            lowerer._aot_type_to_ir_type(AotType("FunctionParams")),
+            IrTupleType((IrRecordType("object"), IrBoolType())),
+        )
+        self.assertEqual(
+            lowerer._aot_type_to_ir_type(AotType("TypeOp")),
+            IrTupleType((IrStringType(), IrRecordType("object"))),
+        )
+        self.assertEqual(
+            lowerer._type_name_to_ir_type("FunctionParams", ast.Pass()),
+            IrTupleType((IrRecordType("object"), IrBoolType())),
+        )
+        self.assertEqual(
+            lowerer._type_name_to_ir_type("TypeOp", ast.Pass()),
+            IrTupleType((IrStringType(), IrRecordType("object"))),
         )
         self.assertEqual(
             lowerer._aot_type_to_ir_type(AotType("dict[str, TypeOp]")),
-            IrTupleType(()),
+            IrTupleType((IrStringType(), IrTupleType((IrStringType(), IrRecordType("object"))))),
         )
         self.assertIsNone(lowerer._optional_record_inner(IrIntType(64, signed=True)))
         self.assertEqual(lowerer._aot_type_to_ir_type(AotType("NoReturn")), IrNoneType())
@@ -1493,6 +2428,29 @@ class AotScalarLoweringTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             lowerer._aot_type_to_ir_type(AotType("object"))
         self.assertEqual(ctx.exception.diagnostics[0].message, "Unsupported lowered type: object")
+
+    def test_lowers_any_annotations_as_opaque_object(self) -> None:
+        module = lower_source_to_ir(
+            "from typing import Any\n"
+            "def echo(value: Any) -> Any:\n"
+            "    return value\n",
+            filename="any.py",
+            entry="echo",
+        )
+        function = module.functions[0]
+        self.assertEqual(function.params[0].type, IrRecordType("object"))
+        self.assertEqual(function.return_type, IrRecordType("object"))
+
+    def test_lowers_bytes_annotations_as_string_type(self) -> None:
+        module = lower_source_to_ir(
+            "def echo(value: bytes) -> bytes:\n"
+            "    return value\n",
+            filename="bytes.py",
+            entry="echo",
+        )
+        function = module.functions[0]
+        self.assertEqual(function.params[0].type, IrStringType())
+        self.assertEqual(function.return_type, IrStringType())
 
     def test_direct_lowerer_narrowing_helpers_cover_edge_inputs(self) -> None:
         class_types = {
@@ -1523,6 +2481,25 @@ class AotScalarLoweringTests(unittest.TestCase):
                 {"value": IrIntType(64, signed=True)},
             )
         )
+        self.assertIsNone(
+            lowerer._isinstance_guard_narrowing(
+                ast.parse("isinstance(value, (Child, 1))", mode="eval").body,
+                {"value": IrRecordType("object")},
+            )
+        )
+        self.assertEqual(
+            lowerer._isinstance_guard_narrowing(
+                ast.parse("isinstance(value, (Child, Base))", mode="eval").body,
+                {"value": IrRecordType("object")},
+            ),
+            ("value", IrRecordType("Child | Base")),
+        )
+        self.assertEqual(
+            _isinstance_target_names(ast.parse("(Child, Base)", mode="eval").body),
+            ("Child", "Base"),
+        )
+        self.assertIsNone(_isinstance_target_names(ast.parse("(Child, 1)", mode="eval").body))
+        self.assertIsNone(_isinstance_target_names(ast.parse("factory()", mode="eval").body))
 
         self.assertIsNone(lowerer._truthy_optional_record_narrowing(ast.Constant(True), {}))
         self.assertIsNone(
@@ -1557,6 +2534,12 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsNone(
             lowerer._not_none_guard_narrowing(
                 ast.parse("value is not None", mode="eval").body,
+                {"value": IrIntType(64, signed=True)},
+            )
+        )
+        self.assertIsNone(
+            lowerer._none_bool_op_narrowing(
+                ast.parse("value is None", mode="eval").body,
                 {"value": IrIntType(64, signed=True)},
             )
         )
@@ -1665,11 +2648,71 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer._infer_assignment_expr_type(ast.Constant(1.5), {}, fallback),
             fallback,
         )
+        self.assertEqual(
+            lowerer._infer_assignment_expr_type(
+                ast.parse("missing[0]", mode="eval").body,
+                {},
+                fallback,
+            ),
+            fallback,
+        )
         mixed_ifexp = ast.parse("1 if flag else 'x'").body[0].value
         self.assertEqual(
             lowerer._infer_assignment_expr_type(mixed_ifexp, {"flag": IrBoolType()}, fallback),
             fallback,
         )
+        fixed_tuple_type = IrTupleType((IrStringType(), IrIntType(64, signed=True)))
+        self.assertEqual(
+            _tuple_subscript_result_type(ast.Name("index", ast.Load()), fixed_tuple_type),
+            fallback,
+        )
+        self.assertEqual(
+            _tuple_subscript_result_type(ast.parse("-1", mode="eval").body, fixed_tuple_type),
+            IrIntType(64, signed=True),
+        )
+        self.assertEqual(
+            _tuple_subscript_result_type(ast.Constant(8), fixed_tuple_type),
+            fallback,
+        )
+        self.assertIsNone(lowerer._tuple_backed_container_element_type("int", ast.Pass()))
+        self.assertEqual(
+            lowerer._tuple_backed_container_types("tuple[str, object]", ast.Pass()),
+            (),
+        )
+        self.assertEqual(
+            lowerer._tuple_backed_container_types("dict[str, object]", ast.Pass()),
+            (),
+        )
+        self.assertEqual(
+            lowerer._tuple_backed_container_types("list[object]", ast.Pass()),
+            (),
+        )
+        self.assertIsNone(lowerer._optional_container_type("object", ast.Pass()))
+        self.assertIsNone(_tuple_backed_container_element_name("list[...]"))
+        self.assertIsNone(_tuple_backed_container_element_name("list["))
+        self.assertIsNone(_dict_container_type_names("dict[str]"))
+
+    def test_direct_lowerer_covers_record_union_field_edges(self) -> None:
+        lowerer = _Lowerer(
+            "union.py",
+            {
+                "Left": AotClassInfo("Left", {"value": AotType("str")}),
+                "Right": AotClassInfo("Right", {"value": AotType("int")}),
+                "Empty": AotClassInfo("Empty", {}),
+            },
+        )
+        self.assertIsNone(
+            lowerer._record_union_field_type("Left | None", "value", ast.Pass())
+        )
+        self.assertIsNone(
+            lowerer._record_union_field_type("Left | Missing", "value", ast.Pass())
+        )
+        self.assertIsNone(
+            lowerer._record_union_field_type("Left | Empty", "value", ast.Pass())
+        )
+        with self.assertRaises(AotError) as ctx:
+            lowerer._record_union_field_type("Left | Right", "value", ast.Pass())
+        self.assertEqual(ctx.exception.diagnostics[0].message, "Ambiguous union field access: value")
 
     def test_lowers_dataclass_record_layout_and_field_read(self) -> None:
         source = (

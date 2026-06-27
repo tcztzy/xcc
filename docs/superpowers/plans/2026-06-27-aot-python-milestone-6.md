@@ -911,6 +911,23 @@ signatures. The broader source-to-LLVM unchecked slice now advances past
 `_eval_case_val` unary operators, and optional `self._func_sym` /
 `self._sema.file_scope` guards; the next observed blocker is `left // right` in
 `codegen.py`.
+AOT lowering now handles the existing integer floor-division/modulo and
+bitwise operator shapes, normal-path `try` handlers, integer `min`/`max`,
+`range`, `chr`, `float`, `float.fromhex`, `str.find`, `str.split`,
+`zip(..., strict=True)`, tuple-backed `dict.items()`, empty container
+constructors, tuple identity conversion, tuple-backed `add`/`append`, expected
+types for list/generator comprehensions, optional tuple-backed top-level
+unions, attribute-aware `isinstance` narrowing, `if` expression `is not None`
+narrowing, exiting `not isinstance` narrowing, and common field access over
+record unions. Codegen has also been reshaped away from several bootstrap-hostile
+source patterns while staying CPython-valid: small local dict dispatch,
+generator `max`, nested callback key functions, starred list literals,
+and an untyped optional symbol lookup. AOT lowering now supports tuple-of-class
+`isinstance` narrowing for common record-field access, so codegen can keep the
+ordinary CPython form where ruff expects it.
+The broader source-to-LLVM unchecked slice now advances past the previous
+`left // right` blocker; the next observed blocker is the existing atomic RMW
+opcode mapping dictionary at `src/xcc/codegen.py:2508`.
 The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with

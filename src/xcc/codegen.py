@@ -105,26 +105,36 @@ def llvm_backend_error(filename: str, message: str) -> CodegenError:
 
 # ── code generator ──────────────────────────────────────────
 
-_BASE_SIZES = {
-    "int": 4,
-    "unsigned int": 4,
-    "long": 8,
-    "unsigned long": 8,
-    "long long": 8,
-    "unsigned long long": 8,
-    "char": 1,
-    "unsigned char": 1,
-    "signed char": 1,
-    "_Bool": 1,
-    "bool": 1,
-    "short": 2,
-    "unsigned short": 2,
-    "float": 4,
-    "double": 8,
-    "long double": 16,
-    "__builtin_va_list": 8,
-    "void": 0,
-}
+
+def _base_size(name: str) -> int:
+    if name in ("int", "unsigned int", "float"):
+        return 4
+    if name in ("long", "unsigned long", "long long", "unsigned long long"):
+        return 8
+    if name in ("char", "unsigned char", "signed char", "_Bool", "bool"):
+        return 1
+    if name in ("short", "unsigned short"):
+        return 2
+    if name == "double":
+        return 8
+    if name == "long double":
+        return 16
+    if name == "__builtin_va_list":
+        return 8
+    if name == "void":
+        return 0
+    return 4
+
+
+def _merge_qualifiers(left: tuple[str, ...], right: tuple[str, ...]) -> tuple[str, ...]:
+    merged: tuple[str, ...] = ()
+    for qualifier in left:
+        if qualifier not in merged:
+            merged = merged + (qualifier,)
+    for qualifier in right:
+        if qualifier not in merged:
+            merged = merged + (qualifier,)
+    return merged
 
 
 @dataclass
@@ -240,29 +250,23 @@ class _LLVMGen:
             return self._struct_type(name)
         if name == "__builtin_va_list":
             return c.PointerType(c.Int8Type(), 0)
-        m = {
-            "int": c.Int32Type,
-            "unsigned int": c.Int32Type,
-            "long": c.Int64Type,
-            "unsigned long": c.Int64Type,
-            "long long": c.Int64Type,
-            "unsigned long long": c.Int64Type,
-            "char": c.Int8Type,
-            "unsigned char": c.Int8Type,
-            "signed char": c.Int8Type,
-            "_Bool": c.Int1Type,
-            "bool": c.Int1Type,
-            "short": c.Int16Type,
-            "unsigned short": c.Int16Type,
-            "float": c.FloatType,
-            "double": c.DoubleType,
-            "long double": c.DoubleType,
-            "void": c.VoidType,
-        }
-        fn = m.get(name)
-        if fn is None:
+        if name in ("int", "unsigned int"):
             return c.Int32Type()
-        return fn()
+        if name in ("long", "unsigned long", "long long", "unsigned long long"):
+            return c.Int64Type()
+        if name in ("char", "unsigned char", "signed char"):
+            return c.Int8Type()
+        if name in ("_Bool", "bool"):
+            return c.Int1Type()
+        if name in ("short", "unsigned short"):
+            return c.Int16Type()
+        if name == "float":
+            return c.FloatType()
+        if name in ("double", "long double"):
+            return c.DoubleType()
+        if name == "void":
+            return c.VoidType()
+        return c.Int32Type()
 
     @staticmethod
     def _is_unsigned_integer_c_type(type_: Type | None) -> bool:
@@ -413,7 +417,9 @@ class _LLVMGen:
             ):
                 nested = self._member_path(member.type_.name, member_name)
                 if nested is not None:
-                    return [(record_name, i, member), *nested]
+                    path: list[tuple[str, int, RecordMemberInfo]] = [(record_name, i, member)]
+                    path.extend(nested)
+                    return path
         return None
 
     def _ptr_type(self, t: Type) -> int:
@@ -425,7 +431,7 @@ class _LLVMGen:
                 return self._record_size(t.name)
             if t.name.startswith("union "):
                 return self._union_size(t.name)
-            return _BASE_SIZES.get(t.name, 4)
+            return _base_size(t.name)
         for kind, value in t.declarator_ops:
             if kind == "ptr":
                 return 8
@@ -433,7 +439,7 @@ class _LLVMGen:
                 assert isinstance(value, int)
                 elem_type = Type(t.name, declarator_ops=t.declarator_ops[1:])
                 return max(value, 0) * self._type_size(elem_type)
-        return _BASE_SIZES.get(t.name, 4)
+        return _base_size(t.name)
 
     def _type_align(self, t: Type) -> int:
         if not t.declarator_ops:
@@ -441,8 +447,13 @@ class _LLVMGen:
                 members = self._sema.record_definitions.get(t.name)
                 if not members:
                     return 1
-                return max((self._member_align(member) for member in members), default=1)
-            return min(_BASE_SIZES.get(t.name, 4), 8)
+                max_align = 1
+                for member in members:
+                    member_align = self._member_align(member)
+                    if member_align > max_align:
+                        max_align = member_align
+                return max_align
+            return min(_base_size(t.name), 8)
         kind, _ = t.declarator_ops[0]
         if kind == "ptr":
             return 8
@@ -480,17 +491,51 @@ class _LLVMGen:
         members = self._sema.record_definitions.get(record_name)
         if not members:
             return 0
-        size = max((self._type_size(member.type_) for member in members), default=0)
-        align = max((self._member_align(member) for member in members), default=1)
+        size = 0
+        align = 1
+        for member in members:
+            member_size = self._type_size(member.type_)
+            if member_size > size:
+                size = member_size
+            member_align = self._member_align(member)
+            if member_align > align:
+                align = member_align
         return self._align_to(size, align)
 
     def _union_storage_member(self, members: tuple[RecordMemberInfo, ...]) -> RecordMemberInfo:
-        def key(member: RecordMemberInfo) -> tuple[int, int, int]:
+        best = members[0]
+        best_type = best.type_
+        best_size = self._type_size(best_type)
+        best_is_record = (
+            1
+            if not best_type.declarator_ops and best_type.name.startswith(("struct ", "union "))
+            else 0
+        )
+        best_align = self._member_align(best)
+        for member in members[1:]:
             type_ = member.type_
-            is_record = not type_.declarator_ops and type_.name.startswith(("struct ", "union "))
-            return (self._type_size(type_), 1 if is_record else 0, self._member_align(member))
-
-        return max(members, key=key)
+            member_size = self._type_size(type_)
+            member_is_record = (
+                1
+                if not type_.declarator_ops and type_.name.startswith(("struct ", "union "))
+                else 0
+            )
+            member_align = self._member_align(member)
+            better = member_size > best_size
+            if member_size == best_size and member_is_record > best_is_record:
+                better = True
+            if (
+                member_size == best_size
+                and member_is_record == best_is_record
+                and member_align > best_align
+            ):
+                better = True
+            if better:
+                best = member
+                best_size = member_size
+                best_is_record = member_is_record
+                best_align = member_align
+        return best
 
     # ── module ───────────────────────────────────────────────
 
@@ -1633,7 +1678,7 @@ class _LLVMGen:
 
     @staticmethod
     def _encode_string_units(body: str, width: int) -> bytes:
-        units = [ord(ch) for ch in body]
+        units: list[int] = [ord(ch) for ch in body]
         units.append(0)
         return b"".join(unit.to_bytes(width, "little", signed=False) for unit in units)
 
@@ -1656,16 +1701,13 @@ class _LLVMGen:
         elem_type = type_.element_type()
         if elem_type is None or elem_type.declarator_ops:
             return None
-        widths = {
-            "char": 1,
-            "signed char": 1,
-            "unsigned char": 1,
-            "short": 2,
-            "unsigned short": 2,
-            "int": 4,
-            "unsigned int": 4,
-        }
-        return widths.get(elem_type.name)
+        if elem_type.name in ("char", "signed char", "unsigned char"):
+            return 1
+        if elem_type.name in ("short", "unsigned short"):
+            return 2
+        if elem_type.name in ("int", "unsigned int"):
+            return 4
+        return None
 
     def _is_string_array_initializer(self, expr: StringLiteral, target_type: Type) -> bool:
         width = self._string_array_element_width(target_type)
@@ -3502,7 +3544,7 @@ class _LLVMGen:
         elif self._sema.file_scope is not None:
             typedef_type = self._sema.file_scope.lookup_typedef(ts.name)
             if typedef_type is not None:
-                qualifiers = tuple(dict.fromkeys((*typedef_type.qualifiers, *ts.qualifiers)))
+                qualifiers = _merge_qualifiers(typedef_type.qualifiers, ts.qualifiers)
                 return Type(
                     typedef_type.name,
                     declarator_ops=resolved_ops + typedef_type.declarator_ops,
@@ -3587,7 +3629,9 @@ class _LLVMGen:
                 return
             if stmt.name and stmt.name not in seen:
                 seen.add(stmt.name)
-                sym = self._func_sym.locals.get(stmt.name) if self._func_sym is not None else None
+                sym: VarSymbol | EnumConstSymbol | None = (
+                    self._func_sym.locals.get(stmt.name) if self._func_sym is not None else None
+                )
                 if isinstance(sym, VarSymbol):
                     result.append((stmt.name, sym.type_))
                 else:
@@ -4861,21 +4905,38 @@ class _LLVMGen:
         while i < len(s):
             if s[i] == "\\" and i + 1 < len(s):
                 ch = s[i + 1]
-                m = {
-                    "n": "\n",
-                    "t": "\t",
-                    "r": "\r",
-                    "0": "\0",
-                    "\\": "\\",
-                    '"': '"',
-                    "'": "'",
-                    "a": "\a",
-                    "b": "\b",
-                    "f": "\f",
-                    "v": "\v",
-                }
-                if ch in m:
-                    result.append(m[ch])
+                if ch == "n":
+                    result.append("\n")
+                    i += 2
+                elif ch == "t":
+                    result.append("\t")
+                    i += 2
+                elif ch == "r":
+                    result.append("\r")
+                    i += 2
+                elif ch == "0":
+                    result.append("\0")
+                    i += 2
+                elif ch == "\\":
+                    result.append("\\")
+                    i += 2
+                elif ch == '"':
+                    result.append('"')
+                    i += 2
+                elif ch == "'":
+                    result.append("'")
+                    i += 2
+                elif ch == "a":
+                    result.append("\a")
+                    i += 2
+                elif ch == "b":
+                    result.append("\b")
+                    i += 2
+                elif ch == "f":
+                    result.append("\f")
+                    i += 2
+                elif ch == "v":
+                    result.append("\v")
                     i += 2
                 elif ch == "x":
                     result.append(chr(int(s[i + 2 : i + 4], 16)))

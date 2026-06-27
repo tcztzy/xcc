@@ -294,6 +294,174 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             repr(functions["_LLVMGen.generate"].body),
         )
 
+    def test_codegen_base_type_lowers_without_callable_dict_dispatch(self) -> None:
+        class_types = {}
+        for module_path in (ROOT / "src/xcc/codegen.py", ROOT / "src/xcc/types.py"):
+            class_types.update(analyze_path(module_path).types.classes)
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._base_type"},
+            extra_classes=class_types,
+        )
+        self.assertEqual([function.name for function in module.functions], ["_LLVMGen._base_type"])
+        self.assertNotIn("Dict", repr(module.functions[0].body))
+
+    def test_codegen_string_array_element_width_lowers_without_dict_literal(self) -> None:
+        class_types = {}
+        function_types = {}
+        for module_path in (ROOT / "src/xcc/codegen.py", ROOT / "src/xcc/types.py"):
+            analysis = analyze_path(module_path)
+            class_types.update(analysis.types.classes)
+            function_types.update(analysis.types.functions)
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._string_array_element_width"},
+            extra_classes=class_types,
+            extra_functions=function_types,
+        )
+        self.assertEqual(
+            [function.name for function in module.functions],
+            ["_LLVMGen._string_array_element_width"],
+        )
+        self.assertNotIn("Dict", repr(module.functions[0].body))
+
+    def test_codegen_decode_string_lowers_without_escape_dict_literal(self) -> None:
+        class_types = analyze_path(ROOT / "src/xcc/codegen.py").types.classes
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._decode_string"},
+            extra_classes=class_types,
+        )
+        self.assertEqual([function.name for function in module.functions], ["_LLVMGen._decode_string"])
+        self.assertNotIn("Dict", repr(module.functions[0].body))
+
+    def test_codegen_encode_string_units_lowers_with_typed_units_list(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._encode_string_units"},
+        )
+        self.assertEqual(
+            [function.name for function in module.functions],
+            ["_LLVMGen._encode_string_units"],
+        )
+        self.assertIn("IrTupleType(elements=(IrIntType", repr(module.functions[0].body))
+
+    def test_codegen_member_path_lowers_without_starred_list_literal(self) -> None:
+        class_types = {}
+        for module_path in (
+            ROOT / "src/xcc/codegen.py",
+            ROOT / "src/xcc/sema/symbols.py",
+            ROOT / "src/xcc/types.py",
+        ):
+            class_types.update(analyze_path(module_path).types.classes)
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._member_path"},
+            extra_classes=class_types,
+        )
+        self.assertEqual([function.name for function in module.functions], ["_LLVMGen._member_path"])
+        self.assertNotIn("Starred", repr(module.functions[0].body))
+
+    def test_codegen_walk_allocas_lowers_typed_optional_symbol_lookup(self) -> None:
+        class_types = {}
+        function_types = {}
+        for module_path in (
+            ROOT / "src/xcc/ast.py",
+            ROOT / "src/xcc/codegen.py",
+            ROOT / "src/xcc/sema/symbols.py",
+            ROOT / "src/xcc/types.py",
+        ):
+            analysis = analyze_path(module_path)
+            class_types.update(analysis.types.classes)
+            function_types.update(analysis.types.functions)
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._walk_allocas"},
+            extra_classes=class_types,
+            extra_functions=function_types,
+        )
+        self.assertEqual([function.name for function in module.functions], ["_LLVMGen._walk_allocas"])
+        self.assertIn("IrRecordType(name='VarSymbol')", repr(module.functions[0].body))
+
+    def test_codegen_union_size_lowers_without_generator_max(self) -> None:
+        class_types = {}
+        for module_path in (
+            ROOT / "src/xcc/codegen.py",
+            ROOT / "src/xcc/sema/symbols.py",
+            ROOT / "src/xcc/types.py",
+        ):
+            class_types.update(analyze_path(module_path).types.classes)
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._type_align", "_LLVMGen._union_size"},
+            extra_classes=class_types,
+        )
+        functions = {function.name: function for function in module.functions}
+        self.assertIn("_LLVMGen._type_align", functions)
+        self.assertIn("_LLVMGen._union_size", functions)
+        self.assertNotIn("GeneratorExp", repr(module.functions))
+
+    def test_codegen_union_storage_member_lowers_without_key_callback(self) -> None:
+        class_types = {}
+        for module_path in (
+            ROOT / "src/xcc/codegen.py",
+            ROOT / "src/xcc/sema/symbols.py",
+            ROOT / "src/xcc/types.py",
+        ):
+            class_types.update(analyze_path(module_path).types.classes)
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/codegen.py"),
+            include_records=frozenset(),
+            include_functions={"_LLVMGen._union_storage_member"},
+            extra_classes=class_types,
+        )
+        self.assertEqual(
+            [function.name for function in module.functions],
+            ["_LLVMGen._union_storage_member"],
+        )
+        self.assertNotIn("FunctionDef", repr(module.functions[0].body))
+
+    def test_llvm_api_pointer_array_helpers_are_native_leaves(self) -> None:
+        module = aot_slice.lower_core_slice(
+            (ROOT / "src/xcc/llvm_api.py",),
+            root_targets=(
+                "xcc.llvm_api.ptr_array",
+                "xcc.llvm_api.zero_ptr_array",
+                "xcc.llvm_api.optional_zero_ptr_array",
+            ),
+        )
+        functions = {function.name: function for function in module.functions}
+        for name in (
+            "xcc.llvm_api.ptr_array",
+            "xcc.llvm_api.zero_ptr_array",
+            "xcc.llvm_api.optional_zero_ptr_array",
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(functions[name].body, ())
+
     def test_frontend_unchecked_success_helper_body_is_ordinary_lowerable(self) -> None:
         class_types = {}
         for module_path in (

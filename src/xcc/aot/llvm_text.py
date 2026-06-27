@@ -490,7 +490,21 @@ class _Emitter:
     ) -> _EmittedValue:
         left = self._emit_expr(expr.left, names, lines)
         right = self._emit_expr(expr.right, names, lines)
-        opcode = {"+": "add", "-": "sub", "*": "mul"}.get(expr.op)
+        if expr.op == "//":
+            return self._emit_floor_div(expr.type, left, right, lines)
+        if expr.op == "%":
+            return self._emit_modulo(expr.type, left, right, lines)
+        shift_opcode = "ashr" if isinstance(expr.type, IrIntType) and expr.type.signed else "lshr"
+        opcode = {
+            "+": "add",
+            "-": "sub",
+            "*": "mul",
+            "<<": "shl",
+            ">>": shift_opcode,
+            "|": "or",
+            "&": "and",
+            "^": "xor",
+        }.get(expr.op)
         if opcode is None:
             self._error(f"Unsupported LLVM binary op: {expr.op}")
         result = self._tmp(opcode)
@@ -498,6 +512,80 @@ class _Emitter:
             f"  {result} = {opcode} {self._llvm_type(expr.type)} {left.value}, {right.value}"
         )
         return _EmittedValue(result, expr.type)
+
+    def _emit_floor_div(
+        self,
+        result_type: IrType,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        lines: list[str],
+    ) -> _EmittedValue:
+        if not isinstance(result_type, IrIntType):
+            self._error(f"Unsupported LLVM floor division type: {type(result_type).__name__}")
+        llvm_type = self._llvm_type(result_type)
+        if not result_type.signed:
+            result = self._tmp("udiv")
+            lines.append(f"  {result} = udiv {llvm_type} {left.value}, {right.value}")
+            return _EmittedValue(result, result_type)
+
+        quotient = self._tmp("sdiv")
+        remainder = self._tmp("srem")
+        remainder_nonzero = self._tmp("remnz")
+        left_negative = self._tmp("leftneg")
+        right_negative = self._tmp("rightneg")
+        signs_differ = self._tmp("signdiff")
+        needs_adjustment = self._tmp("flooradj")
+        decremented = self._tmp("floordec")
+        result = self._tmp("floordiv")
+        lines.append(f"  {quotient} = sdiv {llvm_type} {left.value}, {right.value}")
+        lines.append(f"  {remainder} = srem {llvm_type} {left.value}, {right.value}")
+        lines.append(f"  {remainder_nonzero} = icmp ne {llvm_type} {remainder}, 0")
+        lines.append(f"  {left_negative} = icmp slt {llvm_type} {left.value}, 0")
+        lines.append(f"  {right_negative} = icmp slt {llvm_type} {right.value}, 0")
+        lines.append(f"  {signs_differ} = xor i1 {left_negative}, {right_negative}")
+        lines.append(f"  {needs_adjustment} = and i1 {signs_differ}, {remainder_nonzero}")
+        lines.append(f"  {decremented} = sub {llvm_type} {quotient}, 1")
+        lines.append(
+            f"  {result} = select i1 {needs_adjustment}, "
+            f"{llvm_type} {decremented}, {llvm_type} {quotient}"
+        )
+        return _EmittedValue(result, result_type)
+
+    def _emit_modulo(
+        self,
+        result_type: IrType,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        lines: list[str],
+    ) -> _EmittedValue:
+        if not isinstance(result_type, IrIntType):
+            self._error(f"Unsupported LLVM modulo type: {type(result_type).__name__}")
+        llvm_type = self._llvm_type(result_type)
+        if not result_type.signed:
+            result = self._tmp("urem")
+            lines.append(f"  {result} = urem {llvm_type} {left.value}, {right.value}")
+            return _EmittedValue(result, result_type)
+
+        remainder = self._tmp("srem")
+        remainder_nonzero = self._tmp("remnz")
+        left_negative = self._tmp("leftneg")
+        right_negative = self._tmp("rightneg")
+        signs_differ = self._tmp("signdiff")
+        needs_adjustment = self._tmp("modadj")
+        adjusted = self._tmp("modfix")
+        result = self._tmp("mod")
+        lines.append(f"  {remainder} = srem {llvm_type} {left.value}, {right.value}")
+        lines.append(f"  {remainder_nonzero} = icmp ne {llvm_type} {remainder}, 0")
+        lines.append(f"  {left_negative} = icmp slt {llvm_type} {left.value}, 0")
+        lines.append(f"  {right_negative} = icmp slt {llvm_type} {right.value}, 0")
+        lines.append(f"  {signs_differ} = xor i1 {left_negative}, {right_negative}")
+        lines.append(f"  {needs_adjustment} = and i1 {signs_differ}, {remainder_nonzero}")
+        lines.append(f"  {adjusted} = add {llvm_type} {remainder}, {right.value}")
+        lines.append(
+            f"  {result} = select i1 {needs_adjustment}, "
+            f"{llvm_type} {adjusted}, {llvm_type} {remainder}"
+        )
+        return _EmittedValue(result, result_type)
 
     def _emit_string_concat(
         self,

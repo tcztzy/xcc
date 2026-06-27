@@ -50,7 +50,7 @@ from xcc.ast import (
     UpdateExpr,
     WhileStmt,
 )
-from xcc.codegen import _LLVMGen, generate_llvm_ir
+from xcc.codegen import _LLVMGen, _base_size, _merge_qualifiers, generate_llvm_ir
 from xcc.diag import CodegenError
 from xcc.frontend import FrontendOptions, compile_source
 from xcc.llvm_api import (
@@ -73,6 +73,29 @@ class CodegenTests(unittest.TestCase):
             return cc_driver._find_llc()
         except ValueError as error:
             self.skipTest(str(error))
+
+    def test_base_size_explicit_branches(self) -> None:
+        self.assertEqual(_base_size("int"), 4)
+        self.assertEqual(_base_size("long"), 8)
+        self.assertEqual(_base_size("char"), 1)
+        self.assertEqual(_base_size("short"), 2)
+        self.assertEqual(_base_size("double"), 8)
+        self.assertEqual(_base_size("long double"), 16)
+        self.assertEqual(_base_size("__builtin_va_list"), 8)
+        self.assertEqual(_base_size("void"), 0)
+        self.assertEqual(_base_size("unknown"), 4)
+
+    def test_merge_qualifiers_preserves_first_occurrence_order(self) -> None:
+        self.assertEqual(
+            _merge_qualifiers(("const", "volatile", "const"), ("volatile", "restrict")),
+            ("const", "volatile", "restrict"),
+        )
+
+    def test_decode_string_escape_branches(self) -> None:
+        result = compile_source("int main(void) { return 0; }", filename="decode.c")
+        gen = _LLVMGen(result)
+        decoded = gen._decode_string(r"\n\t\r\0\\\"\'\a\b\f\v")
+        self.assertEqual(decoded, "\n\t\r\0\\\"'\a\b\f\v")
 
     def assertLlcAccepts(self, source: str) -> str:
         llc = self._find_test_llc()
@@ -3064,6 +3087,7 @@ int f(void) { return 0; }
                 Type("char", declarator_ops=(("arr", 2), ("ptr", 0))),
             ),
         )
+        self.assertIsNone(gen._string_array_element_width(Type("double").array_of(2)))
         self.assertIsNone(
             gen._string_array_initializer_length(StringLiteral('u"x"'), Type("char").array_of(4)),
         )
