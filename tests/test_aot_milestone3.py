@@ -246,6 +246,10 @@ class AotMilestone3SliceTests(unittest.TestCase):
             statements,
         )
         self.assertEqual(_function_record_names(function), ("Box", "Enum", "Other"))
+        self.assertEqual(
+            _expr_record_names(IrCall("__llvm_api", (), IrRecordType("LLVMApi"))),
+            (),
+        )
         with self.assertRaises(AssertionError):
             _statement_record_names(object())  # type: ignore[arg-type]
         unknown_expr = type("UnknownExpr", (), {"type": IrStringType()})()

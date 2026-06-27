@@ -612,6 +612,43 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("getelementptr ptr, ptr %values, i64 %index", llvm_ir)
         self.assertIn("store ptr %item", llvm_ir)
 
+    def test_emits_llvm_function_type_intrinsic_call(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "llvm_api.py",
+            (),
+            (
+                IrFunction(
+                    "make",
+                    (
+                        IrParam("ret_t", int64),
+                        IrParam("param_ts", int64),
+                        IrParam("n", int64),
+                        IrParam("variadic", IrBoolType()),
+                    ),
+                    int64,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__llvm_FunctionType",
+                                (
+                                    IrName("ret_t", int64),
+                                    IrName("param_ts", int64),
+                                    IrName("n", int64),
+                                    IrName("variadic", IrBoolType()),
+                                ),
+                                int64,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("call ptr @LLVMFunctionType(", llvm_ir)
+        self.assertIn("declare ptr @LLVMFunctionType(ptr, ptr, i32, i1)", llvm_ir)
+        self.assertNotIn("@__llvm_FunctionType", llvm_ir)
+
     def test_emits_enum_member_constants_as_stable_pointers(self) -> None:
         enum_type = IrRecordType("Enum")
         module = IrModule(
@@ -1005,8 +1042,48 @@ class AotLlvmTextTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             emitter._pointer_compare_value(_EmittedValue("value", object()))  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        with self.assertRaises(AotError) as ctx:
+            emitter._coerce_llvm_pointer(_EmittedValue("value", IrBoolType()), [])
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        self.assertEqual(
+            emitter._coerce_llvm_pointer(_EmittedValue("value", IrStringType()), []),
+            "value",
+        )
+        self.assertEqual(
+            emitter._coerce_llvm_pointer(_EmittedValue("value", IrNoneType()), []),
+            "null",
+        )
+        with self.assertRaises(AotError) as ctx:
+            emitter._coerce_i32(_EmittedValue("value", IrBoolType()), [])
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        self.assertEqual(
+            emitter._coerce_i32(_EmittedValue("value", IrIntType(32, signed=True)), []),
+            "value",
+        )
+        widen_lines: list[str] = []
+        self.assertTrue(
+            emitter._coerce_i32(
+                _EmittedValue("value", IrIntType(16, signed=True)),
+                widen_lines,
+            ).startswith("%i32")
+        )
+        self.assertIn("sext i16 value to i32", widen_lines[0])
 
         int64 = IrIntType(64, signed=True)
+        llvm_api_module = IrModule(
+            "llvm_api_handle.py",
+            (),
+            (
+                IrFunction(
+                    "handle",
+                    (),
+                    IrRecordType("LLVMApi"),
+                    (IrReturn(IrCall("__llvm_api", (), IrRecordType("LLVMApi"))),),
+                ),
+            ),
+        )
+        self.assertIn("ret ptr null", emit_llvm_text(llvm_api_module))
+
         enumerate_cases = (
             (
                 IrCall("__enumerate", (), IrTupleType((int64, IrStringType()))),
@@ -1055,6 +1132,25 @@ class AotLlvmTextTests(unittest.TestCase):
                 with self.assertRaises(AotError) as ctx:
                     emit_llvm_text(bad_module)
                 self.assertEqual(ctx.exception.diagnostics[0].message, message)
+
+        bad_llvm_function_type = IrModule(
+            "bad_llvm_call.py",
+            (),
+            (
+                IrFunction(
+                    "bad",
+                    (),
+                    int64,
+                    (IrReturn(IrCall("__llvm_FunctionType", (), int64)),),
+                ),
+            ),
+        )
+        with self.assertRaises(AotError) as ctx:
+            emit_llvm_text(bad_llvm_function_type)
+        self.assertEqual(
+            ctx.exception.diagnostics[0].message,
+            "LLVMFunctionType helper expects four args -> int",
+        )
 
     def test_reports_unsupported_llvm_shapes(self) -> None:
         int64 = IrIntType(64, signed=True)

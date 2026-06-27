@@ -65,6 +65,7 @@ _NATIVE_EMITTED_LEAF_DEPENDENCIES = {
         "xcc.cc_driver._aot_smoke_llvm_ir",
     ),
 }
+_INTERNAL_RECORD_TYPES = frozenset({"LLVMApi"})
 
 
 @dataclass(frozen=True)
@@ -703,6 +704,8 @@ def _expr_tuple_record_names(expressions: tuple[IrExpr, ...]) -> tuple[str, ...]
 
 def _type_record_names(type_info: IrRecordType | IrTupleType | object) -> tuple[str, ...]:
     if isinstance(type_info, IrRecordType):
+        if type_info.name in _INTERNAL_RECORD_TYPES:
+            return ()
         return (type_info.name,)
     if isinstance(type_info, IrTupleType):
         names: set[str] = set()

@@ -80,6 +80,7 @@ class _Emitter:
         self.string_constants: list[str] = []
         self.enum_constants: dict[tuple[str, str], str] = {}
         self.loop_stack: list[_LoopLabels] = []
+        self.extra_declarations: set[str] = set()
         self.needs_puts = False
         self.needs_runtime_prelude = False
 
@@ -99,6 +100,9 @@ class _Emitter:
             lines.append("")
         if self.needs_puts and not self.needs_runtime_prelude:
             lines.append("declare i32 @puts(ptr)")
+            lines.append("")
+        if self.extra_declarations:
+            lines.extend(sorted(self.extra_declarations))
             lines.append("")
         lines.extend(functions)
         if main is not None:
@@ -678,6 +682,10 @@ class _Emitter:
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue | None:
+        if expr.target == "__llvm_api":
+            return _EmittedValue("null", expr.type)
+        if expr.target == "__llvm_FunctionType":
+            return self._emit_llvm_function_type_call(expr, names, lines)
         if expr.target == "len" and expr.args and isinstance(expr.args[0].type, IrTupleType):
             return self._emit_len_call(expr, names, lines)
         if expr.target == "__getitem" and expr.args and isinstance(expr.args[0].type, IrTupleType):
@@ -919,6 +927,60 @@ class _Emitter:
             lines.append(f"  {result} = icmp ne ptr {value.value}, null")
             return _EmittedValue(result, IrBoolType())
         self._error(f"Unsupported LLVM truth value type: {type(value.type).__name__}")
+
+    def _emit_llvm_function_type_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 4 or not isinstance(expr.type, IrIntType):
+            self._error("LLVMFunctionType helper expects four args -> int")
+        ret_type = self._emit_expr(expr.args[0], names, lines)
+        params = self._emit_expr(expr.args[1], names, lines)
+        count = self._emit_expr(expr.args[2], names, lines)
+        variadic = self._emit_expr(expr.args[3], names, lines)
+        ret_ptr = self._coerce_llvm_pointer(ret_type, lines)
+        params_ptr = self._coerce_llvm_pointer(params, lines)
+        count_i32 = self._coerce_i32(count, lines)
+        variadic_bool = self._coerce_to_bool(variadic, lines)
+        result_ptr = self._tmp("llvmcall")
+        result = self._tmp("llvmint")
+        self.extra_declarations.add("declare ptr @LLVMFunctionType(ptr, ptr, i32, i1)")
+        lines.append(
+            f"  {result_ptr} = call ptr @LLVMFunctionType("
+            f"ptr {ret_ptr}, ptr {params_ptr}, i32 {count_i32}, i1 {variadic_bool.value})"
+        )
+        lines.append(f"  {result} = ptrtoint ptr {result_ptr} to {self._llvm_type(expr.type)}")
+        return _EmittedValue(result, expr.type)
+
+    def _coerce_llvm_pointer(self, value: _EmittedValue, lines: list[str]) -> str:
+        if isinstance(value.type, IrNoneType):
+            return "null"
+        if _is_pointer_type(value.type):
+            return value.value
+        if isinstance(value.type, IrIntType):
+            result = self._tmp("llvmptr")
+            lines.append(
+                f"  {result} = inttoptr {self._llvm_type(value.type)} {value.value} to ptr"
+            )
+            return result
+        self._error(f"Unsupported LLVM pointer value type: {type(value.type).__name__}")
+
+    def _coerce_i32(self, value: _EmittedValue, lines: list[str]) -> str:
+        if not isinstance(value.type, IrIntType):
+            self._error(f"Unsupported i32 value type: {type(value.type).__name__}")
+        if value.type.bits == 32:
+            return value.value
+        result = self._tmp("i32")
+        if value.type.bits < 32:
+            opcode = "sext" if value.type.signed else "zext"
+            lines.append(
+                f"  {result} = {opcode} {self._llvm_type(value.type)} {value.value} to i32"
+            )
+        else:
+            lines.append(f"  {result} = trunc {self._llvm_type(value.type)} {value.value} to i32")
+        return result
 
     def _emit_identity_compare(
         self,

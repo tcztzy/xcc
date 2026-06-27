@@ -228,6 +228,14 @@
   assignment. The broader source-to-LLVM unchecked slice now advances past the
   `enumerate(real_params)` loop and stops at the existing `c.FunctionType(...)`
   LLVM-C receiver call in `codegen.py`.
+- Added AOT lowering for the existing `llvm()` API handle pattern and
+  `c.FunctionType(...)` LLVM-C receiver call shape, plus direct LLVM text
+  emission for `LLVMFunctionType`. Existing `str.encode()` calls now lower as
+  C-string identity values, and bytes literals such as `b"entry"` lower as AOT
+  string constants for LLVM-C names. The broader source-to-LLVM unchecked slice
+  now advances past `c.FunctionType(...)`, `func.name.encode()`, and
+  `c.AppendBasicBlock(fn, b"entry")`; the next observed blocker is
+  `symbol.type_` after `isinstance(symbol, VarSymbol)` in `codegen.py`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

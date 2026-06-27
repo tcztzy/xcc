@@ -892,6 +892,14 @@ first target and emits pointer stores for lowered subscript assignment. The
 broader source-to-LLVM unchecked slice now advances past the
 `enumerate(real_params)` loop; the next observed blocker is the existing
 `c.FunctionType(...)` LLVM-C receiver call in `codegen.py`.
+AOT lowering now handles the existing `llvm()` API handle pattern and
+`c.FunctionType(...)` LLVM-C receiver call shape, and LLVM text emission lowers
+that call directly to `LLVMFunctionType`. Existing `str.encode()` calls lower
+as C-string identity values, and bytes literals such as `b"entry"` lower as AOT
+string constants for LLVM-C names. The broader source-to-LLVM unchecked slice
+now advances past `c.FunctionType(...)`, `func.name.encode()`, and
+`c.AppendBasicBlock(fn, b"entry")`; the next observed blocker is `symbol.type_`
+after `isinstance(symbol, VarSymbol)` in `codegen.py`.
 The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with

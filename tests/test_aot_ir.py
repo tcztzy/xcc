@@ -44,6 +44,7 @@ from xcc.aot.lower import (
     _dict_container_type_names,
     _dict_get_result_type,
     _Lowerer,
+    _llvm_api_call_return_type,
     _none_guard_name,
     _tuple_backed_container_element_name,
 )
@@ -232,6 +233,87 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(skipped_loop, IrForEach)
         assert isinstance(skipped_loop, IrForEach)
         self.assertEqual(skipped_loop.target, "(index, _)")
+
+    def test_lowers_llvm_api_receiver_call(self) -> None:
+        module = lower_source_to_ir(
+            "from xcc.llvm_api import llvm\n"
+            "def make_function_type(ret_t: int, param_ts: int, n: int, variadic: bool) -> int:\n"
+            "    c = llvm()\n"
+            "    return c.FunctionType(ret_t, param_ts, n, variadic)\n",
+            filename="llvm_api_call.py",
+        )
+        function = module.functions[0]
+        assigned = function.body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(assigned.target, "c")
+        self.assertEqual(assigned.value, IrCall("__llvm_api", (), IrRecordType("LLVMApi")))
+        returned = function.body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__llvm_FunctionType",
+                (
+                    IrName("ret_t", IrIntType(64, signed=True)),
+                    IrName("param_ts", IrIntType(64, signed=True)),
+                    IrName("n", IrIntType(64, signed=True)),
+                    IrName("variadic", IrBoolType()),
+                ),
+                IrIntType(64, signed=True),
+            ),
+        )
+
+    def test_lowers_str_encode_as_c_string_identity_for_llvm_api_call(self) -> None:
+        module = lower_source_to_ir(
+            "from xcc.llvm_api import llvm\n"
+            "def lookup(module: int, name: str) -> int:\n"
+            "    c = llvm()\n"
+            "    return c.GetNamedFunction(module, name.encode())\n",
+            filename="llvm_api_encode.py",
+        )
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__llvm_GetNamedFunction",
+                (
+                    IrName("module", IrIntType(64, signed=True)),
+                    IrName("name", IrStringType()),
+                ),
+                IrIntType(64, signed=True),
+            ),
+        )
+
+        encoded = lower_source_to_ir(
+            "def encoded(name: str) -> str:\n"
+            "    return name.encode('utf-8')\n",
+            filename="str_encode_arg.py",
+        )
+        self.assertEqual(encoded.functions[0].body[0].value, IrName("name", IrStringType()))
+
+    def test_lowers_bytes_literal_as_c_string_for_llvm_api_call(self) -> None:
+        module = lower_source_to_ir(
+            "from xcc.llvm_api import llvm\n"
+            "def append_block(fn: int) -> int:\n"
+            "    c = llvm()\n"
+            "    return c.AppendBasicBlock(fn, b'entry')\n",
+            filename="llvm_api_bytes.py",
+        )
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__llvm_AppendBasicBlock",
+                (IrName("fn", IrIntType(64, signed=True)), IrConstString("entry")),
+                IrIntType(64, signed=True),
+            ),
+        )
 
     def test_lowers_dict_get_and_none_guard_narrows_optional_record(self) -> None:
         module = lower_source_to_ir(
@@ -848,12 +930,53 @@ class AotScalarLoweringTests(unittest.TestCase):
                 "    return enumerate(values, 1)\n",
                 "XCC-AOT-LOWER-0003",
             ),
+            (
+                "from xcc.llvm_api import llvm\n"
+                "def f() -> int:\n"
+                "    return llvm(1)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            (
+                "from xcc.llvm_api import llvm\n"
+                "def f(module: int, name: str) -> int:\n"
+                "    c = llvm()\n"
+                "    return c.GetNamedFunction(module=module, name=name)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            (
+                "def f(name: str) -> str:\n"
+                "    return name.encode(encoding='utf-8')\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            ("def f(value: int) -> str:\n    return value.encode()\n", "XCC-AOT-LOWER-0003"),
         )
         for source, code in cases:
             with self.subTest(source=source):
                 with self.assertRaises(AotError) as ctx:
                     lower_source_to_ir(source, filename="bad.py", entry="f")
                 self.assertEqual(ctx.exception.diagnostics[0].code, code)
+
+    def test_llvm_api_lowering_private_helpers_cover_edge_inputs(self) -> None:
+        lowerer = _Lowerer("bad.py", {}, global_names={"llvm"})
+        bad_call = ast.parse("llvm()", mode="eval").body
+        self.assertIsInstance(bad_call, ast.Call)
+        assert isinstance(bad_call, ast.Call)
+        with self.assertRaises(AotError) as ctx:
+            lowerer._lower_llvm_api_call(bad_call, {}, IrNoneType())
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
+
+        self.assertEqual(
+            _llvm_api_call_return_type("SetTarget", IrIntType(64, signed=True)),
+            IrNoneType(),
+        )
+        self.assertEqual(
+            _llvm_api_call_return_type("CreateBuilder", IrRecordType("Builder")),
+            IrRecordType("Builder"),
+        )
+        self.assertEqual(
+            _llvm_api_call_return_type("CreateBuilder", IrNoneType()),
+            IrIntType(64, signed=True),
+        )
 
     def test_star_project_import_does_not_bind_call_target_name(self) -> None:
         module = lower_source_to_ir(

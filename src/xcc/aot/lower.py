@@ -59,6 +59,7 @@ _ALLOWED_BUILTIN_CALLS = {
 _ALLOWED_BUILTIN_VALUES = {"bool", "int", "object", "str", "tuple"}
 _ALLOWED_MUTATING_TUPLE_CALLS = {"append", "extend"}
 _STRING_PREDICATE_METHODS = frozenset({"isalpha", "isdigit", "isalnum", "isspace"})
+_LLVM_API_RECORD = "LLVMApi"
 
 
 def lower_source_to_ir(
@@ -348,6 +349,8 @@ class _Lowerer:
                 return IrConstInt(expr.value, IrIntType(64, signed=True))
             if isinstance(expr.value, str):
                 return IrConstString(expr.value)
+            if isinstance(expr.value, bytes):
+                return IrConstString(expr.value.decode("utf-8"))
         if isinstance(expr, ast.Name):
             value_type = names.get(expr.id)
             if value_type is None:
@@ -509,6 +512,8 @@ class _Lowerer:
         names: dict[str, IrType],
         expected: IrType,
     ) -> IrExpr:
+        if isinstance(expr.func, ast.Name) and expr.func.id == "llvm":
+            return self._lower_llvm_api_constructor(expr)
         if isinstance(expr.func, ast.Name) and expr.func.id == "enumerate":
             return self._lower_enumerate_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id == "len" and len(expr.args) == 1:
@@ -556,6 +561,10 @@ class _Lowerer:
             receiver = self._lower_expr(expr.func.value, names, IrStringType())
             if isinstance(receiver.type, IrStringType):
                 return self._lower_string_startswith_call(expr, receiver, names)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == "encode":
+            receiver = self._lower_expr(expr.func.value, names, IrStringType())
+            if isinstance(receiver.type, IrStringType):
+                return self._lower_string_encode_call(expr, receiver, names)
         if isinstance(expr.func, ast.Attribute) and expr.func.attr in _STRING_PREDICATE_METHODS:
             receiver = self._lower_expr(expr.func.value, names, IrStringType())
             if isinstance(receiver.type, IrStringType):
@@ -563,6 +572,8 @@ class _Lowerer:
         if isinstance(expr.func, ast.Attribute):
             receiver = self._lower_expr(expr.func.value, names, expected)
             receiver_type = receiver.type
+            if isinstance(receiver_type, IrRecordType) and receiver_type.name == _LLVM_API_RECORD:
+                return self._lower_llvm_api_call(expr, names, expected)
             if isinstance(receiver_type, IrRecordType):
                 target = f"{receiver_type.name}.{expr.func.attr}"
                 return_type = self._function_return_type(target, expected)
@@ -646,6 +657,22 @@ class _Lowerer:
             ),
             IrBoolType(),
         )
+
+    def _lower_string_encode_call(
+        self,
+        expr: ast.Call,
+        receiver: IrExpr,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if expr.keywords or len(expr.args) > 1:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        if expr.args:
+            self._lower_expr(expr.args[0], names, IrStringType())
+        return receiver
 
     def _lower_string_predicate_call(
         self,
@@ -949,6 +976,40 @@ class _Lowerer:
         except AotError:
             return None
 
+    def _lower_llvm_api_constructor(self, expr: ast.Call) -> IrExpr:
+        if expr.args or expr.keywords:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        return IrCall("__llvm_api", (), IrRecordType(_LLVM_API_RECORD))
+
+    def _lower_llvm_api_call(
+        self,
+        expr: ast.Call,
+        names: dict[str, IrType],
+        expected: IrType,
+    ) -> IrExpr:
+        if not isinstance(expr.func, ast.Attribute):
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        if expr.keywords:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        method = expr.func.attr
+        return IrCall(
+            f"__llvm_{method}",
+            self._lower_call_args(expr, names, IrRecordType("object")),
+            _llvm_api_call_return_type(method, expected),
+        )
+
     def _lower_enumerate_call(self, expr: ast.Call, names: dict[str, IrType]) -> IrExpr:
         if expr.keywords or len(expr.args) != 1:
             self._error(
@@ -1180,6 +1241,14 @@ def _for_each_target_type(iterable_type: IrType) -> IrType:
     if isinstance(iterable_type, IrTupleType) and len(iterable_type.elements) == 1:
         return iterable_type.elements[0]
     return IrRecordType("object")
+
+
+def _llvm_api_call_return_type(method: str, expected: IrType) -> IrType:
+    if method in {"PositionBuilderAtEnd", "SetInitializer", "SetLinkage", "SetTarget"}:
+        return IrNoneType()
+    if not isinstance(expected, IrNoneType):
+        return expected
+    return IrIntType(64, signed=True)
 
 
 def _dict_get_result_type(value_type: IrType) -> IrType:
