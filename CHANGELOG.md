@@ -41,11 +41,14 @@
   `llvm_api.py`. EVM frame layout and switch-case collection now use explicit
   state containers instead of `nonlocal` rebinding, and AOT type binding
   recognizes existing `bytearray` annotations used by initcode emission,
-  admitting `evm.py`. The
-  all-`src/xcc` probe now reaches 55/57
+  admitting `evm.py`. The x86_64 backend now uses explicit AST child dispatch
+  instead of dataclass reflection, explicit state containers instead of
+  `nonlocal` frame/global-data rebinding, and AOT type binding recognizes
+  existing `float` annotations used by native floating constant helpers,
+  admitting `x86_64_asm.py`. The
+  all-`src/xcc` probe now reaches 56/57
   modules, up from 19/57 before this milestone slice, with remaining blockers
-  concentrated in dynamic calls, lambdas/nonlocals/globals, and rejected
-  runtime `re` shims.
+  concentrated in `aarch64_asm.py` dynamic traversal and `nonlocal` state.
 - Added Milestone 5 AOT parser/sema slice support, including class method
   signature binding, nested container annotation admission, parser helper subset
   cleanup, cross-module record type resolution, and native parser/sema oracle

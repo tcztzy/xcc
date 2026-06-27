@@ -12,6 +12,7 @@ from xcc.ast import (
     BinaryExpr,
     BreakStmt,
     BuiltinOffsetofExpr,
+    BuiltinTypesCompatExpr,
     BuiltinVaArgExpr,
     CallExpr,
     CaseStmt,
@@ -24,8 +25,10 @@ from xcc.ast import (
     ContinueStmt,
     DeclStmt,
     DefaultStmt,
+    DesignatorRange,
     FloatLiteral,
     FunctionDef,
+    GenericExpr,
     Identifier,
     IndirectGotoStmt,
     InitItem,
@@ -102,6 +105,76 @@ class X86_64AsmTests(unittest.TestCase):
         self.assertIn(".globl f\nf:", asm)
         self.assertIn("    mov eax, 7", asm)
         self.assertNotIn("define i32", asm)
+
+    def test_ast_child_walker_covers_explicit_edge_nodes(self) -> None:
+        options = FrontendOptions(
+            std="gnu11",
+            no_standard_includes=True,
+            host_machine="x86_64",
+            target_os="linux",
+        )
+        gen = _X86_64AsmGen(compile_source("int f(void){return 0;}", options=options))
+        seen: list[object] = []
+
+        def collect(node: object) -> None:
+            seen.append(node)
+
+        low = IntLiteral("1")
+        high = IntLiteral("2")
+        gen._walk_ast_children(DesignatorRange(low, high), collect)
+
+        enum_value = IntLiteral("3")
+        atomic_target = TypeSpec("int")
+        typeof_expr = Identifier("typed")
+        rich_type = TypeSpec(
+            "enum",
+            enum_members=(("EMPTY", None), ("VALUE", enum_value)),
+            atomic_target=atomic_target,
+            typeof_expr=typeof_expr,
+        )
+        gen._walk_ast_children(rich_type, collect)
+
+        param_type = TypeSpec("int")
+        body = CompoundStmt([ReturnStmt(IntLiteral("0"))])
+        gen._walk_ast_children(
+            FunctionDef(TypeSpec("int"), "edge", [Param(param_type, "value")], body),
+            collect,
+        )
+        gen._walk_ast_children(
+            FunctionDef(TypeSpec("int"), "declared", [], None),
+            collect,
+        )
+
+        indirect_target = Identifier("label_ptr")
+        gen._walk_ast_children(IndirectGotoStmt(indirect_target), collect)
+
+        generic_control = Identifier("control")
+        assoc_expr = IntLiteral("4")
+        gen._walk_ast_children(
+            GenericExpr(generic_control, ((TypeSpec("int"), assoc_expr),)),
+            collect,
+        )
+
+        compat_left = TypeSpec("long")
+        compat_right = TypeSpec("int")
+        gen._walk_ast_children(BuiltinTypesCompatExpr(compat_left, compat_right), collect)
+
+        for expected in (
+            low,
+            high,
+            enum_value,
+            atomic_target,
+            typeof_expr,
+            param_type,
+            body,
+            indirect_target,
+            generic_control,
+            assoc_expr,
+            compat_left,
+            compat_right,
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, seen)
 
     def test_block_scope_function_declaration_does_not_allocate_local_slot(self) -> None:
         asm = self._asm(

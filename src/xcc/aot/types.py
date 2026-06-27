@@ -8,6 +8,7 @@ _BUILTIN_TYPES = {
     "bool",
     "bytes",
     "bytearray",
+    "float",
     "int",
     "None",
     "object",

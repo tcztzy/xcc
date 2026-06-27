@@ -27,6 +27,7 @@ XCC_INIT_PATH = ROOT / "src/xcc/__init__.py"
 HOST_INCLUDES_PATH = ROOT / "src/xcc/host_includes.py"
 LLVM_API_PATH = ROOT / "src/xcc/llvm_api.py"
 EVM_PATH = ROOT / "src/xcc/evm.py"
+X86_64_ASM_PATH = ROOT / "src/xcc/x86_64_asm.py"
 AOT_BINDER_PATH = ROOT / "src/xcc/aot/binder.py"
 AOT_LOWER_PATH = ROOT / "src/xcc/aot/lower.py"
 AOT_NATIVE_PATH = ROOT / "src/xcc/aot/native.py"
@@ -134,6 +135,11 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
     def test_admits_codegen_without_dynamic_loop_body_getattr(self) -> None:
         analysis = analyze_path(CODEGEN_PATH)
         self.assertIn("_LLVMGen._walk_allocas", analysis.types.functions)
+
+    def test_admits_x86_64_backend_without_reflection_or_nonlocal_state(self) -> None:
+        analysis = analyze_path(X86_64_ASM_PATH)
+        self.assertIn("_X86_64AsmGen._prepare_frame", analysis.types.functions)
+        self.assertIn("_X86_64AsmGen._walk_ast_children", analysis.types.functions)
 
     def test_admits_llvm_api_without_global_cache_or_dynamic_getattr(self) -> None:
         analysis = analyze_path(LLVM_API_PATH)
