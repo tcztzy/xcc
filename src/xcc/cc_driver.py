@@ -504,16 +504,21 @@ def _aot_exec_argv(argv: tuple[str, ...]) -> int32:
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
     if argc != 5 or len(argv) != 5:
         return 1
-    if not _aot_is_smoke_compile_command(argc, argv[1], argv[3]):
+    c_flag: str = argv[1]
+    output_flag: str = argv[3]
+    if not _aot_is_smoke_compile_command(argc, c_flag, output_flag):
         return 1
-    source_path = argv[2]
-    object_path = Path(argv[4])
-    if not _aot_is_smoke_source(_aot_read_text_file(source_path)):
+    source_path: str = argv[2]
+    object_path: str = argv[4]
+    source_text: str = _aot_read_text_file(source_path)
+    if not _aot_is_smoke_source(source_text):
         return 1
-    llvm_path = _aot_smoke_llvm_path(str(object_path))
-    if not _aot_write_text_file(llvm_path, _aot_smoke_llvm_ir()):
+    llvm_path: str = _aot_smoke_llvm_path(object_path)
+    llvm_smoke: str = _aot_smoke_llvm_ir()
+    if not _aot_write_text_file(llvm_path, llvm_smoke):
         return 1
-    return _aot_exec_argv(_aot_smoke_llc_argv(llvm_path, str(object_path)))
+    llc_argv: tuple[str, ...] = _aot_smoke_llc_argv(llvm_path, object_path)
+    return _aot_exec_argv(llc_argv)
 
 
 def _compile_frontend_inputs(

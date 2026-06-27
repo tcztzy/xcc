@@ -137,6 +137,10 @@
   expressions such as `len(argv) != 5` now call `__xcc_aot_tuple_len()` and
   compare an `int64` result instead of treating `len()` as a dynamic pointer
   call.
+- Reshaped the AOT smoke compiler helper body so its paths and helper results
+  are ordinary annotated Python locals. The body now lowers and emits through
+  the generic AOT path without `Path(...)` or `str(...)` bridge calls, while
+  preserving the CPython smoke compiler behavior.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

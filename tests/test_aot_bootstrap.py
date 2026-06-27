@@ -12,6 +12,7 @@ from xcc.aot import (
     collect_bootstrap_sources,
     emit_llvm_text,
     lower_bootstrap_entry_smoke,
+    lower_source_to_ir,
     plan_bootstrap_entry,
     run_bootstrap_self_host_smoke,
     summarize_bootstrap_admission,
@@ -103,6 +104,30 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "target='xcc.options.FrontendOptions.__post_init__'",
             repr(functions["aot_bootstrap_smoke_main"].body),
         )
+
+    def test_smoke_compiler_body_is_ordinary_lowerable(self) -> None:
+        source = (ROOT / "src/xcc/cc_driver.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/cc_driver.py"),
+            include_records=frozenset(),
+            include_functions={"_aot_compile_smoke_source_to_object"},
+        )
+        function = module.functions[0]
+        body = repr(function.body)
+        self.assertNotIn("target='Path'", body)
+        self.assertNotIn("target='str'", body)
+        self.assertIn("target='_aot_read_text_file'", body)
+        self.assertIn("target='_aot_write_text_file'", body)
+        self.assertIn("target='_aot_exec_argv'", body)
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn(
+            "define i32 @_aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
+            llvm_ir,
+        )
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 1)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 4)", llvm_ir)
+        self.assertNotIn("call ptr @__getitem", llvm_ir)
 
     def test_bootstrap_entry_uses_project_owned_smoke_compiler(self) -> None:
         module = lower_bootstrap_entry_smoke(ROOT)
