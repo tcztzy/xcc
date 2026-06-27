@@ -20,7 +20,9 @@
   fixed Analyzer state and static helper access instead of reflection-style
   `getattr`, admitting `sema/constants.py`, `sema/conversions.py`,
   `sema/expressions.py`, `sema/initializers.py`, `sema/statements.py`, and
-  `sema/type_resolution.py`. The all-`src/xcc` probe now reaches 47/57
+  `sema/type_resolution.py`. Parser expression precedence helpers now use
+  explicit static operand dispatch instead of reflection-style `getattr`,
+  admitting `parser/expressions.py`. The all-`src/xcc` probe now reaches 48/57
   modules, up from 19/57 before this milestone slice, with remaining blockers
   concentrated in dynamic calls, lambdas/nonlocals/globals, and rejected
   runtime `re` shims.

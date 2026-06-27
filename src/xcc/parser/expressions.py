@@ -112,13 +112,36 @@ def parse_binary_left_associative(
     operand_name: str,
     operators: tuple[str, ...],
 ) -> Expr:
-    operand = getattr(parser, operand_name)
-    expr = operand()
+    expr = _parse_binary_operand(parser, operand_name)
     while any(parser._check_punct(op) for op in operators):  # type: ignore
         op = parser._advance().lexeme  # type: ignore
-        right = operand()
+        right = _parse_binary_operand(parser, operand_name)
         expr = BinaryExpr(str(op), expr, right)
     return expr
+
+
+def _parse_binary_operand(parser: object, operand_name: str) -> Expr:
+    if operand_name == "_parse_logical_and":
+        return parser._parse_logical_and()  # type: ignore
+    if operand_name == "_parse_bitwise_or":
+        return parser._parse_bitwise_or()  # type: ignore
+    if operand_name == "_parse_bitwise_xor":
+        return parser._parse_bitwise_xor()  # type: ignore
+    if operand_name == "_parse_bitwise_and":
+        return parser._parse_bitwise_and()  # type: ignore
+    if operand_name == "_parse_equality":
+        return parser._parse_equality()  # type: ignore
+    if operand_name == "_parse_relational":
+        return parser._parse_relational()  # type: ignore
+    if operand_name == "_parse_shift":
+        return parser._parse_shift()  # type: ignore
+    if operand_name == "_parse_additive":
+        return parser._parse_additive()  # type: ignore
+    if operand_name == "_parse_multiplicative":
+        return parser._parse_multiplicative()  # type: ignore
+    if operand_name == "_parse_unary":
+        return parser._parse_unary()  # type: ignore
+    raise AssertionError(f"unhandled binary operand parser: {operand_name}")  # pragma: no cover
 
 
 def parse_logical_or(parser: object) -> Expr:

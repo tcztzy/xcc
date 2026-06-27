@@ -7,6 +7,7 @@ from xcc.aot import analyze_path, analyze_source
 
 ROOT = Path(__file__).resolve().parents[1]
 CC_DRIVER_PATH = ROOT / "src/xcc/cc_driver.py"
+PARSER_EXPRESSIONS_PATH = ROOT / "src/xcc/parser/expressions.py"
 PARSER_EXTENSIONS_PATH = ROOT / "src/xcc/parser/extensions.py"
 PREPROCESSOR_CONDITIONALS_PATH = ROOT / "src/xcc/preprocessor/conditionals.py"
 PREPROCESSOR_INCLUDES_PATH = ROOT / "src/xcc/preprocessor/includes.py"
@@ -124,6 +125,10 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 analysis = analyze_path(path)
                 self.assertGreater(len(analysis.types.functions), 0)
+
+    def test_admits_parser_expressions_without_dynamic_getattr(self) -> None:
+        analysis = analyze_path(PARSER_EXPRESSIONS_PATH)
+        self.assertIn("parse_expression", analysis.types.functions)
 
     def test_admits_sema_helpers_without_dynamic_getattr(self) -> None:
         for path in (
