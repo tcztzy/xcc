@@ -831,10 +831,13 @@ construction to lowered project helper `xcc.cc_driver._aot_smoke_llc_argv()`,
 writes the minimal `.ll`, and invokes `/opt/homebrew/opt/llvm/bin/llc` through a
 generic AOT tuple-to-`execvp` runtime shim. The fixed smoke LLVM text has also
 moved into lowered project helper `xcc.cc_driver._aot_smoke_llvm_ir()`. The
-native bridge still emits the outer compiler helper as a specialized leaf
-rather than lowering the helper's Python body or the general frontend/backend
-path, so the remaining native specialization is argv extraction, file I/O, and
-the fixed read envelope around the lowered project-owned helpers.
+generated `main(argc, argv)` now converts the platform C `argv` array into the
+AOT tuple ABI with `__xcc_aot_c_argv_to_tuple()`, and the native smoke compiler
+leaf reads its Python-level `argv` through `__xcc_aot_tuple_get()`. The native
+bridge still emits the outer compiler helper as a specialized leaf rather than
+lowering the helper's Python body or the general frontend/backend path, so the
+remaining native specialization is file I/O and the fixed read envelope around
+the lowered project-owned helpers.
 
 - [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
 

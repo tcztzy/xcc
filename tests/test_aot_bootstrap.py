@@ -120,12 +120,25 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
 
         self.assertIn("define i32 @main(i32 %argc, ptr %argv)", llvm_ir)
+        self.assertIn(
+            "%argv_tuple = call ptr @__xcc_aot_c_argv_to_tuple(i32 %argc, ptr %argv)",
+            llvm_ir,
+        )
+        self.assertIn(
+            "call i32 @aot_bootstrap_smoke_main(i32 %argc, ptr %argv_tuple)",
+            llvm_ir,
+        )
+        self.assertIn("define ptr @__xcc_aot_c_argv_to_tuple(i32 %argc32, ptr %argv)", llvm_ir)
         self.assertNotIn("__xcc_aot_bootstrap_cc_delegate", llvm_ir)
         self.assertNotIn("@__xcc_aot_cc", llvm_ir)
         self.assertIn(
             "define i32 @xcc.cc_driver._aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
             llvm_ir,
         )
+        self.assertIn("%arg1 = call ptr @__xcc_aot_tuple_get(ptr %argv, i64 1)", llvm_ir)
+        self.assertIn("%source_path = call ptr @__xcc_aot_tuple_get(ptr %argv, i64 2)", llvm_ir)
+        self.assertNotIn("%arg1_slot = getelementptr ptr, ptr %argv, i64 1", llvm_ir)
+        self.assertNotIn("%arg4_slot = getelementptr ptr, ptr %argv, i64 4", llvm_ir)
         self.assertIn(
             "define i1 @xcc.cc_driver._aot_is_smoke_compile_command("
             "i32 %argc, ptr %c_flag, ptr %output_flag)",

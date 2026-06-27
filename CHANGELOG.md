@@ -111,6 +111,11 @@
   native smoke compiler leaf now calls `xcc.cc_driver._aot_smoke_llc_argv()`
   from the AOT slice and `__xcc_aot_execvp_tuple()` instead of hand-writing the
   null-terminated `llc` argv array in the LLVM emitter.
+- Bridged native C `argv` into the AOT tuple ABI at the bootstrap executable
+  boundary. The generated `main(argc, argv)` now calls
+  `__xcc_aot_c_argv_to_tuple()` before entering `aot_bootstrap_smoke_main()`,
+  and the smoke compiler leaf reads Python-level arguments through
+  `__xcc_aot_tuple_get()` instead of treating them as a raw `char **`.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

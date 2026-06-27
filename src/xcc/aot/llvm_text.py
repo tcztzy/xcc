@@ -733,19 +733,15 @@ class _Emitter:
                 f"  %argc_ok = icmp eq i32 %{argc}, 5",
                 "  br i1 %argc_ok, label %load_args, label %fail",
                 "load_args:",
-                f"  %arg1_slot = getelementptr ptr, ptr %{argv}, i64 1",
-                "  %arg1 = load ptr, ptr %arg1_slot",
-                f"  %arg2_slot = getelementptr ptr, ptr %{argv}, i64 2",
-                "  %source_path = load ptr, ptr %arg2_slot",
-                f"  %arg3_slot = getelementptr ptr, ptr %{argv}, i64 3",
-                "  %arg3 = load ptr, ptr %arg3_slot",
+                f"  %arg1 = call ptr @__xcc_aot_tuple_get(ptr %{argv}, i64 1)",
+                f"  %source_path = call ptr @__xcc_aot_tuple_get(ptr %{argv}, i64 2)",
+                f"  %arg3 = call ptr @__xcc_aot_tuple_get(ptr %{argv}, i64 3)",
                 (
                     "  %flags_ok = call i1 "
                     "@xcc.cc_driver._aot_is_smoke_compile_command("
                     f"i32 %{argc}, ptr %arg1, ptr %arg3)"
                 ),
-                f"  %arg4_slot = getelementptr ptr, ptr %{argv}, i64 4",
-                "  %object_path = load ptr, ptr %arg4_slot",
+                f"  %object_path = call ptr @__xcc_aot_tuple_get(ptr %{argv}, i64 4)",
                 "  br i1 %flags_ok, label %open_source, label %fail",
                 "open_source:",
                 f"  %source_file = call ptr @fopen(ptr %source_path, ptr {read_mode})",
@@ -1015,6 +1011,12 @@ class _Emitter:
         return_type = function.return_type
         signature, args = self._main_signature_and_args(function)
         lines = [signature + " {", "entry:"]
+        if self._main_uses_c_argv_bridge(function):
+            self.needs_runtime_prelude = True
+            lines.append(
+                "  %argv_tuple = call ptr @__xcc_aot_c_argv_to_tuple(i32 %argc, ptr %argv)"
+            )
+            args = "i32 %argc, ptr %argv_tuple"
         result_type = self._llvm_type(return_type)
         if isinstance(return_type, IrNoneType):
             lines.append(f"  call {result_type} {_llvm_symbol(function.name)}({args})")
@@ -1044,20 +1046,23 @@ class _Emitter:
     def _main_signature_and_args(self, function: IrFunction) -> tuple[str, str]:
         if not function.params:
             return "define i32 @main()", ""
-        if (
-            len(function.params) == 2
-            and function.params[0].name == "argc"
-            and isinstance(function.params[0].type, IrIntType)
-            and function.params[0].type.bits == 32
-            and function.params[1].name == "argv"
-            and isinstance(function.params[1].type, IrTupleType)
-        ):
+        if self._main_uses_c_argv_bridge(function):
             return "define i32 @main(i32 %argc, ptr %argv)", "i32 %argc, ptr %argv"
         args = ", ".join(
             f"{self._param_llvm_type(param.type)} {self._default_value(param.type)}"
             for param in function.params
         )
         return "define i32 @main()", args
+
+    def _main_uses_c_argv_bridge(self, function: IrFunction) -> bool:
+        return (
+            len(function.params) == 2
+            and function.params[0].name == "argc"
+            and isinstance(function.params[0].type, IrIntType)
+            and function.params[0].type.bits == 32
+            and function.params[1].name == "argv"
+            and isinstance(function.params[1].type, IrTupleType)
+        )
 
     def _emit_status_return(self, lines: list[str], return_type: IrType) -> None:
         if isinstance(return_type, IrIntType):
