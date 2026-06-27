@@ -65,6 +65,12 @@
   textual LLVM IR for the bootstrap-reachable smoke entry, lowers it through the
   configured `llc`, links the object with the host C linker, and reports
   bootstrap-specific diagnostics for tool failures.
+- Added the Milestone 6 self-host smoke harness foundation. It builds the native
+  bootstrap executable, invokes that executable on a stable C input with
+  compiler-style `-c`/`-o` arguments, returns the real subprocess status, and
+  rejects stale success when no object file is produced. The current real run
+  reaches the native executable but reports the expected incomplete-bootstrap
+  state as a missing output object rather than claiming self-host success.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

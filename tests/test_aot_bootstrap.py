@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -5,11 +6,13 @@ from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
+    AotBootstrapRunResult,
     AotError,
     build_native_bootstrap,
     collect_bootstrap_sources,
     lower_bootstrap_entry_smoke,
     plan_bootstrap_entry,
+    run_bootstrap_self_host_smoke,
     summarize_bootstrap_admission,
 )
 
@@ -167,6 +170,92 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         output = build_native_bootstrap(ROOT, ROOT / "build/aot/xcc-smoke")
         self.assertTrue(output.exists())
+
+
+class AotBootstrapSelfHostHarnessTests(unittest.TestCase):
+    def test_self_host_harness_invokes_generated_executable_with_c_input(self) -> None:
+        builds: list[tuple[Path, Path, str | None, str]] = []
+        commands: list[tuple[str, ...]] = []
+
+        def fake_build(
+            root: Path,
+            output: Path,
+            *,
+            llc: str | None = None,
+            cc: str = "cc",
+        ) -> Path:
+            builds.append((root, output, llc, cc))
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text("#!/bin/sh\n", encoding="utf-8")
+            return output
+
+        def fake_run(command: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess:
+            commands.append(tuple(command))
+            source_path = Path(command[2])
+            output_path = Path(command[4])
+            self.assertEqual(command[1], "-c")
+            self.assertEqual(command[3], "-o")
+            self.assertEqual(source_path.read_text(encoding="utf-8"), "int main(void){return 0;}\n")
+            self.assertEqual(output_path.name, "self-host-smoke.o")
+            output_path.write_bytes(b"object")
+            return subprocess.CompletedProcess(command, 0, stdout="compiled\n", stderr="")
+
+        with (
+            patch("xcc.aot.bootstrap.build_native_bootstrap", fake_build),
+            patch("subprocess.run", fake_run),
+        ):
+            result = run_bootstrap_self_host_smoke(ROOT, llc="/tool/llc", cc="clang")
+
+        self.assertIsInstance(result, AotBootstrapRunResult)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "compiled\n")
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(builds, [(ROOT, ROOT / "build/aot/xcc", "/tool/llc", "clang")])
+        self.assertEqual(commands[0][0], str(ROOT / "build/aot/xcc"))
+
+    def test_self_host_harness_returns_compiler_diagnostic_status(self) -> None:
+        def fake_build(
+            root: Path,
+            output: Path,
+            *,
+            llc: str | None = None,
+            cc: str = "cc",
+        ) -> Path:
+            return output
+
+        def fake_run(command: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(command, 2, stdout="", stderr="compile failed\n")
+
+        with (
+            patch("xcc.aot.bootstrap.build_native_bootstrap", fake_build),
+            patch("subprocess.run", fake_run),
+        ):
+            result = run_bootstrap_self_host_smoke(ROOT)
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stderr, "compile failed\n")
+
+    def test_self_host_harness_rejects_missing_output_object(self) -> None:
+        def fake_build(
+            root: Path,
+            output: Path,
+            *,
+            llc: str | None = None,
+            cc: str = "cc",
+        ) -> Path:
+            return output
+
+        def fake_run(command: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with (
+            patch("xcc.aot.bootstrap.build_native_bootstrap", fake_build),
+            patch("subprocess.run", fake_run),
+        ):
+            result = run_bootstrap_self_host_smoke(ROOT)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("missing output object", result.stderr)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,6 +34,13 @@ class AotBootstrapAdmissionReport:
 class AotBootstrapEntryPlan:
     entry_symbol: str
     modules: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AotBootstrapRunResult:
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 _BOOTSTRAP_REQUIRED_MODULES = (
@@ -131,6 +139,35 @@ def build_native_bootstrap(
     )
 
 
+def run_bootstrap_self_host_smoke(
+    root: Path,
+    *,
+    llc: str | None = None,
+    cc: str = "cc",
+) -> AotBootstrapRunResult:
+    output = root / "build/aot/xcc"
+    executable = build_native_bootstrap(root, output, llc=llc, cc=cc)
+    smoke_dir = output.parent
+    smoke_dir.mkdir(parents=True, exist_ok=True)
+    source_path = smoke_dir / "self-host-smoke.c"
+    object_path = smoke_dir / "self-host-smoke.o"
+    source_path.write_text("int main(void){return 0;}\n", encoding="utf-8")
+    object_path.unlink(missing_ok=True)
+    completed = subprocess.run(
+        (str(executable), "-c", str(source_path), "-o", str(object_path)),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode == 0 and not object_path.exists():
+        return AotBootstrapRunResult(
+            1,
+            completed.stdout,
+            completed.stderr or f"missing output object: {object_path}\n",
+        )
+    return AotBootstrapRunResult(completed.returncode, completed.stdout, completed.stderr)
+
+
 def _bootstrap_module_name(relative: Path) -> str:
     return "xcc." + ".".join(relative.with_suffix("").parts)
 
@@ -171,7 +208,7 @@ def _bootstrap_entry_smoke_wrapper() -> IrFunction:
                                 IrConstString("human"),
                                 IrConstBool(False),
                                 IrConstNone(),
-                                IrConstNone(),
+                                IrConstString("linux"),
                                 IrConstBool(True),
                             ),
                             options_type,

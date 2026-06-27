@@ -3,10 +3,12 @@ from xcc.aot.binder import bind_types
 from xcc.aot.bootstrap import (
     AotBootstrapAdmissionReport,
     AotBootstrapEntryPlan,
+    AotBootstrapRunResult,
     build_native_bootstrap,
     collect_bootstrap_sources,
     lower_bootstrap_entry_smoke,
     plan_bootstrap_entry,
+    run_bootstrap_self_host_smoke,
     summarize_bootstrap_admission,
 )
 from xcc.aot.diag import AotDiagnostic, AotError
@@ -70,6 +72,7 @@ __all__ = (
     "AotAnalysis",
     "AotBootstrapAdmissionReport",
     "AotBootstrapEntryPlan",
+    "AotBootstrapRunResult",
     "AotClassInfo",
     "AotDiagnostic",
     "AotError",
@@ -134,5 +137,6 @@ __all__ = (
     "plan_bootstrap_entry",
     "run_native_core_smoke",
     "run_native_smoke",
+    "run_bootstrap_self_host_smoke",
     "summarize_bootstrap_admission",
 )
