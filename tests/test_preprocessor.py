@@ -2716,6 +2716,11 @@ A(0)
             preprocess_source("#line nope\n", filename="main.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0104")
 
+    def test_line_directive_requires_operand(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source("#line\n", filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+
     def test_line_directive_requires_positive_line(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#line 0\n", filename="main.c")
@@ -2731,6 +2736,11 @@ A(0)
     def test_line_directive_rejects_non_decimal_macro_expansion(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
             preprocess_source("#define LINE_NO 0x2A\n#line LINE_NO\n", filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+
+    def test_line_directive_rejects_trailing_filename_tokens(self) -> None:
+        with self.assertRaises(PreprocessorError) as ctx:
+            preprocess_source('#line 42 "mapped.c" extra\n', filename="main.c")
         self.assertEqual(ctx.exception.code, "XCC-PP-0104")
 
     def test_predefined_standard_macros(self) -> None:
@@ -3882,6 +3892,13 @@ A(0)
         with self.assertRaises(PreprocessorError) as ctx:
             processor._parse_line_directive('1 "bad\\xZZ"', _SourceLocation("main.c", 1))
         self.assertIn("Invalid #line directive", str(ctx.exception))
+
+    def test_parse_line_directive_rejects_unterminated_filename_literal(self) -> None:
+        processor = _Preprocessor(FrontendOptions())
+        for body in ('1 "bad', '1 "bad\\', '1 "bad\n"'):
+            with self.subTest(body=body), self.assertRaises(PreprocessorError) as ctx:
+                processor._parse_line_directive(body, _SourceLocation("main.c", 1))
+            self.assertEqual(ctx.exception.code, "XCC-PP-0104")
 
     def test_parse_cli_define_head_rejects_invalid_forms(self) -> None:
         self.assertIsNone(_parse_cli_define_head("F("))

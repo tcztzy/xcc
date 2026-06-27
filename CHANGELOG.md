@@ -28,7 +28,10 @@
   oracle fixtures through generated temporary scripts instead of parent-process
   `exec`, admitting `aot/native.py`. Codegen loop alloca collection now uses
   static loop-statement dispatch instead of reflection-style `getattr`,
-  admitting `codegen.py`. The all-`src/xcc` probe now reaches 51/57
+  admitting `codegen.py`. The preprocessor entry module now uses a named
+  conditional-evaluation callback and hand-written `#line` parsing instead of
+  lambda/runtime `re.match`, admitting `preprocessor/__init__.py`. The
+  all-`src/xcc` probe now reaches 52/57
   modules, up from 19/57 before this milestone slice, with remaining blockers
   concentrated in dynamic calls, lambdas/nonlocals/globals, and rejected
   runtime `re` shims.

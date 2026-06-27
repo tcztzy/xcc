@@ -50,6 +50,45 @@ def _location_tuple(location: _SourceLocation) -> tuple[str, int]:
     return location.filename, location.line
 
 
+def _line_directive_filename_literal(text: str) -> str | None:
+    if not text.startswith('"'):
+        return None
+    index = 1
+    while index < len(text):
+        ch = text[index]
+        if ch == "\n":
+            return None
+        if ch == "\\":
+            if index + 1 >= len(text) or text[index + 1] == "\n":
+                return None
+            index += 2
+            continue
+        if ch == '"':
+            if index + 1 == len(text):
+                return text
+            return None
+        index += 1
+    return None
+
+
+def _parse_expanded_line_directive(expanded: str) -> tuple[str, str | None] | None:
+    if not expanded:
+        return None
+    cursor = 0
+    while cursor < len(expanded) and expanded[cursor].isdigit():
+        cursor += 1
+    if cursor == 0:
+        return None
+    line_text = expanded[:cursor]
+    tail = expanded[cursor:].lstrip()
+    if not tail:
+        return line_text, None
+    filename_literal = _line_directive_filename_literal(tail)
+    if filename_literal is None:
+        return None
+    return line_text, filename_literal
+
+
 class _LineMapBuilder:
     def __init__(self) -> None:
         self._entries: list[tuple[str, int]] = []
@@ -776,15 +815,19 @@ class _Preprocessor:
             base_dir=base_dir,
             std=self._options.std,
             macros=self._macros,
-            eval_condition=lambda text, loc, root: self._eval_condition(
-                text,
-                loc,
-                base_dir=root,
-            ),
+            eval_condition=self._eval_condition_for_include_root,
             require_macro_name=self._require_macro_name,
             invalid_directive_code=_PP_INVALID_DIRECTIVE,
             unknown_directive_code=_PP_UNKNOWN_DIRECTIVE,
         )
+
+    def _eval_condition_for_include_root(
+        self,
+        text: str,
+        location: _SourceLocation,
+        include_root: Path | None,
+    ) -> bool:
+        return self._eval_condition(text, location, base_dir=include_root)
 
     def _handle_define(self, body: str) -> None:
         macro = self._parse_define(body)
@@ -1565,8 +1608,8 @@ class _Preprocessor:
         location: _SourceLocation,
     ) -> tuple[int, str | None]:
         expanded = self._expand_macro_text(body, location).strip()
-        match = re.match(r'^(\d+)(?:\s+("(?:[^"\n]|\\.)*"))?\s*$', expanded)
-        if match is None:
+        parsed = _parse_expanded_line_directive(expanded)
+        if parsed is None:
             raise PreprocessorError(
                 "Invalid #line directive",
                 location.line,
@@ -1575,7 +1618,8 @@ class _Preprocessor:
                 code=_PP_INVALID_DIRECTIVE,
             )
 
-        line = int(match.group(1))
+        line_text, filename_literal = parsed
+        line = int(line_text)
         if line <= 0:
             raise PreprocessorError(
                 "Invalid #line directive",
@@ -1585,7 +1629,6 @@ class _Preprocessor:
                 code=_PP_INVALID_DIRECTIVE,
             )
 
-        filename_literal = match.group(2)
         if filename_literal is None:
             return line, None
         try:
