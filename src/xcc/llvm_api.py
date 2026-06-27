@@ -5,23 +5,29 @@ AST-to-LLVM lowering stays in xcc.codegen.
 """
 
 import ctypes
+from typing import Any
 
 # ── libLLVM loading ─────────────────────────────────────────
 
 
-def _load_llvm():
+def _load_llvm() -> ctypes.CDLL:
     path = "/opt/homebrew/opt/llvm/lib/libLLVM-C.dylib"
     return ctypes.CDLL(path)
 
 
-_LLVM: ctypes.CDLL | None = None
+class _LLVMState:
+    def __init__(self) -> None:
+        self.library: Any | None = None
+        self.api: Any | None = None
 
 
-def _llvm():
-    global _LLVM
-    if _LLVM is None:
-        _LLVM = _load_llvm()
-    return _LLVM
+_LLVM_STATE = _LLVMState()
+
+
+def _llvm() -> Any:
+    if _LLVM_STATE.library is None:
+        _LLVM_STATE.library = _load_llvm()
+    return _LLVM_STATE.library
 
 
 # ── ctypes type aliases ─────────────────────────────────────
@@ -82,15 +88,15 @@ LLVM_EXTERNAL_LINKAGE = 0
 LLVM_INTERNAL_LINKAGE = 8
 
 
-def ptr_array(values: list[int] | tuple[int, ...]):
+def ptr_array(values: list[int] | tuple[int, ...]) -> Any:
     return (_c_void_p * len(values))(*values)
 
 
-def zero_ptr_array(size: int):
+def zero_ptr_array(size: int) -> Any:
     return (_c_void_p * size)()
 
 
-def optional_zero_ptr_array(size: int):
+def optional_zero_ptr_array(size: int) -> Any:
     return None if size == 0 else zero_ptr_array(size)
 
 
@@ -100,16 +106,16 @@ def optional_zero_ptr_array(size: int):
 class _LLVMC:
     """Thin wrapper around libLLVM-C API."""
 
-    def __init__(self, lib: ctypes.CDLL):
+    def __init__(self, lib: Any) -> None:
         self._lib = lib
 
-    def _bind(self, name, restype, *argtypes):
-        fn = getattr(self._lib, name)
+    def _bind(self, name: str, restype: Any, *argtypes: Any) -> Any:
+        fn = self._lib[name]
         fn.restype = restype
         fn.argtypes = argtypes
         return fn
 
-    def bind_all(self):
+    def bind_all(self) -> None:
         # Context / Module
         self.ContextCreate = self._bind("LLVMContextCreate", _c_void_p)
         self.ModuleCreateWithName = self._bind(
@@ -711,12 +717,9 @@ class _LLVMC:
         )
 
 
-_api: _LLVMC | None = None
-
-
-def llvm():
-    global _api
-    if _api is None:
-        _api = _LLVMC(_llvm())
-        _api.bind_all()
-    return _api
+def llvm() -> Any:
+    if _LLVM_STATE.api is None:
+        api = _LLVMC(_llvm())
+        api.bind_all()
+        _LLVM_STATE.api = api
+    return _LLVM_STATE.api

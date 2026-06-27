@@ -311,6 +311,17 @@ class AotTypeBinderTests(unittest.TestCase):
         analysis = bind_types(check_subset(module), module)
         self.assertEqual(analysis.functions["f"].parameters, (("value", "datetime"),))
 
+    def test_binds_any_annotations(self) -> None:
+        source = (
+            "from typing import Any\n"
+            "def f(value: Any) -> Any:\n"
+            "    return value\n"
+        )
+        module = parse_source(source, filename="any_annotation.py")
+        analysis = bind_types(check_subset(module), module)
+        self.assertEqual(analysis.functions["f"].parameters, (("value", "Any"),))
+        self.assertEqual(analysis.functions["f"].return_type.name, "Any")
+
     def test_rejects_subscript_annotation_with_unsupported_element(self) -> None:
         source = "def f(value: list[complex]) -> int:\n    return 1\n"
         module = parse_source(source, filename="subscript.py")

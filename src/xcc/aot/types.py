@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 _BUILTIN_TYPES = {
     "Enum",
+    "Any",
     "NoReturn",
     "bool",
     "bytes",

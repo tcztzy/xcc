@@ -35,8 +35,11 @@
   object-like macro replacement and GNU asm qualifier/declaration checks instead
   of lambda/runtime `re.match`, and AOT type binding recognizes the existing
   `datetime` annotations used by predefined date/time helpers, admitting
-  `preprocessor/text.py`. The
-  all-`src/xcc` probe now reaches 53/57
+  `preprocessor/text.py`. The LLVM-C ctypes API cache now uses explicit state
+  fields instead of function-level `global` rebinding, and symbol binding uses
+  the library lookup protocol instead of reflection-style `getattr`, admitting
+  `llvm_api.py`. The
+  all-`src/xcc` probe now reaches 54/57
   modules, up from 19/57 before this milestone slice, with remaining blockers
   concentrated in dynamic calls, lambdas/nonlocals/globals, and rejected
   runtime `re` shims.
