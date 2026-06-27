@@ -136,6 +136,9 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertEqual(tuple(param.name for param in entry.params), ("argc", "argv"))
         self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", functions)
         self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", repr(entry.body))
+        smoke_compiler = functions["xcc.cc_driver._aot_compile_smoke_source_to_object"]
+        self.assertNotEqual(smoke_compiler.body, ())
+        self.assertIn("target='len'", repr(smoke_compiler.body))
         self.assertIn("xcc.cc_driver._aot_is_smoke_compile_command", functions)
         self.assertIn("xcc.cc_driver._aot_is_smoke_source", functions)
         self.assertIn("xcc.cc_driver._aot_smoke_llvm_path", functions)
@@ -163,14 +166,18 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "define i32 @xcc.cc_driver._aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
             llvm_ir,
         )
-        self.assertIn("%arg1 = call ptr @__xcc_aot_tuple_get(ptr %argv, i64 1)", llvm_ir)
-        self.assertIn("%source_path = call ptr @__xcc_aot_tuple_get(ptr %argv, i64 2)", llvm_ir)
+        self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %argv)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 1)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 2)", llvm_ir)
+        self.assertNotIn("load_args:", llvm_ir)
+        self.assertNotIn("write_llvm_path:", llvm_ir)
+        self.assertNotIn("exec_llc:", llvm_ir)
         self.assertNotIn("%arg1_slot = getelementptr ptr, ptr %argv, i64 1", llvm_ir)
         self.assertNotIn("%arg4_slot = getelementptr ptr, ptr %argv, i64 4", llvm_ir)
         self.assertIn("define ptr @xcc.cc_driver._aot_read_text_file(ptr %path)", llvm_ir)
         self.assertIn("define ptr @__xcc_aot_read_text_file(ptr %path)", llvm_ir)
         self.assertIn(
-            "%source_text = call ptr @xcc.cc_driver._aot_read_text_file(ptr %source_path)",
+            "call ptr @xcc.cc_driver._aot_read_text_file(ptr %",
             llvm_ir,
         )
         self.assertIn(
@@ -180,20 +187,20 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         )
         self.assertIn(
             "call i1 @xcc.cc_driver._aot_is_smoke_compile_command("
-            "i32 %argc, ptr %arg1, ptr %arg3)",
+            "i32 %argc, ptr %",
             llvm_ir,
         )
         self.assertNotIn("%arg1_cmp = call i32 @strcmp", llvm_ir)
         self.assertNotIn("%arg3_cmp = call i32 @strcmp", llvm_ir)
         self.assertIn("define i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source)", llvm_ir)
-        self.assertIn("call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source_text)", llvm_ir)
+        self.assertIn("call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %", llvm_ir)
         self.assertNotIn("%source_file = call ptr @fopen", llvm_ir)
         self.assertNotIn("%source_read = call i64 @fread", llvm_ir)
         self.assertNotIn("%source_len_ok = icmp eq i64 %source_read, 26", llvm_ir)
         self.assertIn("call i32 @strcmp(ptr %source, ptr @.str", llvm_ir)
         self.assertNotIn("call i32 @strcmp(ptr %source, ptr null)", llvm_ir)
         self.assertIn("define ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %object_path)", llvm_ir)
-        self.assertIn("call ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %object_path)", llvm_ir)
+        self.assertIn("call ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %", llvm_ir)
         self.assertNotIn("%ll_path_written = call i32", llvm_ir)
         self.assertNotIn("%s.ll", llvm_ir)
         self.assertIn("define ptr @xcc.cc_driver._aot_smoke_llvm_ir()", llvm_ir)
@@ -204,8 +211,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         )
         self.assertIn("define i1 @__xcc_aot_write_text_file(ptr %path, ptr %text)", llvm_ir)
         self.assertIn(
-            "%llvm_written_ok = call i1 @xcc.cc_driver._aot_write_text_file("
-            "ptr %ll_path, ptr %llvm_smoke)",
+            "call i1 @xcc.cc_driver._aot_write_text_file(ptr %",
             llvm_ir,
         )
         self.assertNotIn("%ll_file = call ptr @fopen", llvm_ir)
@@ -217,16 +223,16 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             llvm_ir,
         )
         self.assertIn(
-            "call ptr @xcc.cc_driver._aot_smoke_llc_argv(ptr %ll_path, ptr %object_path)",
+            "call ptr @xcc.cc_driver._aot_smoke_llc_argv(ptr %",
             llvm_ir,
         )
         self.assertIn("define i32 @xcc.cc_driver._aot_exec_argv(ptr %argv)", llvm_ir)
         self.assertIn("define i32 @__xcc_aot_execvp_tuple(ptr %argv_tuple)", llvm_ir)
         self.assertIn(
-            "%llc_status = call i32 @xcc.cc_driver._aot_exec_argv(ptr %llc_argv)",
+            "call i32 @xcc.cc_driver._aot_exec_argv(ptr %",
             llvm_ir,
         )
-        self.assertIn("ret i32 %llc_status", llvm_ir)
+        self.assertIn("ret i32 %", llvm_ir)
         self.assertIn("call i32 @__xcc_aot_execvp_tuple(ptr %argv)", llvm_ir)
         self.assertNotIn("call i32 @__xcc_aot_execvp_tuple(ptr %llc_argv)", llvm_ir)
         self.assertNotIn("%llc_argv = alloca ptr, i64 6", llvm_ir)

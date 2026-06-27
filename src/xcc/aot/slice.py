@@ -41,7 +41,6 @@ from xcc.aot.lower import lower_source_to_ir
 from xcc.aot.types import AotClassInfo
 
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
-    "xcc.cc_driver._aot_compile_smoke_source_to_object",
     "xcc.cc_driver._aot_exec_argv",
     "xcc.cc_driver._aot_read_text_file",
     "xcc.cc_driver._aot_write_text_file",
@@ -53,18 +52,7 @@ _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.sema.type_helpers._aot_integer_type_summary",
     "xcc.types.Type.__str__",
 }
-_NATIVE_EMITTED_LEAF_DEPENDENCIES = {
-    "xcc.cc_driver._aot_compile_smoke_source_to_object": (
-        "xcc.cc_driver._aot_is_smoke_compile_command",
-        "xcc.cc_driver._aot_is_smoke_source",
-        "xcc.cc_driver._aot_smoke_llvm_path",
-        "xcc.cc_driver._aot_smoke_llc_argv",
-        "xcc.cc_driver._aot_smoke_llvm_ir",
-        "xcc.cc_driver._aot_read_text_file",
-        "xcc.cc_driver._aot_write_text_file",
-        "xcc.cc_driver._aot_exec_argv",
-    ),
-}
+_NATIVE_EMITTED_LEAF_DEPENDENCIES: dict[str, tuple[str, ...]] = {}
 
 
 @dataclass(frozen=True)

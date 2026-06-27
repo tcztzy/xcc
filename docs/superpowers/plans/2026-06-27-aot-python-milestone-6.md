@@ -848,11 +848,12 @@ can also move out of the native-special shell without falling back to a dynamic
 longer builds a `Path` object or calls `str()` to bridge back to string paths;
 its path values, read text, emitted LLVM text, and `llc` argv are now annotated
 locals, and the body lowers and emits through the generic AOT path in isolation.
-The native bridge still emits the outer compiler helper as a specialized leaf
-rather than selecting the helper's generic lowered body inside the bootstrap
-slice or lowering the general frontend/backend path, so the remaining native
-specialization is the fixed smoke compiler shell around the lowered
-project-owned helpers.
+The bootstrap slice now selects that generic lowered body instead of emitting a
+native-special smoke compiler shell, so the generated native `xcc` reaches the
+smoke compiler through ordinary lowered tuple length/indexing, branching, and
+project helper calls. The remaining gap for Step 4d is replacing the fixed
+smoke compiler path with the general lowered project-owned frontend/backend
+path for the smoke input.
 
 - [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
 

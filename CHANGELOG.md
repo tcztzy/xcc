@@ -141,6 +141,10 @@
   are ordinary annotated Python locals. The body now lowers and emits through
   the generic AOT path without `Path(...)` or `str(...)` bridge calls, while
   preserving the CPython smoke compiler behavior.
+- Switched the bootstrap smoke compiler from a native-special LLVM shell to its
+  generic lowered Python body. The bootstrap slice now discovers the helper
+  calls from `_aot_compile_smoke_source_to_object()` itself and emits ordinary
+  tuple length/indexing, branching, and project helper calls.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation
