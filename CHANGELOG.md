@@ -87,6 +87,10 @@
   well as in the native AOT bridge. The project source now owns the fixed smoke
   validation, `.ll` emission, and configured `llc` invocation behavior instead
   of leaving that behavior only in the native emitter specialization.
+- Moved the fixed bootstrap smoke LLVM text into a lowered project helper. The
+  native smoke compiler leaf now calls `xcc.cc_driver._aot_smoke_llvm_ir()` from
+  the AOT slice instead of embedding the generated IR body directly in the LLVM
+  emitter, narrowing the remaining native specialization to file/process glue.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

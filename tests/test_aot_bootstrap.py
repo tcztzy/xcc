@@ -111,6 +111,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertEqual(tuple(param.name for param in entry.params), ("argc", "argv"))
         self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", functions)
         self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", repr(entry.body))
+        self.assertIn("xcc.cc_driver._aot_smoke_llvm_ir", functions)
 
         llvm_ir = emit_llvm_text(module)
 
@@ -121,6 +122,8 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "define i32 @xcc.cc_driver._aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
             llvm_ir,
         )
+        self.assertIn("define ptr @xcc.cc_driver._aot_smoke_llvm_ir()", llvm_ir)
+        self.assertIn("call ptr @xcc.cc_driver._aot_smoke_llvm_ir()", llvm_ir)
         self.assertIn("/opt/homebrew/opt/llvm/bin/llc", llvm_ir)
         self.assertIn("declare ptr @fopen(ptr, ptr)", llvm_ir)
         self.assertIn("declare i64 @fwrite(ptr, i64, i64, ptr)", llvm_ir)

@@ -22,7 +22,6 @@ _LLVM_LLC_OVERVIEW = "OVERVIEW: llvm system compiler"
 _LLVM_LLC_USAGE = "USAGE: llc [options] <input bitcode>"
 _AOT_BOOTSTRAP_LLC = "/opt/homebrew/opt/llvm/bin/llc"
 _AOT_SMOKE_SOURCE = "int main(void){return 0;}\n"
-_AOT_SMOKE_LLVM_IR = "define i32 @main() {\nentry:\n  ret i32 0\n}\n"
 
 
 @dataclass(frozen=True)
@@ -457,6 +456,10 @@ def _delegate_argv(config: DriverConfig) -> tuple[str, ...] | list[str]:
     return config.clang_argv
 
 
+def _aot_smoke_llvm_ir() -> str:
+    return "define i32 @main() {\nentry:\n  ret i32 0\n}\n"
+
+
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
     if (argc, len(argv), argv[1:2], argv[3:4]) != (5, 5, ("-c",), ("-o",)):
         return 1
@@ -465,7 +468,7 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
     if source_path.read_text(encoding="utf-8") != _AOT_SMOKE_SOURCE:
         return 1
     llvm_path = Path(str(object_path) + ".ll")
-    llvm_path.write_text(_AOT_SMOKE_LLVM_IR, encoding="utf-8")
+    llvm_path.write_text(_aot_smoke_llvm_ir(), encoding="utf-8")
     completed = subprocess.run(
         (
             _AOT_BOOTSTRAP_LLC,

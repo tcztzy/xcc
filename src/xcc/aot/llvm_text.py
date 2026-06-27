@@ -733,7 +733,6 @@ class _Emitter:
         llc_filetype = self._string_constant("-filetype=obj")
         llc_output = self._string_constant("-o")
         expected_source = self._string_constant(smoke_source)
-        llvm_smoke = self._string_constant("define i32 @main() {\nentry:\n  ret i32 0\n}\n")
         return "\n".join(
             (
                 f"define i32 {_llvm_symbol(function.name)}(i32 %{argc}, ptr %{argv}) {{",
@@ -787,9 +786,10 @@ class _Emitter:
                 "  %ll_open = icmp ne ptr %ll_file, null",
                 "  br i1 %ll_open, label %write_llvm, label %fail",
                 "write_llvm:",
-                f"  %llvm_len = call i64 @strlen(ptr {llvm_smoke})",
+                "  %llvm_smoke = call ptr @xcc.cc_driver._aot_smoke_llvm_ir()",
+                "  %llvm_len = call i64 @strlen(ptr %llvm_smoke)",
                 (
-                    f"  %llvm_written = call i64 @fwrite(ptr {llvm_smoke}, i64 1, "
+                    "  %llvm_written = call i64 @fwrite(ptr %llvm_smoke, i64 1, "
                     "i64 %llvm_len, ptr %ll_file)"
                 ),
                 "  %ll_closed = call i32 @fclose(ptr %ll_file)",

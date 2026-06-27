@@ -50,6 +50,9 @@ _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.sema.type_helpers._aot_integer_type_summary",
     "xcc.types.Type.__str__",
 }
+_NATIVE_EMITTED_LEAF_DEPENDENCIES = {
+    "xcc.cc_driver._aot_compile_smoke_source_to_object": ("xcc.cc_driver._aot_smoke_llvm_ir",),
+}
 
 
 @dataclass(frozen=True)
@@ -202,20 +205,22 @@ def _lower_core_slice_from_roots(
                 _rename_statement_calls(function.body, rename_map),
             )
             functions[full_name] = lowered
-            if lowered.name not in _NATIVE_EMITTED_LEAF_FUNCTIONS:
-                discovered_records = set(_function_record_names(lowered))
-                record_names.update(discovered_records)
-                missing_records = discovered_records.difference(records_by_name)
-                if missing_records:
-                    _add_missing_records(
-                        missing_records,
-                        records_by_name,
-                        class_modules,
-                        inputs_by_name,
-                        source_cache,
-                        class_types,
-                    )
-                pending.extend(_function_call_targets(lowered))
+            if lowered.name in _NATIVE_EMITTED_LEAF_FUNCTIONS:
+                pending.extend(_native_leaf_dependencies(lowered.name))
+                continue
+            discovered_records = set(_function_record_names(lowered))
+            record_names.update(discovered_records)
+            missing_records = discovered_records.difference(records_by_name)
+            if missing_records:
+                _add_missing_records(
+                    missing_records,
+                    records_by_name,
+                    class_modules,
+                    inputs_by_name,
+                    source_cache,
+                    class_types,
+                )
+            pending.extend(_function_call_targets(lowered))
     return IrModule("<core-slice>", tuple(records_by_name.values()), tuple(functions.values()))
 
 
@@ -312,6 +317,7 @@ def core_slice_entry_module(module: IrModule, wrapper: IrFunction) -> IrModule:
             continue
         reachable.add(target)
         if function.name in _NATIVE_EMITTED_LEAF_FUNCTIONS:
+            pending.extend(_native_leaf_dependencies(function.name))
             continue
         pending.extend(_function_call_targets(function))
     return IrModule(
@@ -655,6 +661,10 @@ def _function_call_targets(function: IrFunction) -> tuple[str, ...]:
     for statement in function.body:
         targets.extend(_statement_call_targets(statement))
     return tuple(targets)
+
+
+def _native_leaf_dependencies(function_name: str) -> tuple[str, ...]:
+    return _NATIVE_EMITTED_LEAF_DEPENDENCIES.get(function_name, ())
 
 
 def _statement_call_targets(statement: IrStmt) -> tuple[str, ...]:

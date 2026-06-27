@@ -825,7 +825,10 @@ Current progress toward this step: `_aot_compile_smoke_source_to_object` is now
 real CPython-valid project code that validates the fixed smoke source, writes the
 minimal `.ll`, and invokes `/opt/homebrew/opt/llvm/bin/llc`. The native bridge
 still emits this helper as a specialized leaf rather than lowering the helper's
-Python body or the general frontend/backend path.
+Python body or the general frontend/backend path. The fixed smoke LLVM text has
+also moved into lowered project helper `xcc.cc_driver._aot_smoke_llvm_ir()`, so
+the remaining native specialization is now the file/process glue around that
+project-owned IR helper.
 
 - [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
 
