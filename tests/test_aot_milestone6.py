@@ -15,6 +15,7 @@ PREPROCESSOR_INIT_PATH = ROOT / "src/xcc/preprocessor/__init__.py"
 PREPROCESSOR_INCLUDES_PATH = ROOT / "src/xcc/preprocessor/includes.py"
 PREPROCESSOR_MACROS_PATH = ROOT / "src/xcc/preprocessor/macros.py"
 PREPROCESSOR_PRAGMAS_PATH = ROOT / "src/xcc/preprocessor/pragmas.py"
+PREPROCESSOR_TEXT_PATH = ROOT / "src/xcc/preprocessor/text.py"
 SEMA_CONSTANTS_PATH = ROOT / "src/xcc/sema/constants.py"
 SEMA_CONVERSIONS_PATH = ROOT / "src/xcc/sema/conversions.py"
 SEMA_EXPRESSIONS_PATH = ROOT / "src/xcc/sema/expressions.py"
@@ -149,6 +150,10 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
     def test_admits_preprocessor_entry_without_lambda_or_runtime_regex_match(self) -> None:
         analysis = analyze_path(PREPROCESSOR_INIT_PATH)
         self.assertIn("_Preprocessor._parse_line_directive", analysis.types.functions)
+
+    def test_admits_preprocessor_text_without_lambda_or_runtime_regex_match(self) -> None:
+        analysis = analyze_path(PREPROCESSOR_TEXT_PATH)
+        self.assertIn("_expand_object_like_macros", analysis.types.functions)
 
     def test_admits_sema_helpers_without_dynamic_getattr(self) -> None:
         for path in (

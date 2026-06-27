@@ -117,12 +117,53 @@ def _scan_block_comment_state(line: str, in_block_comment: bool) -> bool:
     return in_block_comment
 
 
+def _is_word_char(ch: str) -> bool:
+    return ch == "_" or ch.isalnum()
+
+
+def _scan_identifier(text: str, index: int) -> tuple[str, int] | None:
+    if index >= len(text):
+        return None
+    ch = text[index]
+    if ch != "_" and not ch.isalpha():
+        return None
+    start = index
+    index += 1
+    while index < len(text) and _is_word_char(text[index]):
+        index += 1
+    return text[start:index], index
+
+
+def _object_like_macro_at(line: str, index: int, names: list[str]) -> str | None:
+    if index > 0 and _is_word_char(line[index - 1]):
+        return None
+    for name in names:
+        if not name:
+            continue
+        end = index + len(name)
+        if not line.startswith(name, index):
+            continue
+        if end < len(line) and _is_word_char(line[end]):
+            continue
+        return name
+    return None
+
+
 def _expand_object_like_macros(line: str, macros: dict[str, str]) -> str:
     if not macros:
         return line
     names = sorted(macros.keys(), key=str.__len__, reverse=True)
-    pattern = re.compile(r"\b(?:" + "|".join(re.escape(name) for name in names) + r")\b")
-    return pattern.sub(lambda match: macros[match.group(0)], line)
+    result: list[str] = []
+    index = 0
+    while index < len(line):
+        name = _object_like_macro_at(line, index, names)
+        if name is None:
+            result.append(line[index])
+            index += 1
+            continue
+        result.append(macros[name])
+        index += len(name)
+    return "".join(result)
 
 
 def _strip_gnu_asm_extensions(source: str) -> str:
@@ -202,10 +243,13 @@ def _rewrite_aarch64_stack_pointer_asm(asm_text: str) -> str | None:
 def _asm_operand_open_index(line: str, index: int) -> int | None:
     cursor = _skip_space(line, index)
     while True:
-        word_match = re.match(r"[A-Za-z_]\w*", line[cursor:])
-        if word_match is None or word_match.group(0) not in _ASM_QUALIFIERS:
+        scanned = _scan_identifier(line, cursor)
+        if scanned is None:
             break
-        cursor = _skip_space(line, cursor + len(word_match.group(0)))
+        word, word_end = scanned
+        if word not in _ASM_QUALIFIERS:
+            break
+        cursor = _skip_space(line, word_end)
     if cursor < len(line) and line[cursor] == "(":
         return cursor
     return None
@@ -366,10 +410,11 @@ def _line_starts_declaration_asm_label(line: str) -> bool:
 def _can_continue_declaration(previous_line: str) -> bool:
     if not previous_line.endswith(")"):
         return False
-    word_match = re.match(r"[A-Za-z_]\w*", previous_line)
-    if word_match is None:
+    scanned = _scan_identifier(previous_line, 0)
+    if scanned is None:
         return True
-    return word_match.group(0) not in _CONTROL_STATEMENT_PREFIXES
+    word, _word_end = scanned
+    return word not in _CONTROL_STATEMENT_PREFIXES
 
 
 def _reject_gnu_asm_statements(

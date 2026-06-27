@@ -11,6 +11,7 @@ _BUILTIN_TYPES = {
     "object",
     "str",
     "ValueError",
+    "datetime",
 }
 _WIDTH_ALIASES = {
     "int8": (8, True),

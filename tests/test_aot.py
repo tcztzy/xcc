@@ -301,6 +301,16 @@ class AotTypeBinderTests(unittest.TestCase):
         self.assertEqual(analysis.functions["f"].parameters, (("value", "bytes | None"),))
         self.assertEqual(analysis.functions["f"].return_type.name, "bytes")
 
+    def test_binds_datetime_annotations(self) -> None:
+        source = (
+            "from datetime import datetime\n"
+            "def f(value: datetime) -> str:\n"
+            "    return str(value.year)\n"
+        )
+        module = parse_source(source, filename="datetime_annotation.py")
+        analysis = bind_types(check_subset(module), module)
+        self.assertEqual(analysis.functions["f"].parameters, (("value", "datetime"),))
+
     def test_rejects_subscript_annotation_with_unsupported_element(self) -> None:
         source = "def f(value: list[complex]) -> int:\n    return 1\n"
         module = parse_source(source, filename="subscript.py")

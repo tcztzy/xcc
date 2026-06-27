@@ -136,6 +136,16 @@ class PreprocessorTests(unittest.TestCase):
 
         self.assertEqual(preprocessor_text._find_matching_paren(line, open_index), len(line) - 2)
 
+    def test_gnu_asm_operand_scanner_skips_known_qualifiers(self) -> None:
+        line = 'asm volatile inline ("nop");'
+
+        self.assertEqual(
+            preprocessor_text._asm_operand_open_index(line, len("asm")),
+            line.index("("),
+        )
+        self.assertIsNone(preprocessor_text._asm_operand_open_index("", 0))
+        self.assertIsNone(preprocessor_text._asm_operand_open_index("asm notqual ();", len("asm")))
+
     def test_gnu_asm_rejection_allows_declaration_labels_and_other_files(self) -> None:
         source = 'int f(void)\n__asm("_f");\nasm("nop");\n'
         line_map = (("main.c", 1), ("main.c", 2), ("header.h", 7))
@@ -195,6 +205,8 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_gnu_asm_declaration_continuation_without_leading_word_is_allowed(self) -> None:
         self.assertTrue(preprocessor_text._can_continue_declaration("(int (*f)(void))"))
+        self.assertTrue(preprocessor_text._can_continue_declaration("typedef int (*f)(void)"))
+        self.assertFalse(preprocessor_text._can_continue_declaration("if (x)"))
 
     def test_gnu_asm_rejection_tracks_non_asm_significant_lines(self) -> None:
         preprocessor_text._reject_gnu_asm_extensions(
@@ -3524,6 +3536,11 @@ A(0)
         )
         self.assertEqual(_expand_object_like_macros("A B", {"A": "1", "B": "2"}), "1 2")
         self.assertEqual(_expand_object_like_macros("A B", {}), "A B")
+        self.assertEqual(
+            _expand_object_like_macros("AA A XA A_ _A", {"A": "1", "AA": "2"}),
+            "2 1 XA A_ _A",
+        )
+        self.assertEqual(preprocessor_text._object_like_macro_at("A", 0, ["", "A"]), "A")
         self.assertEqual(_parse_macro_parameters(""), ([], False))
         self.assertEqual(_parse_macro_parameters("x, ..."), (["x"], True))
         self.assertIsNone(_parse_macro_parameters("x, ..., y"))
