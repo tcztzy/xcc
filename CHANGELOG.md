@@ -116,6 +116,11 @@
   `__xcc_aot_c_argv_to_tuple()` before entering `aot_bootstrap_smoke_main()`,
   and the smoke compiler leaf reads Python-level arguments through
   `__xcc_aot_tuple_get()` instead of treating them as a raw `char **`.
+- Moved bootstrap smoke source-file reading behind a CPython-valid project
+  helper. The native smoke compiler leaf now calls
+  `xcc.cc_driver._aot_read_text_file()` and a generic
+  `__xcc_aot_read_text_file()` runtime shim instead of hand-writing the fixed
+  source `fopen`/`fread` envelope in the outer compiler helper.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

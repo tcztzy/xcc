@@ -92,6 +92,8 @@ class _Emitter:
     def _emit_function(self, function: IrFunction) -> str:
         if function.name == "xcc.cc_driver._aot_compile_smoke_source_to_object":
             return self._emit_bootstrap_smoke_compiler_function(function)
+        if function.name == "xcc.cc_driver._aot_read_text_file":
+            return self._emit_aot_read_text_file_function(function)
         if function.name == "xcc.lexer._aot_error_summary_for_source":
             return self._emit_core_lexer_string_helper_function(
                 function,
@@ -722,9 +724,6 @@ class _Emitter:
             self._error("bootstrap smoke compiler expects (int32, tuple[str, ...]) -> int32")
         argc = function.params[0].name
         argv = function.params[1].name
-        smoke_source = "int main(void){return 0;}\n"
-        smoke_len = len(smoke_source.encode("utf-8"))
-        read_mode = self._string_constant("r")
         write_mode = self._string_constant("w")
         return "\n".join(
             (
@@ -742,24 +741,10 @@ class _Emitter:
                     f"i32 %{argc}, ptr %arg1, ptr %arg3)"
                 ),
                 f"  %object_path = call ptr @__xcc_aot_tuple_get(ptr %{argv}, i64 4)",
-                "  br i1 %flags_ok, label %open_source, label %fail",
-                "open_source:",
-                f"  %source_file = call ptr @fopen(ptr %source_path, ptr {read_mode})",
-                "  %source_open = icmp ne ptr %source_file, null",
-                "  br i1 %source_open, label %read_source, label %fail",
+                "  br i1 %flags_ok, label %read_source, label %fail",
                 "read_source:",
-                f"  %source_buffer = call ptr @malloc(i64 {smoke_len + 2})",
-                (
-                    f"  %source_read = call i64 @fread(ptr %source_buffer, i64 1, "
-                    f"i64 {smoke_len + 1}, ptr %source_file)"
-                ),
-                "  %source_closed = call i32 @fclose(ptr %source_file)",
-                f"  %source_len_ok = icmp eq i64 %source_read, {smoke_len}",
-                "  br i1 %source_len_ok, label %check_source, label %fail",
-                "check_source:",
-                "  %source_zero = getelementptr i8, ptr %source_buffer, i64 %source_read",
-                "  store i8 0, ptr %source_zero",
-                "  %source_ok = call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source_buffer)",
+                "  %source_text = call ptr @xcc.cc_driver._aot_read_text_file(ptr %source_path)",
+                "  %source_ok = call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source_text)",
                 "  br i1 %source_ok, label %write_llvm_path, label %fail",
                 "write_llvm_path:",
                 "  %ll_path = call ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %object_path)",
@@ -785,6 +770,26 @@ class _Emitter:
                 "  ret i32 1",
                 "fail:",
                 "  ret i32 1",
+                "}",
+            )
+        )
+
+    def _emit_aot_read_text_file_function(self, function: IrFunction) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if (
+            len(function.params) != 1
+            or not isinstance(function.params[0].type, IrStringType)
+            or not isinstance(function.return_type, IrStringType)
+        ):
+            self._error("AOT read_text helper expects str -> str")
+        param = function.params[0]
+        return "\n".join(
+            (
+                f"define ptr {_llvm_symbol(function.name)}(ptr %{param.name}) {{",
+                "entry:",
+                f"  %result = call ptr @__xcc_aot_read_text_file(ptr %{param.name})",
+                "  ret ptr %result",
                 "}",
             )
         )

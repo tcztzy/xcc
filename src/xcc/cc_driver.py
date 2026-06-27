@@ -482,14 +482,18 @@ def _aot_smoke_llc_argv(llvm_path: str, object_path: str) -> tuple[str, ...]:
     )
 
 
+def _aot_read_text_file(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
     if argc != 5 or len(argv) != 5:
         return 1
     if not _aot_is_smoke_compile_command(argc, argv[1], argv[3]):
         return 1
-    source_path = Path(argv[2])
+    source_path = argv[2]
     object_path = Path(argv[4])
-    if not _aot_is_smoke_source(source_path.read_text(encoding="utf-8")):
+    if not _aot_is_smoke_source(_aot_read_text_file(source_path)):
         return 1
     llvm_path = Path(_aot_smoke_llvm_path(str(object_path)))
     llvm_path.write_text(_aot_smoke_llvm_ir(), encoding="utf-8")

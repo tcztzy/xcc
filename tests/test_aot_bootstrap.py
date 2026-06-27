@@ -116,6 +116,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("xcc.cc_driver._aot_smoke_llvm_path", functions)
         self.assertIn("xcc.cc_driver._aot_smoke_llvm_ir", functions)
         self.assertIn("xcc.cc_driver._aot_smoke_llc_argv", functions)
+        self.assertIn("xcc.cc_driver._aot_read_text_file", functions)
 
         llvm_ir = emit_llvm_text(module)
 
@@ -139,6 +140,12 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("%source_path = call ptr @__xcc_aot_tuple_get(ptr %argv, i64 2)", llvm_ir)
         self.assertNotIn("%arg1_slot = getelementptr ptr, ptr %argv, i64 1", llvm_ir)
         self.assertNotIn("%arg4_slot = getelementptr ptr, ptr %argv, i64 4", llvm_ir)
+        self.assertIn("define ptr @xcc.cc_driver._aot_read_text_file(ptr %path)", llvm_ir)
+        self.assertIn("define ptr @__xcc_aot_read_text_file(ptr %path)", llvm_ir)
+        self.assertIn(
+            "%source_text = call ptr @xcc.cc_driver._aot_read_text_file(ptr %source_path)",
+            llvm_ir,
+        )
         self.assertIn(
             "define i1 @xcc.cc_driver._aot_is_smoke_compile_command("
             "i32 %argc, ptr %c_flag, ptr %output_flag)",
@@ -152,8 +159,10 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("%arg1_cmp = call i32 @strcmp", llvm_ir)
         self.assertNotIn("%arg3_cmp = call i32 @strcmp", llvm_ir)
         self.assertIn("define i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source)", llvm_ir)
-        self.assertIn("call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source_buffer)", llvm_ir)
-        self.assertIn("%source_len_ok = icmp eq i64 %source_read, 26", llvm_ir)
+        self.assertIn("call i1 @xcc.cc_driver._aot_is_smoke_source(ptr %source_text)", llvm_ir)
+        self.assertNotIn("%source_file = call ptr @fopen", llvm_ir)
+        self.assertNotIn("%source_read = call i64 @fread", llvm_ir)
+        self.assertNotIn("%source_len_ok = icmp eq i64 %source_read, 26", llvm_ir)
         self.assertIn("call i32 @strcmp(ptr %source, ptr @.str", llvm_ir)
         self.assertNotIn("call i32 @strcmp(ptr %source, ptr null)", llvm_ir)
         self.assertIn("define ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %object_path)", llvm_ir)

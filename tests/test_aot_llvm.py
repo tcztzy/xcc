@@ -108,6 +108,24 @@ class AotLlvmTextTests(unittest.TestCase):
                 self.assertIn(f"call ptr {helper_name}(ptr %source)", llvm_ir)
                 self.assertIn("define ptr @__xcc_aot_lexer_translate_source", llvm_ir)
 
+    def test_rejects_malformed_aot_read_text_leaf(self) -> None:
+        module = IrModule(
+            "bad.py",
+            (),
+            (
+                IrFunction(
+                    "xcc.cc_driver._aot_read_text_file",
+                    (),
+                    IrStringType(),
+                    (),
+                ),
+            ),
+        )
+        with self.assertRaises(AotError) as ctx:
+            emit_llvm_text(module)
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        self.assertIn("AOT read_text helper expects str -> str", ctx.exception.diagnostics[0].message)
+
     def test_emits_record_type_and_method_call(self) -> None:
         source = (
             "from dataclasses import dataclass\n"
