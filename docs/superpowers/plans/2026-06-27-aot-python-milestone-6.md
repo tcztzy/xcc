@@ -1,0 +1,772 @@
+# AOT Python Milestone 6 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Turn the existing AOT Python track into a native bootstrap path for XCC while keeping every source file valid CPython 3.11+ Python and avoiding marker syntax or decorators.
+
+**Architecture:** Finish Milestone 6 in two layers. First, make every `src/xcc` module pass deterministic AOT subset/type admission and keep that as a regression gate. Then grow the native lowering and bootstrap harness from the existing CPython/native oracle path until a generated native `xcc` executable can compile the project inputs needed for self-host validation.
+
+**Tech Stack:** Python 3.11+ standard library, `ast`, `dataclasses`, textual LLVM IR, `/opt/homebrew/opt/llvm/bin/llc` or `XCC_LLC`, existing `unittest` and `tox` gates.
+
+---
+
+## Scope Check
+
+This plan implements Milestone 6 from `docs/superpowers/specs/2026-06-26-aot-python-design.md`.
+
+In scope:
+
+- AOT admission for every Python module under `src/xcc`.
+- Source cleanup for rejected dynamic Python constructs already present in XCC source, such as runtime reflection, lambdas, and `nonlocal` state rebinding.
+- A bootstrap source graph that records all modules needed by the native `xcc` executable.
+- Native lowering and runtime shims for the CLI/front-end/backend path required by bootstrap.
+- A native executable build helper that uses textual LLVM IR and `llc`.
+- Self-host validation that runs the generated native `xcc` without the CPython runtime.
+
+Out of scope:
+
+- Supporting arbitrary Python packages or the full CPython object model.
+- Adding marker decorators, pragmas, comment directives, or non-Python syntax.
+- Adding non-stdlib runtime dependencies to XCC source.
+- Claiming final bootstrap completion before the generated native executable has been run against the self-host inputs.
+
+## File Structure
+
+- Modify: `tests/test_aot_milestone6.py`
+  - Holds all-src admission regression tests and targeted Milestone 6 source-shape tests.
+- Modify: `src/xcc/aarch64_asm.py`
+  - Removes remaining admission blockers from the AArch64 backend by replacing dataclass reflection and rebinding closures with explicit dispatch/state.
+- Modify: `tests/test_aarch64_asm.py`
+  - Adds focused coverage for explicit AArch64 AST child traversal.
+- Create: `src/xcc/aot/bootstrap.py`
+  - Owns bootstrap source discovery, admission reporting, bootstrap entry planning, and native build orchestration.
+- Create: `tests/test_aot_bootstrap.py`
+  - Tests bootstrap source graph, admission reports, native command planning, and final self-host harness behavior.
+- Modify: `src/xcc/aot/slice.py`
+  - Reuses and extends multi-module graph collection for bootstrap roots.
+- Modify: `src/xcc/aot/lower.py`
+  - Lowers the additional Python subset forms used by the bootstrap-reachable CLI/front-end/backend path.
+- Modify: `src/xcc/aot/llvm_text.py`
+  - Emits added IR forms and bootstrap entry wrappers as textual LLVM IR.
+- Modify: `src/xcc/aot/core_runtime.py`
+  - Adds minimal runtime helpers required by bootstrap-reachable objects and strings.
+- Modify: `src/xcc/aot/native.py`
+  - Adds native executable build helpers reusable by bootstrap validation.
+- Modify: `CHANGELOG.md`
+  - Records concrete Milestone 6 progress after each verified slice.
+- Modify: `LESSONS.md`
+  - Only when a reusable implementation lesson is discovered.
+
+## Diagnostic Codes
+
+Use existing AOT diagnostics when they match the failure category. Add these only when a new distinction is required:
+
+- `XCC-AOT-BOOTSTRAP-0001`: bootstrap source graph cannot include a requested module.
+- `XCC-AOT-BOOTSTRAP-0002`: bootstrap entry point or wrapper cannot be built from lowered symbols.
+- `XCC-AOT-BOOTSTRAP-0003`: native bootstrap executable command failed.
+- `XCC-AOT-RUNTIME-0003`: unsupported bootstrap runtime helper request.
+
+## Task 1: Freeze All-Source Admission
+
+**Files:**
+
+- Modify: `tests/test_aot_milestone6.py`
+- Modify: `CHANGELOG.md`
+
+- [ ] **Step 1: Add the all-source admission regression test**
+
+Add this method to `AotMilestone6AdmissionTests` in `tests/test_aot_milestone6.py`:
+
+```python
+    def test_all_src_xcc_modules_are_aot_admitted(self) -> None:
+        failures: list[str] = []
+        for path in sorted((ROOT / "src/xcc").rglob("*.py")):
+            with self.subTest(path=path.relative_to(ROOT)):
+                try:
+                    analyze_path(path)
+                except Exception as exc:
+                    failures.append(f"{path.relative_to(ROOT)}: {exc}")
+        self.assertEqual([], failures)
+```
+
+- [ ] **Step 2: Run the focused test and verify it fails before the final cleanup**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_milestone6.AotMilestone6AdmissionTests.test_all_src_xcc_modules_are_aot_admitted -v
+```
+
+Expected before cleanup: the test reports any remaining modules rejected by the AOT subset or type binder. Expected after this milestone's admission cleanup: the test passes for all 57 modules.
+
+- [ ] **Step 3: Record the admission target**
+
+Add a `CHANGELOG.md` current entry sentence after the existing Milestone 6 admission status:
+
+```markdown
+  The Milestone 6 test gate now includes an all-`src/xcc` admission regression
+  that analyzes every Python source file instead of relying on an ad hoc probe.
+```
+
+- [ ] **Step 4: Run the full Milestone 6 admission suite**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_milestone6 -v
+```
+
+Expected: all Milestone 6 admission tests pass.
+
+- [ ] **Step 5: Commit all-source admission gate**
+
+Run:
+
+```bash
+git add tests/test_aot_milestone6.py CHANGELOG.md
+git commit -m "test: gate AOT all-source admission"
+```
+
+## Task 2: Admit the AArch64 Backend
+
+**Files:**
+
+- Modify: `src/xcc/aarch64_asm.py`
+- Modify: `tests/test_aarch64_asm.py`
+- Modify: `tests/test_aot_milestone6.py`
+- Modify: `CHANGELOG.md`
+
+- [ ] **Step 1: Add the focused AArch64 admission assertion**
+
+Add this constant beside the other path constants in `tests/test_aot_milestone6.py`:
+
+```python
+AARCH64_ASM_PATH = ROOT / "src/xcc/aarch64_asm.py"
+```
+
+Add this test to `AotMilestone6AdmissionTests`:
+
+```python
+    def test_admits_aarch64_backend_without_reflection_or_nonlocal_state(self) -> None:
+        analysis = analyze_path(AARCH64_ASM_PATH)
+        self.assertIn("_AArch64AsmGen._prepare_frame", analysis.types.functions)
+        self.assertIn("_AArch64AsmGen._walk_ast_children", analysis.types.functions)
+```
+
+- [ ] **Step 2: Replace reflection-style AST traversal**
+
+In `src/xcc/aarch64_asm.py`, remove `fields` and `is_dataclass` from the dataclass import:
+
+```python
+from dataclasses import dataclass
+```
+
+Add explicit child traversal to `_AArch64AsmGen`:
+
+```python
+    def _walk_ast_children(self, node: object, walk: Callable[[object], None]) -> None:
+        if isinstance(node, (str, int, float, bytes, type(None))):
+            return
+        if isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+            return
+        if isinstance(node, FunctionDef):
+            walk(node.return_type)
+            for param in node.params:
+                walk(param.type_spec)
+            if node.body is not None:
+                walk(node.body)
+            return
+        if isinstance(node, CompoundStmt):
+            for statement in node.statements:
+                walk(statement)
+            return
+        if isinstance(node, BinaryExpr):
+            walk(node.left)
+            walk(node.right)
+            return
+        if isinstance(node, CallExpr):
+            walk(node.callee)
+            for arg in node.args:
+                walk(arg)
+            return
+        if isinstance(node, StatementExpr):
+            walk(node.body)
+            return
+```
+
+Extend the helper in the implementation to cover every AST node shape imported by `aarch64_asm.py`: declarations, statements, initializer lists, type specs, expressions, GNU statement expressions, generic selections, label-address expressions, and indirect gotos. Do not fall back to `getattr`, `fields`, or `is_dataclass`.
+
+- [ ] **Step 3: Replace `nonlocal` layout/global state**
+
+Add small state containers near the existing local dataclasses:
+
+```python
+@dataclass
+class _FrameLayoutState:
+    offset: int = 0
+
+
+@dataclass
+class _GlobalDataState:
+    emitted_section: bool = False
+
+
+@dataclass
+class _GlobalRecordBitfieldState:
+    offset: int = 0
+    active_bit_base: int = 0
+    active_bit_size: int = 0
+    active_bit_used: int = 0
+    active_bit_type: Type | None = None
+    active_bit_value: int = 0
+```
+
+Use these objects in `_prepare_frame()`, `_emit_global_data()`, and `_emit_global_record_initializer()` so nested helpers mutate fields instead of rebinding outer-scope variables.
+
+- [ ] **Step 4: Test explicit traversal edge nodes**
+
+Add this test to `tests/test_aarch64_asm.py`:
+
+```python
+    def test_ast_child_walker_covers_explicit_edge_nodes(self) -> None:
+        gen = _AArch64AsmGen(compile_source("int f(void){return 0;}", filename="test.c"))
+        seen: list[object] = []
+
+        def collect(node: object) -> None:
+            seen.append(node)
+
+        low = IntLiteral("1")
+        high = IntLiteral("2")
+        gen._walk_ast_children(DesignatorRange(low, high), collect)
+
+        enum_value = IntLiteral("3")
+        atomic_target = TypeSpec("int")
+        typeof_expr = Identifier("typed")
+        gen._walk_ast_children(
+            TypeSpec(
+                "enum",
+                enum_members=(("EMPTY", None), ("VALUE", enum_value)),
+                atomic_target=atomic_target,
+                typeof_expr=typeof_expr,
+            ),
+            collect,
+        )
+
+        body = CompoundStmt([ReturnStmt(IntLiteral("0"))])
+        gen._walk_ast_children(StatementExpr(body), collect)
+        gen._walk_ast_children(IndirectGotoStmt(Identifier("label_ptr")), collect)
+
+        for expected in (low, high, enum_value, atomic_target, typeof_expr, body):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, seen)
+```
+
+Import the AST node classes used by the test from `xcc.ast`.
+
+- [ ] **Step 5: Verify AArch64 admission and backend tests**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_milestone6 tests.test_aarch64_asm -v
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 6: Commit AArch64 admission cleanup**
+
+Run:
+
+```bash
+git add src/xcc/aarch64_asm.py tests/test_aarch64_asm.py tests/test_aot_milestone6.py CHANGELOG.md
+git commit -m "feat: admit AOT AArch64 assembler"
+```
+
+## Task 3: Add Bootstrap Source Graph Reporting
+
+**Files:**
+
+- Create: `src/xcc/aot/bootstrap.py`
+- Modify: `src/xcc/aot/__init__.py`
+- Create: `tests/test_aot_bootstrap.py`
+
+- [ ] **Step 1: Write failing bootstrap graph tests**
+
+Create `tests/test_aot_bootstrap.py`:
+
+```python
+import unittest
+from pathlib import Path
+
+from tests import _bootstrap  # noqa: F401
+from xcc.aot import AotError, collect_bootstrap_sources, summarize_bootstrap_admission
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class AotBootstrapGraphTests(unittest.TestCase):
+    def test_collects_all_src_xcc_modules_in_deterministic_order(self) -> None:
+        modules = collect_bootstrap_sources(ROOT)
+        self.assertEqual(len(modules), 57)
+        self.assertEqual(modules[0].name, "xcc.__init__")
+        self.assertEqual(modules[-1].name, "xcc.x86_64_asm")
+
+    def test_rejects_non_repository_root(self) -> None:
+        with self.assertRaises(AotError) as ctx:
+            collect_bootstrap_sources(ROOT / "tests")
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-BOOTSTRAP-0001")
+
+    def test_summarizes_bootstrap_admission(self) -> None:
+        report = summarize_bootstrap_admission(ROOT)
+        self.assertEqual(report.total, 57)
+        self.assertEqual(report.failed, ())
+```
+
+- [ ] **Step 2: Run the tests and verify they fail**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapGraphTests -v
+```
+
+Expected: import failure for `collect_bootstrap_sources`.
+
+- [ ] **Step 3: Implement bootstrap graph collection**
+
+Create `src/xcc/aot/bootstrap.py`:
+
+```python
+from dataclasses import dataclass
+from pathlib import Path
+
+from xcc.aot.analysis import analyze_path
+from xcc.aot.diag import AotDiagnostic, AotError
+from xcc.aot.slice import AotSliceInput, collect_slice_inputs
+
+
+@dataclass(frozen=True)
+class AotBootstrapAdmissionReport:
+    total: int
+    failed: tuple[str, ...]
+
+
+def collect_bootstrap_sources(root: Path) -> tuple[AotSliceInput, ...]:
+    src_xcc = root / "src" / "xcc"
+    if not src_xcc.is_dir():
+        raise AotError(
+            (
+                AotDiagnostic(
+                    "XCC-AOT-BOOTSTRAP-0001",
+                    f"Bootstrap root does not contain src/xcc: {root}",
+                    filename=str(root),
+                ),
+            )
+        )
+    return collect_slice_inputs(tuple(sorted(src_xcc.rglob("*.py"))))
+
+
+def summarize_bootstrap_admission(root: Path) -> AotBootstrapAdmissionReport:
+    failures: list[str] = []
+    modules = collect_bootstrap_sources(root)
+    for module in modules:
+        try:
+            analyze_path(module.path)
+        except AotError as exc:
+            failures.append(f"{module.name}: {exc}")
+    return AotBootstrapAdmissionReport(len(modules), tuple(failures))
+```
+
+Export `AotBootstrapAdmissionReport`, `collect_bootstrap_sources`, and `summarize_bootstrap_admission` from `src/xcc/aot/__init__.py`.
+
+- [ ] **Step 4: Run bootstrap graph tests**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapGraphTests -v
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 5: Commit bootstrap graph reporting**
+
+Run:
+
+```bash
+git add src/xcc/aot/__init__.py src/xcc/aot/bootstrap.py tests/test_aot_bootstrap.py
+git commit -m "feat: add AOT bootstrap source graph"
+```
+
+## Task 4: Plan and Lower the Native `xcc` Entry
+
+**Files:**
+
+- Modify: `src/xcc/aot/bootstrap.py`
+- Modify: `src/xcc/aot/slice.py`
+- Modify: `src/xcc/aot/lower.py`
+- Modify: `tests/test_aot_bootstrap.py`
+
+- [ ] **Step 1: Add failing entry-plan tests**
+
+Append to `tests/test_aot_bootstrap.py`:
+
+```python
+from xcc.aot import plan_bootstrap_entry
+
+
+class AotBootstrapEntryTests(unittest.TestCase):
+    def test_plans_cc_driver_main_as_bootstrap_entry(self) -> None:
+        plan = plan_bootstrap_entry(ROOT)
+        self.assertEqual(plan.entry_symbol, "xcc.cc_driver.main")
+        self.assertIn("xcc.cc_driver", plan.modules)
+        self.assertIn("xcc.frontend", plan.modules)
+        self.assertIn("xcc.parser.__init__", plan.modules)
+        self.assertIn("xcc.sema.__init__", plan.modules)
+
+    def test_entry_plan_contains_target_backends(self) -> None:
+        plan = plan_bootstrap_entry(ROOT)
+        self.assertIn("xcc.x86_64_asm", plan.modules)
+        self.assertIn("xcc.aarch64_asm", plan.modules)
+        self.assertIn("xcc.llvm_api", plan.modules)
+```
+
+- [ ] **Step 2: Run entry-plan tests and verify they fail**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapEntryTests -v
+```
+
+Expected: import failure for `plan_bootstrap_entry`.
+
+- [ ] **Step 3: Implement bootstrap entry planning**
+
+Add to `src/xcc/aot/bootstrap.py`:
+
+```python
+@dataclass(frozen=True)
+class AotBootstrapEntryPlan:
+    entry_symbol: str
+    modules: tuple[str, ...]
+
+
+_BOOTSTRAP_REQUIRED_MODULES = (
+    "xcc.__init__",
+    "xcc.aarch64_asm",
+    "xcc.ast",
+    "xcc.cc_driver",
+    "xcc.codegen",
+    "xcc.diag",
+    "xcc.frontend",
+    "xcc.lexer",
+    "xcc.llvm_api",
+    "xcc.options",
+    "xcc.parser.__init__",
+    "xcc.preprocessor.__init__",
+    "xcc.sema.__init__",
+    "xcc.types",
+    "xcc.x86_64_asm",
+)
+
+
+def plan_bootstrap_entry(root: Path) -> AotBootstrapEntryPlan:
+    available = {module.name for module in collect_bootstrap_sources(root)}
+    missing = tuple(name for name in _BOOTSTRAP_REQUIRED_MODULES if name not in available)
+    if missing:
+        raise AotError(
+            (
+                AotDiagnostic(
+                    "XCC-AOT-BOOTSTRAP-0002",
+                    f"Missing bootstrap modules: {', '.join(missing)}",
+                    filename=str(root),
+                ),
+            )
+        )
+    return AotBootstrapEntryPlan("xcc.cc_driver.main", _BOOTSTRAP_REQUIRED_MODULES)
+```
+
+Export `AotBootstrapEntryPlan` and `plan_bootstrap_entry` from `src/xcc/aot/__init__.py`.
+
+- [ ] **Step 4: Run entry-plan tests**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapEntryTests -v
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 5: Lower one bootstrap-reachable wrapper**
+
+Extend `src/xcc/aot/slice.py` and `src/xcc/aot/lower.py` only as needed to lower a wrapper that calls a bootstrap-reachable leaf, for example a diagnostic or options path. Add a test that proves the wrapper is lowered by name rather than hard-coded output:
+
+```python
+from xcc.aot import lower_bootstrap_entry_smoke
+
+
+class AotBootstrapLoweringTests(unittest.TestCase):
+    def test_lowers_bootstrap_entry_smoke_wrapper(self) -> None:
+        module = lower_bootstrap_entry_smoke(ROOT)
+        self.assertIn("aot_bootstrap_smoke_main", {function.name for function in module.functions})
+```
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapLoweringTests -v
+```
+
+Expected: the smoke wrapper lowers to AOT IR.
+
+- [ ] **Step 6: Commit bootstrap entry planning**
+
+Run:
+
+```bash
+git add src/xcc/aot/__init__.py src/xcc/aot/bootstrap.py src/xcc/aot/slice.py src/xcc/aot/lower.py tests/test_aot_bootstrap.py
+git commit -m "feat: plan AOT bootstrap entry"
+```
+
+## Task 5: Build the Native Bootstrap Executable
+
+**Files:**
+
+- Modify: `src/xcc/aot/bootstrap.py`
+- Modify: `src/xcc/aot/native.py`
+- Modify: `src/xcc/aot/llvm_text.py`
+- Modify: `src/xcc/aot/core_runtime.py`
+- Modify: `tests/test_aot_bootstrap.py`
+
+- [ ] **Step 1: Add mocked native build tests**
+
+Append to `tests/test_aot_bootstrap.py`:
+
+```python
+from unittest.mock import patch
+
+from xcc.aot import build_native_bootstrap
+
+
+class AotBootstrapNativeBuildTests(unittest.TestCase):
+    def test_build_native_bootstrap_invokes_llc_and_linker(self) -> None:
+        commands: list[tuple[str, ...]] = []
+
+        def fake_run(command: list[str], *args: object, **kwargs: object) -> object:
+            commands.append(tuple(command))
+
+            class Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+
+            return Result()
+
+        with patch("subprocess.run", fake_run):
+            output = build_native_bootstrap(ROOT, ROOT / "build/aot/xcc")
+
+        self.assertEqual(output, ROOT / "build/aot/xcc")
+        self.assertTrue(any("llc" in command[0] for command in commands))
+        self.assertTrue(any(command[0] == "cc" for command in commands))
+```
+
+- [ ] **Step 2: Run mocked native build tests and verify they fail**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapNativeBuildTests -v
+```
+
+Expected: import failure for `build_native_bootstrap`.
+
+- [ ] **Step 3: Implement native bootstrap build orchestration**
+
+Add `build_native_bootstrap(root: Path, output: Path) -> Path` to `src/xcc/aot/bootstrap.py`. It must:
+
+- call `plan_bootstrap_entry(root)`;
+- lower the bootstrap entry module graph;
+- emit textual LLVM IR through `src/xcc/aot/llvm_text.py`;
+- write temporary `.ll` and `.o` files under `output.parent`;
+- invoke the configured `llc` path through the existing native helper;
+- invoke the host C linker only to link the already generated native object and runtime support;
+- return `output` on success;
+- raise `AotError` with `XCC-AOT-BOOTSTRAP-0003` when a command fails.
+
+- [ ] **Step 4: Run mocked native build tests**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapNativeBuildTests -v
+```
+
+Expected: mocked command planning tests pass.
+
+- [ ] **Step 5: Add an optional real toolchain smoke**
+
+Add a test guarded by `llc` availability:
+
+```python
+    def test_real_native_bootstrap_smoke_when_llc_exists(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        output = build_native_bootstrap(ROOT, ROOT / "build/aot/xcc-smoke")
+        self.assertTrue(output.exists())
+```
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapNativeBuildTests -v
+```
+
+Expected: mocked test passes and real smoke either passes or is skipped when the configured `llc` is unavailable.
+
+- [ ] **Step 6: Commit native bootstrap build helper**
+
+Run:
+
+```bash
+git add src/xcc/aot/bootstrap.py src/xcc/aot/native.py src/xcc/aot/llvm_text.py src/xcc/aot/core_runtime.py tests/test_aot_bootstrap.py
+git commit -m "feat: build native AOT bootstrap executable"
+```
+
+## Task 6: Validate Self-Hosting Inputs
+
+**Files:**
+
+- Modify: `src/xcc/aot/bootstrap.py`
+- Modify: `tests/test_aot_bootstrap.py`
+- Modify: `CHANGELOG.md`
+
+- [ ] **Step 1: Add self-host validation tests**
+
+Append to `tests/test_aot_bootstrap.py`:
+
+```python
+from xcc.aot import run_bootstrap_self_host_smoke
+
+
+class AotBootstrapSelfHostTests(unittest.TestCase):
+    def test_self_host_smoke_compiles_known_project_input(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        result = run_bootstrap_self_host_smoke(ROOT)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("compiled", result.stdout)
+```
+
+- [ ] **Step 2: Run self-host validation and verify it fails before implementation**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapSelfHostTests -v
+```
+
+Expected before implementation: import failure for `run_bootstrap_self_host_smoke`.
+
+- [ ] **Step 3: Implement the self-host smoke helper**
+
+Add to `src/xcc/aot/bootstrap.py`:
+
+```python
+@dataclass(frozen=True)
+class AotBootstrapRunResult:
+    returncode: int
+    stdout: str
+    stderr: str
+```
+
+Implement `run_bootstrap_self_host_smoke(root: Path) -> AotBootstrapRunResult` so it:
+
+- builds the native bootstrap executable under `build/aot/xcc`;
+- invokes the generated executable, not `python -m xcc`;
+- compiles a stable project-owned C smoke input that already exists in the test suite or writes one under a temporary directory;
+- returns stdout, stderr, and status;
+- raises `AotError` only for harness setup failures, not for normal compiler diagnostics.
+
+- [ ] **Step 4: Run self-host smoke**
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap.AotBootstrapSelfHostTests -v
+```
+
+Expected: the generated native `xcc` compiles the smoke input with return code 0.
+
+- [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
+
+Run this only after the project-owned self-host smoke passes:
+
+```bash
+tmpdir="$(mktemp -d /private/tmp/xcc-cpython-aot.XXXXXX)"
+cd "$tmpdir"
+git clone --depth 1 https://github.com/python/cpython.git cpython
+cd cpython
+CC="/Users/tcztzy/GitHub/xcc/build/aot/xcc" ./configure
+make -j8
+```
+
+Expected: `configure` and `make` complete with `CC` pointing at the generated native `xcc`. Record optional dependency skips separately from compiler failures.
+
+- [ ] **Step 6: Record final Milestone 6 status**
+
+Add to `CHANGELOG.md` only after Step 4 passes:
+
+```markdown
+- Completed Milestone 6 native bootstrap smoke: the generated native `xcc`
+  executable is built from the accepted Python source without the CPython
+  runtime and compiles the project-owned self-host smoke input successfully.
+```
+
+Add the CPython build result only after Step 5 completes:
+
+```markdown
+- Validated the native `xcc` as `CC` for a CPython `configure && make` run.
+```
+
+- [ ] **Step 7: Commit self-host validation**
+
+Run:
+
+```bash
+git add src/xcc/aot/bootstrap.py tests/test_aot_bootstrap.py CHANGELOG.md
+git commit -m "test: validate AOT bootstrap self-host smoke"
+```
+
+## Final Verification
+
+Run these commands before handoff after any Milestone 6 code slice:
+
+```bash
+uv run python -m unittest tests.test_aot_milestone6 -v
+uv run tox -e lint
+uv run tox -e type
+uv run tox -e py311
+git diff --check
+```
+
+For final bootstrap completion, also run:
+
+```bash
+uv run python -m unittest tests.test_aot_bootstrap -v
+```
+
+If the CPython compiler target is being claimed, also run:
+
+```bash
+CC="/Users/tcztzy/GitHub/xcc/build/aot/xcc" ./configure
+make -j8
+```
+
+from a clean CPython checkout, and record the exact checkout path, command output summary, and result in `CHANGELOG.md`.

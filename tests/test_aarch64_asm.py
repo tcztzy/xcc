@@ -10,8 +10,8 @@ from xcc.aarch64_asm import (
     _ScalarInfo,
     _Slot,
     _StaticLocal,
-    _VariadicAggregate,
     _Value,
+    _VariadicAggregate,
     generate_aarch64_asm,
 )
 from xcc.ast import (
@@ -19,8 +19,8 @@ from xcc.ast import (
     ArrayDecl,
     AssignExpr,
     BinaryExpr,
-    BreakStmt,
     BuiltinOffsetofExpr,
+    BuiltinTypesCompatExpr,
     BuiltinVaArgExpr,
     CallExpr,
     CaseStmt,
@@ -30,27 +30,30 @@ from xcc.ast import (
     CompoundLiteralExpr,
     CompoundStmt,
     ConditionalExpr,
-    ContinueStmt,
     DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
+    DesignatorRange,
     DoWhileStmt,
     ExprStmt,
     FloatLiteral,
     ForStmt,
     FunctionDef,
+    GenericExpr,
     Identifier,
     IfStmt,
     IndirectGotoStmt,
     InitItem,
     InitList,
     IntLiteral,
+    LabelAddressExpr,
     LabelStmt,
     MemberExpr,
     NullStmt,
     Param,
     ReturnStmt,
     SizeofExpr,
+    StatementExpr,
     StringLiteral,
     SubscriptExpr,
     SwitchStmt,
@@ -102,6 +105,74 @@ class AArch64AsmTests(unittest.TestCase):
             )
             self.assertEqual(assemble.returncode, 0, assemble.stderr)
             return exe_path.read_bytes()
+
+    def test_ast_child_walker_covers_explicit_edge_nodes(self) -> None:
+        gen = _AArch64AsmGen(compile_source("int f(void){return 0;}", filename="test.c"))
+        seen: list[object] = []
+
+        def collect(node: object) -> None:
+            seen.append(node)
+
+        low = IntLiteral("1")
+        high = IntLiteral("2")
+        gen._walk_ast_children(DesignatorRange(low, high), collect)
+
+        enum_value = IntLiteral("3")
+        atomic_target = TypeSpec("int")
+        typeof_expr = Identifier("typed")
+        rich_type = TypeSpec(
+            "enum",
+            enum_members=(("EMPTY", None), ("VALUE", enum_value)),
+            atomic_target=atomic_target,
+            typeof_expr=typeof_expr,
+        )
+        gen._walk_ast_children(rich_type, collect)
+
+        param_type = TypeSpec("int")
+        body = CompoundStmt([ReturnStmt(IntLiteral("0"))])
+        gen._walk_ast_children(
+            FunctionDef(TypeSpec("int"), "edge", [Param(param_type, "value")], body),
+            collect,
+        )
+        gen._walk_ast_children(StatementExpr(body), collect)
+        gen._walk_ast_children(
+            FunctionDef(TypeSpec("int"), "declared", [], None),
+            collect,
+        )
+
+        indirect_target = Identifier("label_ptr")
+        gen._walk_ast_children(IndirectGotoStmt(indirect_target), collect)
+
+        generic_control = Identifier("control")
+        assoc_expr = IntLiteral("4")
+        gen._walk_ast_children(
+            GenericExpr(generic_control, ((TypeSpec("int"), assoc_expr),)),
+            collect,
+        )
+
+        compat_left = TypeSpec("long")
+        compat_right = TypeSpec("int")
+        gen._walk_ast_children(BuiltinTypesCompatExpr(compat_left, compat_right), collect)
+
+        label_address = LabelAddressExpr("target")
+        gen._walk_ast_children(label_address, collect)
+
+        for expected in (
+            low,
+            high,
+            enum_value,
+            atomic_target,
+            typeof_expr,
+            param_type,
+            body,
+            indirect_target,
+            generic_control,
+            assoc_expr,
+            compat_left,
+            compat_right,
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, seen)
 
     def test_emits_constant_return_function(self) -> None:
         asm = self._asm("int f(void){return 7;}")
@@ -2060,9 +2131,7 @@ void sync_release_char(signed char *ptr) { __sync_lock_release(ptr); }
         with self.assertRaisesRegex(CodegenError, "does not support atomic type float"):
             gen._atomic_pointee(float_pointer)
 
-        signed_char = Type("signed char")
         signed_char_info = _ScalarInfo(1, 1, True)
-        signed_short = Type("short")
         signed_short_info = _ScalarInfo(2, 2, True)
         unsigned_short_info = _ScalarInfo(2, 2, False)
 

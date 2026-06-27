@@ -7,7 +7,7 @@ codegen diagnostics instead of falling back to LLVM.
 
 import struct
 from collections.abc import Callable
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass
 from typing import cast
 
 from xcc.ast import (
@@ -17,6 +17,7 @@ from xcc.ast import (
     BinaryExpr,
     BreakStmt,
     BuiltinOffsetofExpr,
+    BuiltinTypesCompatExpr,
     BuiltinVaArgExpr,
     CallExpr,
     CaseStmt,
@@ -30,23 +31,29 @@ from xcc.ast import (
     DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
+    DesignatorRange,
     DoWhileStmt,
     Expr,
     ExprStmt,
     FloatLiteral,
     ForStmt,
     FunctionDef,
+    GenericExpr,
     GotoStmt,
     Identifier,
     IfStmt,
+    IndirectGotoStmt,
     InitItem,
     InitList,
     IntLiteral,
+    LabelAddressExpr,
     LabelStmt,
     MemberExpr,
     NullStmt,
+    RecordMemberDecl,
     ReturnStmt,
     SizeofExpr,
+    StatementExpr,
     StaticAssertDecl,
     Stmt,
     StringLiteral,
@@ -131,13 +138,33 @@ class _MemberAccess:
     bit_width: int | None = None
 
 
+@dataclass
+class _FrameLayoutState:
+    offset: int = 0
+
+
+@dataclass
+class _GlobalDataState:
+    emitted_section: bool = False
+
+
+@dataclass
+class _GlobalRecordBitfieldState:
+    offset: int = 0
+    active_bit_base: int = 0
+    active_bit_size: int = 0
+    active_bit_used: int = 0
+    active_bit_type: Type | None = None
+    active_bit_value: int = 0
+
+
 class _AArch64AsmGen:
     _BASE_SCRATCH_SIZE = 16
     _EXPR_SPILL_SIZE = 16
     _CALL_ARG_SPILL_SIZE = 128
     _CALL_ARG_INT_SPILL_SIZE = 64
 
-    def __init__(self, result: FrontendResult):
+    def __init__(self, result: FrontendResult) -> None:
         self._result = result
         self._unit = result.unit
         self._sema = result.sema
@@ -227,6 +254,204 @@ class _AArch64AsmGen:
         self._lines.append(".subsections_via_symbols")
         return "\n".join(self._lines) + "\n"
 
+    def _walk_ast_children(self, node: object, walk: Callable[[object], None]) -> None:
+        if isinstance(node, (str, int, float, bytes, type(None))):
+            return
+        if isinstance(node, (list, tuple)):
+            for item in node:
+                walk(item)
+            return
+        if isinstance(node, ArrayDecl):
+            walk(node.length)
+            return
+        if isinstance(node, DesignatorRange):
+            walk(node.low)
+            walk(node.high)
+            return
+        if isinstance(node, RecordMemberDecl):
+            walk(node.type_spec)
+            if node.bit_width_expr is not None:
+                walk(node.bit_width_expr)
+            return
+        if isinstance(node, TypeSpec):
+            for member in node.record_members:
+                walk(member)
+            for _kind, declarator_value in node.declarator_ops:
+                walk(declarator_value)
+            for _name, enum_value in node.enum_members:
+                if enum_value is not None:
+                    walk(enum_value)
+            if node.atomic_target is not None:
+                walk(node.atomic_target)
+            if node.typeof_expr is not None:
+                walk(node.typeof_expr)
+            return
+        if isinstance(node, InitItem):
+            for _kind, designator_value in node.designators:
+                walk(designator_value)
+            walk(node.initializer)
+            return
+        if isinstance(node, InitList):
+            for item in node.items:
+                walk(item)
+            return
+        if isinstance(node, FunctionDef):
+            walk(node.return_type)
+            for param in node.params:
+                walk(param.type_spec)
+            if node.body is not None:
+                walk(node.body)
+            return
+        if isinstance(node, CompoundStmt):
+            for statement in node.statements:
+                walk(statement)
+            return
+        if isinstance(node, IfStmt):
+            walk(node.condition)
+            walk(node.then_body)
+            if node.else_body is not None:
+                walk(node.else_body)
+            return
+        if isinstance(node, WhileStmt):
+            walk(node.condition)
+            walk(node.body)
+            return
+        if isinstance(node, DoWhileStmt):
+            walk(node.body)
+            walk(node.condition)
+            return
+        if isinstance(node, ForStmt):
+            walk(node.init)
+            walk(node.condition)
+            walk(node.post)
+            walk(node.body)
+            return
+        if isinstance(node, SwitchStmt):
+            walk(node.condition)
+            walk(node.body)
+            return
+        if isinstance(node, CaseStmt):
+            walk(node.value)
+            walk(node.body)
+            return
+        if isinstance(node, DefaultStmt):
+            walk(node.body)
+            return
+        if isinstance(node, LabelStmt):
+            walk(node.body)
+            return
+        if isinstance(node, IndirectGotoStmt):
+            walk(node.target)
+            return
+        if isinstance(node, ReturnStmt):
+            walk(node.value)
+            return
+        if isinstance(node, StaticAssertDecl):
+            walk(node.condition)
+            walk(node.message)
+            return
+        if isinstance(node, ExprStmt):
+            walk(node.expr)
+            return
+        if isinstance(node, DeclGroupStmt):
+            for declaration in node.declarations:
+                walk(declaration)
+            return
+        if isinstance(node, DeclStmt):
+            walk(node.type_spec)
+            walk(node.init)
+            return
+        if isinstance(node, TypedefDecl):
+            walk(node.type_spec)
+            return
+        if isinstance(node, BinaryExpr):
+            walk(node.left)
+            walk(node.right)
+            return
+        if isinstance(node, ConditionalExpr):
+            walk(node.condition)
+            walk(node.then_expr)
+            walk(node.else_expr)
+            return
+        if isinstance(node, CommaExpr):
+            walk(node.left)
+            walk(node.right)
+            return
+        if isinstance(node, AssignExpr):
+            walk(node.target)
+            walk(node.value)
+            return
+        if isinstance(node, UnaryExpr):
+            walk(node.operand)
+            return
+        if isinstance(node, UpdateExpr):
+            walk(node.operand)
+            return
+        if isinstance(node, CallExpr):
+            walk(node.callee)
+            for arg in node.args:
+                walk(arg)
+            return
+        if isinstance(node, SubscriptExpr):
+            walk(node.base)
+            walk(node.index)
+            return
+        if isinstance(node, MemberExpr):
+            walk(node.base)
+            return
+        if isinstance(node, SizeofExpr):
+            walk(node.expr)
+            walk(node.type_spec)
+            return
+        if isinstance(node, AlignofExpr):
+            walk(node.expr)
+            walk(node.type_spec)
+            return
+        if isinstance(node, CastExpr):
+            walk(node.type_spec)
+            walk(node.expr)
+            return
+        if isinstance(node, CompoundLiteralExpr):
+            walk(node.type_spec)
+            walk(node.initializer)
+            return
+        if isinstance(node, StatementExpr):
+            walk(node.body)
+            return
+        if isinstance(node, GenericExpr):
+            walk(node.control)
+            for assoc_type, assoc_expr in node.associations:
+                walk(assoc_type)
+                walk(assoc_expr)
+            return
+        if isinstance(node, BuiltinOffsetofExpr):
+            walk(node.type_spec)
+            return
+        if isinstance(node, BuiltinTypesCompatExpr):
+            walk(node.type1)
+            walk(node.type2)
+            return
+        if isinstance(node, BuiltinVaArgExpr):
+            walk(node.ap)
+            walk(node.type_spec)
+            return
+        if isinstance(
+            node,
+            (
+                BreakStmt,
+                ContinueStmt,
+                GotoStmt,
+                NullStmt,
+                IntLiteral,
+                FloatLiteral,
+                CharLiteral,
+                StringLiteral,
+                Identifier,
+                LabelAddressExpr,
+            ),
+        ):
+            return
+
     def _collect_globals(self) -> None:
         if self._sema.file_scope is None:
             return
@@ -287,15 +512,7 @@ class _AArch64AsmGen:
         def walk(value: object) -> None:
             if isinstance(value, Identifier) and value.name in self._sema.function_signatures:
                 names.append(value.name)
-            if isinstance(value, (str, int, float, bytes, type(None))):
-                return
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    walk(item)
-                return
-            if is_dataclass(value):
-                for field in fields(value):
-                    walk(getattr(value, field.name))
+            self._walk_ast_children(value, walk)
 
         walk(node)
         return names
@@ -351,7 +568,7 @@ class _AArch64AsmGen:
                 collect(function, function.body)
 
     def _emit_global_data(self) -> None:
-        emitted_section = False
+        state = _GlobalDataState()
         initialized_globals: set[str] = set()
         emitted_labels: set[str] = set()
 
@@ -369,7 +586,6 @@ class _AArch64AsmGen:
                 initialized_globals.add(stmt.name)
 
         def emit_decl(stmt: Stmt) -> None:
-            nonlocal emitted_section
             if isinstance(stmt, DeclGroupStmt):
                 for declaration in stmt.declarations:
                     emit_decl(declaration)
@@ -386,9 +602,9 @@ class _AArch64AsmGen:
             if global_ is None or global_.label in emitted_labels:
                 return
             emitted_labels.add(global_.label)
-            if not emitted_section:
+            if not state.emitted_section:
                 self._lines.append(".section __DATA,__data")
-                emitted_section = True
+                state.emitted_section = True
             align = self._type_align(global_.type_) or 1
             self._lines.append(f".p2align {max(0, align.bit_length() - 1)}")
             if not global_.is_static:
@@ -401,9 +617,9 @@ class _AArch64AsmGen:
         for declaration in self._unit.declarations:
             emit_decl(declaration)
         for (function_name, _), static_local in self._static_locals.items():
-            if not emitted_section:
+            if not state.emitted_section:
                 self._lines.append(".section __DATA,__data")
-                emitted_section = True
+                state.emitted_section = True
             align = self._type_align(static_local.type_) or 1
             self._lines.append(f".p2align {max(0, align.bit_length() - 1)}")
             self._lines.append(f"{static_local.label}:")
@@ -417,9 +633,9 @@ class _AArch64AsmGen:
         while compound_index < len(self._compound_literals):
             label, type_, init = self._compound_literals[compound_index]
             compound_index += 1
-            if not emitted_section:
+            if not state.emitted_section:
                 self._lines.append(".section __DATA,__data")
-                emitted_section = True
+                state.emitted_section = True
             align = self._type_align(type_) or 1
             self._lines.append(f".p2align {max(0, align.bit_length() - 1)}")
             self._lines.append(f"{label}:")
@@ -517,29 +733,22 @@ class _AArch64AsmGen:
                 self._lines.append(f"    .zero {size - member_size}")
             return
         items_by_index = self._record_initializer_items_by_index(members, init)
-        offset = 0
-        active_bit_type: Type | None = None
-        active_bit_base = 0
-        active_bit_size = 0
-        active_bit_used = 0
-        active_bit_value = 0
+        state = _GlobalRecordBitfieldState()
 
         def flush_bitfield_unit() -> None:
-            nonlocal active_bit_base
-            nonlocal active_bit_size
-            nonlocal active_bit_type
-            nonlocal active_bit_used
-            nonlocal active_bit_value
-            nonlocal offset
-            if active_bit_type is None:
+            if state.active_bit_type is None:
                 return
-            if active_bit_base > offset:  # pragma: no cover - bitfield flush keeps offset in sync.
-                self._lines.append(f"    .zero {active_bit_base - offset}")
-            self._emit_global_int_constant(self._scalar_info(active_bit_type), active_bit_value)
-            offset = active_bit_base + active_bit_size
-            active_bit_type = None
-            active_bit_used = 0
-            active_bit_value = 0
+            if (
+                state.active_bit_base > state.offset
+            ):  # pragma: no cover - bitfield flush keeps offset in sync.
+                self._lines.append(f"    .zero {state.active_bit_base - state.offset}")
+            self._emit_global_int_constant(
+                self._scalar_info(state.active_bit_type), state.active_bit_value
+            )
+            state.offset = state.active_bit_base + state.active_bit_size
+            state.active_bit_type = None
+            state.active_bit_used = 0
+            state.active_bit_value = 0
 
         for index, member in enumerate(members):
             if member.bit_width is not None:
@@ -549,26 +758,26 @@ class _AArch64AsmGen:
                     raise self._error(f"AArch64 target cannot size bit-field member {member.name}")
                 if member.bit_width == 0:
                     flush_bitfield_unit()
-                    access_offset = self._align_to(offset, member_align)
-                    if access_offset > offset:
-                        self._lines.append(f"    .zero {access_offset - offset}")
-                    offset = access_offset
+                    access_offset = self._align_to(state.offset, member_align)
+                    if access_offset > state.offset:
+                        self._lines.append(f"    .zero {access_offset - state.offset}")
+                    state.offset = access_offset
                     continue
                 member_bits = member_size * 8
                 if (
-                    active_bit_type != member.type_
-                    or active_bit_used + member.bit_width > member_bits
+                    state.active_bit_type != member.type_
+                    or state.active_bit_used + member.bit_width > member_bits
                 ):
                     flush_bitfield_unit()
-                    access_offset = self._align_to(offset, member_align)
-                    if access_offset > offset:
-                        self._lines.append(f"    .zero {access_offset - offset}")
-                    offset = access_offset
-                    active_bit_base = offset
-                    active_bit_size = member_size
-                    active_bit_used = 0
-                    active_bit_type = member.type_
-                    active_bit_value = 0
+                    access_offset = self._align_to(state.offset, member_align)
+                    if access_offset > state.offset:
+                        self._lines.append(f"    .zero {access_offset - state.offset}")
+                    state.offset = access_offset
+                    state.active_bit_base = state.offset
+                    state.active_bit_size = member_size
+                    state.active_bit_used = 0
+                    state.active_bit_type = member.type_
+                    state.active_bit_value = 0
                 bitfield_item = items_by_index.get(index)
                 if bitfield_item is not None:
                     if not isinstance(bitfield_item.initializer, Expr):
@@ -576,25 +785,25 @@ class _AArch64AsmGen:
                     bitfield_value = self._eval_int_constant(bitfield_item.initializer)
                     if bitfield_value is None:
                         raise self._error("AArch64 target requires constant bit-field initializer")
-                    active_bit_value |= (
+                    state.active_bit_value |= (
                         bitfield_value & ((1 << member.bit_width) - 1)
-                    ) << active_bit_used
-                active_bit_used += member.bit_width
+                    ) << state.active_bit_used
+                state.active_bit_used += member.bit_width
                 continue
             flush_bitfield_unit()
             member_align = self._member_align(member)
             if member_align is None:
                 raise self._error(f"AArch64 target cannot align record member {member.name}")
-            access_offset = self._align_to(offset, member_align)
+            access_offset = self._align_to(state.offset, member_align)
             member_item = items_by_index.get(index)
             if self._is_trailing_flexible_array_member(members, index):
-                if access_offset > offset:
-                    self._lines.append(f"    .zero {access_offset - offset}")
+                if access_offset > state.offset:
+                    self._lines.append(f"    .zero {access_offset - state.offset}")
                 if member_item is not None:
                     if isinstance(member_item.initializer, Expr) and self._is_zero_initializer(
                         member_item.initializer
                     ):
-                        offset = access_offset
+                        state.offset = access_offset
                         continue
                     flex_type = self._complete_flexible_array_initializer_type(
                         member.type_, member_item.initializer
@@ -603,15 +812,15 @@ class _AArch64AsmGen:
                     flex_size = self._type_size(flex_type)
                     if flex_size is None:
                         raise self._error(f"AArch64 target cannot size record member {member.name}")
-                    offset = access_offset + flex_size
+                    state.offset = access_offset + flex_size
                 else:
-                    offset = access_offset
+                    state.offset = access_offset
                 continue
             member_size = self._type_size(member.type_)
             if member_size is None:
                 raise self._error(f"AArch64 target cannot size record member {member.name}")
-            if access_offset > offset:
-                self._lines.append(f"    .zero {access_offset - offset}")
+            if access_offset > state.offset:
+                self._lines.append(f"    .zero {access_offset - state.offset}")
             if member_item is None:
                 self._emit_global_zero(member.type_)
             else:
@@ -621,16 +830,16 @@ class _AArch64AsmGen:
                     and self._is_zero_initializer(member_item.initializer)
                 ):
                     self._emit_global_zero(member.type_)
-                    offset = access_offset + member_size
+                    state.offset = access_offset + member_size
                     continue
                 self._emit_global_initializer(member.type_, member_item.initializer)
-            offset = access_offset + member_size
+            state.offset = access_offset + member_size
         flush_bitfield_unit()
         size = self._type_size(type_)
         if size is None:
             raise self._error(f"AArch64 target cannot size type {type_}")
-        if size > offset:
-            self._lines.append(f"    .zero {size - offset}")
+        if size > state.offset:
+            self._lines.append(f"    .zero {size - state.offset}")
 
     def _record_initializer_items_by_index(
         self,
@@ -1087,15 +1296,14 @@ class _AArch64AsmGen:
         self._indirect_call_slots = {}
         self._variadic_arg_slots = {}
         self._sret_slot = None
-        offset = 0
+        state = _FrameLayoutState()
 
         def add_slot(type_: Type, alignment: int | None = None) -> _Slot:
-            nonlocal offset
             info = self._slot_info(type_)
             align = alignment or info.align
-            offset = self._align_to(offset, align)
-            slot = _Slot(offset, type_, info)
-            offset += info.size
+            state.offset = self._align_to(state.offset, align)
+            slot = _Slot(state.offset, type_, info)
+            state.offset += info.size
             return slot
 
         assert self._func_sym is not None
@@ -1137,7 +1345,7 @@ class _AArch64AsmGen:
             self._variadic_arg_slots[id(expr)] = add_slot(type_)
 
         self._collect_variadic_arg_slots(body, add_variadic_arg_slot)
-        self._frame_size = self._align_to(offset, 16)
+        self._frame_size = self._align_to(state.offset, 16)
 
     def _collect_local_slots(
         self,
@@ -1197,26 +1405,24 @@ class _AArch64AsmGen:
         node: object,
         add_slot: Callable[[CompoundLiteralExpr], None],
     ) -> None:
+        def visit_child(child: object) -> None:
+            self._collect_compound_literal_slots(child, add_slot)
+
         if isinstance(node, CompoundLiteralExpr):
             if id(node) not in self._compound_literal_slots:
                 add_slot(node)
             self._collect_compound_literal_slots(node.initializer, add_slot)
             return
-        if isinstance(node, (str, int, float, bytes, type(None))):
-            return
-        if isinstance(node, (list, tuple)):
-            for item in node:
-                self._collect_compound_literal_slots(item, add_slot)
-            return
-        if is_dataclass(node):
-            for field in fields(node):
-                self._collect_compound_literal_slots(getattr(node, field.name), add_slot)
+        self._walk_ast_children(node, visit_child)
 
     def _collect_byval_arg_slots(
         self,
         node: object,
         add_slot: Callable[[Expr, Type], None],
     ) -> None:
+        def visit_child(child: object) -> None:
+            self._collect_byval_arg_slots(child, add_slot)
+
         if isinstance(node, CallExpr):
             for index, arg in enumerate(node.args):
                 param_type = self._call_param_type(node, index)
@@ -1226,40 +1432,30 @@ class _AArch64AsmGen:
                     and id(arg) not in self._byval_arg_slots
                 ):
                     add_slot(arg, param_type)
-        if isinstance(node, (str, int, float, bytes, type(None))):
-            return
-        if isinstance(node, (list, tuple)):
-            for item in node:
-                self._collect_byval_arg_slots(item, add_slot)
-            return
-        if is_dataclass(node):
-            for field in fields(node):
-                self._collect_byval_arg_slots(getattr(node, field.name), add_slot)
+        self._walk_ast_children(node, visit_child)
 
     def _collect_indirect_call_slots(
         self,
         node: object,
         add_slot: Callable[[CallExpr, Type], None],
     ) -> None:
+        def visit_child(child: object) -> None:
+            self._collect_indirect_call_slots(child, add_slot)
+
         if isinstance(node, CallExpr):
             type_ = self._expr_type(node)
             if self._is_record_type(type_) and id(node) not in self._indirect_call_slots:
                 add_slot(node, type_)
-        if isinstance(node, (str, int, float, bytes, type(None))):
-            return
-        if isinstance(node, (list, tuple)):
-            for item in node:
-                self._collect_indirect_call_slots(item, add_slot)
-            return
-        if is_dataclass(node):
-            for field in fields(node):
-                self._collect_indirect_call_slots(getattr(node, field.name), add_slot)
+        self._walk_ast_children(node, visit_child)
 
     def _collect_variadic_arg_slots(
         self,
         node: object,
         add_slot: Callable[[Expr, Type], None],
     ) -> None:
+        def visit_child(child: object) -> None:
+            self._collect_variadic_arg_slots(child, add_slot)
+
         if isinstance(node, CallExpr):
             fixed_count = self._call_variadic_fixed_count(node)
             if fixed_count is not None:
@@ -1271,15 +1467,7 @@ class _AArch64AsmGen:
                         and id(arg) not in self._variadic_arg_slots
                     ):
                         add_slot(arg, type_)
-        if isinstance(node, (str, int, float, bytes, type(None))):
-            return
-        if isinstance(node, (list, tuple)):
-            for item in node:
-                self._collect_variadic_arg_slots(item, add_slot)
-            return
-        if is_dataclass(node):
-            for field in fields(node):
-                self._collect_variadic_arg_slots(getattr(node, field.name), add_slot)
+        self._walk_ast_children(node, visit_child)
 
     def _spill_parameters(self, function: FunctionDef) -> None:
         int_arg_reg = 0
@@ -1514,10 +1702,9 @@ class _AArch64AsmGen:
 
     def _collect_switch_cases(self, stmt: Stmt) -> tuple[list[CaseStmt], DefaultStmt | None]:
         cases: list[CaseStmt] = []
-        default_stmt: DefaultStmt | None = None
+        default_stmt: list[DefaultStmt | None] = [None]
 
         def collect(child: Stmt) -> None:
-            nonlocal default_stmt
             if isinstance(child, SwitchStmt):
                 return
             if isinstance(child, CompoundStmt):
@@ -1529,11 +1716,11 @@ class _AArch64AsmGen:
                 collect(child.body)
                 return
             if isinstance(child, DefaultStmt):
-                default_stmt = child
+                default_stmt[0] = child
                 collect(child.body)
 
         collect(stmt)
-        return cases, default_stmt
+        return cases, default_stmt[0]
 
     def _emit_return(self, stmt: ReturnStmt) -> None:
         assert self._func_sym is not None
@@ -5757,28 +5944,19 @@ class _AArch64AsmGen:
         return False
 
     def _stmt_expr_spill_depth(self, stmt: Stmt) -> int:
-        maximum = 0
+        maximum: list[int] = [0]
 
         def walk(node: object) -> None:
-            nonlocal maximum
             if isinstance(node, Expr):
-                maximum = max(maximum, self._expr_spill_depth_needed(node))
+                maximum[0] = max(maximum[0], self._expr_spill_depth_needed(node))
                 return
             if isinstance(node, InitList):
-                maximum = max(maximum, self._init_expr_spill_depth(node))
+                maximum[0] = max(maximum[0], self._init_expr_spill_depth(node))
                 return
-            if isinstance(node, (str, int, float, bytes, type(None))):
-                return
-            if isinstance(node, (list, tuple)):
-                for item in node:
-                    walk(item)
-                return
-            if is_dataclass(node):
-                for field in fields(node):
-                    walk(getattr(node, field.name))
+            self._walk_ast_children(node, walk)
 
         walk(stmt)
-        return maximum
+        return maximum[0]
 
     def _init_expr_spill_depth(self, init: Expr | InitList) -> int:
         if isinstance(init, Expr):
@@ -5986,24 +6164,15 @@ class _AArch64AsmGen:
         return False
 
     def _max_outgoing_arg_size(self, stmt: Stmt) -> int:
-        maximum = 0
+        maximum: list[int] = [0]
 
         def walk(node: object) -> None:
-            nonlocal maximum
             if isinstance(node, CallExpr):
-                maximum = max(maximum, self._call_outgoing_stack_size(len(node.args)))
-            if isinstance(node, (str, int, float, bytes, type(None))):
-                return
-            if isinstance(node, (list, tuple)):
-                for item in node:
-                    walk(item)
-                return
-            if is_dataclass(node):
-                for field in fields(node):
-                    walk(getattr(node, field.name))
+                maximum[0] = max(maximum[0], self._call_outgoing_stack_size(len(node.args)))
+            self._walk_ast_children(node, walk)
 
         walk(stmt)
-        return maximum
+        return maximum[0]
 
     def _call_outgoing_stack_size(self, arg_count: int) -> int:
         stack_arg_count = max(0, arg_count - 8)

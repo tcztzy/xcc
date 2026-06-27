@@ -4,7 +4,6 @@ from pathlib import Path
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import analyze_path, analyze_source
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CC_DRIVER_PATH = ROOT / "src/xcc/cc_driver.py"
 CODEGEN_PATH = ROOT / "src/xcc/codegen.py"
@@ -27,6 +26,7 @@ XCC_INIT_PATH = ROOT / "src/xcc/__init__.py"
 HOST_INCLUDES_PATH = ROOT / "src/xcc/host_includes.py"
 LLVM_API_PATH = ROOT / "src/xcc/llvm_api.py"
 EVM_PATH = ROOT / "src/xcc/evm.py"
+AARCH64_ASM_PATH = ROOT / "src/xcc/aarch64_asm.py"
 X86_64_ASM_PATH = ROOT / "src/xcc/x86_64_asm.py"
 AOT_BINDER_PATH = ROOT / "src/xcc/aot/binder.py"
 AOT_LOWER_PATH = ROOT / "src/xcc/aot/lower.py"
@@ -36,6 +36,16 @@ AOT_SUBSET_PATH = ROOT / "src/xcc/aot/subset.py"
 
 
 class AotMilestone6AdmissionTests(unittest.TestCase):
+    def test_all_src_xcc_modules_are_aot_admitted(self) -> None:
+        failures: list[str] = []
+        for path in sorted((ROOT / "src/xcc").rglob("*.py")):
+            with self.subTest(path=path.relative_to(ROOT)):
+                try:
+                    analyze_path(path)
+                except Exception as exc:
+                    failures.append(f"{path.relative_to(ROOT)}: {exc}")
+        self.assertEqual([], failures)
+
     def test_binds_bootstrap_container_and_callable_annotations(self) -> None:
         source = (
             "from collections.abc import Callable\n"
@@ -140,6 +150,11 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
         analysis = analyze_path(X86_64_ASM_PATH)
         self.assertIn("_X86_64AsmGen._prepare_frame", analysis.types.functions)
         self.assertIn("_X86_64AsmGen._walk_ast_children", analysis.types.functions)
+
+    def test_admits_aarch64_backend_without_reflection_or_nonlocal_state(self) -> None:
+        analysis = analyze_path(AARCH64_ASM_PATH)
+        self.assertIn("_AArch64AsmGen._prepare_frame", analysis.types.functions)
+        self.assertIn("_AArch64AsmGen._walk_ast_children", analysis.types.functions)
 
     def test_admits_llvm_api_without_global_cache_or_dynamic_getattr(self) -> None:
         analysis = analyze_path(LLVM_API_PATH)

@@ -45,10 +45,17 @@
   instead of dataclass reflection, explicit state containers instead of
   `nonlocal` frame/global-data rebinding, and AOT type binding recognizes
   existing `float` annotations used by native floating constant helpers,
-  admitting `x86_64_asm.py`. The
-  all-`src/xcc` probe now reaches 56/57
-  modules, up from 19/57 before this milestone slice, with remaining blockers
-  concentrated in `aarch64_asm.py` dynamic traversal and `nonlocal` state.
+  admitting `x86_64_asm.py`. The AArch64 backend now uses explicit AST child
+  dispatch instead of dataclass reflection and explicit state containers instead
+  of `nonlocal` frame/global-data/analysis-state rebinding, admitting
+  `aarch64_asm.py`. The all-`src/xcc` probe now reaches 57/57 modules, up from
+  19/57 before this milestone slice. The Milestone 6 test gate now includes an
+  all-`src/xcc` admission regression that analyzes every Python source file
+  instead of relying on an ad hoc probe.
+- Added the Milestone 6 implementation plan for full AOT bootstrap, covering
+  all-source admission, explicit backend cleanup, bootstrap source graph
+  reporting, native executable build orchestration, and self-host validation
+  without CPython runtime fallback or marker syntax.
 - Added Milestone 5 AOT parser/sema slice support, including class method
   signature binding, nested container annotation admission, parser helper subset
   cleanup, cross-module record type resolution, and native parser/sema oracle
