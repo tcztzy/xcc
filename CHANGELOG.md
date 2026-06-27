@@ -83,6 +83,10 @@
   configured `/opt/homebrew/opt/llvm/bin/llc` path, and produces
   `build/aot/self-host-smoke.o` without CPython or host `cc`. This remains a
   fixed smoke-subset bridge; general frontend/backend lowering is still pending.
+- Made the bootstrap smoke compiler leaf executable under normal CPython as
+  well as in the native AOT bridge. The project source now owns the fixed smoke
+  validation, `.ll` emission, and configured `llc` invocation behavior instead
+  of leaving that behavior only in the native emitter specialization.
 - Added the Milestone 6 implementation plan for full AOT bootstrap, covering
   all-source admission, explicit backend cleanup, bootstrap source graph
   reporting, native executable build orchestration, and self-host validation

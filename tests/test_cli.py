@@ -38,8 +38,66 @@ class CliTests(unittest.TestCase):
             if call.args[0][0] == llc_path and "-filetype=obj" in call.args[0]
         ]
 
-    def test_aot_smoke_compiler_stub_fails_under_cpython(self) -> None:
-        self.assertEqual(cc_driver._aot_compile_smoke_source_to_object(0, ()), 1)
+    def test_aot_smoke_compiler_writes_llvm_and_invokes_llc_under_cpython(self) -> None:
+        commands: list[tuple[str, ...]] = []
+
+        def fake_run(command: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess:
+            commands.append(tuple(command))
+            Path(command[-1]).write_bytes(b"object")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "smoke.c"
+            output = root / "smoke.o"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+
+            with patch("subprocess.run", fake_run):
+                code = cc_driver._aot_compile_smoke_source_to_object(
+                    5,
+                    ("xcc", "-c", str(source), "-o", str(output)),
+                )
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                commands,
+                [
+                    (
+                        "/opt/homebrew/opt/llvm/bin/llc",
+                        "-filetype=obj",
+                        str(output) + ".ll",
+                        "-o",
+                        str(output),
+                    )
+                ],
+            )
+            self.assertEqual(
+                (root / "smoke.o.ll").read_text(encoding="utf-8"),
+                "define i32 @main() {\nentry:\n  ret i32 0\n}\n",
+            )
+            self.assertEqual(output.read_bytes(), b"object")
+
+    def test_aot_smoke_compiler_rejects_non_smoke_inputs_under_cpython(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "smoke.c"
+            output = root / "smoke.o"
+            source.write_text("int main(void){return 1;}\n", encoding="utf-8")
+
+            with patch("subprocess.run") as run:
+                bad_args = cc_driver._aot_compile_smoke_source_to_object(
+                    4,
+                    ("xcc", "-c", str(source), "-o"),
+                )
+                bad_source = cc_driver._aot_compile_smoke_source_to_object(
+                    5,
+                    ("xcc", "-c", str(source), "-o", str(output)),
+                )
+
+            self.assertEqual(bad_args, 1)
+            self.assertEqual(bad_source, 1)
+            run.assert_not_called()
+            self.assertFalse((root / "smoke.o.ll").exists())
 
     def test_main_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
