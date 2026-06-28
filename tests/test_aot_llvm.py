@@ -217,6 +217,70 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("select i1", llvm_ir)
         self.assertNotIn("@max", llvm_ir)
 
+    def test_emits_object_name_narrowed_to_int_as_ptr_to_int(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "object_int_narrow.py",
+            (),
+            (
+                IrFunction(
+                    "choose",
+                    (IrParam("value", IrRecordType("object")),),
+                    int64,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__ifexp",
+                                (
+                                    IrCall(
+                                        "__cmp_GtE",
+                                        (IrName("value", int64), IrConstInt(0, int64)),
+                                        IrBoolType(),
+                                    ),
+                                    IrName("value", int64),
+                                    IrConstInt(0, int64),
+                                ),
+                                int64,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("ptrtoint ptr %value to i64", llvm_ir)
+        self.assertIn("icmp sge i64", llvm_ir)
+        self.assertIn("select i1", llvm_ir)
+
+    def test_emits_object_name_narrowed_to_string_and_tuple_as_pointer(self) -> None:
+        tuple_type = IrTupleType((IrStringType(),))
+        module = IrModule(
+            "object_pointer_narrow.py",
+            (),
+            (
+                IrFunction(
+                    "as_string",
+                    (IrParam("value", IrRecordType("object")),),
+                    IrStringType(),
+                    (IrReturn(IrName("value", IrStringType())),),
+                ),
+                IrFunction(
+                    "as_tuple",
+                    (IrParam("value", IrRecordType("object")),),
+                    tuple_type,
+                    (IrReturn(IrName("value", tuple_type)),),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("define ptr @as_string(ptr %value)", llvm_ir)
+        self.assertIn("define ptr @as_tuple(ptr %value)", llvm_ir)
+        self.assertIn("ret ptr %value", llvm_ir)
+
     def test_emits_string_return_with_puts_wrapper(self) -> None:
         module = lower_source_to_ir(
             'def message() -> str:\n    return "ok"\n',
@@ -237,6 +301,104 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
         self.assertIn("%call1 = call ptr @__xcc_aot_tuple_get(ptr %argv, i64 2)", llvm_ir)
         self.assertNotIn("call ptr @__getitem", llvm_ir)
+
+    def test_emits_tuple_getitem_unboxes_integer_result(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        values_type = IrTupleType((int64,))
+        module = IrModule(
+            "tuple_getitem_int.py",
+            (),
+            (
+                IrFunction(
+                    "pick",
+                    (IrParam("values", values_type),),
+                    int64,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__getitem",
+                                (IrName("values", values_type), IrConstInt(0, int64)),
+                                int64,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %values, i64 0)", llvm_ir)
+        self.assertIn("ptrtoint ptr", llvm_ir)
+
+    def test_emits_tuple_getitem_coerces_object_index_to_int(self) -> None:
+        values_type = IrTupleType((IrRecordType("RecordMemberInfo"),))
+        module = IrModule(
+            "tuple_getitem_object_index.py",
+            (IrRecord("RecordMemberInfo", ()),),
+            (
+                IrFunction(
+                    "pick",
+                    (
+                        IrParam("values", values_type),
+                        IrParam("index", IrRecordType("object")),
+                    ),
+                    IrRecordType("RecordMemberInfo"),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__getitem",
+                                (IrName("values", values_type), IrName("index", IrRecordType("object"))),
+                                IrRecordType("RecordMemberInfo"),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("ptrtoint ptr %index to i64", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %values", llvm_ir)
+
+    def test_emits_tuple_getitem_extends_and_truncates_non_i64_indexes(self) -> None:
+        tuple_type = IrTupleType((IrStringType(),))
+        cases = (
+            (IrIntType(32, signed=True), "sext i32 0 to i64"),
+            (IrIntType(32, signed=False), "zext i32 0 to i64"),
+            (IrIntType(128, signed=True), "trunc i128 0 to i64"),
+        )
+        for index_type, expected in cases:
+            with self.subTest(index_type=index_type):
+                module = IrModule(
+                    "tuple_getitem_index_width.py",
+                    (),
+                    (
+                        IrFunction(
+                            "pick",
+                            (IrParam("values", tuple_type),),
+                            IrStringType(),
+                            (
+                                IrReturn(
+                                    IrCall(
+                                        "__getitem",
+                                        (
+                                            IrName("values", tuple_type),
+                                            IrConstInt(0, index_type),
+                                        ),
+                                        IrStringType(),
+                                    )
+                                ),
+                            ),
+                        ),
+                    ),
+                )
+
+                llvm_ir = emit_llvm_text(module)
+
+                self.assertIn(expected, llvm_ir)
+                self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %values", llvm_ir)
 
     def test_emits_tuple_len_intrinsic(self) -> None:
         module = lower_source_to_ir(
@@ -710,6 +872,417 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("for.next", llvm_ir)
         self.assertIn("br label %for.next", llvm_ir)
 
+    def test_for_each_binds_homogeneous_tuple_element_type(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        function_def = IrRecord("FunctionDef", (IrField("body", int64),))
+        function_type = IrRecordType("FunctionDef")
+        tuple_type = IrTupleType((function_type,))
+        module = IrModule(
+            "for_record.py",
+            (function_def,),
+            (
+                IrFunction(
+                    "first_body",
+                    (IrParam("functions", tuple_type),),
+                    int64,
+                    (
+                        IrForEach(
+                            "func",
+                            IrName("functions", tuple_type),
+                            IrBranch(
+                                (
+                                    IrReturn(
+                                        IrGetField(IrName("func", function_type), "body", int64)
+                                    ),
+                                )
+                            ),
+                        ),
+                        IrReturn(IrConstInt(0, int64)),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("%FunctionDef = type { i64 }", llvm_ir)
+        self.assertIn("getelementptr inbounds %FunctionDef", llvm_ir)
+
+    def test_for_each_destructures_homogeneous_tuple_element_type(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        op_type = IrTupleType((IrStringType(), IrRecordType("object")))
+        ops_type = IrTupleType((op_type,))
+        module = IrModule(
+            "for_tuple_target.py",
+            (),
+            (
+                IrFunction(
+                    "first_array_length",
+                    (IrParam("ops", ops_type),),
+                    int64,
+                    (
+                        IrForEach(
+                            "(kind, value)",
+                            IrName("ops", ops_type),
+                            IrBranch(
+                                (
+                                    IrIf(
+                                        IrCall(
+                                            "__cmp_Eq",
+                                            (IrName("kind", IrStringType()), IrConstString("arr")),
+                                            IrBoolType(),
+                                        ),
+                                        IrBranch(
+                                            (
+                                                IrReturn(
+                                                    IrCall(
+                                                        "__ifexp",
+                                                        (
+                                                            IrCall(
+                                                                "__cmp_GtE",
+                                                                (
+                                                                    IrName("value", int64),
+                                                                    IrConstInt(0, int64),
+                                                                ),
+                                                                IrBoolType(),
+                                                            ),
+                                                            IrName("value", int64),
+                                                            IrConstInt(0, int64),
+                                                        ),
+                                                        int64,
+                                                    )
+                                                ),
+                                            )
+                                        ),
+                                    ),
+                                )
+                            ),
+                        ),
+                        IrReturn(IrConstInt(0, int64)),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %item", llvm_ir)
+        self.assertIn("i64 0)", llvm_ir)
+        self.assertIn("i64 1)", llvm_ir)
+        self.assertIn("ptrtoint ptr", llvm_ir)
+
+    def test_for_each_destructures_unknown_tuple_element_type_as_object_slots(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "for_unknown_tuple_target.py",
+            (),
+            (
+                IrFunction(
+                    "first_array_length",
+                    (IrParam("ops", IrTupleType(())),),
+                    int64,
+                    (
+                        IrForEach(
+                            "(kind, value)",
+                            IrName("ops", IrTupleType(())),
+                            IrBranch(
+                                (
+                                    IrReturn(
+                                        IrCall(
+                                            "__ifexp",
+                                            (
+                                                IrCall(
+                                                    "__cmp_GtE",
+                                                    (
+                                                        IrName("value", int64),
+                                                        IrConstInt(0, int64),
+                                                    ),
+                                                    IrBoolType(),
+                                                ),
+                                                IrName("value", int64),
+                                                IrConstInt(0, int64),
+                                            ),
+                                            int64,
+                                        )
+                                    ),
+                                )
+                            ),
+                        ),
+                        IrReturn(IrConstInt(0, int64)),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %item", llvm_ir)
+        self.assertIn("ptrtoint ptr", llvm_ir)
+
+    def test_for_each_skips_underscore_tuple_target_slot(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        op_type = IrTupleType((IrStringType(), int64))
+        ops_type = IrTupleType((op_type,))
+        module = IrModule(
+            "for_tuple_underscore_target.py",
+            (),
+            (
+                IrFunction(
+                    "first_kind",
+                    (IrParam("ops", ops_type),),
+                    IrStringType(),
+                    (
+                        IrForEach(
+                            "(kind, _)",
+                            IrName("ops", ops_type),
+                            IrBranch((IrReturn(IrName("kind", IrStringType())),)),
+                        ),
+                        IrReturn(IrConstString("")),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %item", llvm_ir)
+        self.assertIn("i64 0)", llvm_ir)
+
+    def test_assignment_destructures_tuple_value(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        op_type = IrTupleType((IrStringType(), IrRecordType("object")))
+        module = IrModule(
+            "assign_tuple_target.py",
+            (),
+            (
+                IrFunction(
+                    "length",
+                    (IrParam("op", op_type),),
+                    int64,
+                    (
+                        IrAssign("(kind, length_value)", IrName("op", op_type)),
+                        IrReturn(
+                            IrCall(
+                                "__ifexp",
+                                (
+                                    IrCall(
+                                        "__cmp_GtE",
+                                        (IrName("length_value", int64), IrConstInt(0, int64)),
+                                        IrBoolType(),
+                                    ),
+                                    IrName("length_value", int64),
+                                    IrConstInt(0, int64),
+                                ),
+                                int64,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %op, i64 1)", llvm_ir)
+        self.assertIn("ptrtoint ptr", llvm_ir)
+
+    def test_assignment_destructures_object_and_skips_underscore_slot(self) -> None:
+        module = IrModule(
+            "assign_tuple_object_target.py",
+            (),
+            (
+                IrFunction(
+                    "kind",
+                    (IrParam("packed", IrRecordType("object")),),
+                    IrStringType(),
+                    (
+                        IrAssign("(kind, _)", IrName("packed", IrRecordType("object"))),
+                        IrReturn(IrName("kind", IrStringType())),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %packed, i64 0)", llvm_ir)
+        self.assertNotIn("call ptr @__xcc_aot_tuple_get(ptr %packed, i64 1)", llvm_ir)
+
+    def test_assignment_destructures_pointer_sized_int_tuple_value(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "assign_tuple_int_target.py",
+            (),
+            (
+                IrFunction(
+                    "flag",
+                    (IrParam("packed", int64),),
+                    IrBoolType(),
+                    (
+                        IrAssign("(param_specs, is_variadic)", IrName("packed", int64)),
+                        IrReturn(IrName("is_variadic", IrBoolType())),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("inttoptr i64 %packed to ptr", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get", llvm_ir)
+
+    def test_emits_field_access_after_optional_name_narrowing(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        box_type = IrRecordType("Box")
+        optional_box_type = IrRecordType("Box | None")
+        module = IrModule(
+            "optional_record.py",
+            (IrRecord("Box", (IrField("value", int64),)),),
+            (
+                IrFunction(
+                    "read",
+                    (),
+                    int64,
+                    (
+                        IrAssign(
+                            "box",
+                            IrCall("maybe_box", (), optional_box_type),
+                        ),
+                        IrReturn(IrGetField(IrName("box", box_type), "value", int64)),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @maybe_box()", llvm_ir)
+        self.assertIn("getelementptr inbounds %Box", llvm_ir)
+
+    def test_emits_field_access_after_union_name_narrowing(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        var_symbol_type = IrRecordType("VarSymbol")
+        union_type = IrRecordType("VarSymbol | EnumConstSymbol | None")
+        module = IrModule(
+            "union_record.py",
+            (IrRecord("VarSymbol", (IrField("slot", int64),)),),
+            (
+                IrFunction(
+                    "read",
+                    (),
+                    int64,
+                    (
+                        IrAssign(
+                            "symbol",
+                            IrCall("lookup_symbol", (), union_type),
+                        ),
+                        IrReturn(IrGetField(IrName("symbol", var_symbol_type), "slot", int64)),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @lookup_symbol()", llvm_ir)
+        self.assertIn("getelementptr inbounds %VarSymbol", llvm_ir)
+
+    def test_emits_field_access_after_base_record_name_narrowing(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        stmt_type = IrRecordType("Stmt")
+        compound_type = IrRecordType("CompoundStmt")
+        module = IrModule(
+            "base_record.py",
+            (IrRecord("CompoundStmt", (IrField("count", int64),)),),
+            (
+                IrFunction(
+                    "read",
+                    (IrParam("stmt", stmt_type),),
+                    int64,
+                    (IrReturn(IrGetField(IrName("stmt", compound_type), "count", int64)),),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("getelementptr inbounds %CompoundStmt", llvm_ir)
+
+    def test_emits_field_access_after_union_record_name_narrowing(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        stmt_type = IrRecordType("Stmt")
+        loop_union_type = IrRecordType("WhileStmt | ForStmt")
+        module = IrModule(
+            "union_record.py",
+            (
+                IrRecord("Stmt", ()),
+                IrRecord("WhileStmt", (IrField("body", int64),)),
+                IrRecord("ForStmt", (IrField("body", int64),)),
+            ),
+            (
+                IrFunction(
+                    "read",
+                    (IrParam("stmt", stmt_type),),
+                    int64,
+                    (IrReturn(IrGetField(IrName("stmt", loop_union_type), "body", int64)),),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("getelementptr inbounds %WhileStmt", llvm_ir)
+
+    def test_direct_emitter_resolves_union_record_field_owner(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        emitter = _Emitter(
+            IrModule(
+                "union_record.py",
+                (
+                    IrRecord("WhileStmt", (IrField("body", int64),)),
+                    IrRecord("EmptyStmt", ()),
+                ),
+                (),
+            )
+        )
+
+        self.assertEqual(
+            emitter._field_record_name("MissingStmt | WhileStmt", "body"),
+            "WhileStmt",
+        )
+        with self.assertRaises(AotError) as ctx:
+            emitter._field_record_name("MissingStmt | EmptyStmt", "body")
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+
+    def test_emits_isinstance_class_marker_name_as_truthy_value(self) -> None:
+        module = IrModule(
+            "class_marker.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (IrParam("symbol", IrRecordType("object")),),
+                    IrBoolType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "isinstance",
+                                (
+                                    IrName("symbol", IrRecordType("object")),
+                                    IrName("VarSymbol", IrBoolType()),
+                                ),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call i1 @isinstance(ptr %symbol, i1 true)", llvm_ir)
+
     def test_emits_enumerate_for_each_without_runtime_enumerate_call(self) -> None:
         int64 = IrIntType(64, signed=True)
         module = lower_source_to_ir(
@@ -875,6 +1448,73 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("define i1 @__xcc_aot_string_startswith", llvm_ir)
         self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 2)", llvm_ir)
 
+    def test_emits_string_startswith_tuple_prefix_intrinsic_calls(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "startswith_tuple.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (),
+                    IrBoolType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__str_startswith",
+                                (
+                                    IrConstString("abcdef"),
+                                    IrTuple(
+                                        (IrConstString("ab"), IrConstString("cd")),
+                                        IrTupleType((IrStringType(), IrStringType())),
+                                    ),
+                                    IrConstInt(0, int64),
+                                ),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 0)", llvm_ir)
+        self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str2, i64 0)", llvm_ir)
+        self.assertIn("or i1", llvm_ir)
+
+    def test_emits_string_startswith_object_prefix_as_string_pointer(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "startswith_object_prefix.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (IrParam("prefix", IrRecordType("object")),),
+                    IrBoolType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__str_startswith",
+                                (
+                                    IrConstString("abcdef"),
+                                    IrName("prefix", IrRecordType("object")),
+                                    IrConstInt(0, int64),
+                                ),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr %prefix, i64 0)", llvm_ir)
+
     def test_emits_string_endswith_intrinsic_call(self) -> None:
         module = IrModule(
             "endswith.py",
@@ -899,6 +1539,33 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
         self.assertIn("define i1 @__xcc_aot_string_endswith", llvm_ir)
         self.assertIn("call i1 @__xcc_aot_string_endswith(ptr @.str0, ptr @.str1)", llvm_ir)
+
+    def test_emits_string_order_compare_with_strcmp(self) -> None:
+        module = IrModule(
+            "string_order.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (IrParam("ch", IrStringType()),),
+                    IrBoolType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__cmp_LtE",
+                                (IrConstString("a"), IrName("ch", IrStringType())),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call i32 @strcmp", llvm_ir)
+        self.assertIn("icmp sle i32", llvm_ir)
 
     def test_emits_string_ljust_and_rstrip_intrinsic_calls(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -1282,7 +1949,18 @@ class AotLlvmTextTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             emitter._default_value(object())  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        self.assertEqual(emitter._default_value(IrBoolType()), "false")
         self.assertEqual(emitter._default_value(IrFloatType()), "0.0")
+        with self.assertRaises(AotError) as ctx:
+            emitter._emit_runtime_boxed_value("%raw", object(), [])  # type: ignore[arg-type]
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
+        self.assertIsNone(
+            emitter._emit_runtime_object_narrowing(
+                _EmittedValue("%raw", IrRecordType("object")),
+                IrFloatType(),
+                [],
+            )
+        )
         with self.assertRaises(AotError) as ctx:
             emitter._emit_status_return([], object())  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
@@ -1434,6 +2112,83 @@ class AotLlvmTextTests(unittest.TestCase):
             IrModule("bad.py", (), (IrFunction("f", (), int64, (object(),)),)),
             IrModule("bad.py", (), (IrFunction("f", (), int64, (IrReturn(object()),)),)),
             IrModule("bad.py", (), (IrFunction("f", (), int64, (IrReturn(IrName("x", int64)),)),)),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (IrParam("items", IrTupleType((IrStringType(),))),),
+                        IrNoneType(),
+                        (
+                            IrForEach(
+                                "(left, right)",
+                                IrName("items", IrTupleType((IrStringType(),))),
+                                IrBranch(()),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__cmp_Lt",
+                                    (IrConstBool(False), IrConstBool(True)),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrBoolType(),
+                        (
+                            IrReturn(
+                                IrCall(
+                                    "__str_startswith",
+                                    (
+                                        IrConstString("x"),
+                                        IrTuple(
+                                            (IrConstInt(1, int64),),
+                                            IrTupleType((int64,)),
+                                        ),
+                                        IrConstInt(0, int64),
+                                    ),
+                                    IrBoolType(),
+                                )
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            IrModule(
+                "bad.py",
+                (),
+                (
+                    IrFunction(
+                        "f",
+                        (),
+                        IrNoneType(),
+                        (IrAssign("(left, right)", IrConstBool(True)),),
+                    ),
+                ),
+            ),
             IrModule(
                 "bad.py",
                 (),
@@ -2129,26 +2884,6 @@ class AotLlvmTextTests(unittest.TestCase):
                             IrReturn(
                                 IrCall(
                                     "__cmp_Lt",
-                                    (IrConstString("x"), IrConstString("y")),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__cmp_Lt",
                                     (
                                         IrConstInt(1, IrIntType(32, signed=True)),
                                         IrConstInt(2, int64),
@@ -2200,32 +2935,6 @@ class AotLlvmTextTests(unittest.TestCase):
                                         IrConstBool(True),
                                     ),
                                     IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__getitem",
-                                    (
-                                        IrTuple(
-                                            (IrConstString("x"),),
-                                            IrTupleType((IrStringType(),)),
-                                        ),
-                                        IrConstInt(0, int64),
-                                    ),
-                                    int64,
                                 )
                             ),
                         ),

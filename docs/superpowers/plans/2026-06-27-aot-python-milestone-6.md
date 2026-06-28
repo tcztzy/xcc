@@ -934,10 +934,19 @@ The broader source-to-LLVM unchecked slice rooted at
 successfully, currently covering 237 functions and 62 records. LLVM text
 emission and runtime coverage now exists for the newly discovered
 `str.ljust`, `str.rstrip`, `bytes`, `int.to_bytes`, and `id` intrinsics, with
-native smoke coverage for observable string/byte/id paths. The remaining Step
-4d work is the broader lowered codegen emission/execution path plus
-length-aware bytes semantics beyond the current C-string-compatible buffer
-shape.
+native smoke coverage for observable string/byte/id paths.
+The same unchecked slice now emits textual LLVM IR end-to-end, currently
+producing 18,914 LLVM lines for those 237 functions and 62 records. The latest
+lowerer/emitter work handles Python value-semantics `and`/`or` when the result
+type is not bool, tuple-backed dictionary subscripts, `reversed(tuple)` element
+type preservation, tuple destructuring over homogeneous and opaque runtime
+tuples, object-to-scalar/string/tuple narrowing at use sites, non-`i64` tuple
+indexes, string ordering through `strcmp`, tuple-prefix `str.startswith(...)`,
+and record-union field-owner selection. The remaining Step 4d work is native
+execution validation of this broader emitted code, runtime object/type tagging,
+and length-aware bytes semantics beyond the current C-string-compatible buffer
+shape; this milestone note does not claim full `llc` or native execution
+correctness for the broad source-to-LLVM slice yet.
 The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with

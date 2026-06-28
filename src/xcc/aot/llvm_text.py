@@ -183,7 +183,10 @@ class _Emitter:
                 value = self._emit_construct_record(statement.value, names, lines, statement.target)
             else:
                 value = self._emit_expr(statement.value, names, lines)
-            _bind_emitted_target(statement.target, value, names)
+            if "," in statement.target:
+                self._bind_emitted_tuple_target(statement.target, value, names, lines)
+            else:
+                _bind_emitted_target(statement.target, value, names)
             return
         if isinstance(statement, IrSetItem):
             self._emit_set_item(statement, names, lines)
@@ -251,9 +254,23 @@ class _Emitter:
         if isinstance(expr, IrName):
             value = names.get(expr.name)
             if value is None:
+                if isinstance(expr.type, IrBoolType) and _is_type_marker_name(expr.name):
+                    return _EmittedValue("true", expr.type)
                 if expr.name in _BUILTIN_VALUE_NAMES or expr.name.isupper():
                     return _EmittedValue(self._default_value(expr.type), expr.type)
                 self._error(f"Unknown LLVM name: {expr.name}")
+            if _is_record_narrowing(value.type, expr.type) or (
+                isinstance(value.type, IrRecordType)
+                and isinstance(expr.type, IrRecordType)
+                and (
+                    expr.type.name in self.records
+                    or _is_known_record_union_name(expr.type.name, self.records)
+                )
+            ):
+                return _EmittedValue(value.value, expr.type)
+            narrowed_value = self._emit_runtime_object_narrowing(value, expr.type, lines)
+            if narrowed_value is not None:
+                return narrowed_value
             return value
         if isinstance(expr, IrBinary):
             return self._emit_binary(expr, names, lines)
@@ -344,8 +361,33 @@ class _Emitter:
         if enumerate_call is not None:
             self._bind_enumerate_targets(statement, index, item, names)
         else:
-            for target in _for_each_targets(statement.target):
-                names[target] = _EmittedValue(item, IrRecordType("object"))
+            item_type: IrType = IrRecordType("object")
+            if isinstance(iterable.type, IrTupleType) and len(iterable.type.elements) == 1:
+                item_type = iterable.type.elements[0]
+            slots = _for_each_target_slots(statement.target)
+            if len(slots) > 1:
+                if isinstance(item_type, IrTupleType) and len(item_type.elements) == len(slots):
+                    target_types = item_type.elements
+                elif (isinstance(item_type, IrTupleType) and not item_type.elements) or (
+                    isinstance(item_type, IrRecordType) and item_type.name == "object"
+                ):
+                    target_types = (IrRecordType("object"),) * len(slots)
+                else:
+                    self._error("tuple for-each target expects tuple item type")
+                for slot_index, (target, target_type) in enumerate(
+                    zip(slots, target_types, strict=True)
+                ):
+                    if target is None:
+                        continue
+                    names[target] = self._emit_runtime_tuple_get(
+                        item,
+                        slot_index,
+                        target_type,
+                        lines,
+                    )
+            else:
+                for target in _for_each_targets(statement.target):
+                    names[target] = _EmittedValue(item, item_type)
         self.loop_stack.append(_LoopLabels(next_label, end_label))
         self._emit_branch(statement.body, names, lines, return_type)
         self.loop_stack.pop()
@@ -367,7 +409,8 @@ class _Emitter:
         value = self._emit_expr(statement.value, names, lines)
         slot = self._tmp("setslot")
         stored = self._box_to_runtime_ptr(value, lines)
-        lines.append(f"  {slot} = getelementptr ptr, ptr {target.value}, i64 {index.value}")
+        index_value = self._coerce_index_i64(index, lines, "setitem")
+        lines.append(f"  {slot} = getelementptr ptr, ptr {target.value}, i64 {index_value}")
         lines.append(f"  store ptr {stored}, ptr {slot}")
 
     def _bind_enumerate_targets(
@@ -395,6 +438,63 @@ class _Emitter:
         ):
             if slot is not None:
                 names[slot] = _EmittedValue(value, type_info)
+
+    def _emit_runtime_tuple_get(
+        self,
+        tuple_value: str,
+        index: int,
+        result_type: IrType,
+        lines: list[str],
+    ) -> _EmittedValue:
+        raw = self._tmp("itemslot")
+        lines.append(f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {tuple_value}, i64 {index})")
+        return self._emit_runtime_boxed_value(raw, result_type, lines)
+
+    def _emit_runtime_boxed_value(
+        self,
+        raw: str,
+        result_type: IrType,
+        lines: list[str],
+    ) -> _EmittedValue:
+        if _is_pointer_type(result_type):
+            return _EmittedValue(raw, result_type)
+        if isinstance(result_type, IrIntType):
+            result = self._tmp("narrowint")
+            lines.append(f"  {result} = ptrtoint ptr {raw} to {self._llvm_type(result_type)}")
+            return _EmittedValue(result, result_type)
+        if isinstance(result_type, IrBoolType):
+            result = self._tmp("narrowbool")
+            lines.append(f"  {result} = icmp ne ptr {raw}, null")
+            return _EmittedValue(result, result_type)
+        self._error(f"Unsupported tuple item type: {type(result_type).__name__}")
+
+    def _bind_emitted_tuple_target(
+        self,
+        target: str,
+        value: _EmittedValue,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> None:
+        slots = _for_each_target_slots(target)
+        if isinstance(value.type, IrTupleType) and len(value.type.elements) == len(slots):
+            target_types = value.type.elements
+            tuple_value = value.value
+        elif (isinstance(value.type, IrTupleType) and not value.type.elements) or (
+            isinstance(value.type, IrRecordType) and value.type.name == "object"
+        ):
+            target_types = (IrRecordType("object"),) * len(slots)
+            tuple_value = value.value
+        elif isinstance(value.type, IrIntType):
+            target_types = (IrRecordType("object"),) * len(slots)
+            tuple_value = self._tmp("tupleptr")
+            lines.append(
+                f"  {tuple_value} = inttoptr {self._llvm_type(value.type)} {value.value} to ptr"
+            )
+        else:
+            self._error("tuple assignment target expects tuple value")
+        for index, (slot, target_type) in enumerate(zip(slots, target_types, strict=True)):
+            if slot is not None:
+                names[slot] = self._emit_runtime_tuple_get(tuple_value, index, target_type, lines)
 
     def _emit_while(
         self,
@@ -739,11 +839,12 @@ class _Emitter:
         record_type = value.type
         if not isinstance(record_type, IrRecordType):
             self._error(f"Unsupported LLVM field receiver: {expr.field}")
-        index = self._field_index(record_type.name, expr.field)
+        record_name = self._field_record_name(record_type.name, expr.field)
+        index = self._field_index(record_name, expr.field)
         field_ptr = self._tmp("fieldptr")
         result = self._tmp("load")
         lines.append(
-            f"  {field_ptr} = getelementptr inbounds %{record_type.name}, ptr {value.value}, "
+            f"  {field_ptr} = getelementptr inbounds %{record_name}, ptr {value.value}, "
             f"i32 0, i32 {index}"
         )
         lines.append(f"  {result} = load {self._storage_llvm_type(expr.type)}, ptr {field_ptr}")
@@ -890,21 +991,41 @@ class _Emitter:
         if len(expr.args) != 3:
             self._error("__str_startswith expects three arguments")
         value = self._emit_expr(expr.args[0], names, lines)
-        prefix = self._emit_expr(expr.args[1], names, lines)
         start = self._emit_expr(expr.args[2], names, lines)
-        if not isinstance(value.type, IrStringType) or not isinstance(prefix.type, IrStringType):
+        if not _is_string_like_type(value.type):
             self._error("__str_startswith expects string receiver and prefix")
         if not isinstance(start.type, IrIntType) or start.type.bits != 64:
             self._error("__str_startswith expects an int64 start")
         if not isinstance(expr.type, IrBoolType):
             self._error("__str_startswith expects a bool result")
         self.needs_runtime_prelude = True
-        result = self._tmp("startswith")
+        if isinstance(expr.args[1], IrTuple):
+            result: _EmittedValue = _EmittedValue("false", IrBoolType())
+            for prefix_expr in expr.args[1].elements:
+                prefix = self._emit_expr(prefix_expr, names, lines)
+                if not _is_string_like_type(prefix.type):
+                    self._error("__str_startswith expects string receiver and prefix")
+                current = self._tmp("startswith")
+                lines.append(
+                    f"  {current} = call i1 @__xcc_aot_string_startswith("
+                    f"ptr {value.value}, ptr {prefix.value}, i64 {start.value})"
+                )
+                if result.value == "false":
+                    result = _EmittedValue(current, IrBoolType())
+                else:
+                    combined = self._tmp("startswith")
+                    lines.append(f"  {combined} = or i1 {result.value}, {current}")
+                    result = _EmittedValue(combined, IrBoolType())
+            return result
+        prefix = self._emit_expr(expr.args[1], names, lines)
+        if not _is_string_like_type(prefix.type):
+            self._error("__str_startswith expects string receiver and prefix")
+        call_result = self._tmp("startswith")
         lines.append(
-            f"  {result} = call i1 @__xcc_aot_string_startswith("
+            f"  {call_result} = call i1 @__xcc_aot_string_startswith("
             f"ptr {value.value}, ptr {prefix.value}, i64 {start.value})"
         )
-        return _EmittedValue(result, expr.type)
+        return _EmittedValue(call_result, expr.type)
 
     def _emit_string_endswith_call(
         self,
@@ -1090,17 +1211,13 @@ class _Emitter:
             self._error("__getitem expects two arguments")
         value = self._emit_expr(expr.args[0], names, lines)
         index = self._emit_expr(expr.args[1], names, lines)
-        if not isinstance(index.type, IrIntType) or index.type.bits != 64:
-            self._error("__getitem expects an int64 index")
-        if not _is_pointer_type(expr.type):
-            self._error("__getitem currently supports pointer element results")
+        index_value = self._coerce_index_i64(index, lines, "__getitem")
         self.needs_runtime_prelude = True
-        result = self._tmp("call")
+        raw = self._tmp("call")
         lines.append(
-            f"  {result} = call {self._llvm_type(expr.type)} @__xcc_aot_tuple_get("
-            f"ptr {value.value}, i64 {index.value})"
+            f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {value.value}, i64 {index_value})"
         )
-        return _EmittedValue(result, expr.type)
+        return self._emit_runtime_boxed_value(raw, expr.type, lines)
 
     def _emit_not_in_tuple(
         self,
@@ -1147,6 +1264,28 @@ class _Emitter:
         result = self._tmp("not")
         lines.append(f"  {result} = xor i1 {truth.value}, true")
         return _EmittedValue(result, IrBoolType())
+
+    def _emit_runtime_object_narrowing(
+        self,
+        value: _EmittedValue,
+        requested_type: IrType,
+        lines: list[str],
+    ) -> _EmittedValue | None:
+        if not isinstance(value.type, IrRecordType) or value.type.name != "object":
+            return None
+        if isinstance(requested_type, IrIntType):
+            result = self._tmp("narrowint")
+            lines.append(
+                f"  {result} = ptrtoint ptr {value.value} to {self._llvm_type(requested_type)}"
+            )
+            return _EmittedValue(result, requested_type)
+        if isinstance(requested_type, IrBoolType):
+            result = self._tmp("narrowbool")
+            lines.append(f"  {result} = icmp ne ptr {value.value}, null")
+            return _EmittedValue(result, requested_type)
+        if isinstance(requested_type, IrStringType | IrTupleType):
+            return _EmittedValue(value.value, requested_type)
+        return None
 
     def _coerce_to_bool(self, value: _EmittedValue, lines: list[str]) -> _EmittedValue:
         if isinstance(value.type, IrBoolType):
@@ -1215,6 +1354,32 @@ class _Emitter:
         else:
             lines.append(f"  {result} = trunc {self._llvm_type(value.type)} {value.value} to i32")
         return result
+
+    def _coerce_index_i64(
+        self,
+        value: _EmittedValue,
+        lines: list[str],
+        context: str,
+    ) -> str:
+        if isinstance(value.type, IrIntType):
+            if value.type.bits == 64:
+                return value.value
+            result = self._tmp("index")
+            if value.type.bits < 64:
+                opcode = "sext" if value.type.signed else "zext"
+                lines.append(
+                    f"  {result} = {opcode} {self._llvm_type(value.type)} {value.value} to i64"
+                )
+            else:
+                lines.append(
+                    f"  {result} = trunc {self._llvm_type(value.type)} {value.value} to i64"
+                )
+            return result
+        if _is_pointer_type(value.type):
+            result = self._tmp("index")
+            lines.append(f"  {result} = ptrtoint ptr {value.value} to i64")
+            return result
+        self._error(f"{context} expects an int64 index")
 
     def _emit_identity_compare(
         self,
@@ -1295,17 +1460,28 @@ class _Emitter:
         right: _EmittedValue,
         lines: list[str],
     ) -> _EmittedValue:
-        if not isinstance(left.type, IrIntType) or not isinstance(right.type, IrIntType):
-            self._error(f"{target} currently supports integer arguments")
-        if left.type.bits != right.type.bits:
-            self._error(f"{target} expects matching integer widths")
-        prefix = "s" if left.type.signed else "u"
         op = {
             "__cmp_Gt": "gt",
             "__cmp_GtE": "ge",
             "__cmp_Lt": "lt",
             "__cmp_LtE": "le",
         }[target]
+        if _is_string_like_type(left.type) and _is_string_like_type(right.type):
+            self.needs_runtime_prelude = True
+            compared = self._tmp("strcmp")
+            result = self._tmp("cmp")
+            lines.append(
+                f"  {compared} = call i32 @strcmp("
+                f"ptr {self._pointer_compare_value(left)}, "
+                f"ptr {self._pointer_compare_value(right)})"
+            )
+            lines.append(f"  {result} = icmp s{op} i32 {compared}, 0")
+            return _EmittedValue(result, IrBoolType())
+        if not isinstance(left.type, IrIntType) or not isinstance(right.type, IrIntType):
+            self._error(f"{target} currently supports integer arguments")
+        if left.type.bits != right.type.bits:
+            self._error(f"{target} expects matching integer widths")
+        prefix = "s" if left.type.signed else "u"
         result = self._tmp("cmp")
         lines.append(
             f"  {result} = icmp {prefix}{op} {self._llvm_type(left.type)} "
@@ -1789,6 +1965,15 @@ class _Emitter:
                 return index
         self._error(f"Unknown LLVM record field: {record_name}.{field}")
 
+    def _field_record_name(self, record_name: str, field: str) -> str:
+        if record_name in self.records:
+            return record_name
+        for part in _record_union_parts(record_name):
+            record = self.records.get(part)
+            if record is not None and any(candidate.name == field for candidate in record.fields):
+                return part
+        self._error(f"Unknown LLVM record field: {record_name}.{field}")
+
     def _llvm_type(self, type_info: IrType) -> str:
         if isinstance(type_info, IrIntType):
             return f"i{type_info.bits}"
@@ -1861,6 +2046,31 @@ def _llvm_symbol(name: str) -> str:
 
 def _is_pointer_type(type_info: IrType) -> bool:
     return isinstance(type_info, IrNoneType | IrRecordType | IrStringType | IrTupleType)
+
+
+def _is_string_like_type(type_info: IrType) -> bool:
+    return isinstance(type_info, IrStringType) or (
+        isinstance(type_info, IrRecordType) and type_info.name == "object"
+    )
+
+
+def _is_record_narrowing(bound_type: IrType, requested_type: IrType) -> bool:
+    if not isinstance(bound_type, IrRecordType) or not isinstance(requested_type, IrRecordType):
+        return False
+    return requested_type.name in bound_type.name.split(" | ")
+
+
+def _is_known_record_union_name(record_name: str, records: dict[str, IrRecord]) -> bool:
+    parts = _record_union_parts(record_name)
+    return len(parts) > 1 and all(part in records for part in parts)
+
+
+def _record_union_parts(record_name: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in record_name.split("|") if part.strip())
+
+
+def _is_type_marker_name(name: str) -> bool:
+    return name in _BUILTIN_VALUE_NAMES or (name[:1].isupper() and name.isidentifier())
 
 
 def _format_float_literal(value: float) -> str:

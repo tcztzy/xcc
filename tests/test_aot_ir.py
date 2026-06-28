@@ -47,6 +47,7 @@ from xcc.aot.lower import (
     _collect_global_names,
     _dict_container_type_names,
     _dict_get_result_type,
+    _for_each_target_type,
     _isinstance_target_names,
     _Lowerer,
     _llvm_api_call_return_type,
@@ -1115,6 +1116,113 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_tuple_assignment_from_homogeneous_tuple_subscript(self) -> None:
+        module = lower_source_to_ir(
+            "def first_kind(ops: tuple[TypeOp, ...]) -> str:\n"
+            "    kind, _ = ops[0]\n"
+            "    return kind\n",
+            filename="tuple_assign_subscript.py",
+        )
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(
+            assigned.value,
+            IrCall(
+                "__getitem",
+                (
+                    IrName(
+                        "ops",
+                        IrTupleType((IrTupleType((IrStringType(), IrRecordType("object"))),)),
+                    ),
+                    IrConstInt(0, IrIntType(64, signed=True)),
+                ),
+                IrTupleType((IrStringType(), IrRecordType("object"))),
+            ),
+        )
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(returned.value, IrName("kind", IrStringType()))
+
+    def test_lowers_tuple_assignment_from_object_value_with_object_slots(self) -> None:
+        module = lower_source_to_ir(
+            "from typing import Any\n"
+            "def first(packed: Any) -> Any:\n"
+            "    left, _ = packed\n"
+            "    return left\n",
+            filename="tuple_assign_object.py",
+        )
+        assigned = module.functions[0].body[0]
+        self.assertEqual(
+            assigned,
+            IrAssign("(left, _)", IrName("packed", IrRecordType("object"))),
+        )
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(returned.value, IrName("left", IrRecordType("object")))
+
+    def test_lowers_reversed_preserving_tuple_element_type(self) -> None:
+        module = lower_source_to_ir(
+            "def first_kind(ops: tuple[TypeOp, ...]) -> str:\n"
+            "    for kind, value in reversed(ops):\n"
+            "        return kind\n"
+            "    return ''\n",
+            filename="reversed_tuple_type.py",
+        )
+        op_type = IrTupleType((IrStringType(), IrRecordType("object")))
+        ops_type = IrTupleType((op_type,))
+        loop = module.functions[0].body[0]
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        self.assertEqual(loop.target, "(kind, value)")
+        self.assertEqual(loop.iterable, IrCall("reversed", (IrName("ops", ops_type),), ops_type))
+        returned = loop.body.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(returned.value, IrName("kind", IrStringType()))
+
+    def test_lowerer_nested_tuple_subscript_prefers_container_element_type(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        item_type = IrTupleType((IrStringType(), int64, IrRecordType("object")))
+        path_type = IrTupleType((item_type,))
+        lowerer = _Lowerer("nested_subscript.py", {})
+        expr = ast.parse("path[0][1]", mode="eval").body
+
+        lowered = lowerer._lower_expr(expr, {"path": path_type}, int64)
+
+        self.assertEqual(
+            lowered,
+            IrCall(
+                "__getitem",
+                (
+                    IrCall(
+                        "__getitem",
+                        (IrName("path", path_type), IrConstInt(0, int64)),
+                        item_type,
+                    ),
+                    IrConstInt(1, int64),
+                ),
+                int64,
+            ),
+        )
+
+        unknown_index = ast.parse("item[index]", mode="eval").body
+        unknown_lowered = lowerer._lower_expr(
+            unknown_index,
+            {"item": item_type, "index": int64},
+            int64,
+        )
+        self.assertEqual(
+            unknown_lowered,
+            IrCall(
+                "__getitem",
+                (IrName("item", item_type), IrName("index", int64)),
+                int64,
+            ),
+        )
+
     def test_lowers_unary_int_plus_and_minus_expressions(self) -> None:
         negated = lower_source_to_ir(
             "def negate(value: int) -> int:\n"
@@ -1235,6 +1343,35 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(return_type_field, IrGetField)
         assert isinstance(return_type_field, IrGetField)
         self.assertEqual(return_type_field.value, IrName("func_sym", IrRecordType("FunctionSymbol")))
+
+    def test_lowers_tuple_backed_dict_subscript_as_dict_get(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Cache:\n"
+            "    values: dict[str, int]\n"
+            "def lookup(cache: Cache, key: str) -> int:\n"
+            "    return cache.values[key]\n",
+            filename="dict_subscript.py",
+        )
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__dict_get",
+                (
+                    IrGetField(
+                        IrName("cache", IrRecordType("Cache")),
+                        "values",
+                        IrTupleType((IrStringType(), IrIntType(64, signed=True))),
+                    ),
+                    IrName("key", IrStringType()),
+                ),
+                IrIntType(64, signed=True),
+            ),
+        )
 
     def test_lowers_isinstance_guarded_ifexp_record_field(self) -> None:
         module = lower_source_to_ir(
@@ -1924,6 +2061,33 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_string_bool_or_as_value_expression_for_int_parse(self) -> None:
+        module = lower_source_to_ir(
+            "def parse(text: str) -> int:\n"
+            "    return int(text or '0', 10)\n",
+            filename="int_parse_default.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            module.functions[0].body[0].value,
+            IrCall(
+                "__int_parse",
+                (
+                    IrCall(
+                        "__ifexp",
+                        (
+                            IrName("text", IrStringType()),
+                            IrName("text", IrStringType()),
+                            IrConstString("0"),
+                        ),
+                        IrStringType(),
+                    ),
+                    IrConstInt(10, int64),
+                ),
+                int64,
+            ),
+        )
+
     def test_lowers_int_bool_call_as_ifexp(self) -> None:
         module = lower_source_to_ir(
             "def numeric(flag: bool) -> int:\n"
@@ -1941,6 +2105,224 @@ class AotScalarLoweringTests(unittest.TestCase):
                     IrConstInt(0, int64),
                 ),
                 int64,
+            ),
+        )
+
+    def test_lowers_order_compare_arithmetic_operand_as_integer(self) -> None:
+        module = lower_source_to_ir(
+            "def before_end(s: str, i: int) -> bool:\n"
+            "    return i + 1 < len(s)\n",
+            filename="compare_arithmetic.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__cmp_Lt",
+                (
+                    IrBinary(
+                        "+",
+                        IrName("i", int64),
+                        IrConstInt(1, int64),
+                        int64,
+                    ),
+                    IrCall("len", (IrName("s", IrStringType()),), int64),
+                ),
+                IrBoolType(),
+            ),
+        )
+
+    def test_lowers_bytes_size_expression_as_integer(self) -> None:
+        module = lower_source_to_ir(
+            "def padding(size: int, data: bytes) -> bytes:\n"
+            "    return bytes(size - len(data))\n",
+            filename="bytes_size_expr.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__bytes",
+                (
+                    IrBinary(
+                        "-",
+                        IrName("size", int64),
+                        IrCall("len", (IrName("data", IrStringType()),), int64),
+                        int64,
+                    ),
+                ),
+                IrStringType(),
+            ),
+        )
+
+    def test_lowers_attribute_integer_add_assignment_when_function_returns_string(self) -> None:
+        module = lower_source_to_ir(
+            "class Scanner:\n"
+            "    _index: int\n"
+            "    def peek(self, offset: int = 0) -> str:\n"
+            "        index = self._index + offset\n"
+            "        return ''\n",
+            filename="attribute_add_assignment.py",
+            include_records={"Scanner"},
+            include_functions={"Scanner.peek"},
+        )
+        int64 = IrIntType(64, signed=True)
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(
+            assigned.value,
+            IrBinary(
+                "+",
+                IrGetField(IrName("self", IrRecordType("Scanner")), "_index", int64),
+                IrName("offset", int64),
+                int64,
+            ),
+        )
+
+    def test_lowers_bool_assignment_as_bool_when_function_returns_object(self) -> None:
+        module = lower_source_to_ir(
+            "from typing import Any\n"
+            "class ArrayDecl:\n"
+            "    pass\n"
+            "def classify(value: Any) -> Any:\n"
+            "    unspecified = isinstance(value, int) or isinstance(value, ArrayDecl)\n"
+            "    return value\n",
+            filename="bool_assignment.py",
+        )
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(
+            assigned.value,
+            IrCall(
+                "__bool_or",
+                (
+                    IrCall(
+                        "isinstance",
+                        (IrName("value", IrRecordType("object")), IrName("int", IrBoolType())),
+                        IrBoolType(),
+                    ),
+                    IrCall(
+                        "isinstance",
+                        (
+                            IrName("value", IrRecordType("object")),
+                            IrName("ArrayDecl", IrBoolType()),
+                        ),
+                        IrBoolType(),
+                    ),
+                ),
+                IrBoolType(),
+            ),
+        )
+
+    def test_lowers_value_or_assignment_with_operand_type_when_function_returns_object(self) -> None:
+        module = lower_source_to_ir(
+            "from typing import Any\n"
+            "class Type:\n"
+            "    pass\n"
+            "def choose(left: Type | None, right: Type | None) -> Any:\n"
+            "    value = left or right\n"
+            "    return value\n",
+            filename="value_or_assignment.py",
+        )
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertIsInstance(assigned.value, IrCall)
+        assert isinstance(assigned.value, IrCall)
+        self.assertEqual(assigned.value.target, "__ifexp")
+        self.assertEqual(assigned.value.type, IrRecordType("Type | None"))
+
+    def test_lowers_bool_or_with_negative_isinstance_int_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "from typing import Any\n"
+            "def invalid(value: Any) -> bool:\n"
+            "    return not isinstance(value, int) or value < 0\n",
+            filename="bool_or_negative_isinstance.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        compare = returned.value.args[1]
+        self.assertEqual(
+            compare,
+            IrCall(
+                "__cmp_Lt",
+                (IrName("value", int64), IrConstInt(0, int64)),
+                IrBoolType(),
+            ),
+        )
+
+    def test_lowers_value_and_with_not_none_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "from typing import Any\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "def choose(value: Type | None) -> Any:\n"
+            "    return value is not None and value\n",
+            filename="value_and_not_none.py",
+        )
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__ifexp")
+        self.assertEqual(returned.value.args[1], IrName("value", IrRecordType("Type")))
+
+    def test_lowers_value_or_with_none_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "from typing import Any\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "def choose(value: Type | None) -> Any:\n"
+            "    return value is None or value.name\n",
+            filename="value_or_none.py",
+        )
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__ifexp")
+        self.assertEqual(
+            returned.value.args[2],
+            IrGetField(IrName("value", IrRecordType("Type")), "name", IrStringType()),
+        )
+
+    def test_lowers_value_and_without_guard_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "def choose(left: str, right: str) -> str:\n"
+            "    return left and right\n",
+            filename="value_and_plain.py",
+        )
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__ifexp",
+                (
+                    IrName("left", IrStringType()),
+                    IrName("right", IrStringType()),
+                    IrName("left", IrStringType()),
+                ),
+                IrStringType(),
             ),
         )
 
@@ -2182,6 +2564,12 @@ class AotScalarLoweringTests(unittest.TestCase):
             ("def f(value: int) -> bool:\n    return value.startswith('x')\n", "XCC-AOT-LOWER-0003"),
             ("def f(text: str) -> bool:\n    return text.endswith()\n", "XCC-AOT-LOWER-0003"),
             ("def f(value: int) -> bool:\n    return value.endswith('x')\n", "XCC-AOT-LOWER-0003"),
+            (
+                "def f(values: tuple[str, ...]) -> tuple[str, ...]:\n"
+                "    return reversed(values, key=True)\n",
+                "XCC-AOT-LOWER-0003",
+            ),
+            ("def f(value: int) -> int:\n    return reversed(value)\n", "XCC-AOT-LOWER-0003"),
             ("def f(text: str) -> str:\n    return text.ljust()\n", "XCC-AOT-LOWER-0003"),
             ("def f(value: int) -> str:\n    return value.ljust(4)\n", "XCC-AOT-LOWER-0003"),
             ("def f(text: str) -> str:\n    return text.rstrip()\n", "XCC-AOT-LOWER-0003"),
@@ -2339,6 +2727,10 @@ class AotScalarLoweringTests(unittest.TestCase):
             _llvm_api_call_return_type("CreateBuilder", IrNoneType()),
             IrIntType(64, signed=True),
         )
+        self.assertEqual(
+            _llvm_api_call_return_type("GetBasicBlockTerminator", IrBoolType()),
+            IrIntType(64, signed=True),
+        )
 
     def test_star_project_import_does_not_bind_call_target_name(self) -> None:
         module = lower_source_to_ir(
@@ -2464,6 +2856,10 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrTupleType((IrTupleType((IrStringType(), IrRecordType("object"))),)),
         )
         self.assertEqual(
+            lowerer._aot_type_to_ir_type(AotType("tuple[DeclaratorOp, ...]")),
+            IrTupleType((IrTupleType((IrStringType(), IrRecordType("object"))),)),
+        )
+        self.assertEqual(
             lowerer._aot_type_to_ir_type(AotType("FunctionParams")),
             IrTupleType((IrRecordType("object"), IrBoolType())),
         )
@@ -2472,11 +2868,19 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrTupleType((IrStringType(), IrRecordType("object"))),
         )
         self.assertEqual(
+            lowerer._aot_type_to_ir_type(AotType("DeclaratorOp")),
+            IrTupleType((IrStringType(), IrRecordType("object"))),
+        )
+        self.assertEqual(
             lowerer._type_name_to_ir_type("FunctionParams", ast.Pass()),
             IrTupleType((IrRecordType("object"), IrBoolType())),
         )
         self.assertEqual(
             lowerer._type_name_to_ir_type("TypeOp", ast.Pass()),
+            IrTupleType((IrStringType(), IrRecordType("object"))),
+        )
+        self.assertEqual(
+            lowerer._type_name_to_ir_type("DeclaratorOp", ast.Pass()),
             IrTupleType((IrStringType(), IrRecordType("object"))),
         )
         self.assertEqual(
@@ -2778,6 +3182,47 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer._infer_assignment_expr_type(mixed_ifexp, {"flag": IrBoolType()}, fallback),
             fallback,
         )
+        mixed_bool = ast.parse("text or flag", mode="eval").body
+        self.assertEqual(
+            lowerer._infer_assignment_expr_type(
+                mixed_bool,
+                {"text": IrStringType(), "flag": IrBoolType()},
+                fallback,
+            ),
+            fallback,
+        )
+        self.assertEqual(
+            lowerer._infer_assignment_expr_type(
+                ast.parse("not flag", mode="eval").body,
+                {"flag": IrBoolType()},
+                fallback,
+            ),
+            IrBoolType(),
+        )
+        self.assertEqual(
+            lowerer._infer_assignment_expr_type(
+                ast.parse("left + right", mode="eval").body,
+                {"left": IrStringType(), "right": IrStringType()},
+                fallback,
+            ),
+            IrStringType(),
+        )
+        self.assertEqual(
+            lowerer._infer_assignment_expr_type(
+                ast.parse("left - right", mode="eval").body,
+                {"left": IrStringType(), "right": IrStringType()},
+                fallback,
+            ),
+            fallback,
+        )
+        self.assertEqual(
+            lowerer._infer_assignment_expr_type(
+                ast.parse("value.missing", mode="eval").body,
+                {"value": int64},
+                fallback,
+            ),
+            fallback,
+        )
         fixed_tuple_type = IrTupleType((IrStringType(), IrIntType(64, signed=True)))
         self.assertEqual(
             _tuple_subscript_result_type(ast.Name("index", ast.Load()), fixed_tuple_type),
@@ -2791,6 +3236,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             _tuple_subscript_result_type(ast.Constant(8), fixed_tuple_type),
             fallback,
         )
+        self.assertEqual(_for_each_target_type(int64), fallback)
         self.assertIsNone(lowerer._tuple_backed_container_element_type("int", ast.Pass()))
         self.assertEqual(
             lowerer._tuple_backed_container_types("tuple[str, object]", ast.Pass()),

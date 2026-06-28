@@ -30,6 +30,16 @@
   emission and runtime support now cover the newly reached `str.ljust(...)`,
   `str.rstrip(...)`, `bytes(...)`, `int.to_bytes(...)`, and `id(...)`
   intrinsics, with native smoke coverage for observable string/byte/id paths.
+  The same unchecked slice now emits textual LLVM IR end-to-end, currently
+  producing 18,914 LLVM lines for those 237 functions and 62 records. The
+  emitter/lowerer now handles Python value-semantics `and`/`or` for non-bool
+  results, tuple-backed dictionary subscripts, `reversed(tuple)` element type
+  preservation, tuple destructuring over homogeneous/opaque runtime tuples,
+  object-to-scalar/string/tuple narrowing at use sites, non-`i64` tuple indexes,
+  string ordering via `strcmp`, tuple-prefix `str.startswith(...)`, and record
+  union field-owner selection. This is textual emission progress only; native
+  execution correctness, length-aware bytes semantics, and full runtime object
+  tagging remain future bootstrap work.
 - Expanded Milestone 6 AOT bootstrap admission by validating ordinary
   container, private project-type, dotted type, and `Callable[[...], ...]`
   annotations structurally, plus read-only `Sequence[...]` and `Iterable[...]`
