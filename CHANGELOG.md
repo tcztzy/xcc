@@ -2,6 +2,12 @@
 
 ## Current
 
+- Completed the approved Milestone 1 Stage 0 freeze. The final six-module AOT
+  gate ran 508 tests in 505.034s with only the recorded B268/V367/V380 valid
+  union status-2 failure and the V368 expected failure; B271 and B272 no longer
+  fail. Lint and type gates pass. The stable baseline tag is
+  `aot-stage0-m1-20260711`; it does not claim a native AOT Stage 1 or strong
+  self-hosting.
 - Split the approved Milestone 1 worktree into ten logical commits covering
   strong-bootstrap documents, hosted binder, IR/lowering, emitter/runtime,
   native oracle tooling, the native C integration boundary, three explicitly

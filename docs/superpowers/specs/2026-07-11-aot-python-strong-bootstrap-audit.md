@@ -245,6 +245,13 @@ Milestone 1 gate:
 The hunk ledger maps every preserved non-AOT source hunk to the applicable
 integration or quarantine commit. Missing native gates remain explicit debt.
 
+The final six-module AOT gate after the split ran 508 tests in 505.034 seconds.
+It had exactly one failure, the frozen B268/V367/V380 valid-union status-2
+failure, plus the V368 expected failure. B271 and B272 were corrected as stale
+test ABI assertions. `uv run tox -e lint` and `uv run tox -e type` both passed.
+The Stage 0 freeze tag is `aot-stage0-m1-20260711`; it is a Milestone 1 baseline,
+not evidence of Stage 1 or strong self-hosting.
+
 ## Priority Correction
 
 P0 is now strong-bootstrap infrastructure: project-owned AST/parser, explicit
