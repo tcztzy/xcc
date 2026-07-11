@@ -96,7 +96,7 @@ V384: Bootstrap outputs ! deterministic module ordering, source manifest, normal
 id|status|task|cites
 T1|x|freeze current hosted Stage 0 and split the large worktree into bisectable logical commits|V379,V382,V384
 T2|x|define strong-bootstrap source contract, project-owned AST, and hosted/native AOT CLI|V369,V374,I.cmd
-T3|~|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
+T3|x|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
 T4|.|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
 T5|.|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
 T6|.|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378

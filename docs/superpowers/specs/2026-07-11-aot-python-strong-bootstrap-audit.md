@@ -309,6 +309,68 @@ frontend migration) and `fb792da` (source, CLI, tool, and bootstrap boundary
 contracts). The following status/spec commit records the acceptance evidence;
 none of these commits includes the unrelated OSS application document.
 
+## Milestone 3 Project-Owned Parser Result
+
+Milestone 3 adds a hand-written, deterministic Python lexer and
+recursive-descent/Pratt parser. They use no CPython AST objects, `ast.parse`,
+generated parser tables, required cache, marker decorator, pragma, or comment
+directive. The lexer implements indentation, implicit/explicit continuation,
+identifiers, numeric and string tokens, comments, operators, and 1-based
+line/0-based UTF-8 byte spans. The parser constructs the immutable 77-kind
+owned AST surface, including functions/classes, imports, annotations, control
+flow, exception/with forms, calls, containers, comprehensions, slices, adjacent
+strings, bytes, and nested f-string format specifications.
+
+The Stage 0 oracle compares every semantic field, end-exclusive span, and
+ordered child edge. All 67 current `src/xcc` files and 436,377 CPython tokens
+match. Stable `XCC-AOT-PYLEX-*` and `XCC-AOT-PYPARSE-*` diagnostics cover the
+documented rejection boundary. The common `module.parse_source` path now uses
+the owned parser; tests that deliberately exercise a later checker/lowerer
+rejection construct their hosted oracle AST explicitly.
+
+`xcc.aot.parser_oracle` is a fourth explicit Stage 0-only module alongside
+`__main__`, `hosted_cli`, and `cpython_ast_adapter`. The acceptance command
+
+```text
+uv run python -m xcc.aot parser-oracle \
+  --source-root src/xcc --entry xcc.aot.cli:main
+```
+
+reported `checked=63`, the full deterministic `xcc.aot.cli` dependency
+closure, and `failures=[]`. The subset closure contains `xcc.aot.py_lexer` and
+`xcc.aot.py_parser` and contains none of the four hosted-only modules.
+
+The hosted Stage 0 command also completed a no-cache subset build from source:
+
+```text
+uv run python -m xcc.aot build --parser=subset --no-cache \
+  --source-root src/xcc --entry xcc.aot.cli:main \
+  --emit-normalized-ir build/aot/parser/subset.ir \
+  --output build/aot/parser/subset-xcc-aot
+```
+
+The result is a 37 KiB arm64 Mach-O CLI contract shell. It reports the native
+contract version/help, links only `libSystem`, and has no unresolved Python
+symbols. `subset.reachability` records the parser source closure and explicitly
+sets `native_call_graph=false`; it is not an emitted compiler call graph, not
+Stage 1, and not evidence for Milestone 5. Exception/status ABI work remains
+Milestone 4, and native source loading plus parser/binder/lowerer/emitter/tool
+reachability remains Milestone 5.
+
+The final fast AOT gate ran 527 tests across 14 modules with no failures.
+`uv run tox -e lint` and `uv run tox -e type` passed. The complete bootstrap
+module ran 84 tests in 1348.607 seconds with exactly the frozen
+B268/V367/V380 conditional-include/union status-2 failure and the V368 expected
+failure; it had no new failure or error, and the V367 focused test passed. No
+CPython `configure && make` work and no non-`src/xcc/aot` compiler-core source
+change was performed.
+
+The implementation is split into `80b76c9` (owned lexer), `3a83009` (owned
+parser), `c08cf82` (hosted oracle, common/backend boundary, and subset CLI), and
+`4b95eb2` (explicit hosted unsupported-form test oracles). The following
+status/spec commit records this evidence; none of these commits includes the
+unrelated OSS application document.
+
 ## Priority Correction
 
 P0 is now strong-bootstrap infrastructure: project-owned AST/parser, explicit

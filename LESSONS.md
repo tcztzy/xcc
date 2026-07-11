@@ -1,5 +1,21 @@
 # Lessons
 
+- A Python lexer oracle must compare token text and end-exclusive UTF-8 byte
+  spans, not only token kinds. Guard an empty EOF sentinel before string
+  membership tests: in Python, `"" in "chars"` is true and can silently accept
+  a trailing continuation or take the wrong numeric branch.
+- Exact AST span parity needs both semantic node spans and nonsemantic grouping
+  extents. Parentheses do not change a child node's own span, but they do change
+  the enclosing expression or statement extent; keep that information outside
+  the immutable semantic AST and prefer the outermost grouping record.
+- A function-local hosted import is still visible to conservative static source
+  closure. Moving `ast.parse` behind a lazy import does not make it unreachable;
+  the common parse boundary itself must use the owned parser, with hosted
+  unsupported-form tests constructing oracle ASTs explicitly.
+- A subset source-closure report is useful Milestone 3 evidence, but it is not a
+  native call graph. Label that boundary in the artifact
+  (`native_call_graph=false`) until the emitted compiler actually reaches source
+  loading, parser, binder, lowerer, emitter, runtime, and tool spawning.
 - A source manifest must describe the exact bytes and owned AST passed to the
   compiler. Hashing one read and then rereading/reparsing the entry leaves a
   race in which the manifest and artifact can describe different snapshots.

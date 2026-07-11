@@ -2,6 +2,28 @@
 
 ## Current
 
+- Completed the approved strong-bootstrap Milestone 3 frontend: the project now
+  has a hand-written Python lexer and recursive-descent/Pratt parser that build
+  immutable owned AST nodes without `ast.parse`, generated tables, cached AST,
+  marker decorators, pragmas, or source directives. The common
+  `module.parse_source` path uses this parser; the CPython adapter is explicit
+  Stage 0 oracle code only.
+- Added exact lexer and parser oracles over all 67 active `src/xcc` files
+  (436,377 CPython tokens). Parser comparison covers semantic fields, 1-based
+  line/0-based UTF-8 byte spans, end-exclusive extents, and ordered child edges.
+  The `parser-oracle` command also verified all 63 native-candidate modules and
+  the `xcc.aot.cli` dependency closure with zero differences.
+- Enabled hosted `build --parser=subset --no-cache`. The acceptance build
+  produced `build/aot/parser/subset-xcc-aot`, a 37 KiB arm64 native CLI shell
+  linked only to `libSystem`, with no Python symbols. Its deterministic
+  `subset.reachability` file includes `py_lexer`/`py_parser` and excludes all
+  hosted parser modules, but explicitly records `native_call_graph=false`:
+  this is not Stage 1 and does not satisfy Milestone 5 reachability.
+- Verified Milestone 3 with 527/527 fast AOT tests, lint/type gates, and the
+  complete 84-test bootstrap module. The latter ran in 1348.607s with exactly
+  the frozen B268/V367/V380 status-2 failure and V368 expected failure, and no
+  new failure/error. No CPython `configure && make` work or non-`src/xcc/aot`
+  compiler-core source change was performed.
 - Completed the approved strong-bootstrap Milestone 2 contract: binder and
   lowerer public APIs now consume an immutable project-owned AST, with CPython
   `ast.parse` confined to an explicit Stage 0 adapter. The adapter covers all

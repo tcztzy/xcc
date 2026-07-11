@@ -133,6 +133,13 @@ decorators are the ordinary Python decorators `dataclass`, `staticmethod`,
 `classmethod`, `property`, and `cache`; `dataclass` may use literal-`True`
 `frozen` and `kw_only` keywords only.
 
+Milestone 3 implements that target with the hand-written `py_lexer.py` and
+`py_parser.py`. The oracle compares semantic fields, UTF-8 spans, and ordered
+child edges against `ast.parse -> cpython_ast_adapter` for every active source.
+The common `module.parse_source` boundary now uses the owned parser; explicit
+hosted CPython parsing remains available only through Stage 0 adapters and the
+`parser-oracle` command.
+
 Supported annotation grammar is names and dotted project types, `|` unions,
 grouping parentheses, width aliases, `Iterable[T]`, `Sequence[T]`,
 `list[T]`, `set[T]`, `frozenset[T]`, `dict[K, V]`, fixed/variadic/empty
@@ -153,7 +160,8 @@ are rejected before the native common path.
 
 Source spans use 1-based lines, 0-based UTF-8 byte columns, and end-exclusive
 end positions, matching CPython AST rather than Unicode code-point columns.
-Hosted `SyntaxError.offset` is normalized to that same convention.
+Owned lexer/parser diagnostics use the same convention, and hosted token/AST
+oracles normalize their character columns before comparison.
 
 ### Milestone 2 Module, Manifest, and Cache Contract
 
@@ -171,8 +179,8 @@ allowed external dependency roots, and deterministic order. It also records
 the parser backend and cache policy. Parser kind and callback travel as one
 `ParserBackend`; a caller cannot independently label a CPython callback as the
 subset backend. The subset backend rejects `xcc.aot.__main__`,
-`xcc.aot.hosted_cli`, and `xcc.aot.cpython_ast_adapter` as explicit Stage 0-only
-modules.
+`xcc.aot.hosted_cli`, `xcc.aot.cpython_ast_adapter`, and
+`xcc.aot.parser_oracle` as explicit Stage 0-only modules.
 
 Milestone 2 has no persistent AST/IR cache: reads and writes are both disabled.
 The manifest records whether `--no-cache` was explicitly requested. A later
@@ -186,12 +194,12 @@ program data containing the same path text.
 
 ### Native Operation Inventory and Ownership
 
-| Layer | Required operations | Milestone 2 state | Native closure |
+| Layer | Required operations | Current state | Native closure |
 |---|---|---|---|
-| CLI contract | argv tuple indexing, string split/prefix/membership, option state, deterministic status/diagnostic | Native contract shell lowers and links; hosted and native validate required/duplicate/unknown options; native rejects CPython parser | Full build dispatch remains M5 |
+| CLI contract | argv tuple indexing, string split/prefix/membership, option state, deterministic status/diagnostic | Native contract shell lowers and links; hosted mode exposes CPython/subset builds plus `parser-oracle`; native rejects CPython parser | Full native build dispatch remains M5 |
 | source loader | canonical path checks, strict byte reads/UTF-8 decode, parent/import closure, SCC order | Contract and hosted implementation complete | Native path/read intrinsics remain M5 |
 | manifest | raw SHA-256 and canonical JSON | Hosted implementation complete and bound to the same source snapshot | Owned hash/JSON writer or native shims remain M5 |
-| frontend | indentation/token/literal scanning and owned-node construction | Owned immutable AST and CPython adapter complete | Lexer/parser remain M3 |
+| frontend | indentation/token/literal scanning and owned-node construction | Owned immutable AST, hand-written lexer/parser, stable rejection diagnostics, and CPython oracle complete | M3 proves hosted subset source closure only; emitted native call-graph closure remains M5 |
 | common compiler | walk/structural render, subset validation, binding, typed lowering, IR text emission | Public binder/lowerer APIs consume only owned AST | Emitted call-graph closure remains M5 |
 | runtime/error | strings/bytes/path, tuples/lists/maps/sets, allocation, status/error propagation | Existing assets only; known semantic gaps remain | Status ABI/runtime work remains M4 |
 | tools | write LLVM/assembly/object, invoke configured `llc`, optional assembler, and linker command, check status | Hosted runner accepts explicit paths | Native spawn/file boundary and audit remain M5/M6 |
