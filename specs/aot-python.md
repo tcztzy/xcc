@@ -125,3 +125,12 @@ B283|2026-07-11|native-candidate admission rejected the owned AST's ordinary `da
 B284|2026-07-11|the secondary native C bootstrap preloaded every module into a flat short-name class table, so `xcc.aot.py_ast.FunctionDef` displaced `xcc.ast.FunctionDef` and lost `is_variadic`|V376,V381,V383
 B285|2026-07-11|the first owned lexer emitted `NEWLINE` end spans after advancing to the next physical line instead of at the end of the newline token|V370,V384
 B286|2026-07-11|the owned lexer treated the empty EOF sentinel as a member of character-class strings, accepting a trailing line-continuation backslash and taking incorrect numeric/string EOF branches|V370,V384
+B287|2026-07-11|the first owned parser routed tuple/set display elements through non-star expression branches, rejecting active `(*items, ...)` and `{item, *items}` displays|V370,V374
+B288|2026-07-11|the owned numeric decoder tested for exponent letters before radix prefixes, so valid hexadecimal integers containing `e`/`E` were sent to decimal float conversion|V370,V374,V384
+B289|2026-07-11|the owned statement dispatcher treated the soft keyword `match` as reserved and rejected an ordinary active assignment to a variable named `match`|V370,V374
+B290|2026-07-11|the owned parser discarded grouping-delimiter extents, so enclosing expressions and statements ended at the inner node instead of the closing parenthesis|V370,V384
+B291|2026-07-11|formatted-string children used each token's span instead of CPython's full adjacent-string expression span|V370,V384
+B292|2026-07-11|a generator expression used as the sole call argument omitted the call parentheses from its span|V370,V384
+B293|2026-07-11|an open-ended slice selected its lower bound as the span end and omitted the consumed colon|V370,V384
+B294|2026-07-11|owned tuple nodes ended at their final element and omitted a trailing comma from the CPython-compatible source span|V370,V384
+B295|2026-07-11|grouping extent lookup selected the oldest record, so nested parentheses propagated the inner opening delimiter to enclosing nodes|V370,V384
