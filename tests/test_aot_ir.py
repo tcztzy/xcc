@@ -44,7 +44,7 @@ from xcc.aot import (
     lower_source_to_ir,
 )
 from xcc.aot.binder import _TypeBinder
-from xcc.aot.cpython_ast_adapter import parse_cpython_expression
+from xcc.aot.cpython_ast_adapter import parse_cpython_expression, parse_cpython_source
 from xcc.aot.lower import (
     _can_narrow_to_record,
     _collect_global_names,
@@ -70,6 +70,10 @@ def _owned_parse(source: str, *, mode: str = "exec") -> ast.Module | ast.Express
     if mode != "exec":
         raise ValueError(f"unsupported test parse mode: {mode}")
     return parse_source(source, filename="<test-module>").tree
+
+
+def _hosted_owned_parse(source: str) -> ast.Module:
+    return parse_cpython_source(source, filename="<test-module>")
 
 
 class AotIrModelTests(unittest.TestCase):
@@ -4756,13 +4760,19 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer.lower_function(unsupported_call, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
 
-        unsupported_dynamic_call = _owned_parse("def f() -> int:\n    return (lambda: 1)()\n").body[0]
+        unsupported_dynamic_call = _hosted_owned_parse(
+            "def f() -> int:\n    return (lambda: 1)()\n"
+        ).body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(unsupported_dynamic_call, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
 
         with self.assertRaises(AotError) as ctx:
-            lowerer._lower_statement(_owned_parse("del value\n").body[0], {}, IrNoneType())
+            lowerer._lower_statement(
+                _hosted_owned_parse("del value\n").body[0],
+                {},
+                IrNoneType(),
+            )
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
 
         with self.assertRaises(AotError) as ctx:
