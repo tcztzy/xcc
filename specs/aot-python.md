@@ -148,3 +148,15 @@ B306|2026-07-11|eight lowerer regressions encoded the temporary handler whitelis
 B307|2026-07-11|the structured-handler implementation inserted `IrTry` after `IrTuple` in two source import blocks, violating deterministic ruff ordering|V379,V384
 B308|2026-07-11|the first handler ancestry helper duplicated and was overwritten by the emitter's existing `_record_extends` method with a different signature|V380,V384
 B309|2026-07-11|the typed-error payload fixture omitted the subset-required `__init__ -> None` annotation and retained the pre-payload `IrRaise` expectation|V374,V380,V384
+B310|2026-07-11|tuple literal lowering passed the container `IrTupleType` as each element's expected type, rejecting integer tuples used by ordinary `for` and negative-index code|V375,V384
+B311|2026-07-11|only empty dict literals had a tuple-backed lowering path, so supported nonempty `dict[K, V]` initialization failed before membership or mutation semantics ran|V375,V384
+B312|2026-07-11|the bytes-size constructor allocated embedded NUL bytes but string-style `len` used `strlen`, reporting every `bytes(n)` value as length zero|V368,V375
+B313|2026-07-11|Path equality compared pointer representations, so separately materialized but equal parent/path values compared unequal|V368,V375
+B314|2026-07-11|tuple equality and nested tuple membership compared allocation pointers instead of recursively comparing CPython-visible element values|V368,V375
+B315|2026-07-11|string `__getitem__` applied a signed negative index directly to the data pointer instead of normalizing it against the string length|V368,V375
+B316|2026-07-11|dict membership reused tuple membership and compared the needle with each key/value pair object rather than with the pair's key|V368,V375
+B317|2026-07-11|the first bytes-header patch matched the string zero-buffer allocator's similar prologue, leaving `%total` undefined there and `%data` undefined in `int.to_bytes`|V368,V384
+B318|2026-07-11|introducing a distinct dict IR type left method dispatch and Parser singleton-scope construction guarded by the obsolete tuple type, rejecting supported `get`/`items`/`setdefault` calls and dropping initial dict scopes|V368,V375,V384
+B319|2026-07-11|the first length-aware bytes object allocated no trailing zero beyond its logical payload, so exporting its data pointer to C string APIs could read past the allocation|V368,V376,V384
+B320|2026-07-11|IR regressions still asserted the obsolete tuple-backed-dict and string-backed-bytes type identities after those values gained distinct semantic types|V384
+B321|2026-07-11|the distinct bytes expression variant was imported but omitted from bootstrap slice call-target exhaustiveness, while adjacent imports and type predicates missed lint normalization|V376,V379,V384

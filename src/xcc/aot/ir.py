@@ -14,6 +14,11 @@ class IrStringType:
 
 
 @dataclass(frozen=True)
+class IrBytesType:
+    pass
+
+
+@dataclass(frozen=True)
 class IrFloatType:
     pass
 
@@ -38,8 +43,22 @@ class IrTupleType:
     elements: tuple["IrType", ...]
 
 
+@dataclass(frozen=True)
+class IrDictType:
+    key: "IrType"
+    value: "IrType"
+
+
 IrType = (
-    IrIntType | IrStringType | IrFloatType | IrRecordType | IrBoolType | IrNoneType | IrTupleType
+    IrIntType
+    | IrStringType
+    | IrBytesType
+    | IrFloatType
+    | IrRecordType
+    | IrBoolType
+    | IrNoneType
+    | IrTupleType
+    | IrDictType
 )
 
 
@@ -83,6 +102,15 @@ class IrConstString:
     @property
     def type(self) -> IrStringType:
         return IrStringType()
+
+
+@dataclass(frozen=True)
+class IrConstBytes:
+    value: bytes
+
+    @property
+    def type(self) -> IrBytesType:
+        return IrBytesType()
 
 
 @dataclass(frozen=True)
@@ -158,7 +186,7 @@ class IrCall:
 @dataclass(frozen=True)
 class IrTuple:
     elements: tuple["IrExpr", ...]
-    type: IrTupleType
+    type: IrTupleType | IrDictType
 
 
 @dataclass(frozen=True)
@@ -194,6 +222,7 @@ class IrStringJoin:
 IrExpr = (
     IrConstInt
     | IrConstString
+    | IrConstBytes
     | IrConstFloat
     | IrConstBool
     | IrConstNone

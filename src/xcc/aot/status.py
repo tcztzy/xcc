@@ -4,6 +4,7 @@ from xcc.aot.ir import (
     IrBreak,
     IrCall,
     IrConstBool,
+    IrConstBytes,
     IrConstFloat,
     IrConstInt,
     IrConstNone,
@@ -148,6 +149,7 @@ def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
     if isinstance(
         expr,
         IrConstInt
+        | IrConstBytes
         | IrConstString
         | IrConstFloat
         | IrConstBool

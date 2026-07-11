@@ -9,14 +9,17 @@ from xcc.aot import (
     IrBinary,
     IrBoolType,
     IrBreak,
+    IrBytesType,
     IrCall,
     IrConstBool,
+    IrConstBytes,
     IrConstFloat,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
     IrConstString,
     IrContinue,
+    IrDictType,
     IrEnumMember,
     IrExceptHandler,
     IrForEach,
@@ -1467,8 +1470,11 @@ class AotScalarLoweringTests(unittest.TestCase):
             [field.name for field in record.fields],
             ["lookup", "names", "frozen_names", "iterable_names", "sequence_names"],
         )
-        self.assertTrue(all(isinstance(field.type, IrTupleType) for field in record.fields))
-        self.assertEqual(record.fields[0].type, IrTupleType((IrStringType(), IrIntType(64, True))))
+        self.assertIsInstance(record.fields[0].type, IrDictType)
+        self.assertTrue(
+            all(isinstance(field.type, IrTupleType) for field in record.fields[1:])
+        )
+        self.assertEqual(record.fields[0].type, IrDictType(IrStringType(), IrIntType(64, True)))
         self.assertEqual(record.fields[1].type, IrTupleType((IrStringType(),)))
 
     def test_lowers_for_target_from_homogeneous_container_annotation(self) -> None:
@@ -1693,7 +1699,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             returned.value,
             IrCall(
                 "__llvm_AppendBasicBlock",
-                (IrName("fn", IrIntType(64, signed=True)), IrConstString("entry")),
+                (IrName("fn", IrIntType(64, signed=True)), IrConstBytes(b"entry")),
                 IrIntType(64, signed=True),
             ),
         )
@@ -2410,7 +2416,7 @@ class AotScalarLoweringTests(unittest.TestCase):
                     IrGetField(
                         IrName("cache", IrRecordType("Cache")),
                         "values",
-                        IrTupleType((IrStringType(), IrIntType(64, signed=True))),
+                        IrDictType(IrStringType(), IrIntType(64, signed=True)),
                     ),
                     IrName("key", IrStringType()),
                 ),
@@ -2435,7 +2441,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrCall(
                 "__dict_get",
                 (
-                    IrName("VALUES", IrTupleType((IrStringType(), int64))),
+                    IrName("VALUES", IrDictType(IrStringType(), int64)),
                     IrName("name", IrStringType()),
                 ),
                 int64,
@@ -2452,7 +2458,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             include_functions={"lookup"},
         )
         int64 = IrIntType(64, signed=True)
-        dict_type = IrTupleType((IrStringType(), int64))
+        dict_type = IrDictType(IrStringType(), int64)
         returned = module.functions[0].body[0]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
@@ -2496,7 +2502,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrCall(
                 "__dict_get",
                 (
-                    IrName("VALUES", IrTupleType((IrStringType(), int64))),
+                    IrName("VALUES", IrDictType(IrStringType(), int64)),
                     IrName("name", IrStringType()),
                 ),
                 int64,
@@ -2783,7 +2789,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             "    return dict(values)\n",
             filename="dict_constructor.py",
         )
-        dict_type = IrTupleType((IrStringType(), IrIntType(64, signed=True)))
+        dict_type = IrDictType(IrStringType(), IrIntType(64, signed=True))
         returned = module.functions[0].body[0]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
@@ -2809,7 +2815,7 @@ class AotScalarLoweringTests(unittest.TestCase):
                 IrCall(
                     "__dict_get",
                     (
-                        IrName("sigs", IrTupleType((IrStringType(), signature_type))),
+                        IrName("sigs", IrDictType(IrStringType(), signature_type)),
                         IrName("name", IrStringType()),
                     ),
                     signature_type,
@@ -2834,7 +2840,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrCall(
                 "__dict_get",
                 (
-                    IrName("values", IrTupleType((IrStringType(), value_type))),
+                    IrName("values", IrDictType(IrStringType(), value_type)),
                     IrName("name", IrStringType()),
                 ),
                 value_type,
@@ -2961,7 +2967,7 @@ class AotScalarLoweringTests(unittest.TestCase):
                             IrRecordType("FunctionSymbol"),
                         ),
                         "locals",
-                        IrTupleType((IrStringType(), IrIntType(64, signed=True))),
+                        IrDictType(IrStringType(), IrIntType(64, signed=True)),
                     ),
                 ),
                 IrIntType(64, signed=True),
@@ -3483,7 +3489,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(assigned, IrAssign)
         self.assertEqual(
             assigned.value,
-            IrTuple((), IrTupleType((IrStringType(), IrIntType(64, signed=True)))),
+            IrTuple((), IrDictType(IrStringType(), IrIntType(64, signed=True))),
         )
 
     def test_lowers_subscript_assignment_statement(self) -> None:
@@ -3501,7 +3507,7 @@ class AotScalarLoweringTests(unittest.TestCase):
 
     def test_lowers_nested_dict_subscript_assignment_as_stack_replacement(self) -> None:
         int64 = IrIntType(64, signed=True)
-        dict_type = IrTupleType((IrStringType(), int64))
+        dict_type = IrDictType(IrStringType(), int64)
         stack_type = IrTupleType((dict_type,))
         module = lower_source_to_ir(
             "def store(stack: list[dict[str, int]], name: str, item: int) -> None:\n"
@@ -4013,11 +4019,11 @@ class AotScalarLoweringTests(unittest.TestCase):
                     IrBinary(
                         "-",
                         IrName("size", int64),
-                        IrCall("len", (IrName("data", IrStringType()),), int64),
+                        IrCall("len", (IrName("data", IrBytesType()),), int64),
                         int64,
                     ),
                 ),
-                IrStringType(),
+                IrBytesType(),
             ),
         )
 
@@ -4893,7 +4899,10 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertEqual(
             lowerer._aot_type_to_ir_type(AotType("dict[str, TypeOp]")),
-            IrTupleType((IrStringType(), IrTupleType((IrStringType(), IrRecordType("object"))))),
+            IrDictType(
+                IrStringType(),
+                IrTupleType((IrStringType(), IrRecordType("object"))),
+            ),
         )
         self.assertIsNone(lowerer._optional_record_inner(IrIntType(64, signed=True)))
         self.assertEqual(lowerer._aot_type_to_ir_type(AotType("NoReturn")), IrNoneType())
@@ -5253,7 +5262,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         assigned = module.functions[0].body[0]
         self.assertEqual(assigned, IrAssign("boxed", IrName("value", IrRecordType("Box"))))
 
-    def test_lowers_bytes_annotations_as_string_type(self) -> None:
+    def test_lowers_bytes_annotations_as_bytes_type(self) -> None:
         module = lower_source_to_ir(
             "def echo(value: bytes) -> bytes:\n"
             "    return value\n",
@@ -5261,8 +5270,8 @@ class AotScalarLoweringTests(unittest.TestCase):
             entry="echo",
         )
         function = module.functions[0]
-        self.assertEqual(function.params[0].type, IrStringType())
-        self.assertEqual(function.return_type, IrStringType())
+        self.assertEqual(function.params[0].type, IrBytesType())
+        self.assertEqual(function.return_type, IrBytesType())
 
     def test_lowers_bytes_builtin_constructor(self) -> None:
         module = lower_source_to_ir(
@@ -5276,7 +5285,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrCall(
                 "__bytes",
                 (IrName("size", IrIntType(64, signed=True)),),
-                IrStringType(),
+                IrBytesType(),
             ),
         )
 
@@ -5314,7 +5323,7 @@ class AotScalarLoweringTests(unittest.TestCase):
                     IrName("size", int64),
                     IrConstString("little"),
                 ),
-                IrStringType(),
+                IrBytesType(),
             ),
         )
 

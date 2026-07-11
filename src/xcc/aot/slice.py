@@ -12,12 +12,14 @@ from xcc.aot.ir import (
     IrBreak,
     IrCall,
     IrConstBool,
+    IrConstBytes,
     IrConstFloat,
     IrConstInt,
     IrConstNone,
     IrConstructRecord,
     IrConstString,
     IrContinue,
+    IrDictType,
     IrEnumMember,
     IrExceptHandler,
     IrExpr,
@@ -1048,6 +1050,7 @@ def _rename_expr_call(expr: IrExpr, rename_map: dict[str, str]) -> IrExpr:
     if isinstance(
         expr,
         IrConstInt
+        | IrConstBytes
         | IrConstString
         | IrConstFloat
         | IrConstBool
@@ -1176,6 +1179,7 @@ def _expr_record_names(expr: IrExpr) -> tuple[str, ...]:
     if isinstance(
         expr,
         IrConstInt
+        | IrConstBytes
         | IrConstString
         | IrConstFloat
         | IrConstBool
@@ -1221,7 +1225,9 @@ def _expr_tuple_record_names(expressions: tuple[IrExpr, ...]) -> tuple[str, ...]
     return tuple(sorted(names))
 
 
-def _type_record_names(type_info: IrRecordType | IrTupleType | object) -> tuple[str, ...]:
+def _type_record_names(
+    type_info: IrDictType | IrRecordType | IrTupleType | object,
+) -> tuple[str, ...]:
     if isinstance(type_info, IrRecordType):
         if type_info.name in _INTERNAL_RECORD_TYPES:
             return ()
@@ -1230,6 +1236,10 @@ def _type_record_names(type_info: IrRecordType | IrTupleType | object) -> tuple[
         names: set[str] = set()
         for element in type_info.elements:
             names.update(_type_record_names(element))
+        return tuple(sorted(names))
+    if isinstance(type_info, IrDictType):
+        names = set(_type_record_names(type_info.key))
+        names.update(_type_record_names(type_info.value))
         return tuple(sorted(names))
     return ()
 
@@ -1299,6 +1309,7 @@ def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
         expr,
         IrConstInt
         | IrConstString
+        | IrConstBytes
         | IrConstFloat
         | IrConstBool
         | IrConstNone

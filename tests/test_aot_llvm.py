@@ -8,6 +8,7 @@ from xcc.aot import (
     IrBoolType,
     IrBreak,
     IrBranch,
+    IrBytesType,
     IrCall,
     IrConstBool,
     IrConstFloat,
@@ -16,6 +17,7 @@ from xcc.aot import (
     IrConstructRecord,
     IrConstString,
     IrContinue,
+    IrDictType,
     IrEnumMember,
     IrField,
     IrForEach,
@@ -3018,7 +3020,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
     def test_emits_bytes_id_and_int_to_bytes_intrinsic_calls(self) -> None:
         int64 = IrIntType(64, signed=True)
-        string_type = IrStringType()
+        bytes_type = IrBytesType()
         module = IrModule(
             "bytes_helpers.py",
             (),
@@ -3026,8 +3028,8 @@ class AotLlvmTextTests(unittest.TestCase):
                 IrFunction(
                     "zeroed",
                     (),
-                    string_type,
-                    (IrReturn(IrCall("__bytes", (IrConstInt(3, int64),), string_type)),),
+                    bytes_type,
+                    (IrReturn(IrCall("__bytes", (IrConstInt(3, int64),), bytes_type)),),
                 ),
                 IrFunction(
                     "key",
@@ -3038,13 +3040,13 @@ class AotLlvmTextTests(unittest.TestCase):
                 IrFunction(
                     "encode",
                     (),
-                    string_type,
+                    bytes_type,
                     (
                         IrReturn(
                             IrCall(
                                 "__int_to_bytes",
                                 (IrConstInt(65, int64), IrConstInt(1, int64), IrConstString("little")),
-                                string_type,
+                                bytes_type,
                             )
                         ),
                     ),
@@ -3052,9 +3054,11 @@ class AotLlvmTextTests(unittest.TestCase):
             ),
         )
         llvm_ir = emit_llvm_text(module)
-        self.assertIn("define ptr @__xcc_aot_zero_bytes", llvm_ir)
+        self.assertIn("define ptr @__xcc_aot_bytes_new", llvm_ir)
         self.assertIn("define ptr @__xcc_aot_int_to_bytes", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_zero_bytes(i64 3)", llvm_ir)
+        self.assertIn("%payload_size = add i64 %count, 1", llvm_ir)
+        self.assertIn("call ptr @memset(ptr %data, i32 0, i64 %payload_size)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_bytes_new(i64 3)", llvm_ir)
         self.assertIn("ptrtoint ptr %value to i64", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_int_to_bytes(i64 65, i64 1, ptr @.str0)", llvm_ir)
 
@@ -3299,7 +3303,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
     def test_emits_dict_get_as_tuple_pair_scan(self) -> None:
         int64 = IrIntType(64, signed=True)
-        dict_type = IrTupleType((IrStringType(), int64))
+        dict_type = IrDictType(IrStringType(), int64)
         module = IrModule(
             "dict_get.py",
             (),
@@ -3330,7 +3334,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
     def test_emits_dict_items_as_tuple_identity(self) -> None:
         int64 = IrIntType(64, signed=True)
-        dict_type = IrTupleType((IrStringType(), int64))
+        dict_type = IrDictType(IrStringType(), int64)
         items_type = IrTupleType((IrTupleType((IrStringType(), int64)),))
         module = IrModule(
             "dict_items.py",
