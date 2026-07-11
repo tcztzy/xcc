@@ -1,4 +1,3 @@
-import ast
 import os
 import subprocess
 import unittest
@@ -49,6 +48,7 @@ from xcc.aot import (
     emit_llvm_text,
     lower_core_slice,
     lower_source_to_ir,
+    parse_source,
     run_native_core_smoke,
 )
 from xcc.aot.core_runtime import runtime_prelude
@@ -329,11 +329,13 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertIn("@__xcc_aot_fmt_token", prelude)
 
     def test_annotation_name_edge_forms(self) -> None:
-        string_annotation = ast.parse('def f() -> "Type | None":\n    pass\n').body[0].returns
-        tuple_expr = ast.parse("value = (int, str)\n").body[0].value
+        string_annotation = parse_source(
+            'def f() -> "Type | None":\n    pass\n'
+        ).tree.body[0].returns
+        tuple_expr = parse_source("value = (int, str)\n").tree.body[0].value
         attribute_annotation = (
-            ast.parse("def f(value: module.Type) -> int:\n    pass\n")
-            .body[0]
+            parse_source("def f(value: module.Type) -> int:\n    pass\n")
+            .tree.body[0]
             .args.args[0]
             .annotation
         )

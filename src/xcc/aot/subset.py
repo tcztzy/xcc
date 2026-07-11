@@ -1,6 +1,6 @@
-import ast
 from dataclasses import dataclass
 
+from xcc.aot import py_ast as ast
 from xcc.aot.diag import AotDiagnostic, AotError, node_location
 from xcc.aot.module import AotModule
 
@@ -27,6 +27,7 @@ _UNSUPPORTED_NODES = (
     ast.Lambda,
     ast.Match,
     ast.Nonlocal,
+    ast.UnsupportedNode,
     ast.Yield,
     ast.YieldFrom,
 )
@@ -52,7 +53,7 @@ def check_subset(module: AotModule) -> AotModuleSummary:
     )
 
 
-class _SubsetChecker(ast.NodeVisitor):
+class _SubsetChecker:
     def __init__(self, filename: str) -> None:
         self.filename = filename
         self.imports: list[str] = []
@@ -63,6 +64,26 @@ class _SubsetChecker(ast.NodeVisitor):
     def raise_if_errors(self) -> None:
         if self._diagnostics:
             raise AotError(tuple(self._diagnostics))
+
+    def visit(self, node: ast.AST) -> None:
+        if isinstance(node, _UNSUPPORTED_NODES):
+            self._add_error(
+                "XCC-AOT-SUBSET-0001",
+                f"Unsupported Python syntax: {type(node).__name__}",
+                node,
+            )
+        elif isinstance(node, ast.Import):
+            self.visit_Import(node)
+        elif isinstance(node, ast.ImportFrom):
+            self.visit_ImportFrom(node)
+        elif isinstance(node, ast.ClassDef):
+            self.visit_ClassDef(node)
+        elif isinstance(node, ast.FunctionDef):
+            self.visit_FunctionDef(node)
+        elif isinstance(node, ast.Call):
+            self.visit_Call(node)
+        else:
+            self.generic_visit(node)
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -99,21 +120,15 @@ class _SubsetChecker(ast.NodeVisitor):
         self.generic_visit(node)
 
     def generic_visit(self, node: ast.AST) -> None:
-        if isinstance(node, _UNSUPPORTED_NODES):
-            self._add_error(
-                "XCC-AOT-SUBSET-0001",
-                f"Unsupported Python syntax: {type(node).__name__}",
-                node,
-            )
-            return
-        super().generic_visit(node)
+        for child in node.children:
+            self.visit(child)
 
     def _record_import(self, module: str) -> None:
         root = module.split(".", 1)[0]
         if root not in self.imports:
             self.imports.append(root)
 
-    def _check_decorators(self, decorators: list[ast.expr]) -> None:
+    def _check_decorators(self, decorators: tuple[ast.expr, ...]) -> None:
         for decorator in decorators:
             if _is_allowed_decorator(decorator):
                 continue
@@ -149,7 +164,7 @@ def _is_allowed_decorator(decorator: ast.expr) -> bool:
         if decorator.func.id != "dataclass":
             return False
         for keyword in decorator.keywords:
-            if keyword.arg != "frozen":
+            if keyword.arg not in {"frozen", "kw_only"}:
                 return False
             if not isinstance(keyword.value, ast.Constant):
                 return False

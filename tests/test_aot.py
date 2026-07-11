@@ -1,4 +1,3 @@
-import ast
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +13,7 @@ from xcc.aot import (
     parse_source,
 )
 from xcc.aot.diag import node_location
+from xcc.aot.py_ast import Pass
 from xcc.aot.binder import (
     _is_supported_annotation_node,
     _is_supported_composite_annotation,
@@ -62,9 +62,9 @@ class AotDiagnosticTests(unittest.TestCase):
         self.assertEqual(str(ctx.exception), "AotError requires at least one diagnostic")
 
     def test_node_location_handles_positioned_and_synthetic_nodes(self) -> None:
-        function = ast.parse("def f() -> int:\n    return 1\n").body[0]
+        function = parse_source("def f() -> int:\n    return 1\n").tree.body[0]
         self.assertEqual(node_location(function), (1, 0))
-        self.assertEqual(node_location(ast.Pass()), (None, None))
+        self.assertEqual(node_location(Pass()), (None, None))
 
 
 class AotModuleParseTests(unittest.TestCase):
@@ -80,9 +80,15 @@ class AotModuleParseTests(unittest.TestCase):
         diagnostic = ctx.exception.diagnostics[0]
         self.assertEqual(diagnostic.code, "XCC-AOT-PARSE-0001")
         self.assertEqual(diagnostic.filename, "bad.py")
-        self.assertEqual(diagnostic.line, 1)
-        self.assertIsNotNone(diagnostic.column)
+        self.assertEqual((diagnostic.line, diagnostic.column), (1, 8))
         self.assertIn("invalid syntax", diagnostic.message)
+
+    def test_parse_syntax_error_column_uses_zero_based_utf8_bytes(self) -> None:
+        with self.assertRaises(AotError) as ctx:
+            parse_source("π = )\n", filename="unicode-bad.py")
+
+        diagnostic = ctx.exception.diagnostics[0]
+        self.assertEqual((diagnostic.line, diagnostic.column), (1, 5))
 
 
 class AotSubsetCheckerTests(unittest.TestCase):
@@ -148,6 +154,18 @@ class AotSubsetCheckerTests(unittest.TestCase):
         summary = check_subset(parse_source(source, filename="bare_dataclass.py"))
         self.assertEqual(summary.classes, ("Box",))
         self.assertEqual(summary.functions, ("f",))
+
+    def test_accepts_frozen_keyword_only_dataclass(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True, kw_only=True)\n"
+            "class Node:\n"
+            "    value: int\n"
+        )
+
+        summary = check_subset(parse_source(source, filename="kw_only.py"))
+
+        self.assertEqual(summary.classes, ("Node",))
 
     def test_rejects_decorator_call_that_is_not_dataclass(self) -> None:
         source = (
@@ -365,6 +383,10 @@ class AotTypeBinderTests(unittest.TestCase):
         self.assertTrue(_is_supported_composite_annotation("'Type | None'"))
         self.assertTrue(_is_supported_composite_annotation("tuple[str, ...]"))
         self.assertTrue(_is_supported_composite_annotation("Callable[..., bool]"))
+        self.assertTrue(_is_supported_composite_annotation("(int | str)"))
+        self.assertTrue(_is_supported_composite_annotation("tuple[()]"))
+        self.assertTrue(_is_supported_composite_annotation(r'Literal["a\\\"b"]'))
+        self.assertFalse(_is_supported_composite_annotation("Literal[-1]"))
         self.assertFalse(_is_supported_composite_annotation("["))
         self.assertFalse(_is_supported_composite_annotation("list[str, int]"))
         self.assertFalse(_is_supported_composite_annotation("dict[str]"))
@@ -373,9 +395,9 @@ class AotTypeBinderTests(unittest.TestCase):
         self.assertFalse(_is_supported_composite_annotation("Callable[str, bool]"))
         self.assertFalse(_is_supported_composite_annotation("type[str]"))
 
-        ellipsis_constant = ast.parse("value = ...\n").body[0].value
-        unsupported_constant = ast.parse("value = 1\n").body[0].value
-        unsupported_expr = ast.parse("value = 1 + 2\n").body[0].value
+        ellipsis_constant = parse_source("value = ...\n").tree.body[0].value
+        unsupported_constant = parse_source("value = 1\n").tree.body[0].value
+        unsupported_expr = parse_source("value = 1 + 2\n").tree.body[0].value
         self.assertTrue(_is_supported_annotation_node(ellipsis_constant))
         self.assertFalse(_is_supported_annotation_node(unsupported_constant))
         self.assertFalse(_is_supported_annotation_node(unsupported_expr))

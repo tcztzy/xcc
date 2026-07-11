@@ -1,4 +1,4 @@
-from xcc.aot.analysis import AotAnalysis, analyze_path, analyze_source
+from xcc.aot.analysis import AotAnalysis, analyze_module, analyze_path, analyze_source
 from xcc.aot.binder import bind_types
 from xcc.aot.bootstrap import (
     AotBootstrapAdmissionReport,
@@ -56,7 +56,7 @@ from xcc.aot.ir import (
     IrWhile,
 )
 from xcc.aot.llvm_text import emit_llvm_text
-from xcc.aot.lower import lower_source_to_ir
+from xcc.aot.lower import lower_analysis_to_ir, lower_source_to_ir
 from xcc.aot.module import AotModule, parse_path, parse_source
 from xcc.aot.native import (
     NativeSmokeResult,
@@ -132,6 +132,7 @@ __all__ = (
     "IrWhile",
     "NativeSmokeResult",
     "analyze_path",
+    "analyze_module",
     "analyze_source",
     "bind_types",
     "check_subset",
@@ -144,6 +145,7 @@ __all__ = (
     "core_slice_entry_module",
     "emit_llvm_text",
     "lower_core_slice",
+    "lower_analysis_to_ir",
     "lower_bootstrap_entry_smoke",
     "lower_source_to_ir",
     "parse_path",

@@ -1,7 +1,8 @@
-import ast
+from collections.abc import Sequence
 from typing import Literal, NoReturn
 
-from xcc.aot.analysis import analyze_source
+from xcc.aot import py_ast as ast
+from xcc.aot.analysis import AotAnalysis, analyze_source
 from xcc.aot.diag import AotDiagnostic, AotError, node_location
 from xcc.aot.ir import (
     IrAssign,
@@ -30,6 +31,7 @@ from xcc.aot.ir import (
     IrName,
     IrNoneType,
     IrParam,
+    IrPrint,
     IrRaise,
     IrRecord,
     IrRecordType,
@@ -207,6 +209,36 @@ def lower_source_to_ir(
     extra_global_string_container_constants: dict[str, IrTuple] | None = None,
 ) -> IrModule:
     analysis = analyze_source(source, filename=filename)
+    return lower_analysis_to_ir(
+        analysis,
+        entry=entry,
+        include_records=include_records,
+        include_functions=include_functions,
+        bodyless_functions=bodyless_functions,
+        extra_classes=extra_classes,
+        extra_functions=extra_functions,
+        extra_aliases=extra_aliases,
+        extra_global_annotations=extra_global_annotations,
+        extra_global_string_constants=extra_global_string_constants,
+        extra_global_string_container_constants=extra_global_string_container_constants,
+    )
+
+
+def lower_analysis_to_ir(
+    analysis: AotAnalysis,
+    *,
+    entry: str | None = None,
+    include_records: set[str] | frozenset[str] | None = None,
+    include_functions: set[str] | frozenset[str] | None = None,
+    bodyless_functions: set[str] | frozenset[str] | None = None,
+    extra_classes: dict[str, AotClassInfo] | None = None,
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
+    extra_aliases: dict[str, AotType] | None = None,
+    extra_global_annotations: dict[str, str] | None = None,
+    extra_global_string_constants: dict[str, str] | None = None,
+    extra_global_string_container_constants: dict[str, IrTuple] | None = None,
+) -> IrModule:
+    filename = analysis.module.filename
     class_types = dict(extra_classes or {})
     class_types.update(analysis.types.classes)
     function_types = dict(extra_functions or {})
@@ -547,6 +579,14 @@ class _Lowerer:
         if isinstance(statement, ast.Pass):
             return IrAssign("__pass", IrConstNone())
         if isinstance(statement, ast.Expr):
+            if (
+                isinstance(statement.value, ast.Call)
+                and isinstance(statement.value.func, ast.Name)
+                and statement.value.func.id == "print"
+                and len(statement.value.args) == 1
+                and not statement.value.keywords
+            ):
+                return IrPrint(self._lower_expr(statement.value.args[0], names, IrStringType()))
             mutating_tuple_statement = self._lower_mutating_tuple_expr_statement(
                 statement.value,
                 names,
@@ -1721,7 +1761,7 @@ class _Lowerer:
 
     def _lower_starred_container_literal(
         self,
-        elements: list[ast.expr],
+        elements: Sequence[ast.expr],
         names: dict[str, IrType],
         expected: IrType,
     ) -> IrExpr:
@@ -3095,8 +3135,8 @@ class _Lowerer:
     def _none_guard_narrowing(
         self,
         test: ast.expr,
-        body: list[ast.stmt],
-        orelse: list[ast.stmt],
+        body: Sequence[ast.stmt],
+        orelse: Sequence[ast.stmt],
         names: dict[str, IrType],
     ) -> tuple[str, IrType] | None:
         narrowings = self._none_guard_narrowings(test, body, orelse, names)
@@ -3105,8 +3145,8 @@ class _Lowerer:
     def _none_guard_narrowings(
         self,
         test: ast.expr,
-        body: list[ast.stmt],
-        orelse: list[ast.stmt],
+        body: Sequence[ast.stmt],
+        orelse: Sequence[ast.stmt],
         names: dict[str, IrType],
     ) -> tuple[tuple[str, IrType], ...]:
         if orelse or not _statements_exit(body):
@@ -3121,8 +3161,8 @@ class _Lowerer:
     def _negative_isinstance_guard_narrowing(
         self,
         test: ast.expr,
-        body: list[ast.stmt],
-        orelse: list[ast.stmt],
+        body: Sequence[ast.stmt],
+        orelse: Sequence[ast.stmt],
         names: dict[str, IrType],
     ) -> tuple[str, IrType] | None:
         narrowings = self._negative_isinstance_guard_narrowings(test, body, orelse, names)
@@ -3131,8 +3171,8 @@ class _Lowerer:
     def _negative_isinstance_guard_narrowings(
         self,
         test: ast.expr,
-        body: list[ast.stmt],
-        orelse: list[ast.stmt],
+        body: Sequence[ast.stmt],
+        orelse: Sequence[ast.stmt],
         names: dict[str, IrType],
     ) -> tuple[tuple[str, IrType], ...]:
         if orelse or not _statements_exit(body):
@@ -3847,11 +3887,11 @@ def _is_none_constant(expr: ast.expr) -> bool:
     return isinstance(expr, ast.Constant) and expr.value is None
 
 
-def _statements_exit(statements: list[ast.stmt]) -> bool:
+def _statements_exit(statements: Sequence[ast.stmt]) -> bool:
     return bool(statements) and isinstance(statements[-1], (ast.Return, ast.Raise))
 
 
-def _statements_fall_through(statements: list[ast.stmt]) -> bool:
+def _statements_fall_through(statements: Sequence[ast.stmt]) -> bool:
     if not statements:
         return True
     last = statements[-1]
@@ -4092,7 +4132,7 @@ def _is_normal_path_exception_handler(handler: ast.ExceptHandler) -> bool:
     return False
 
 
-def _is_ellipsis_body(statements: list[ast.stmt]) -> bool:
+def _is_ellipsis_body(statements: Sequence[ast.stmt]) -> bool:
     return (
         len(statements) == 1
         and isinstance(statements[0], ast.Expr)

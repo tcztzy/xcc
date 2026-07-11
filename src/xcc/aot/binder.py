@@ -1,5 +1,6 @@
-import ast
+from collections.abc import Sequence
 
+from xcc.aot import py_ast as ast
 from xcc.aot.diag import AotDiagnostic, AotError, node_location
 from xcc.aot.module import AotModule
 from xcc.aot.subset import AotModuleSummary
@@ -12,6 +13,23 @@ from xcc.aot.types import (
     is_builtin_type_name,
     width_alias_type,
 )
+
+_OWNED_AST_TYPE_NAMES = {
+    "alias",
+    "arg",
+    "arguments",
+    "boolop",
+    "cmpop",
+    "comprehension",
+    "excepthandler",
+    "expr",
+    "expr_context",
+    "keyword",
+    "operator",
+    "stmt",
+    "unaryop",
+    "withitem",
+}
 
 
 def bind_types(summary: AotModuleSummary, module: AotModule) -> AotTypeAnalysis:
@@ -317,7 +335,7 @@ def _is_annotation_alias_value(node: ast.expr) -> bool:
 
 
 def _init_self_assignments(
-    statements: list[ast.stmt],
+    statements: Sequence[ast.stmt],
 ) -> tuple[tuple[ast.Attribute, ast.expr | None, ast.expr | None], ...]:
     assignments: list[tuple[ast.Attribute, ast.expr | None, ast.expr | None]] = []
     for statement in statements:
@@ -345,11 +363,174 @@ def _is_self_attribute(expr: ast.Attribute) -> bool:
 
 
 def _is_supported_composite_annotation(name: str) -> bool:
-    try:
-        node = ast.parse(name, mode="eval").body
-    except SyntaxError:
-        return _is_project_type_reference(name)
-    return _is_supported_annotation_node(node)
+    return _is_supported_annotation_text(name.strip())
+
+
+def _is_supported_annotation_text(text: str) -> bool:
+    text = text.strip()
+    while _annotation_parentheses_wrap(text):
+        text = text[1:-1].strip()
+    if not text:
+        return False
+    if text[:1] in {'"', "'"}:
+        if len(text) < 2 or text[-1] != text[0]:
+            return False
+        return _is_supported_annotation_text(text[1:-1].strip())
+    union_parts = _split_annotation_parts(text, "|")
+    if len(union_parts) > 1:
+        return all(_is_supported_annotation_text(part) for part in union_parts)
+    bracket = text.find("[")
+    if bracket < 0:
+        if text == "...":
+            return True
+        return (
+            is_builtin_type_name(text)
+            or width_alias_type(text) is not None
+            or text in _OWNED_AST_TYPE_NAMES
+            or _is_project_type_reference(text)
+            or _is_dotted_annotation_name(text)
+        )
+    if not text.endswith("]") or not _balanced_annotation_text(text):
+        return False
+    base = text[:bracket].strip()
+    body = text[bracket + 1 : -1].strip()
+    elements = _split_annotation_parts(body, ",")
+    if base == "Literal":
+        return bool(elements) and all(_is_string_literal_text(item) for item in elements)
+    if base in {"Iterable", "Sequence", "list", "set", "frozenset"}:
+        return len(elements) == 1 and _is_supported_annotation_text(elements[0])
+    if base == "dict":
+        return len(elements) == 2 and all(_is_supported_annotation_text(item) for item in elements)
+    if base == "tuple":
+        if body == "()":
+            return True
+        return bool(elements) and all(
+            item == "..." or _is_supported_annotation_text(item) for item in elements
+        )
+    if base != "Callable" or len(elements) != 2:
+        return False
+    args, return_type = elements
+    if args == "...":
+        return _is_supported_annotation_text(return_type)
+    if not args.startswith("[") or not args.endswith("]"):
+        return False
+    arg_body = args[1:-1].strip()
+    arg_types = () if not arg_body else _split_annotation_parts(arg_body, ",")
+    return all(_is_supported_annotation_text(arg) for arg in arg_types) and (
+        _is_supported_annotation_text(return_type)
+    )
+
+
+def _split_annotation_parts(text: str, separator: str) -> tuple[str, ...]:
+    parts: list[str] = []
+    start = 0
+    bracket_depth = 0
+    parenthesis_depth = 0
+    quote = ""
+    escaped = False
+    for index, ch in enumerate(text):
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = ""
+            continue
+        if ch in {'"', "'"}:
+            quote = ch
+        elif ch == "[":
+            bracket_depth += 1
+        elif ch == "]":
+            bracket_depth -= 1
+        elif ch == "(":
+            parenthesis_depth += 1
+        elif ch == ")":
+            parenthesis_depth -= 1
+        elif ch == separator and bracket_depth == 0 and parenthesis_depth == 0:
+            parts.append(text[start:index].strip())
+            start = index + 1
+    parts.append(text[start:].strip())
+    return tuple(parts)
+
+
+def _balanced_annotation_text(text: str) -> bool:
+    bracket_depth = 0
+    parenthesis_depth = 0
+    quote = ""
+    escaped = False
+    for ch in text:
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = ""
+            continue
+        if ch in {'"', "'"}:
+            quote = ch
+        elif ch == "[":
+            bracket_depth += 1
+        elif ch == "]":
+            bracket_depth -= 1
+            if bracket_depth < 0:
+                return False
+        elif ch == "(":
+            parenthesis_depth += 1
+        elif ch == ")":
+            parenthesis_depth -= 1
+            if parenthesis_depth < 0:
+                return False
+    return bracket_depth == 0 and parenthesis_depth == 0 and not quote
+
+
+def _annotation_parentheses_wrap(text: str) -> bool:
+    if len(text) < 2 or text[0] != "(" or text[-1] != ")":
+        return False
+    depth = 0
+    quote = ""
+    escaped = False
+    for index, ch in enumerate(text):
+        if quote:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = ""
+            continue
+        if ch in {'"', "'"}:
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0 and index != len(text) - 1:
+                return False
+            if depth < 0:
+                return False
+    return depth == 0 and not quote
+
+
+def _is_dotted_annotation_name(text: str) -> bool:
+    parts = text.split(".")
+    return len(parts) > 1 and all(part.isidentifier() for part in parts)
+
+
+def _is_string_literal_text(text: str) -> bool:
+    if len(text) < 2 or text[0] not in {'"', "'"} or text[-1] != text[0]:
+        return False
+    quote = text[0]
+    escaped = False
+    for index, ch in enumerate(text[1:], start=1):
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == quote:
+            return index == len(text) - 1
+    return False
 
 
 def _is_supported_annotation_node(node: ast.expr) -> bool:
@@ -380,7 +561,10 @@ def _is_supported_subscript_annotation(node: ast.Subscript) -> bool:
     base = ast.unparse(node.value)
     elements = _annotation_slice_elements(node.slice)
     if base == "Literal":
-        return all(isinstance(element, ast.Constant) for element in elements)
+        return bool(elements) and all(
+            isinstance(element, ast.Constant) and isinstance(element.value, str)
+            for element in elements
+        )
     if base in {"Iterable", "Sequence", "list", "set", "frozenset"}:
         return len(elements) == 1 and _is_supported_annotation_node(elements[0])
     if base == "dict":

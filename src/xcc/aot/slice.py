@@ -1,8 +1,8 @@
-import ast
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
+from xcc.aot import py_ast as ast
 from xcc.aot.analysis import analyze_source
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.ir import (
@@ -48,6 +48,7 @@ from xcc.aot.lower import (
     _collect_global_string_container_constants,
     lower_source_to_ir,
 )
+from xcc.aot.module import parse_source
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
 
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
@@ -572,7 +573,7 @@ def _slice_global_annotations(
 ) -> dict[str, str]:
     annotations: dict[str, str] = {}
     for module_input in module_inputs:
-        tree = ast.parse(source_cache[module_input.name])
+        tree = parse_source(source_cache[module_input.name], filename=str(module_input.path)).tree
         for statement in tree.body:
             if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
                 annotations.setdefault(statement.target.id, ast.unparse(statement.annotation))
@@ -585,7 +586,7 @@ def _slice_global_string_constants(
 ) -> dict[str, str]:
     constants: dict[str, str] = {}
     for module_input in module_inputs:
-        tree = ast.parse(source_cache[module_input.name])
+        tree = parse_source(source_cache[module_input.name], filename=str(module_input.path)).tree
         for name, value in _collect_global_string_constants(tree).items():
             constants.setdefault(name, value)
     return constants
@@ -597,7 +598,7 @@ def _slice_global_string_container_constants(
 ) -> dict[str, IrTuple]:
     constants: dict[str, IrTuple] = {}
     for module_input in module_inputs:
-        tree = ast.parse(source_cache[module_input.name])
+        tree = parse_source(source_cache[module_input.name], filename=str(module_input.path)).tree
         for name, value in _collect_global_string_container_constants(tree).items():
             constants.setdefault(name, value)
     return constants
@@ -642,7 +643,7 @@ def _module_rename_map(
     source: str,
     module_names: frozenset[str] | set[str] | None = None,
 ) -> dict[str, str]:
-    tree = ast.parse(source)
+    tree = parse_source(source, filename=module_name).tree
     rename_map = {name: f"{module_name}.{name}" for name in _local_function_names_from_tree(tree)}
     rename_map.update(
         _imported_project_function_names(

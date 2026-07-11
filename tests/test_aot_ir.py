@@ -1,8 +1,8 @@
-import ast
 import unittest
 from dataclasses import FrozenInstanceError
 
 from tests import _bootstrap  # noqa: F401
+from xcc.aot import py_ast as ast
 from xcc.aot import (
     AotError,
     IrAssign,
@@ -28,6 +28,7 @@ from xcc.aot import (
     IrName,
     IrNoneType,
     IrParam,
+    IrPrint,
     IrRaise,
     IrRecordType,
     IrReturn,
@@ -43,6 +44,7 @@ from xcc.aot import (
     lower_source_to_ir,
 )
 from xcc.aot.binder import _TypeBinder
+from xcc.aot.cpython_ast_adapter import parse_cpython_expression
 from xcc.aot.lower import (
     _can_narrow_to_record,
     _collect_global_names,
@@ -60,6 +62,14 @@ from xcc.aot.lower import (
 from xcc.aot.module import parse_source
 from xcc.aot.subset import check_subset
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
+
+
+def _owned_parse(source: str, *, mode: str = "exec") -> ast.Module | ast.Expression:
+    if mode == "eval":
+        return parse_cpython_expression(source, filename="<test-expression>")
+    if mode != "exec":
+        raise ValueError(f"unsupported test parse mode: {mode}")
+    return parse_source(source, filename="<test-module>").tree
 
 
 class AotIrModelTests(unittest.TestCase):
@@ -102,6 +112,17 @@ class AotIrModelTests(unittest.TestCase):
 
 
 class AotScalarLoweringTests(unittest.TestCase):
+    def test_lowers_single_argument_print_statement(self) -> None:
+        module = lower_source_to_ir(
+            "def main() -> int:\n"
+            "    print('ready')\n"
+            "    return 0\n",
+            filename="print.py",
+            entry="main",
+        )
+
+        self.assertEqual(module.functions[0].body[0], IrPrint(IrConstString("ready")))
+
     def test_lowers_int64_return_constant(self) -> None:
         module = lower_source_to_ir(
             "int64 = int\ndef answer() -> int64:\n    return 42\n",
@@ -1001,7 +1022,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             },
             global_names={"_helper"},
         )
-        expr = ast.parse("_helper.is_ready(1)", mode="eval").body
+        expr = _owned_parse("_helper.is_ready(1)", mode="eval").body
         self.assertIsInstance(expr, ast.Call)
         assert isinstance(expr, ast.Call)
 
@@ -2128,7 +2149,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
 
         lowered = lowerer._lower_expr(
-            ast.parse("left if flag else fallback()", mode="eval").body,
+            _owned_parse("left if flag else fallback()", mode="eval").body,
             {"flag": IrBoolType(), "left": int64},
             IrRecordType("object"),
         )
@@ -2204,7 +2225,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         item_type = IrTupleType((IrStringType(), int64, IrRecordType("object")))
         path_type = IrTupleType((item_type,))
         lowerer = _Lowerer("nested_subscript.py", {})
-        expr = ast.parse("path[0][1]", mode="eval").body
+        expr = _owned_parse("path[0][1]", mode="eval").body
 
         lowered = lowerer._lower_expr(expr, {"path": path_type}, int64)
 
@@ -2224,7 +2245,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
-        unknown_index = ast.parse("item[index]", mode="eval").body
+        unknown_index = _owned_parse("item[index]", mode="eval").body
         unknown_lowered = lowerer._lower_expr(
             unknown_index,
             {"item": item_type, "index": int64},
@@ -3528,10 +3549,10 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrIntType(64, signed=True),
         )
         self.assertEqual(
-            _none_guard_name(ast.parse("None is value").body[0].value),
+            _none_guard_name(_owned_parse("None is value").body[0].value),
             "value",
         )
-        self.assertIsNone(_none_guard_name(ast.parse("None is 1").body[0].value))
+        self.assertIsNone(_none_guard_name(_owned_parse("None is 1").body[0].value))
 
     def test_lowers_bodyless_requested_function_signature(self) -> None:
         module = lower_source_to_ir(
@@ -4642,7 +4663,7 @@ class AotScalarLoweringTests(unittest.TestCase):
 
     def test_llvm_api_lowering_private_helpers_cover_edge_inputs(self) -> None:
         lowerer = _Lowerer("bad.py", {}, global_names={"llvm"})
-        bad_call = ast.parse("llvm()", mode="eval").body
+        bad_call = _owned_parse("llvm()", mode="eval").body
         self.assertIsInstance(bad_call, ast.Call)
         assert isinstance(bad_call, ast.Call)
         with self.assertRaises(AotError) as ctx:
@@ -4710,49 +4731,49 @@ class AotScalarLoweringTests(unittest.TestCase):
 
     def test_direct_lowerer_reports_missing_and_unsupported_forms(self) -> None:
         lowerer = _Lowerer("direct.py", {})
-        missing_param = ast.parse("def f(value) -> int:\n    return 1\n").body[0]
+        missing_param = _owned_parse("def f(value) -> int:\n    return 1\n").body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(missing_param, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
 
-        missing_return = ast.parse("def f():\n    return 1\n").body[0]
+        missing_return = _owned_parse("def f():\n    return 1\n").body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(missing_return, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].message, "Missing lowered annotation")
 
-        unsupported_return = ast.parse("def f() -> float:\n    return 1\n").body[0]
+        unsupported_return = _owned_parse("def f() -> float:\n    return 1\n").body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(unsupported_return, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
 
-        unsupported_string_return = ast.parse('def f() -> "int":\n    return 1\n').body[0]
+        unsupported_string_return = _owned_parse('def f() -> "int":\n    return 1\n').body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(unsupported_string_return, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
 
-        unsupported_call = ast.parse("def f(value: int) -> int:\n    return value.bits()\n").body[0]
+        unsupported_call = _owned_parse("def f(value: int) -> int:\n    return value.bits()\n").body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(unsupported_call, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
 
-        unsupported_dynamic_call = ast.parse("def f() -> int:\n    return (lambda: 1)()\n").body[0]
+        unsupported_dynamic_call = _owned_parse("def f() -> int:\n    return (lambda: 1)()\n").body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(unsupported_dynamic_call, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
 
         with self.assertRaises(AotError) as ctx:
-            lowerer._lower_statement(ast.parse("del value\n").body[0], {}, IrNoneType())
+            lowerer._lower_statement(_owned_parse("del value\n").body[0], {}, IrNoneType())
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
 
         with self.assertRaises(AotError) as ctx:
             lowerer._lower_expr(
-                ast.parse("lambda: 1", mode="eval").body,
+                _owned_parse("lambda: 1", mode="eval").body,
                 {},
                 IrRecordType("object"),
             )
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
 
-        missing_kwonly = ast.parse("def f(*, flag) -> int:\n    return 1\n").body[0]
+        missing_kwonly = _owned_parse("def f(*, flag) -> int:\n    return 1\n").body[0]
         with self.assertRaises(AotError) as ctx:
             lowerer.lower_function(missing_kwonly, owner=None)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
@@ -4771,7 +4792,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer._lower_joined_str(malformed_fstring, {})
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0005")
 
-        unsupported_statement = ast.parse(
+        unsupported_statement = _owned_parse(
             "def f() -> int:\n"
             "    try:\n"
             "        return 1\n"
@@ -4799,7 +4820,7 @@ class AotScalarLoweringTests(unittest.TestCase):
                 )
             },
         )
-        record = lowerer.lower_record(ast.parse("class Node:\n    pass\n").body[0])
+        record = lowerer.lower_record(_owned_parse("class Node:\n    pass\n").body[0])
         self.assertEqual(record.fields[0].type, IrStringType())
         self.assertEqual(record.fields[1].type, IrIntType(64, signed=True))
         self.assertEqual(record.fields[2].type, IrRecordType("Node"))
@@ -5289,41 +5310,41 @@ class AotScalarLoweringTests(unittest.TestCase):
 
         self.assertIsNone(
             lowerer._isinstance_guard_narrowing(
-                ast.parse("isinstance(value.attr, Child)", mode="eval").body,
+                _owned_parse("isinstance(value.attr, Child)", mode="eval").body,
                 {"value": IrRecordType("object")},
             )
         )
         self.assertIsNone(
             lowerer._isinstance_guard_narrowing(
-                ast.parse("isinstance(value, Missing)", mode="eval").body,
+                _owned_parse("isinstance(value, Missing)", mode="eval").body,
                 {"value": IrRecordType("object")},
             )
         )
         self.assertIsNone(
             lowerer._isinstance_guard_narrowing(
-                ast.parse("isinstance(value, Child)", mode="eval").body,
+                _owned_parse("isinstance(value, Child)", mode="eval").body,
                 {"value": IrIntType(64, signed=True)},
             )
         )
         self.assertIsNone(
             lowerer._isinstance_guard_narrowing(
-                ast.parse("isinstance(value, (Child, 1))", mode="eval").body,
+                _owned_parse("isinstance(value, (Child, 1))", mode="eval").body,
                 {"value": IrRecordType("object")},
             )
         )
         self.assertEqual(
             lowerer._isinstance_guard_narrowing(
-                ast.parse("isinstance(value, (Child, Base))", mode="eval").body,
+                _owned_parse("isinstance(value, (Child, Base))", mode="eval").body,
                 {"value": IrRecordType("object")},
             ),
             ("value", IrRecordType("Child | Base")),
         )
         self.assertEqual(
-            _isinstance_target_names(ast.parse("(Child, Base)", mode="eval").body),
+            _isinstance_target_names(_owned_parse("(Child, Base)", mode="eval").body),
             ("Child", "Base"),
         )
-        self.assertIsNone(_isinstance_target_names(ast.parse("(Child, 1)", mode="eval").body))
-        self.assertIsNone(_isinstance_target_names(ast.parse("factory()", mode="eval").body))
+        self.assertIsNone(_isinstance_target_names(_owned_parse("(Child, 1)", mode="eval").body))
+        self.assertIsNone(_isinstance_target_names(_owned_parse("factory()", mode="eval").body))
 
         self.assertIsNone(lowerer._truthy_optional_record_narrowing(ast.Constant(True), {}))
         self.assertIsNone(
@@ -5338,32 +5359,32 @@ class AotScalarLoweringTests(unittest.TestCase):
 
         self.assertEqual(
             lowerer._not_none_guard_narrowing(
-                ast.parse("None is not value", mode="eval").body,
+                _owned_parse("None is not value", mode="eval").body,
                 {"value": IrRecordType("Child | None")},
             ),
             ("value", IrRecordType("Child")),
         )
         self.assertIsNone(
-            lowerer._not_none_guard_narrowing(ast.parse("None is not 1", mode="eval").body, {})
+            lowerer._not_none_guard_narrowing(_owned_parse("None is not 1", mode="eval").body, {})
         )
         self.assertIsNone(
-            lowerer._not_none_guard_narrowing(ast.parse("1 is not 2", mode="eval").body, {})
+            lowerer._not_none_guard_narrowing(_owned_parse("1 is not 2", mode="eval").body, {})
         )
         self.assertIsNone(
             lowerer._not_none_guard_narrowing(
-                ast.parse("missing is not None", mode="eval").body,
+                _owned_parse("missing is not None", mode="eval").body,
                 {},
             )
         )
         self.assertIsNone(
             lowerer._not_none_guard_narrowing(
-                ast.parse("value is not None", mode="eval").body,
+                _owned_parse("value is not None", mode="eval").body,
                 {"value": IrIntType(64, signed=True)},
             )
         )
         self.assertIsNone(
             lowerer._none_bool_op_narrowing(
-                ast.parse("value is None", mode="eval").body,
+                _owned_parse("value is None", mode="eval").body,
                 {"value": IrIntType(64, signed=True)},
             )
         )
@@ -5415,10 +5436,10 @@ class AotScalarLoweringTests(unittest.TestCase):
     def test_direct_lowerer_covers_assignment_and_global_name_edges(self) -> None:
         lowerer = _Lowerer("direct.py", {})
         names: dict[str, IrIntType] = {}
-        target = ast.parse("self.value = 1\n").body[0].targets[0]
+        target = _owned_parse("self.value = 1\n").body[0].targets[0]
         lowerer._bind_assignment_target(target, IrIntType(64, signed=True), names)
         self.assertIn("self.value", names)
-        unsupported_target = ast.parse("items[0] = 1\n").body[0].targets[0]
+        unsupported_target = _owned_parse("items[0] = 1\n").body[0].targets[0]
         with self.assertRaises(AotError) as ctx:
             lowerer._bind_assignment_target(
                 unsupported_target,
@@ -5426,7 +5447,7 @@ class AotScalarLoweringTests(unittest.TestCase):
                 names,
             )
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
-        tree = ast.parse(
+        tree = _owned_parse(
             "import os as operating_system\n"
             "import sys\n"
             "left, right = (1, 2)\n"
@@ -5442,7 +5463,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertIsInstance(
             lowerer._lower_call(
-                ast.parse("''.join()\n").body[0].value,
+                _owned_parse("''.join()\n").body[0].value,
                 {},
                 IrStringType(),
             ),
@@ -5450,7 +5471,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         int64 = IrIntType(64, signed=True)
         fallback = IrRecordType("object")
-        field_target = ast.parse("value.field = None\n").body[0].targets[0]
+        field_target = _owned_parse("value.field = None\n").body[0].targets[0]
         self.assertEqual(
             lowerer._assignment_value_type(
                 field_target,
@@ -5474,18 +5495,18 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertEqual(
             lowerer._infer_assignment_expr_type(
-                ast.parse("missing[0]", mode="eval").body,
+                _owned_parse("missing[0]", mode="eval").body,
                 {},
                 fallback,
             ),
             fallback,
         )
-        mixed_ifexp = ast.parse("1 if flag else 'x'").body[0].value
+        mixed_ifexp = _owned_parse("1 if flag else 'x'").body[0].value
         self.assertEqual(
             lowerer._infer_assignment_expr_type(mixed_ifexp, {"flag": IrBoolType()}, fallback),
             fallback,
         )
-        mixed_bool = ast.parse("text or flag", mode="eval").body
+        mixed_bool = _owned_parse("text or flag", mode="eval").body
         self.assertEqual(
             lowerer._infer_assignment_expr_type(
                 mixed_bool,
@@ -5496,7 +5517,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertEqual(
             lowerer._infer_assignment_expr_type(
-                ast.parse("not flag", mode="eval").body,
+                _owned_parse("not flag", mode="eval").body,
                 {"flag": IrBoolType()},
                 fallback,
             ),
@@ -5504,7 +5525,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertEqual(
             lowerer._infer_assignment_expr_type(
-                ast.parse("left + right", mode="eval").body,
+                _owned_parse("left + right", mode="eval").body,
                 {"left": IrStringType(), "right": IrStringType()},
                 fallback,
             ),
@@ -5512,7 +5533,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertEqual(
             lowerer._infer_assignment_expr_type(
-                ast.parse("left - right", mode="eval").body,
+                _owned_parse("left - right", mode="eval").body,
                 {"left": IrStringType(), "right": IrStringType()},
                 fallback,
             ),
@@ -5520,7 +5541,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertEqual(
             lowerer._infer_assignment_expr_type(
-                ast.parse("value.missing", mode="eval").body,
+                _owned_parse("value.missing", mode="eval").body,
                 {"value": int64},
                 fallback,
             ),
@@ -5532,7 +5553,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             fallback,
         )
         self.assertEqual(
-            _tuple_subscript_result_type(ast.parse("-1", mode="eval").body, fixed_tuple_type),
+            _tuple_subscript_result_type(_owned_parse("-1", mode="eval").body, fixed_tuple_type),
             IrIntType(64, signed=True),
         )
         self.assertEqual(

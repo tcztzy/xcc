@@ -1,6 +1,7 @@
-import ast
 from dataclasses import dataclass
 from typing import cast
+
+from xcc.aot import py_ast as ast
 
 
 class _LocatedNode:

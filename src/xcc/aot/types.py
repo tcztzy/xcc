@@ -1,5 +1,6 @@
-import ast
 from dataclasses import dataclass, field
+
+from xcc.aot import py_ast as ast
 
 _BUILTIN_TYPES = {
     "Enum",
