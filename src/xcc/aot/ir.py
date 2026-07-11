@@ -59,6 +59,7 @@ class IrField:
 class IrRecord:
     name: str
     fields: tuple[IrField, ...]
+    bases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
