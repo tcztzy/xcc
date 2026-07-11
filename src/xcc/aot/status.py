@@ -20,6 +20,7 @@ from xcc.aot.ir import (
     IrName,
     IrPrint,
     IrRaise,
+    IrReraise,
     IrReturn,
     IrSetItem,
     IrStmt,
@@ -58,7 +59,7 @@ def _function_directly_raises(function: IrFunction) -> bool:
 
 
 def _statement_directly_raises(statement: IrStmt) -> bool:
-    if isinstance(statement, IrRaise):
+    if isinstance(statement, IrRaise | IrReraise):
         return True
     if isinstance(statement, IrIf):
         return (
@@ -118,6 +119,8 @@ def _statement_call_targets(statement: IrStmt) -> tuple[str, ...]:
             _expr_call_targets(statement.payload) if statement.payload is not None else ()
         )
         return _expr_call_targets(statement.message) + payload_targets
+    if isinstance(statement, IrReraise):
+        return ()
     if isinstance(statement, IrTry):
         branches = (
             statement.body,

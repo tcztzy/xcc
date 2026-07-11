@@ -18,6 +18,7 @@ from xcc.aot import (
     IrConstString,
     IrContinue,
     IrEnumMember,
+    IrExceptHandler,
     IrForEach,
     IrFunction,
     IrGetField,
@@ -39,6 +40,7 @@ from xcc.aot import (
     IrTuple,
     IrTupleSlice,
     IrTupleType,
+    IrTry,
     IrWhile,
     analyze_source,
     lower_source_to_ir,
@@ -214,17 +216,16 @@ class AotScalarLoweringTests(unittest.TestCase):
             entry="f",
         )
         branch = module.functions[0].body[1]
-        self.assertIsInstance(branch, IrIf)
-        assert isinstance(branch, IrIf)
-        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertIsInstance(branch, IrTry)
+        assert isinstance(branch, IrTry)
         self.assertEqual(
-            branch.then_branch.statements,
-            (
-                IrAssign("value", IrConstInt(2, IrIntType(64, signed=True))),
-                IrAssign("value", IrConstInt(3, IrIntType(64, signed=True))),
-            ),
+            branch.body.statements,
+            (IrAssign("value", IrConstInt(2, IrIntType(64, signed=True))),),
         )
-        self.assertIsNone(branch.else_branch)
+        self.assertEqual(
+            branch.finalbody.statements,
+            (IrAssign("value", IrConstInt(3, IrIntType(64, signed=True))),),
+        )
 
     def test_lowers_codegen_error_try_except_normal_path(self) -> None:
         module = lower_source_to_ir(
@@ -239,13 +240,13 @@ class AotScalarLoweringTests(unittest.TestCase):
             entry="f",
         )
         branch = module.functions[0].body[0]
-        self.assertIsInstance(branch, IrIf)
-        assert isinstance(branch, IrIf)
-        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertIsInstance(branch, IrTry)
+        assert isinstance(branch, IrTry)
         self.assertEqual(
-            branch.then_branch.statements,
+            branch.body.statements,
             (IrReturn(IrName("value", IrIntType(64, signed=True))),),
         )
+        self.assertEqual(branch.handlers[0].exceptions, ("CodegenError",))
 
     def test_lowers_exception_try_except_normal_path(self) -> None:
         module = lower_source_to_ir(
@@ -258,13 +259,13 @@ class AotScalarLoweringTests(unittest.TestCase):
             entry="f",
         )
         branch = module.functions[0].body[0]
-        self.assertIsInstance(branch, IrIf)
-        assert isinstance(branch, IrIf)
-        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertIsInstance(branch, IrTry)
+        assert isinstance(branch, IrTry)
         self.assertEqual(
-            branch.then_branch.statements,
+            branch.body.statements,
             (IrReturn(IrName("value", IrIntType(64, signed=True))),),
         )
+        self.assertEqual(branch.handlers[0].exceptions, ("Exception",))
 
     def test_lowers_sema_error_try_except_normal_path(self) -> None:
         module = lower_source_to_ir(
@@ -279,13 +280,13 @@ class AotScalarLoweringTests(unittest.TestCase):
             entry="f",
         )
         branch = module.functions[0].body[0]
-        self.assertIsInstance(branch, IrIf)
-        assert isinstance(branch, IrIf)
-        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertIsInstance(branch, IrTry)
+        assert isinstance(branch, IrTry)
         self.assertEqual(
-            branch.then_branch.statements,
+            branch.body.statements,
             (IrReturn(IrName("value", IrIntType(64, signed=True))),),
         )
+        self.assertEqual(branch.handlers[0].exceptions, ("SemaError",))
 
     def test_lowers_parser_error_try_except_normal_path(self) -> None:
         module = lower_source_to_ir(
@@ -300,13 +301,13 @@ class AotScalarLoweringTests(unittest.TestCase):
             entry="f",
         )
         branch = module.functions[0].body[0]
-        self.assertIsInstance(branch, IrIf)
-        assert isinstance(branch, IrIf)
-        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertIsInstance(branch, IrTry)
+        assert isinstance(branch, IrTry)
         self.assertEqual(
-            branch.then_branch.statements,
+            branch.body.statements,
             (IrReturn(IrName("value", IrIntType(64, signed=True))),),
         )
+        self.assertEqual(branch.handlers[0].exceptions, ("ParserError",))
 
     def test_lowers_preprocessor_try_except_normal_path(self) -> None:
         module = lower_source_to_ir(
@@ -323,12 +324,15 @@ class AotScalarLoweringTests(unittest.TestCase):
             entry="f",
         )
         branch = module.functions[0].body[0]
-        self.assertIsInstance(branch, IrIf)
-        assert isinstance(branch, IrIf)
-        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertIsInstance(branch, IrTry)
+        assert isinstance(branch, IrTry)
         self.assertEqual(
-            branch.then_branch.statements,
+            branch.body.statements,
             (IrReturn(IrName("value", IrIntType(64, signed=True))),),
+        )
+        self.assertEqual(
+            tuple(handler.exceptions for handler in branch.handlers),
+            (("OSError",), ("PreprocessorError",)),
         )
 
     def test_lowers_tuple_exception_try_except_normal_path(self) -> None:
@@ -342,13 +346,13 @@ class AotScalarLoweringTests(unittest.TestCase):
             entry="f",
         )
         branch = module.functions[0].body[0]
-        self.assertIsInstance(branch, IrIf)
-        assert isinstance(branch, IrIf)
-        self.assertEqual(branch.condition, IrConstBool(True))
+        self.assertIsInstance(branch, IrTry)
+        assert isinstance(branch, IrTry)
         self.assertEqual(
-            branch.then_branch.statements,
+            branch.body.statements,
             (IrReturn(IrName("value", IrIntType(64, signed=True))),),
         )
+        self.assertEqual(branch.handlers[0].exceptions, ("SyntaxError", "ValueError"))
 
     def test_lowers_two_arg_integer_min_max_as_ifexp(self) -> None:
         for call, cmp_target in (("max", "__cmp_GtE"), ("min", "__cmp_LtE")):
@@ -4802,18 +4806,25 @@ class AotScalarLoweringTests(unittest.TestCase):
             lowerer._lower_joined_str(malformed_fstring, {})
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0005")
 
-        unsupported_statement = _owned_parse(
+        structured_try = _owned_parse(
             "def f() -> int:\n"
             "    try:\n"
             "        return 1\n"
             "    except RuntimeError:\n"
             "        return 0\n"
         ).body[0]
-        with self.assertRaises(AotError) as ctx:
-            lowerer.lower_function(unsupported_statement, owner=None)
+        lowered_try = lowerer.lower_function(structured_try, owner=None).body[0]
+        self.assertIsInstance(lowered_try, IrTry)
+        assert isinstance(lowered_try, IrTry)
         self.assertEqual(
-            ctx.exception.diagnostics[0].message,
-            "Unsupported lowered statement: Try",
+            lowered_try.handlers,
+            (
+                IrExceptHandler(
+                    ("RuntimeError",),
+                    None,
+                    lowered_try.handlers[0].body,
+                ),
+            ),
         )
 
     def test_direct_lowerer_maps_string_int_and_record_field_types(self) -> None:

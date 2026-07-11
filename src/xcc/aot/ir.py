@@ -277,6 +277,11 @@ class IrRaise:
 
 
 @dataclass(frozen=True)
+class IrReraise:
+    span: IrSourceSpan = IrSourceSpan()
+
+
+@dataclass(frozen=True)
 class IrExceptHandler:
     exceptions: tuple[str, ...]
     target: str | None
@@ -302,6 +307,7 @@ IrStmt = (
     | IrContinue
     | IrPrint
     | IrRaise
+    | IrReraise
     | IrTry
 )
 

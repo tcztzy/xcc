@@ -19,6 +19,7 @@ from xcc.aot.ir import (
     IrConstString,
     IrContinue,
     IrEnumMember,
+    IrExceptHandler,
     IrExpr,
     IrField,
     IrFloatType,
@@ -35,12 +36,15 @@ from xcc.aot.ir import (
     IrRaise,
     IrRecord,
     IrRecordType,
+    IrReraise,
     IrReturn,
     IrSetItem,
+    IrSourceSpan,
     IrStmt,
     IrStringConcat,
     IrStringJoin,
     IrStringType,
+    IrTry,
     IrTuple,
     IrTupleSlice,
     IrTupleType,
@@ -333,6 +337,29 @@ class _Lowerer:
         )
         return IrRecord(node.name, fields, class_info.bases)
 
+    def _except_handler_target_type(self, exceptions: tuple[str, ...]) -> IrType:
+        if len(exceptions) == 1 and exceptions[0] in self.class_types:
+            return IrRecordType(exceptions[0])
+        return IrRecordType("object")
+
+    def _exception_message(
+        self,
+        exception: str,
+        payload: IrExpr | None,
+        argument: IrExpr | None,
+    ) -> IrExpr:
+        if isinstance(payload, IrConstructRecord):
+            str_target = self._record_method_target(payload.type, "__str__")
+            if str_target in self.function_types:
+                return IrCall(str_target, (payload,), IrStringType())
+        if argument is None:
+            return IrConstString("")
+        if isinstance(argument.type, IrStringType):
+            return argument
+        if isinstance(argument.type, IrIntType):
+            return IrStringConcat((argument,))
+        return IrConstString(exception)
+
     def _global_annotation_types(self, annotations: dict[str, str]) -> dict[str, IrType]:
         global_types: dict[str, IrType] = {}
         for name, annotation in annotations.items():
@@ -544,32 +571,84 @@ class _Lowerer:
                 body,
             )
         if isinstance(statement, ast.Try):
-            if _is_normal_path_try(statement):
-                body_names = dict(names)
-                statements = tuple(
+            body_names = dict(names)
+            body = IrBranch(
+                tuple(
                     self._lower_statement(child, body_names, return_type)
                     for child in statement.body
                 )
-                names.update(body_names)
-                return IrIf(IrConstBool(True), IrBranch(statements))
-            if statement.handlers or statement.orelse or not statement.finalbody:
-                self._error(
-                    "XCC-AOT-LOWER-0001",
-                    "Unsupported lowered statement: Try",
-                    statement,
+            )
+            handler_names: list[dict[str, IrType]] = []
+            handlers: list[IrExceptHandler] = []
+            for handler in statement.handlers:
+                exceptions = _except_handler_names(handler)
+                child_names = dict(names)
+                if handler.name is not None:
+                    child_names[handler.name] = self._except_handler_target_type(exceptions)
+                handlers.append(
+                    IrExceptHandler(
+                        exceptions,
+                        handler.name,
+                        IrBranch(
+                            tuple(
+                                self._lower_statement(child, child_names, return_type)
+                                for child in handler.body
+                            )
+                        ),
+                    )
                 )
-            body_names = dict(names)
-            statements = tuple(
-                self._lower_statement(child, body_names, return_type)
-                for child in (*statement.body, *statement.finalbody)
+                handler_names.append(child_names)
+            else_names = dict(body_names)
+            orelse = IrBranch(
+                tuple(
+                    self._lower_statement(child, else_names, return_type)
+                    for child in statement.orelse
+                )
+            )
+            final_names = dict(names)
+            final_names.update(body_names)
+            final_names.update(else_names)
+            for child_names in handler_names:
+                final_names.update(child_names)
+            finalbody = IrBranch(
+                tuple(
+                    self._lower_statement(child, final_names, return_type)
+                    for child in statement.finalbody
+                )
             )
             names.update(body_names)
-            return IrIf(IrConstBool(True), IrBranch(statements))
-        if isinstance(statement, ast.Raise) and isinstance(statement.exc, ast.Call):
-            message: IrExpr = IrConstString("")
+            names.update(else_names)
+            for child_names in handler_names:
+                names.update(child_names)
+            names.update(final_names)
+            return IrTry(body, tuple(handlers), orelse, finalbody)
+        if isinstance(statement, ast.Raise):
+            span = _ir_source_span(statement)
+            if statement.exc is None:
+                return IrReraise(span)
+            if not isinstance(statement.exc, ast.Call):
+                self._error(
+                    "XCC-AOT-LOWER-0001",
+                    "Unsupported lowered statement: Raise",
+                    statement,
+                )
+            exception = ast.unparse(statement.exc.func)
+            argument: IrExpr | None = None
             if statement.exc.args:
-                message = self._lower_expr(statement.exc.args[0], names, IrStringType())
-            return IrRaise(ast.unparse(statement.exc.func), message)
+                argument = self._lower_expr(
+                    statement.exc.args[0],
+                    names,
+                    IrRecordType("object"),
+                )
+            payload = argument
+            if isinstance(statement.exc.func, ast.Name) and exception in self.class_types:
+                payload = self._lower_expr(
+                    statement.exc,
+                    names,
+                    IrRecordType(exception),
+                )
+            message = self._exception_message(exception, payload, argument)
+            return IrRaise(exception, message, span, payload)
         if isinstance(statement, ast.Assert):
             condition = self._lower_expr(statement.test, names, IrBoolType())
             for narrowed in self._isinstance_guard_narrowings(statement.test, names):
@@ -4097,39 +4176,21 @@ def _is_object_setattr_call(expr: ast.Call) -> bool:
     )
 
 
-_NORMAL_PATH_EXCEPTION_NAMES = frozenset(
-    {
-        "CodegenError",
-        "Exception",
-        "OSError",
-        "ParserError",
-        "PreprocessorError",
-        "SemaError",
-        "SyntaxError",
-        "ValueError",
-        "_PPExprOverflow",
-    }
-)
-
-
-def _is_normal_path_try(statement: ast.Try) -> bool:
-    if statement.orelse or statement.finalbody or not statement.handlers:
-        return False
-    for handler in statement.handlers:  # noqa: SIM110 - avoid generator lowering in AOT code.
-        if not _is_normal_path_exception_handler(handler):
-            return False
-    return True
-
-
-def _is_normal_path_exception_handler(handler: ast.ExceptHandler) -> bool:
-    if isinstance(handler.type, ast.Name):
-        return handler.type.id in _NORMAL_PATH_EXCEPTION_NAMES
+def _except_handler_names(handler: ast.ExceptHandler) -> tuple[str, ...]:
+    if handler.type is None:
+        return ()
     if isinstance(handler.type, ast.Tuple):
-        for item in handler.type.elts:
-            if not isinstance(item, ast.Name) or item.id not in _NORMAL_PATH_EXCEPTION_NAMES:
-                return False
-        return True
-    return False
+        return tuple(ast.unparse(item) for item in handler.type.elts)
+    return (ast.unparse(handler.type),)
+
+
+def _ir_source_span(node: ast.AST) -> IrSourceSpan:
+    return IrSourceSpan(
+        node.span.line,
+        node.span.column,
+        node.span.end_line,
+        node.span.end_column,
+    )
 
 
 def _is_ellipsis_body(statements: Sequence[ast.stmt]) -> bool:

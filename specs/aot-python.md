@@ -144,3 +144,7 @@ B302|2026-07-11|fallibility pre-analysis raised a raw `AssertionError` for delib
 B303|2026-07-11|bootstrap slice call rewriting and dependency scans omitted the new `IrTry` variant and discarded `IrRaise` span/payload data|V376,V380,V384
 B304|2026-07-11|the new slice raise-call scan reused a branch-local `targets` name already inferred as `list[str]`, violating the tuple return contract under mypy|V379,V384
 B305|2026-07-11|the initial status/slice additions left import ordering and one fallibility predicate line outside the repository's ruff format contract|V379,V384
+B306|2026-07-11|eight lowerer regressions encoded the temporary handler whitelist and `try -> IrIf(True)` flattening instead of the required structured status/handler IR|V375,V380,V384
+B307|2026-07-11|the structured-handler implementation inserted `IrTry` after `IrTuple` in two source import blocks, violating deterministic ruff ordering|V379,V384
+B308|2026-07-11|the first handler ancestry helper duplicated and was overwritten by the emitter's existing `_record_extends` method with a different signature|V380,V384
+B309|2026-07-11|the typed-error payload fixture omitted the subset-required `__init__ -> None` annotation and retained the pre-payload `IrRaise` expectation|V374,V380,V384

@@ -18,6 +18,7 @@ from xcc.aot.ir import (
     IrConstString,
     IrContinue,
     IrEnumMember,
+    IrExceptHandler,
     IrExpr,
     IrFloatType,
     IrForEach,
@@ -32,12 +33,14 @@ from xcc.aot.ir import (
     IrRaise,
     IrRecord,
     IrRecordType,
+    IrReraise,
     IrReturn,
     IrSetItem,
     IrStmt,
     IrStringConcat,
     IrStringJoin,
     IrStringType,
+    IrTry,
     IrTuple,
     IrTupleSlice,
     IrTupleType,
@@ -217,6 +220,21 @@ class _LoopLabels:
     continue_sources: list[tuple[str, dict[str, _EmittedValue]]] | None = None
 
 
+@dataclass
+class _HandlerScope:
+    dispatch_label: str
+    status_slot: str
+    error_sources: list[tuple[str, dict[str, _EmittedValue]]]
+
+
+@dataclass(frozen=True)
+class _FinallyScope:
+    body: IrBranch
+
+
+_FailureScope = _HandlerScope | _FinallyScope
+
+
 def emit_llvm_text(module: IrModule) -> str:
     emitter = _Emitter(module)
     return emitter.emit()
@@ -242,6 +260,8 @@ class _Emitter:
         self.current_function_is_fallible = False
         self.current_result_out: str | None = None
         self.current_error_out: str | None = None
+        self.failure_scopes: list[_FailureScope] = []
+        self.caught_status_stack: list[str] = []
 
     def emit(self) -> str:
         declarations = [self._emit_record(record) for record in self.module.records]
@@ -361,10 +381,14 @@ class _Emitter:
         previous_fallible = self.current_function_is_fallible
         previous_result_out = self.current_result_out
         previous_error_out = self.current_error_out
+        previous_failure_scopes = self.failure_scopes
+        previous_caught_status_stack = self.caught_status_stack
         self.current_function = function
         self.current_function_is_fallible = fallible
         self.current_result_out = result_out if fallible else None
         self.current_error_out = "%error_out" if fallible else None
+        self.failure_scopes = []
+        self.caught_status_stack = []
         names = {
             param.name: _EmittedValue(f"%{param.name}", param.type) for param in function.params
         }
@@ -380,6 +404,8 @@ class _Emitter:
             self.current_function_is_fallible = previous_fallible
             self.current_result_out = previous_result_out
             self.current_error_out = previous_error_out
+            self.failure_scopes = previous_failure_scopes
+            self.caught_status_stack = previous_caught_status_stack
         lines.append("}")
         return "\n".join(lines)
 
@@ -414,32 +440,7 @@ class _Emitter:
             self._emit_set_item(statement, names, lines)
             return
         if isinstance(statement, IrReturn):
-            if self.current_function_is_fallible:
-                if isinstance(return_type, IrNoneType):
-                    lines.append("  ret i32 0")
-                    return
-                if self.current_result_out is None:
-                    self._error("fallible non-void function is missing result_out")
-                if isinstance(statement.value, IrConstNone):
-                    stored = self._default_value(return_type)
-                else:
-                    value = self._emit_expr(statement.value, names, lines)
-                    stored = self._value_for_result_type(value, return_type, lines)
-                lines.append(
-                    f"  store {self._storage_llvm_type(return_type)} {stored}, "
-                    f"ptr {self.current_result_out}"
-                )
-                lines.append("  ret i32 0")
-                return
-            if isinstance(return_type, IrNoneType):
-                lines.append("  ret void")
-                return
-            if isinstance(statement.value, IrConstNone):
-                self._emit_default_return(lines, return_type)
-                return
-            value = self._emit_expr(statement.value, names, lines)
-            returned = self._value_for_result_type(value, return_type, lines)
-            lines.append(f"  ret {self._llvm_type(return_type)} {returned}")
+            self._emit_return(statement, names, lines, return_type)
             return
         if isinstance(statement, IrIf):
             self._emit_if(statement, names, lines, return_type)
@@ -450,14 +451,23 @@ class _Emitter:
         if isinstance(statement, IrWhile):
             self._emit_while(statement, names, lines, return_type)
             return
+        if isinstance(statement, IrTry):
+            self._emit_try(statement, names, lines, return_type)
+            return
         if isinstance(statement, IrBreak):
             if not self.loop_stack:
                 self._error("break outside loop")
+            self._emit_control_finally(names, lines, return_type)
+            if _block_is_terminated(lines):
+                return
             lines.append(f"  br label %{self.loop_stack[-1].break_label}")
             return
         if isinstance(statement, IrContinue):
             if not self.loop_stack:
                 self._error("continue outside loop")
+            self._emit_control_finally(names, lines, return_type)
+            if _block_is_terminated(lines):
+                return
             loop = self.loop_stack[-1]
             if loop.continue_sources is not None:
                 loop.continue_sources.append((_current_label(lines), dict(names)))
@@ -472,9 +482,363 @@ class _Emitter:
             if not self.current_function_is_fallible or self.current_error_out is None:
                 self._error("raise requires a fallible function status ABI")
             self._emit_error_record(statement, names, lines)
-            lines.append("  ret i32 2")
+            self._emit_failure_transfer("2", names, lines, return_type)
+            return
+        if isinstance(statement, IrReraise):
+            if not self.caught_status_stack:
+                self._error("reraise outside an active exception handler")
+            self._emit_failure_transfer(
+                self.caught_status_stack[-1],
+                names,
+                lines,
+                return_type,
+            )
             return
         self._error(f"Unsupported LLVM statement: {type(statement).__name__}")
+
+    def _emit_return(
+        self,
+        statement: IrReturn,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+        return_type: IrType,
+    ) -> None:
+        value = None
+        if not isinstance(return_type, IrNoneType) and not isinstance(statement.value, IrConstNone):
+            value = self._emit_expr(statement.value, names, lines)
+        self._emit_control_finally(names, lines, return_type)
+        if _block_is_terminated(lines):
+            return
+        if self.current_function_is_fallible:
+            if isinstance(return_type, IrNoneType):
+                lines.append("  ret i32 0")
+                return
+            if self.current_result_out is None:
+                self._error("fallible non-void function is missing result_out")
+            stored = (
+                self._default_value(return_type)
+                if value is None
+                else self._value_for_result_type(value, return_type, lines)
+            )
+            lines.append(
+                f"  store {self._storage_llvm_type(return_type)} {stored}, "
+                f"ptr {self.current_result_out}"
+            )
+            lines.append("  ret i32 0")
+            return
+        if isinstance(return_type, IrNoneType):
+            lines.append("  ret void")
+            return
+        if value is None:
+            self._emit_default_return(lines, return_type)
+            return
+        returned = self._value_for_result_type(value, return_type, lines)
+        lines.append(f"  ret {self._llvm_type(return_type)} {returned}")
+
+    def _emit_failure_transfer(
+        self,
+        status: str,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+        return_type: IrType,
+    ) -> None:
+        if self.failure_scopes:
+            scope = self.failure_scopes[-1]
+            if isinstance(scope, _HandlerScope):
+                lines.append(f"  store i32 {status}, ptr {scope.status_slot}")
+                scope.error_sources.append((_current_label(lines), dict(names)))
+                lines.append(f"  br label %{scope.dispatch_label}")
+                return
+            original_scopes = self.failure_scopes
+            self.failure_scopes = original_scopes[:-1]
+            try:
+                self._emit_branch(scope.body, names, lines, return_type)
+                if not _block_is_terminated(lines):
+                    self._emit_failure_transfer(status, names, lines, return_type)
+            finally:
+                self.failure_scopes = original_scopes
+            return
+        if not self.current_function_is_fallible:
+            self._error("failure propagation requires a fallible function")
+        lines.append(f"  ret i32 {status}")
+
+    def _emit_control_finally(
+        self,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+        return_type: IrType,
+    ) -> None:
+        scope_index = self._innermost_finally_scope_index()
+        if scope_index is None:
+            return
+        scope = self.failure_scopes[scope_index]
+        if not isinstance(scope, _FinallyScope):
+            self._error("invalid finally scope")
+        original_scopes = self.failure_scopes
+        self.failure_scopes = original_scopes[:scope_index]
+        try:
+            self._emit_branch(scope.body, names, lines, return_type)
+            if not _block_is_terminated(lines):
+                self._emit_control_finally(names, lines, return_type)
+        finally:
+            self.failure_scopes = original_scopes
+
+    def _emit_one_finally(
+        self,
+        scope: _FinallyScope,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+        return_type: IrType,
+    ) -> None:
+        scope_index = None
+        for index in range(len(self.failure_scopes) - 1, -1, -1):
+            if self.failure_scopes[index] is scope:
+                scope_index = index
+                break
+        if scope_index is None:
+            self._error("missing active finally scope")
+        original_scopes = self.failure_scopes
+        self.failure_scopes = original_scopes[:scope_index]
+        try:
+            self._emit_branch(scope.body, names, lines, return_type)
+        finally:
+            self.failure_scopes = original_scopes
+
+    def _innermost_finally_scope_index(self) -> int | None:
+        for index in range(len(self.failure_scopes) - 1, -1, -1):
+            if isinstance(self.failure_scopes[index], _FinallyScope):
+                return index
+        return None
+
+    def _emit_try(
+        self,
+        statement: IrTry,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+        return_type: IrType,
+    ) -> None:
+        before_names = dict(names)
+        end_label = self._label("try.end")
+        incoming: list[tuple[str, dict[str, _EmittedValue]]] = []
+        finally_scope = (
+            _FinallyScope(statement.finalbody) if statement.finalbody.statements else None
+        )
+        if finally_scope is not None:
+            self.failure_scopes.append(finally_scope)
+        handler_scope = None
+        if statement.handlers and self.current_function_is_fallible:
+            handler_scope = _HandlerScope(
+                self._label("try.dispatch"),
+                self._tmp("trystatus.ptr"),
+                [],
+            )
+            lines.append(f"  {handler_scope.status_slot} = alloca i32")
+            self.failure_scopes.append(handler_scope)
+        body_names = dict(before_names)
+        self._emit_branch(statement.body, body_names, lines, return_type)
+        if handler_scope is not None:
+            popped = self.failure_scopes.pop()
+            if popped is not handler_scope:
+                self._error("unbalanced exception handler scope")
+        if not _block_is_terminated(lines):
+            self._emit_branch(statement.orelse, body_names, lines, return_type)
+        if not _block_is_terminated(lines) and finally_scope is not None:
+            self._emit_one_finally(finally_scope, body_names, lines, return_type)
+        if not _block_is_terminated(lines):
+            incoming.append((_current_label(lines), dict(body_names)))
+            lines.append(f"  br label %{end_label}")
+        if handler_scope is not None:
+            self._emit_try_handlers(
+                statement.handlers,
+                handler_scope,
+                finally_scope,
+                before_names,
+                incoming,
+                end_label,
+                lines,
+                return_type,
+            )
+        if finally_scope is not None:
+            popped = self.failure_scopes.pop()
+            if popped is not finally_scope:
+                self._error("unbalanced finally scope")
+        if not incoming:
+            return
+        lines.append(f"{end_label}:")
+        self._merge_incoming_names(names, before_names, incoming, lines, "tryphi")
+
+    def _emit_try_handlers(
+        self,
+        handlers: tuple[IrExceptHandler, ...],
+        scope: _HandlerScope,
+        finally_scope: _FinallyScope | None,
+        before_names: dict[str, _EmittedValue],
+        incoming: list[tuple[str, dict[str, _EmittedValue]]],
+        end_label: str,
+        lines: list[str],
+        return_type: IrType,
+    ) -> None:
+        if self.current_error_out is None:
+            self._error("exception handlers require error_out")
+        lines.append(f"{scope.dispatch_label}:")
+        dispatch_names = dict(before_names)
+        self._merge_incoming_names(
+            dispatch_names,
+            before_names,
+            scope.error_sources,
+            lines,
+            "errorphi",
+        )
+        status = self._tmp("trystatus")
+        lines.append(f"  {status} = load i32, ptr {scope.status_slot}")
+        error_type = self._load_error_field("type", "ptr", 0, lines)
+        handled_all = False
+        for index, handler in enumerate(handlers):
+            handler_label = self._label("except.body")
+            catch_all = self._handler_is_catch_all(handler)
+            next_label = None if catch_all else self._label("except.next")
+            if catch_all:
+                lines.append(f"  br label %{handler_label}")
+            else:
+                matched = self._emit_handler_match(error_type, handler, lines)
+                if next_label is None:
+                    self._error("typed handler is missing a continuation label")
+                lines.append(f"  br i1 {matched}, label %{handler_label}, label %{next_label}")
+            lines.append(f"{handler_label}:")
+            handler_names = dict(dispatch_names)
+            if handler.target is not None:
+                self._bind_error_target(handler, handler_names, lines)
+            self.caught_status_stack.append(status)
+            try:
+                self._emit_branch(handler.body, handler_names, lines, return_type)
+            finally:
+                self.caught_status_stack.pop()
+            if not _block_is_terminated(lines) and finally_scope is not None:
+                self._emit_one_finally(finally_scope, handler_names, lines, return_type)
+            if not _block_is_terminated(lines):
+                incoming.append((_current_label(lines), dict(handler_names)))
+                lines.append(f"  br label %{end_label}")
+            if catch_all:
+                handled_all = True
+                break
+            if next_label is None:
+                self._error(f"handler {index} is missing a next label")
+            lines.append(f"{next_label}:")
+        if not handled_all:
+            self._emit_failure_transfer(status, dispatch_names, lines, return_type)
+
+    def _handler_is_catch_all(self, handler: IrExceptHandler) -> bool:
+        return not handler.exceptions or any(
+            exception in {"BaseException", "Exception"} for exception in handler.exceptions
+        )
+
+    def _emit_handler_match(
+        self,
+        error_type: str,
+        handler: IrExceptHandler,
+        lines: list[str],
+    ) -> str:
+        tags = self._handler_runtime_tags(handler.exceptions)
+        if not tags:
+            return "true"
+        self.needs_runtime_prelude = True
+        matches: list[str] = []
+        for tag in tags:
+            compared = self._tmp("exceptcmp")
+            matched = self._tmp("exceptmatch")
+            lines.append(
+                f"  {compared} = call i32 @strcmp(ptr {error_type}, "
+                f"ptr {self._string_constant(tag)})"
+            )
+            lines.append(f"  {matched} = icmp eq i32 {compared}, 0")
+            matches.append(matched)
+        result = matches[0]
+        for matched in matches[1:]:
+            combined = self._tmp("exceptmatch")
+            lines.append(f"  {combined} = or i1 {result}, {matched}")
+            result = combined
+        return result
+
+    def _handler_runtime_tags(self, exceptions: tuple[str, ...]) -> tuple[str, ...]:
+        tags = set(exceptions)
+        for record_name in self.records:
+            for exception in exceptions:
+                if self._record_extends(record_name, exception):
+                    tags.add(record_name)
+        return tuple(sorted(tags))
+
+    def _bind_error_target(
+        self,
+        handler: IrExceptHandler,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> None:
+        if handler.target is None:
+            return
+        payload = self._load_error_field("payload", "ptr", 7, lines)
+        message = self._load_error_field("message", "ptr", 1, lines)
+        has_payload = self._tmp("errorpayload")
+        value = self._tmp("errorvalue")
+        lines.append(f"  {has_payload} = icmp ne ptr {payload}, null")
+        lines.append(f"  {value} = select i1 {has_payload}, ptr {payload}, ptr {message}")
+        target_type: IrType = IrRecordType("object")
+        if len(handler.exceptions) == 1 and handler.exceptions[0] in self.records:
+            target_type = IrRecordType(handler.exceptions[0])
+        names[handler.target] = _EmittedValue(value, target_type)
+
+    def _load_error_field(
+        self,
+        name: str,
+        llvm_type: str,
+        index: int,
+        lines: list[str],
+    ) -> str:
+        if self.current_error_out is None:
+            self._error("error field load requires error_out")
+        field_ptr = self._tmp(f"error{name}.ptr")
+        value = self._tmp(f"error{name}")
+        lines.append(
+            f"  {field_ptr} = getelementptr inbounds {_ERROR_LLVM_TYPE}, "
+            f"ptr {self.current_error_out}, i32 0, i32 {index}"
+        )
+        lines.append(f"  {value} = load {llvm_type}, ptr {field_ptr}")
+        return value
+
+    def _merge_incoming_names(
+        self,
+        target_names: dict[str, _EmittedValue],
+        before_names: dict[str, _EmittedValue],
+        incoming: list[tuple[str, dict[str, _EmittedValue]]],
+        lines: list[str],
+        prefix: str,
+    ) -> None:
+        if not incoming:
+            return
+        candidate_names = set(before_names)
+        for _, source_names in incoming:
+            candidate_names.update(source_names)
+        for name in sorted(candidate_names):
+            before = before_names.get(name)
+            values: list[tuple[str, _EmittedValue]] = []
+            for source, source_names in incoming:
+                value = source_names.get(name, before)
+                if value is not None:
+                    values.append((source, value))
+            if not values:
+                continue
+            if len(values) == 1 or all(value == values[0][1] for _, value in values[1:]):
+                target_names[name] = values[0][1]
+                continue
+            merged_type = self._if_phi_type(tuple(value for _, value in values))
+            if merged_type is None:
+                continue
+            result = self._tmp(prefix)
+            parts = ", ".join(
+                f"[ {self._if_phi_value(value, merged_type)}, %{source} ]"
+                for source, value in values
+            )
+            lines.append(f"  {result} = phi {self._storage_llvm_type(merged_type)} {parts}")
+            target_names[name] = _EmittedValue(result, merged_type)
 
     def _emit_assert(
         self,
@@ -1424,7 +1788,12 @@ class _Emitter:
             lines.append(f"  {failed} = icmp ne i32 {status}, 0")
             lines.append(f"  br i1 {failed}, label %{failure_label}, label %{success_label}")
             lines.append(f"{failure_label}:")
-            lines.append(f"  ret i32 {status}")
+            return_type = (
+                self.current_function.return_type
+                if self.current_function is not None
+                else IrNoneType()
+            )
+            self._emit_failure_transfer(status, names, lines, return_type)
             lines.append(f"{success_label}:")
             if result_slot is None:
                 return _EmittedValue("null", expr.type)
@@ -4726,6 +5095,22 @@ def _statement_assignment_types(statement: IrStmt) -> dict[str, tuple[IrType, ..
         return _branch_assignment_types(statement.body)
     if isinstance(statement, IrWhile):
         return _branch_assignment_types(statement.body)
+    if isinstance(statement, IrTry):
+        assignments = _branch_assignment_types(statement.body)
+        assignments = _merge_assignment_types(
+            assignments,
+            _branch_assignment_types(statement.orelse),
+        )
+        assignments = _merge_assignment_types(
+            assignments,
+            _branch_assignment_types(statement.finalbody),
+        )
+        for handler in statement.handlers:
+            assignments = _merge_assignment_types(
+                assignments,
+                _branch_assignment_types(handler.body),
+            )
+        return assignments
     return {}
 
 
@@ -4759,6 +5144,13 @@ def _statement_assigned_names(statement: IrStmt) -> tuple[str, ...]:
         return tuple(sorted(names))
     if isinstance(statement, IrWhile):
         return _branch_assigned_names(statement.body)
+    if isinstance(statement, IrTry):
+        names = set(_branch_assigned_names(statement.body))
+        names.update(_branch_assigned_names(statement.orelse))
+        names.update(_branch_assigned_names(statement.finalbody))
+        for handler in statement.handlers:
+            names.update(_branch_assigned_names(handler.body))
+        return tuple(sorted(names))
     return ()
 
 

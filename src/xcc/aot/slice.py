@@ -33,6 +33,7 @@ from xcc.aot.ir import (
     IrRaise,
     IrRecord,
     IrRecordType,
+    IrReraise,
     IrReturn,
     IrSetItem,
     IrStmt,
@@ -1020,6 +1021,8 @@ def _rename_statement_call(statement: IrStmt, rename_map: dict[str, str]) -> IrS
                 else None
             ),
         )
+    if isinstance(statement, IrReraise):
+        return statement
     if isinstance(statement, IrTry):
         return IrTry(
             _rename_branch_calls(statement.body, rename_map),
@@ -1149,6 +1152,8 @@ def _statement_record_names(statement: IrStmt) -> tuple[str, ...]:
         if statement.payload is not None:
             names.update(_expr_record_names(statement.payload))
         return tuple(sorted(names))
+    if isinstance(statement, IrReraise):
+        return ()
     if isinstance(statement, IrTry):
         names = set(_branch_record_names(statement.body))
         names.update(_branch_record_names(statement.orelse))
@@ -1270,6 +1275,8 @@ def _statement_call_targets(statement: IrStmt) -> tuple[str, ...]:
         if statement.payload is not None:
             raise_targets += _expr_call_targets(statement.payload)
         return raise_targets
+    if isinstance(statement, IrReraise):
+        return ()
     if isinstance(statement, IrTry):
         targets = list(_branch_call_targets(statement.body))
         targets.extend(_branch_call_targets(statement.orelse))
