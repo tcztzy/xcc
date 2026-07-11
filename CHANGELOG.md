@@ -2,6 +2,9 @@
 
 ## Current
 
+- Updated four direct LLVM codegen helper fixtures to pass the explicit
+  left/right null-pointer-constant facts added to `_LLVMGen._compare`; the
+  initial Milestone 1 codegen baseline exposed the stale helper ABI as B272.
 - Began the approved strong-bootstrap Milestone 1 freeze at baseline
   `codex/test-gate-hardening` / `182d9c7` without modifying or staging the
   unrelated OSS application document. The initial six-module Stage 0 AOT gate

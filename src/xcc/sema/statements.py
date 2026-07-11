@@ -112,7 +112,8 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
             if stmt.storage_class == "extern":
                 raise SemaError(a._extern_initializer_message("block-scope"))
             a._analyze_initializer(var_type, stmt.init, scope)
-            if var_type.is_array() and var_type.declarator_ops[0][1] < 0:
+            array_bound = var_type.declarator_ops[0][1] if var_type.is_array() else None
+            if isinstance(array_bound, int) and array_bound < 0:
                 inferred = a._infer_array_size_from_init(stmt.init, scope, var_type)
                 if inferred is not None:
                     new_ops = (("arr", inferred),) + var_type.declarator_ops[1:]
@@ -163,7 +164,7 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
             raise SemaError("Return value is not compatible with function return type")
         return
     if isinstance(stmt, ForStmt):
-        inner_scope = Scope(scope)
+        inner_scope = scope.child()
         if isinstance(stmt.init, Stmt):
             a._analyze_stmt(stmt.init, inner_scope, return_type)
         elif isinstance(stmt.init, Expr):
@@ -227,11 +228,11 @@ def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) 
             raise SemaError("Indirect goto target must be pointer to void")
         return
     if isinstance(stmt, CompoundStmt):
-        inner_scope = Scope(scope)
+        inner_scope = scope.child()
         a._analyze_compound(stmt, inner_scope, return_type)
         return
     if isinstance(stmt, IfStmt):
-        inner_scope = Scope(scope)
+        inner_scope = scope.child()
         a._check_condition_type(a._analyze_expr(stmt.condition, inner_scope))
         a._analyze_stmt(stmt.then_body, inner_scope, return_type)
         if stmt.else_body is not None:

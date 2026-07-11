@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from xcc.ast import (
     ArrayDecl,
@@ -9,6 +9,7 @@ from xcc.ast import (
     Expr,
     TypeSpec,
     UnaryExpr,
+    type_spec_declarator_ops,
 )
 from xcc.types import (
     BOOL,
@@ -31,19 +32,28 @@ from xcc.types import (
     USHORT,
     VOID,
     Type,
+    type_declarator_ops,
 )
 
 from .symbols import EnumConstSymbol, RecordMemberInfo, Scope, SemaError
 
+if TYPE_CHECKING:
+    from . import Analyzer
 
-def register_type_spec(analyzer: object, type_spec: TypeSpec) -> None:
+
+def register_type_spec(analyzer: "Analyzer", type_spec: TypeSpec) -> None:
     self = cast(Any, analyzer)
-    if type_spec.name not in {"struct", "union"} or not type_spec.has_record_body:
+    if type_spec.name not in {"struct", "union"}:
+        return
+    if not type_spec.has_record_body and not type_spec.record_members:
         return
     spec_id = id(type_spec)
     if spec_id in self._seen_record_definitions:
         return
     self._seen_record_definitions.add(spec_id)
+    key = self._record_type_name(type_spec)
+    if type_spec.record_tag is None and self._record_definitions.get(key) is not None:
+        return
     seen_members: set[str] = set()
     member_types: list[RecordMemberInfo] = []
     for member in type_spec.record_members:
@@ -96,7 +106,7 @@ def register_type_spec(analyzer: object, type_spec: TypeSpec) -> None:
         if (
             member_name is None
             and bit_width is None
-            and not resolved_member_type.declarator_ops
+            and not type_declarator_ops(resolved_member_type)
             and self._is_record_name(resolved_member_type.name)
         ):
             nested_lookup = self._record_member_lookup(resolved_member_type.name)
@@ -113,11 +123,10 @@ def register_type_spec(analyzer: object, type_spec: TypeSpec) -> None:
                 bit_width,
             )
         )
-    key = self._record_type_name(type_spec)
-    if key in self._record_definitions:
-        existing = self._record_definitions[key]
+    existing = self._record_definitions.get(key)
+    if existing is not None:
         if existing != tuple(member_types):
-            display_key = key.split(" <scope:", 1)[0]
+            display_key = key.split(" <scope:")[0]
             raise SemaError(f"Duplicate definition: {display_key}")
         return
     self._record_definitions[key] = tuple(member_types)
@@ -128,10 +137,11 @@ def register_type_spec(analyzer: object, type_spec: TypeSpec) -> None:
     self._record_pack[key] = pack
 
 
-def resolve_type(analyzer: object, type_spec: TypeSpec) -> Type:
+def resolve_type(analyzer: "Analyzer", type_spec: TypeSpec) -> Type:
     self = cast(Any, analyzer)
     self._register_type_spec(type_spec)
-    is_unqualified_scalar = not type_spec.declarator_ops and not type_spec.qualifiers
+    ops = type_spec_declarator_ops(type_spec)
+    is_unqualified_scalar = not ops and not type_spec.qualifiers
     if type_spec.name == "int" and is_unqualified_scalar:
         return INT
     if type_spec.name == "char" and is_unqualified_scalar:
@@ -173,9 +183,9 @@ def resolve_type(analyzer: object, type_spec: TypeSpec) -> Type:
     if type_spec.name == "typeof" and type_spec.typeof_expr is not None:
         scope = self._current_scope if self._current_scope is not None else self._file_scope
         expr_type = self._analyze_expr(type_spec.typeof_expr, scope)
-        if type_spec.declarator_ops:
+        if ops:
             base = expr_type
-            for kind, value in type_spec.declarator_ops:
+            for kind, value in ops:
                 if kind == "ptr":
                     base = base.pointer_to()
                 elif kind == "arr":
@@ -187,14 +197,17 @@ def resolve_type(analyzer: object, type_spec: TypeSpec) -> Type:
         return expr_type
     if type_spec.name == "enum" and is_unqualified_scalar:
         return INT
-    if type_spec.name in {"struct", "union"} and not type_spec.declarator_ops:
+    if type_spec.name in {"struct", "union"} and not ops:
         return Type(self._record_type_name(type_spec), qualifiers=type_spec.qualifiers)
     resolved_ops: list[tuple[str, int | tuple[tuple[Type, ...] | None, bool]]] = []
-    for kind, value in type_spec.declarator_ops:
+    for kind, value in ops:
+        if kind == "ptr":
+            resolved_ops.append(("ptr", 0))
+            continue
+        if kind == "arr":
+            resolved_ops.append(("arr", self._resolve_array_bound(value)))
+            continue
         if kind != "fn":
-            if kind == "arr":
-                resolved_ops.append(("arr", self._resolve_array_bound(value)))
-                continue
             assert isinstance(value, int)
             resolved_ops.append((kind, value))
             continue
@@ -212,7 +225,7 @@ def resolve_type(analyzer: object, type_spec: TypeSpec) -> Type:
     return Type(base_name, declarator_ops=tuple(resolved_ops), qualifiers=type_spec.qualifiers)
 
 
-def resolve_array_bound(analyzer: object, value: object) -> int:
+def resolve_array_bound(analyzer: "Analyzer", value: object) -> int:
     self = cast(Any, analyzer)
     if isinstance(value, int):
         return value
@@ -229,7 +242,7 @@ def resolve_array_bound(analyzer: object, value: object) -> int:
 
 
 def resolve_function_param_types(
-    analyzer: object,
+    analyzer: "Analyzer",
     declarator_value: int | tuple[tuple[TypeSpec, ...] | None, bool],
 ) -> tuple[tuple[Type, ...] | None, bool]:
     self = cast(Any, analyzer)
@@ -251,13 +264,13 @@ def resolve_function_param_types(
     return tuple(params), is_variadic
 
 
-def resolve_param_type(analyzer: object, type_spec: TypeSpec) -> Type:
+def resolve_param_type(analyzer: "Analyzer", type_spec: TypeSpec) -> Type:
     self = cast(Any, analyzer)
     resolved = self._resolve_type(type_spec)
     return resolved.decay_parameter_type()
 
 
-def define_enum_members(analyzer: object, type_spec: TypeSpec, scope: Scope) -> None:
+def define_enum_members(analyzer: "Analyzer", type_spec: TypeSpec, scope: Scope) -> None:
     self = cast(Any, analyzer)
     next_value = 0
     for name, expr in type_spec.enum_members:
@@ -271,7 +284,7 @@ def define_enum_members(analyzer: object, type_spec: TypeSpec, scope: Scope) -> 
         next_value = enum_value + 1
 
 
-def _eval_enum_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | None:
+def _eval_enum_int_constant_expr(analyzer: "Analyzer", expr: Expr, scope: Scope) -> int | None:
     self = cast(Any, analyzer)
     value = self._eval_int_constant_expr(expr, scope)
     if value is not None:
@@ -308,7 +321,7 @@ def _eval_enum_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> 
 
 
 def _eval_enum_binary_int_constant_expr(
-    analyzer: object,
+    analyzer: "Analyzer",
     expr: BinaryExpr,
     scope: Scope,
 ) -> int | None:
@@ -363,7 +376,7 @@ def _eval_enum_binary_int_constant_expr(
     return None
 
 
-def _enum_char_literal_value(analyzer: object, lexeme: str) -> int | None:
+def _enum_char_literal_value(analyzer: "Analyzer", lexeme: str) -> int | None:
     self = cast(Any, analyzer)
     body = self._char_literal_body(lexeme)
     if body is None:
@@ -377,7 +390,7 @@ def _enum_char_literal_value(analyzer: object, lexeme: str) -> int | None:
     return value
 
 
-def define_scoped_enum_members(analyzer: object, type_spec: TypeSpec, scope: Scope) -> None:
+def define_scoped_enum_members(analyzer: "Analyzer", type_spec: TypeSpec, scope: Scope) -> None:
     self = cast(Any, analyzer)
     if not type_spec.enum_members:
         return
@@ -389,41 +402,50 @@ def define_scoped_enum_members(analyzer: object, type_spec: TypeSpec, scope: Sco
 
 
 def is_function_object_type(type_spec: TypeSpec) -> bool:
-    return bool(type_spec.declarator_ops) and type_spec.declarator_ops[0][0] == "fn"
+    ops = type_spec_declarator_ops(type_spec)
+    return bool(ops) and ops[0][0] == "fn"
 
 
-def is_invalid_atomic_type_spec(analyzer: object, type_spec: TypeSpec) -> bool:
+def is_invalid_atomic_type_spec(analyzer: "Analyzer", type_spec: TypeSpec) -> bool:
     self = cast(Any, analyzer)
     if not type_spec.is_atomic:
         return False
-    target = type_spec.atomic_target if type_spec.atomic_target is not None else type_spec
+    target = type_spec
+    if type_spec.atomic_target is not None:
+        target = type_spec.atomic_target
+    target_ops = type_spec_declarator_ops(target)
     return (
         self._is_invalid_void_object_type(target)
         or self._is_invalid_incomplete_record_object_type(target)
         or self._is_function_object_type(target)
-        or (bool(target.declarator_ops) and target.declarator_ops[0][0] == "arr")
+        or (bool(target_ops) and target_ops[0][0] == "arr")
     )
 
 
-def is_invalid_incomplete_record_object_type(analyzer: object, type_spec: TypeSpec) -> bool:
+def is_invalid_incomplete_record_object_type(analyzer: "Analyzer", type_spec: TypeSpec) -> bool:
     self = cast(Any, analyzer)
     if type_spec.name not in {"struct", "union"}:
         return False
-    if any(kind == "ptr" for kind, _ in type_spec.declarator_ops):
-        return False
+    ops = type_spec_declarator_ops(type_spec)
+    index = 0
+    while index < len(ops):
+        kind, _ = ops[index]
+        if kind == "ptr":
+            return False
+        index += 1
     if type_spec.record_members:
         return False
     if type_spec.record_tag is None:
         return True
     key = self._record_type_name(type_spec)
-    return key not in self._record_definitions
+    return self._record_members(key) is None
 
 
 def is_record_name(name: str) -> bool:
     return name.startswith("struct ") or name.startswith("union ")
 
 
-def lookup_record_member(analyzer: object, record_type: Type, member_name: str) -> Type:
+def lookup_record_member(analyzer: "Analyzer", record_type: Type, member_name: str) -> Type:
     self = cast(Any, analyzer)
     lookup = self._record_member_lookup(record_type.name)
     if lookup is None:
@@ -435,7 +457,7 @@ def lookup_record_member(analyzer: object, record_type: Type, member_name: str) 
 
 
 def resolve_member_type(
-    analyzer: object,
+    analyzer: "Analyzer",
     base_type: Type,
     member_name: str,
     through_pointer: bool,
@@ -446,7 +468,7 @@ def resolve_member_type(
         record_type = base_value_type.pointee()
         if (
             record_type is None
-            or record_type.declarator_ops
+            or type_declarator_ops(record_type)
             or not self._is_record_name(record_type.name)
         ):
             # In GNU mode, allow -> on a non-pointer record type by
@@ -455,19 +477,19 @@ def resolve_member_type(
             # underlying record type.
             if (
                 self._std == "gnu11"
-                and not base_type.declarator_ops
+                and not type_declarator_ops(base_type)
                 and self._is_record_name(base_type.name)
             ):
                 return self._lookup_record_member(base_type, member_name)
             raise SemaError("Member access on non-record pointer")
         return self._lookup_record_member(record_type, member_name)
-    if base_type.declarator_ops or not self._is_record_name(base_type.name):
+    if type_declarator_ops(base_type) or not self._is_record_name(base_type.name):
         raise SemaError("Member access on non-record type")
     return self._lookup_record_member(base_type, member_name)
 
 
 def invalid_sizeof_operand_reason_for_type_spec(
-    analyzer: object,
+    analyzer: "Analyzer",
     type_spec: TypeSpec,
 ) -> str | None:
     self = cast(Any, analyzer)
@@ -482,23 +504,26 @@ def invalid_sizeof_operand_reason_for_type_spec(
     return None
 
 
-def invalid_sizeof_operand_reason_for_type(analyzer: object, type_: Type) -> str | None:
+def invalid_sizeof_operand_reason_for_type(analyzer: "Analyzer", type_: Type) -> str | None:
     self = cast(Any, analyzer)
     if type_ == VOID:
         return "void type"
-    if type_.declarator_ops and type_.declarator_ops[0][0] == "fn":
+    ops = type_declarator_ops(type_)
+    if ops and ops[0][0] == "fn":
         return "function type"
-    if (
-        self._is_record_name(type_.name)
-        and not any(kind == "ptr" for kind, _ in type_.declarator_ops)
-        and type_.name not in self._record_definitions
-    ):
+    index = 0
+    while index < len(ops):
+        kind, _ = ops[index]
+        if kind == "ptr":
+            return None
+        index += 1
+    if self._is_record_name(type_.name) and self._record_members(type_.name) is None:
         return "incomplete type"
     return None
 
 
 def invalid_generic_association_type_reason(
-    analyzer: object,
+    analyzer: "Analyzer",
     type_spec: TypeSpec,
 ) -> str | None:
     self = cast(Any, analyzer)
@@ -512,14 +537,14 @@ def invalid_generic_association_type_reason(
 
 def describe_generic_association_type(type_spec: TypeSpec, resolved_type: Type) -> str:
     spelled_type = f"{' '.join(type_spec.qualifiers)} {type_spec.name}".strip()
-    if not type_spec.declarator_ops and not type_spec.is_atomic:
+    if not type_spec_declarator_ops(type_spec) and not type_spec.is_atomic:
         return spelled_type
     return str(resolved_type)
 
 
-def is_variably_modified_type_spec(analyzer: object, type_spec: TypeSpec) -> bool:
+def is_variably_modified_type_spec(analyzer: "Analyzer", type_spec: TypeSpec) -> bool:
     self = cast(Any, analyzer)
-    for kind, value in type_spec.declarator_ops:
+    for kind, value in type_spec_declarator_ops(type_spec):
         if kind != "arr":
             continue
         if isinstance(value, int):

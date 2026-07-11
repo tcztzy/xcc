@@ -298,6 +298,20 @@ int main(void)
 
         self.assertProgramReturns(source, 0)
 
+    def test_pointer_null_comparisons_avoid_inttoptr(self) -> None:
+        source = """
+int main(void)
+{
+  int *cursor = 0;
+  return (cursor == 0) + (0 == cursor) + (cursor != 0);
+}
+"""
+
+        ir = self.assertLlcAccepts(source)
+
+        self.assertIn("icmp ne ptr", ir)
+        self.assertNotIn("inttoptr", ir)
+
     def test_bool_conversion_uses_nonzero_not_low_bit_truncation(self) -> None:
         self.assertProgramReturns(
             "int main(void) { _Bool b = 0x1000000; return b ? 0 : 1; }",
@@ -3403,6 +3417,8 @@ int f(void) { return 0; }
                 c.ConstInt(c.Int32Type(), 1, False),
                 None,
                 None,
+                False,
+                False,
             ),
             0,
         )
@@ -3413,6 +3429,8 @@ int f(void) { return 0; }
                 c.ConstInt(c.Int32Type(), 1, False),
                 None,
                 None,
+                False,
+                False,
             ),
             0,
         )
@@ -3921,6 +3939,8 @@ int define_duplicate(int dup) { return dup; }
                     c.ConstReal(c.FloatType(), 2.0),
                     FLOAT,
                     FLOAT,
+                    False,
+                    False,
                 ),
                 0,
             )
@@ -3931,6 +3951,8 @@ int define_duplicate(int dup) { return dup; }
                     c.ConstInt(c.Int32Type(), 2, False),
                     unsigned_int,
                     unsigned_int,
+                    False,
+                    False,
                 ),
                 0,
             )
@@ -3941,6 +3963,8 @@ int define_duplicate(int dup) { return dup; }
                     c.ConstInt(c.Int32Type(), 2, True),
                     INT,
                     INT,
+                    False,
+                    False,
                 ),
                 0,
             )
@@ -3951,6 +3975,8 @@ int define_duplicate(int dup) { return dup; }
                 c.ConstReal(c.FloatType(), 2.0),
                 FLOAT,
                 FLOAT,
+                False,
+                False,
             )
         with self.assertRaises(CodegenError):
             gen._compare(
@@ -3959,6 +3985,8 @@ int define_duplicate(int dup) { return dup; }
                 c.ConstInt(c.Int32Type(), 2, True),
                 INT,
                 INT,
+                False,
+                False,
             )
 
         def bind_local(name: str, type_: Type, value_ref: int) -> None:
@@ -5268,6 +5296,8 @@ int f(void) { return 0; }
                 c.ConstNull(c.ArrayType(c.Int32Type(), 2)),
                 Type("int").array_of(2),
                 Type("int").array_of(2),
+                False,
+                False,
             ),
             0,
         )
@@ -5415,6 +5445,8 @@ int f(void) { return 0; }
                 c.ConstInt(c.Int32Type(), 1, False),
                 None,
                 None,
+                False,
+                False,
             ),
             0,
         )
@@ -5425,6 +5457,8 @@ int f(void) { return 0; }
                 c.ConstInt(c.Int64Type(), 1, False),
                 None,
                 None,
+                False,
+                False,
             ),
             0,
         )

@@ -65,7 +65,10 @@ class TypeMap:
         return self._map.get(id(node))
 
     def require(self, node: Expr) -> Type:
-        return self._map[id(node)]
+        type_ = self.get(node)
+        if type_ is None:
+            raise KeyError("missing type map entry")
+        return type_
 
 
 @dataclass(frozen=True)
@@ -82,8 +85,13 @@ class Scope:
     def __init__(self, parent: "Scope | None" = None) -> None:
         self._symbols: dict[str, VarSymbol | EnumConstSymbol] = {}
         self._typedefs: dict[str, Type] = {}
-        self._record_tags: dict[tuple[str, str], str] = {}
+        self._record_tags: dict[str, str] = {}
         self._parent = parent
+
+    def child(self) -> "Scope":
+        scope = Scope()
+        scope._parent = self
+        return scope
 
     def _types_mergeable(self, a: "Type", b: "Type") -> bool:
         """Check two types are compatible enough to merge tentative definitions.
@@ -107,7 +115,9 @@ class Scope:
                 return False
             if kind_a == "arr":
                 assert isinstance(val_a, int) and isinstance(val_b, int)
-                if val_a > 0 and val_b > 0 and val_a != val_b:
+                bound_a = val_a
+                bound_b = val_b
+                if bound_a > 0 and bound_b > 0 and bound_a != bound_b:
                     return False
             elif kind_a == "fn" and val_a != val_b:
                 return False
@@ -183,7 +193,7 @@ class Scope:
         self._typedefs[name] = type_
 
     def define_record_tag(self, kind: str, tag: str, record_name: str) -> str:
-        key = (kind, tag)
+        key = kind + " " + tag
         existing = self._record_tags.get(key)
         if existing is not None:
             return existing
@@ -191,31 +201,34 @@ class Scope:
         return record_name
 
     def lookup_record_tag_current(self, kind: str, tag: str) -> str | None:
-        return self._record_tags.get((kind, tag))
+        return self._record_tags.get(kind + " " + tag)
 
     def lookup_record_tag(self, kind: str, tag: str) -> str | None:
-        record_name = self.lookup_record_tag_current(kind, tag)
-        if record_name is not None:
-            return record_name
-        if self._parent is None:
-            return None
-        return self._parent.lookup_record_tag(kind, tag)
+        scope: Scope | None = self
+        while scope is not None:
+            record_name = scope.lookup_record_tag_current(kind, tag)
+            if record_name is not None:
+                return record_name
+            scope = scope._parent
+        return None
 
     def lookup(self, name: str) -> VarSymbol | EnumConstSymbol | None:
-        symbol = self._symbols.get(name)
-        if symbol is not None:
-            return symbol
-        if self._parent is None:
-            return None
-        return self._parent.lookup(name)
+        scope: Scope | None = self
+        while scope is not None:
+            symbol = scope._symbols.get(name)
+            if symbol is not None:
+                return symbol
+            scope = scope._parent
+        return None
 
     def lookup_typedef(self, name: str) -> Type | None:
-        typedef_type = self._typedefs.get(name)
-        if typedef_type is not None:
-            return typedef_type
-        if self._parent is None:
-            return None
-        return self._parent.lookup_typedef(name)
+        scope: Scope | None = self
+        while scope is not None:
+            typedef_type = scope._typedefs.get(name)
+            if typedef_type is not None:
+                return typedef_type
+            scope = scope._parent
+        return None
 
     @property
     def symbols(self) -> dict[str, VarSymbol | EnumConstSymbol]:

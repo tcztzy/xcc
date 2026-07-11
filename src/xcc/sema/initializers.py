@@ -226,7 +226,12 @@ def analyze_record_initializer_list(
     all_members = analyzer._record_members(target_type.name)  # type: ignore
     if all_members is None:
         raise SemaError("Initializer type mismatch")
-    if not any(_record_member_takes_initializer(analyzer, member) for member in all_members):
+    has_initializable_member = False
+    for member in all_members:
+        if _record_member_takes_initializer(analyzer, member):
+            has_initializable_member = True
+            break
+    if not has_initializable_member:
         # In GNU mode, empty/anonymous struct init is silently accepted.
         if _is_gnu_mode(analyzer):
             return

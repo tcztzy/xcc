@@ -1,4 +1,3 @@
-from contextlib import suppress
 from typing import Literal
 
 from xcc.ast import (
@@ -12,7 +11,6 @@ from xcc.ast import (
     InitList,
     MemberExpr,
     Param,
-    RecordMemberDecl,
     StaticAssertDecl,
     Stmt,
     StringLiteral,
@@ -79,6 +77,7 @@ from .layout import (
     sizeof_type,
 )
 from .records import (
+    anonymous_record_key,
     flatten_hoisted_record_members,
     is_anonymous_record_member,
     normalize_record_members,
@@ -135,10 +134,6 @@ _FLOAT_COMPARE_BUILTINS = (
 )
 
 
-def _overload_rank_key(item: tuple[int, int, FunctionSignature]) -> tuple[int, int]:
-    return item[0], item[1]
-
-
 class Analyzer:
     def __init__(
         self,
@@ -158,7 +153,7 @@ class Analyzer:
                 _pack = _p
         self._effective_global_pack: int | None = _pack
         self._functions: dict[str, FunctionSymbol] = {}
-        self._type_map = TypeMap()
+        self._type_map: TypeMap = TypeMap()
         self._function_signatures: dict[str, FunctionSignature] = {}
         self._function_overloads: dict[str, list[FunctionSignature]] = {}
         self._overloadable_functions: set[str] = set()
@@ -174,7 +169,7 @@ class Analyzer:
         ] = {}
         self._seen_record_definitions: set[int] = set()
         self._seen_scoped_enum_definitions: set[tuple[int, int]] = set()
-        self._file_scope = Scope()
+        self._file_scope: Scope = Scope()
         self._loop_depth = 0
         self._switch_stack: list[SwitchContext] = []
         self._function_labels: set[str] = set()
@@ -183,7 +178,7 @@ class Analyzer:
         self._current_scope: Scope | None = None
         self._current_function_name: str | None = None
         self._anon_record_counter = 0
-        self._anon_record_names: dict[tuple[str, tuple[RecordMemberDecl, ...]], str] = {}
+        self._anon_record_names: dict[str, str] = {}
         self._scoped_record_counter = 0
         self._record_type_names_by_spec_id: dict[int, str] = {}
         self._register_builtin_functions()
@@ -805,17 +800,10 @@ class Analyzer:
             overloads.append(signature)
 
     def _set_overload_expr_name(self, expr: Expr, name: str) -> None:
-        with suppress(TypeError):
-            self._overload_expr_names[expr] = name
-            return
         self._overload_expr_ids[id(expr)] = name
 
     def _get_overload_expr_name(self, expr: Expr) -> str | None:
-        try:
-            hash(expr)
-        except TypeError:
-            return self._overload_expr_ids.get(id(expr))
-        return self._overload_expr_names.get(expr)
+        return self._overload_expr_ids.get(id(expr))
 
     def _signature_matches_callable_type(
         self,
@@ -841,11 +829,10 @@ class Analyzer:
         overloads = self._function_overloads.get(overload_name)
         if not overloads:
             return None
-        matches = [
-            signature
-            for signature in overloads
-            if self._signature_matches_callable_type(signature, target_type)
-        ]
+        matches: list[FunctionSignature] = []
+        for signature in overloads:
+            if self._signature_matches_callable_type(signature, target_type):
+                matches.append(signature)
         if len(matches) != 1:
             return None
         return matches[0]
@@ -876,7 +863,7 @@ class Analyzer:
     def _analyze_function(self, func: FunctionDef) -> None:
         return_type = self._function_signatures[func.name].return_type
         assert func.body is not None
-        scope = Scope(self._file_scope)
+        scope = self._file_scope.child()
         self._function_labels = set()
         self._pending_goto_labels = []
         previous_return_type = self._current_return_type
@@ -1045,7 +1032,7 @@ class Analyzer:
             if cached is not None:
                 return cached
             scope = self._current_scope if self._current_scope is not None else self._file_scope
-            if type_spec.has_record_body:
+            if type_spec.has_record_body or type_spec.record_members:
                 name = scope.lookup_record_tag_current(type_spec.name, type_spec.record_tag)
                 if name is None:
                     name = self._new_record_type_name(type_spec.name, type_spec.record_tag, scope)
@@ -1057,11 +1044,14 @@ class Analyzer:
                     scope.define_record_tag(type_spec.name, type_spec.record_tag, name)
             self._record_type_names_by_spec_id[id(type_spec)] = name
             return name
-        name, self._anon_record_counter = record_type_name(
+        result = record_type_name(
             type_spec,
             self._anon_record_names,
             self._anon_record_counter,
         )
+        name = result[0]
+        self._anon_record_counter = result[1]
+        self._anon_record_names[anonymous_record_key(type_spec)] = name
         return name
 
     def _new_record_type_name(self, kind: str, tag: str, scope: Scope) -> str:
@@ -1087,7 +1077,7 @@ class Analyzer:
             self._transparent_union_types.add(type_.name)
 
     def _is_anonymous_record_member(self, member: RecordMemberInfo) -> bool:
-        return is_anonymous_record_member(member, self._is_record_name)
+        return is_anonymous_record_member(member)
 
     def _flatten_hoisted_record_members(
         self,
@@ -1098,7 +1088,6 @@ class Analyzer:
             self._record_definitions,
             record_type,
             owner_index,
-            self._is_record_name,
         )
 
     def _record_member_lookup(
@@ -1109,7 +1098,6 @@ class Analyzer:
             self._record_definitions,
             self._record_member_lookup_cache,
             record_name,
-            self._is_record_name,
         )
 
     def _register_type_spec(self, type_spec: TypeSpec) -> None:
@@ -1446,9 +1434,12 @@ class Analyzer:
         )
 
     def _is_invalid_void_object_type(self, type_spec: TypeSpec) -> bool:
-        return type_spec.name == "void" and not any(
-            kind == "ptr" for kind, _ in type_spec.declarator_ops
-        )
+        if type_spec.name != "void":
+            return False
+        for kind, _ in type_spec.declarator_ops:  # noqa: SIM110
+            if kind == "ptr":
+                return False
+        return True
 
     def _is_invalid_void_parameter_type(self, type_spec: TypeSpec) -> bool:
         return type_spec.name == "void" and not type_spec.declarator_ops
@@ -1505,23 +1496,44 @@ class Analyzer:
                 self._analyze_expr(arg, scope)
             self._check_call_arguments(args, default.params, default.is_variadic, name, scope)
             return default
-        analyzed_arg_types = [
-            self._decay_array_value(self._analyze_expr(arg, scope)) for arg in args
-        ]
-        ranked: list[tuple[int, int, FunctionSignature]] = []
+        analyzed_arg_types: list[Type] = []
+        for arg in args:
+            analyzed_arg_types.append(self._decay_array_value(self._analyze_expr(arg, scope)))
+        best_score_exact = 0
+        best_score_promotion = 0
+        best_has_score = False
+        best_signature = default
+        ambiguous = False
         for signature in overloads:
             score = self._match_overload_signature(args, analyzed_arg_types, signature, scope)
             if score is not None:
-                ranked.append((score[0], score[1], signature))
-        if not ranked:
+                score_exact = score[0]
+                score_promotion = score[1]
+                if (
+                    not best_has_score
+                    or score_exact > best_score_exact
+                    or (score_exact == best_score_exact and score_promotion > best_score_promotion)
+                ):
+                    best_score_exact = score_exact
+                    best_score_promotion = score_promotion
+                    best_has_score = True
+                    best_signature = signature
+                    ambiguous = False
+                elif score_exact == best_score_exact and score_promotion == best_score_promotion:
+                    ambiguous = True
+        if not best_has_score:
             self._check_call_arguments(args, default.params, default.is_variadic, name, scope)
             return default
-        ranked.sort(key=_overload_rank_key, reverse=True)
-        if len(ranked) > 1 and ranked[0][:2] == ranked[1][:2]:
+        if ambiguous:
             raise SemaError(f"Ambiguous overloaded call: {name}")
-        chosen = ranked[0][2]
-        self._check_call_arguments(args, chosen.params, chosen.is_variadic, name, scope)
-        return chosen
+        self._check_call_arguments(
+            args,
+            best_signature.params,
+            best_signature.is_variadic,
+            name,
+            scope,
+        )
+        return best_signature
 
     def _match_overload_signature(
         self,
@@ -1539,7 +1551,9 @@ class Analyzer:
             return None
         exact_matches = 0
         fixed_params = signature.params
-        for arg, arg_type, param_type in zip(args, arg_types, fixed_params, strict=False):
+        for index, param_type in enumerate(fixed_params):
+            arg = args[index]
+            arg_type = arg_types[index]
             if not self._is_call_argument_compatible(param_type, arg, arg_type, scope):
                 return None
             if arg_type == param_type:
@@ -1553,7 +1567,7 @@ class Analyzer:
             return LONGDOUBLE
         return DOUBLE
 
-    def _parse_int_literal(self, lexeme: str | int) -> tuple[int, Type] | None:
+    def _parse_int_literal(self, lexeme: str) -> tuple[int, Type] | None:
         return parse_int_literal(self, lexeme)
 
     def _fits_integer_literal_value(self, value: int, type_: Type) -> bool:

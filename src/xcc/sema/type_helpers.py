@@ -21,13 +21,13 @@ from xcc.types import (
     Type,
 )
 
-SIGNED_INTEGER_TYPE_LIMITS = {
+SIGNED_INTEGER_TYPE_LIMITS: dict[Type, tuple[int, int]] = {
     INT: (-(1 << 31), (1 << 31) - 1),
     LONG: (-(1 << 63), (1 << 63) - 1),
     LLONG: (-(1 << 63), (1 << 63) - 1),
     INT128: (-(1 << 127), (1 << 127) - 1),
 }
-UNSIGNED_INTEGER_TYPE_LIMITS = {
+UNSIGNED_INTEGER_TYPE_LIMITS: dict[Type, int] = {
     UINT: (1 << 32) - 1,
     ULONG: (1 << 64) - 1,
     ULLONG: (1 << 64) - 1,
@@ -86,7 +86,9 @@ CANONICAL_INTEGER_TYPES = {
 
 
 def is_integer_type(type_: Type) -> bool:
-    return type_.declarator_ops == () and _canonical_integer_type(type_.name) is not None
+    if type_.declarator_ops:
+        return False
+    return _canonical_integer_type(type_.name) is not None
 
 
 def is_const_qualified(type_: Type) -> bool:
@@ -94,7 +96,7 @@ def is_const_qualified(type_: Type) -> bool:
 
 
 def is_floating_type(type_: Type) -> bool:
-    if type_.declarator_ops != ():
+    if type_.declarator_ops:
         return False
     return type_.name in ("float", "double", "long double")
 
@@ -287,12 +289,29 @@ def is_compatible_pointee_type(left_type: Type, right_type: Type) -> bool:
     )
 
 
+def _merge_unique_qualifiers(
+    left: tuple[str, ...],
+    right: tuple[str, ...],
+) -> tuple[str, ...]:
+    merged: tuple[str, ...] = ()
+    for qualifier in left:
+        if qualifier not in merged:
+            merged = (*merged, qualifier)
+    for qualifier in right:
+        if qualifier not in merged:
+            merged = (*merged, qualifier)
+    return merged
+
+
 def merged_qualifiers(left_type: Type, right_type: Type) -> tuple[str, ...]:
-    return tuple(dict.fromkeys((*left_type.qualifiers, *right_type.qualifiers)))
+    return _merge_unique_qualifiers(left_type.qualifiers, right_type.qualifiers)
 
 
 def qualifiers_contain(target_type: Type, value_type: Type) -> bool:
-    return set(value_type.qualifiers).issubset(target_type.qualifiers)
+    for qualifier in value_type.qualifiers:  # noqa: SIM110 - avoid generator lowering in AOT code.
+        if qualifier not in target_type.qualifiers:
+            return False
+    return True
 
 
 def is_object_pointer_type(type_: Type) -> bool:

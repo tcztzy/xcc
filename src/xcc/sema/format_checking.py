@@ -80,7 +80,10 @@ def check_printf_format(
     if body is None:  # pragma: no cover
         return
     decoded = decode_escaped_units(body)
-    format_string = "".join(chr(c) for c in decoded)
+    format_chars: list[str] = []
+    for c in decoded:
+        format_chars.append(chr(c))
+    format_string = "".join(format_chars)
     specs = _parse_printf_format_string(format_string)
     arg_index = 0
     for spec in specs:  # pragma: no branch
@@ -96,7 +99,8 @@ def check_printf_format(
 
 
 def _pointee_or_element(type_: Type) -> Type | None:
-    if (pointee := type_.pointee()) is not None:
+    pointee = type_.pointee()
+    if pointee is not None:
         return pointee
     return type_.element_type()
 
@@ -113,22 +117,22 @@ def _check_format_spec(spec: _FormatSpec, arg_type: Type, arg_index: int) -> Non
         if not is_integer_type(arg_type):  # pragma: no cover
             raise SemaError(_format_flag_msg(arg_index, str(arg_type), "integer"))
     elif c == "s":
-        pointee = _pointee_or_element(arg_type)
-        if pointee is None:  # pragma: no cover
+        string_pointee = _pointee_or_element(arg_type)
+        if string_pointee is None:  # pragma: no cover
             raise SemaError(_format_flag_msg(arg_index, str(arg_type), "pointer to char"))
         if spec.length == "l":
-            if not is_integer_type(pointee):  # pragma: no cover
+            if not is_integer_type(string_pointee):  # pragma: no cover
                 raise SemaError(
                     _format_flag_msg(arg_index, str(arg_type), "pointer to wide character")
                 )
             return
-        if pointee.name not in {"char", "signed char", "unsigned char"}:  # pragma: no cover
+        if string_pointee.name not in {"char", "signed char", "unsigned char"}:  # pragma: no cover
             raise SemaError(_format_flag_msg(arg_index, str(arg_type), "pointer to char"))
     elif c == "p":
-        pointee = _pointee_or_element(arg_type)
-        if pointee is None:  # pragma: no cover
+        pointer_pointee = _pointee_or_element(arg_type)
+        if pointer_pointee is None:  # pragma: no cover
             raise SemaError(_format_flag_msg(arg_index, str(arg_type), "pointer"))
     elif c == "n":  # pragma: no branch
-        pointee = _pointee_or_element(arg_type)
-        if pointee is None or not is_integer_type(pointee):  # pragma: no cover
+        count_pointee = _pointee_or_element(arg_type)
+        if count_pointee is None or not is_integer_type(count_pointee):  # pragma: no cover
             raise SemaError(_format_flag_msg(arg_index, str(arg_type), "pointer to integer"))

@@ -7,7 +7,7 @@ def _align_to(value: int, alignment: int) -> int:
 
 
 POINTER_SIZE = 8
-BASE_TYPE_SIZES = {
+BASE_TYPE_SIZES: dict[str, int] = {
     "_Bool": 1,
     "char": 1,
     "unsigned char": 1,
@@ -28,7 +28,7 @@ BASE_TYPE_SIZES = {
     "double": 8,
     "long double": 16,
 }
-BASE_TYPE_ALIGNMENTS = dict(BASE_TYPE_SIZES)
+BASE_TYPE_ALIGNMENTS: dict[str, int] = dict(BASE_TYPE_SIZES)
 
 
 def sizeof_type(analyzer: object, type_: Type, limit: int | None = None) -> int | None:

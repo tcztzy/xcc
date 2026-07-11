@@ -60,6 +60,7 @@ from xcc.ast import (
     UnaryExpr,
     UpdateExpr,
     WhileStmt,
+    type_spec_declarator_ops,
 )
 from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendResult
@@ -76,9 +77,7 @@ from xcc.llvm_api import (
     LLVM_INTERNAL_LINKAGE,
     LLVMTypeKind,
     llvm,
-    optional_zero_ptr_array,
     ptr_array,
-    zero_ptr_array,
 )
 from xcc.sema.constants import char_literal_body, decode_escaped_units
 from xcc.sema.symbols import (
@@ -94,7 +93,7 @@ from xcc.sema.type_helpers import (
     is_signed_integer_type,
     usual_arithmetic_conversion,
 )
-from xcc.types import INT, FunctionParams, Type, TypeOp
+from xcc.types import INT, FunctionParams, Type, TypeOp, type_declarator_ops
 
 _CG_UNSUPPORTED = "XCC-CG-0005"
 
@@ -207,9 +206,13 @@ class _LLVMGen:
         """Map XCC Type to LLVMTypeRef."""
         c = llvm()
         base_name = t.name
+        ops = type_declarator_ops(t)
 
         result: int | None = None
-        for kind, value in reversed(t.declarator_ops):
+        op_index = len(ops)
+        while op_index:
+            op_index -= 1
+            kind, value = ops[op_index]
             if kind == "ptr":
                 result = c.PointerType(c.Int8Type(), 0)
             elif kind == "arr":
@@ -228,14 +231,18 @@ class _LLVMGen:
                     params = value[0] if value[0] else ()
                     is_var = value[1]
                 # Filter out void params
-                real_params = [pt for pt in params if pt.name != "void" or pt.declarator_ops]
+                real_params: list[Type] = []
+                for pt in params:
+                    if pt.name != "void" or type_declarator_ops(pt):
+                        real_params.append(pt)
                 n = len(real_params)
                 if n == 0:
                     param_arr = None
                 else:
-                    param_arr = zero_ptr_array(n)
-                    for i, pt in enumerate(real_params):
-                        param_arr[i] = self._type_to_llvm(pt)
+                    param_types: list[int] = []
+                    for pt in real_params:
+                        param_types.append(self._type_to_llvm(pt))
+                    param_arr = ptr_array(param_types)
                 result = c.FunctionType(result, param_arr, n, is_var)
         if result is None:
             result = self._base_type(base_name)
@@ -361,15 +368,14 @@ class _LLVMGen:
             padding = union_size - storage_size
             if padding > 0:
                 field_types.append(c.ArrayType(c.Int8Type(), padding))
-            member_types = zero_ptr_array(len(field_types))
-            for i, field_type in enumerate(field_types):
-                member_types[i] = field_type
+            member_types = ptr_array(field_types)
             st = c.StructType(member_types, len(field_types), False)
             self._struct_types[record_name] = st
             return st
-        member_types = zero_ptr_array(len(members))
-        for i, m in enumerate(members):
-            member_types[i] = self._record_member_llvm_type(m)
+        member_field_types: list[int] = []
+        for m in members:
+            member_field_types.append(self._record_member_llvm_type(m))
+        member_types = ptr_array(member_field_types)
         st = c.StructType(member_types, len(members), False)
         self._struct_types[record_name] = st
         return st
@@ -625,10 +631,19 @@ class _LLVMGen:
         return func.storage_class == "static" or (func.body is not None and func.is_inline)
 
     def _function_param_types(self, func: FunctionDef) -> list[Type]:
+        signature = self._sema.function_signatures.get(func.name)
+        if signature is not None:
+            params = signature.params
+            if params is None:
+                return []
+            result: list[Type] = []
+            for param_type in params:
+                result.append(param_type)
+            return result
         param_types: list[Type] = []
         for param in func.params:
             param_type = self._resolve_type(param.type_spec)
-            if param_type.name == "void" and not param_type.declarator_ops:
+            if param_type.name == "void" and not type_declarator_ops(param_type):
                 continue
             param_types.append(param_type.decay_parameter_type())
         return param_types
@@ -636,20 +651,25 @@ class _LLVMGen:
     def _declare_func(self, func: FunctionDef) -> None:
         c = llvm()
         func_sym = self._sema.functions.get(func.name)
+        signature = self._sema.function_signatures.get(func.name)
         if func_sym is not None:
             ret_t = self._type_to_llvm(func_sym.return_type)
+        elif signature is not None:
+            ret_t = self._type_to_llvm(signature.return_type)
         else:
             ret_t = self._type_to_llvm(self._resolve_type(func.return_type))
-        real_params = [
-            self._type_to_llvm(param_type) for param_type in self._function_param_types(func)
-        ]
+        real_params: list[int] = []
+        for param_type in self._function_param_types(func):
+            real_params.append(self._type_to_llvm(param_type))
         n = len(real_params)
-        param_ts = zero_ptr_array(n)
-        for i, lt in enumerate(real_params):
-            param_ts[i] = lt
-        fn_t = c.FunctionType(ret_t, param_ts, n, func.is_variadic)
+        param_ts = None if n == 0 else ptr_array(real_params)
+        is_variadic = signature.is_variadic if signature is not None else func.is_variadic
+        fn_t = c.FunctionType(ret_t, param_ts, n, is_variadic)
         self._func_types[func.name] = fn_t  # save for later calls
-        self._func_param_types[func.name] = [real_params[i] for i in range(n)]
+        stored_param_types: list[int] = []
+        for i in range(n):
+            stored_param_types.append(real_params[i])
+        self._func_param_types[func.name] = stored_param_types
         fn = c.GetNamedFunction(self._mod, func.name.encode())
         if not fn:
             fn = c.AddFunction(self._mod, func.name.encode(), fn_t)
@@ -674,13 +694,11 @@ class _LLVMGen:
         self._switch_info = []
 
         ret_t = self._type_to_llvm(func_sym.return_type)
-        real_params = [
-            self._type_to_llvm(param_type) for param_type in self._function_param_types(func)
-        ]
+        real_params: list[int] = []
+        for param_type in self._function_param_types(func):
+            real_params.append(self._type_to_llvm(param_type))
         n = len(real_params)
-        param_ts = zero_ptr_array(n)
-        for i, lt in enumerate(real_params):
-            param_ts[i] = lt
+        param_ts = None if n == 0 else ptr_array(real_params)
         fn_t = c.FunctionType(ret_t, param_ts, n, func.is_variadic)
         # Reuse existing declaration if present
         fn = c.GetNamedFunction(self._mod, func.name.encode())
@@ -699,26 +717,29 @@ class _LLVMGen:
         for param in func.params:
             assert param.name
             pt = self._resolve_type(param.type_spec)
-            if pt.name == "void" and not pt.declarator_ops:
+            if pt.name == "void" and not type_declarator_ops(pt):
                 continue
             symbol = func_sym.locals.get(param.name)
-            pt = symbol.type_ if isinstance(symbol, VarSymbol) else pt.decay_parameter_type()
+            if isinstance(symbol, VarSymbol):  # noqa: SIM108
+                pt = symbol.type_
+            else:
+                pt = pt.decay_parameter_type()
             lt = self._type_to_llvm(pt)
             pv = c.GetParam(fn, param_index)
             param_index += 1
             alloca = c.BuildAlloca(self._builder, lt, f"{param.name}.addr".encode())
             c.BuildStore(self._builder, pv, alloca)
-            self._locals[-1][param.name] = alloca
+            self._set_current_local(param.name, alloca)
 
         # Pre-collect allocas
         assert func.body is not None
         allocas = self._collect_allocas(func.body)
         for vname, vtype in allocas:
-            if vname in self._locals[-1]:
+            if self._current_local_contains(vname):
                 continue
             lt = self._type_to_llvm(vtype)
             a = c.BuildAlloca(self._builder, lt, f"{vname}.addr".encode())
-            self._locals[-1][vname] = a
+            self._set_current_local(vname, a)
 
         self._emit_stmt(func.body)
 
@@ -1266,18 +1287,17 @@ class _LLVMGen:
             return
         if stmt.storage_class == "extern":
             return
-        current_scope = self._locals[-1]
-        if stmt.name in current_scope:
+        if self._current_local_contains(stmt.name):
             return
         var_type = self._decl_type(stmt)
         lt = self._type_to_llvm(var_type)
-        current_scope[stmt.name] = self._build_entry_alloca(lt, f"{stmt.name}.addr")
+        self._set_current_local(stmt.name, self._build_entry_alloca(lt, f"{stmt.name}.addr"))
 
     def _ensure_static_local(self, stmt: DeclStmt) -> int | None:
         if stmt.name is None or not self._locals:
             return None
-        current_scope = self._locals[-1]
-        existing = current_scope.get(stmt.name)
+        current_scope = self._current_local_scope()
+        existing = self._lookup_local_in_scope(current_scope, stmt.name)
         if existing is not None:
             return existing
 
@@ -1294,13 +1314,13 @@ class _LLVMGen:
             c.SetLinkage(gv, LLVM_INTERNAL_LINKAGE)
             self._static_local_globals[key] = gv
             self._static_local_global_values.add(gv)
-            current_scope[stmt.name] = gv
+            self._set_current_local(stmt.name, gv)
 
             init = self._eval_init(stmt.init, var_type) if stmt.init is not None else None
             c.SetInitializer(gv, init if init is not None else c.ConstNull(lt))
             return gv
 
-        current_scope[stmt.name] = gv
+        self._set_current_local(stmt.name, gv)
         return gv
 
     def _build_entry_alloca(self, llvm_type: int, name: str) -> int:
@@ -1346,10 +1366,12 @@ class _LLVMGen:
         cond = self._to_bool(cond_val)
 
         then_bb = c.AppendBasicBlock(fn, b"if.then")
-        else_bb = c.AppendBasicBlock(fn, b"if.else") if stmt.else_body else None
+        else_bb = None
+        if stmt.else_body is not None:
+            else_bb = c.AppendBasicBlock(fn, b"if.else")
         merge_bb = c.AppendBasicBlock(fn, b"if.end")
 
-        if else_bb:
+        if else_bb is not None:
             c.BuildCondBr(self._builder, cond, then_bb, else_bb)
         else:
             c.BuildCondBr(self._builder, cond, then_bb, merge_bb)
@@ -1359,7 +1381,7 @@ class _LLVMGen:
         if self._bb_needs_term():
             c.BuildBr(self._builder, merge_bb)
 
-        if else_bb:
+        if else_bb is not None:
             c.PositionBuilderAtEnd(self._builder, else_bb)
             assert stmt.else_body is not None
             self._emit_stmt(stmt.else_body)
@@ -1605,16 +1627,48 @@ class _LLVMGen:
     @staticmethod
     def _parse_int_value(lexeme: str) -> int:
         """Parse a C integer literal lexeme, stripping any suffix."""
-        s = lexeme
-        while s and s[-1] in "uUlL":
-            s = s[:-1]
-        if s.startswith(("0x", "0X")):
-            return int(s, 16)
-        if s.startswith(("0b", "0B")):
-            return int(s, 2)
-        if len(s) > 1 and s.startswith("0"):
-            return int(s, 8)
-        return int(s or "0", 10)
+        end = len(lexeme)
+        while end > 0:
+            suffix_ch = lexeme[end - 1]
+            if suffix_ch == "u" or suffix_ch == "U" or suffix_ch == "l" or suffix_ch == "L":
+                end -= 1
+                continue
+            break
+        if end == 0:
+            return 0
+        base = 10
+        index = 0
+        if end > 1 and lexeme[0] == "0":
+            second_ch = lexeme[1]
+            if second_ch == "x" or second_ch == "X":
+                base = 16
+                index = 2
+            elif second_ch == "b" or second_ch == "B":
+                base = 2
+                index = 2
+            else:
+                base = 8
+        if index >= end:
+            raise ValueError("invalid integer literal")
+        value = 0
+        while index < end:
+            ch = lexeme[index]
+            codepoint = ord(ch)
+            digit = 0
+            valid_digit = True
+            if 48 <= codepoint <= 57:
+                digit = codepoint - 48
+            elif 65 <= codepoint <= 70:
+                digit = codepoint - 55
+            elif 97 <= codepoint <= 102:
+                digit = codepoint - 87
+            else:
+                valid_digit = False
+            if not valid_digit or digit >= base:
+                raise ValueError("invalid integer literal")
+            value = value * base + digit
+            index += 1
+        return value
 
     def _int_literal(self, expr: IntLiteral | CharLiteral) -> int:
         c = llvm()
@@ -1632,7 +1686,12 @@ class _LLVMGen:
     def _char_value(self, s: str) -> int:
         """Decode a C char literal, including multi-char (GNU extension)."""
         body = char_literal_body(s)
-        units = decode_escaped_units(body) if body is not None else [ord(ch) for ch in s]
+        units: list[int] = []
+        if body is not None:
+            units = decode_escaped_units(body)
+        else:
+            for ch in s:
+                units.append(ord(ch))
         if len(units) == 1:
             return units[0]
         val = 0
@@ -1656,8 +1715,11 @@ class _LLVMGen:
             gv = self._str_constants[expr.value]
         else:
             data = self._string_literal_bytes(expr)
-            lt = c.ArrayType(c.Int8Type(), len(data))
-            init = c.ConstString(data, len(data), True)
+            init_len = len(data)
+            if init_len > 0 and data[init_len - 1] == 0:
+                init_len -= 1
+            lt = c.ArrayType(c.Int8Type(), init_len + 1)
+            init = c.ConstString(data, init_len, False)
             gv = c.AddGlobal(self._mod, lt, b".str")
             c.SetInitializer(gv, init)
             c.SetLinkage(gv, LLVM_INTERNAL_LINKAGE)
@@ -1668,11 +1730,7 @@ class _LLVMGen:
 
     def _string_literal_bytes(self, expr: StringLiteral) -> bytes:
         raw = expr.value
-        qpos = -1
-        for i, ch in enumerate(raw):
-            if ch in ('"', "'"):
-                qpos = i
-                break
+        qpos = self._string_literal_quote_pos(raw)
         prefix = raw[:qpos] if qpos >= 0 else ""
         body = self._decode_string(raw[qpos + 1 : -1] if qpos >= 0 else raw)
         if prefix == "u":
@@ -1682,21 +1740,37 @@ class _LLVMGen:
         return body.encode() + b"\x00"
 
     @staticmethod
-    def _encode_string_units(body: str, width: int) -> bytes:
-        units: list[int] = [ord(ch) for ch in body]
-        units.append(0)
-        return b"".join(unit.to_bytes(width, "little", signed=False) for unit in units)
+    def _string_literal_quote_pos(raw: str) -> int:
+        qpos = -1
+        index = 0
+        while qpos < 0 and index < len(raw):
+            ch = raw[index]
+            if ch == '"' or ch == "'":
+                qpos = index
+            index += 1
+        return qpos
 
     @staticmethod
-    def _string_literal_prefix(expr: StringLiteral) -> str:
-        qpos = expr.value.find('"')
-        return expr.value[:qpos] if qpos >= 0 else ""
+    def _encode_string_units(body: str, width: int) -> bytes:
+        encoded = b""
+        for ch in body:
+            unit = ord(ch)
+            encoded += unit.to_bytes(width, "little", signed=False)
+        encoded += (0).to_bytes(width, "little", signed=False)
+        return encoded
+
+    def _string_literal_prefix(self, expr: StringLiteral) -> str:
+        raw = expr.value
+        qpos = self._string_literal_quote_pos(raw)
+        return raw[:qpos] if qpos >= 0 else ""
 
     def _string_literal_units(self, expr: StringLiteral) -> list[int]:
         raw = expr.value
-        qpos = raw.find('"')
+        qpos = self._string_literal_quote_pos(raw)
         body = self._decode_string(raw[qpos + 1 : -1] if qpos >= 0 else raw)
-        units = [ord(ch) for ch in body]
+        units: list[int] = []
+        for ch in body:
+            units.append(ord(ch))
         units.append(0)
         return units
 
@@ -1754,7 +1828,10 @@ class _LLVMGen:
             units += [0] * (length - len(units))
         else:
             units = units[:length]
-        return self._const_array(elem_lt, [c.ConstInt(elem_lt, unit, False) for unit in units])
+        values: list[int] = []
+        for unit in units:
+            values.append(c.ConstInt(elem_lt, unit, False))
+        return self._const_array(elem_lt, values)
 
     # ── identifier ───────────────────────────────────────────
 
@@ -1818,7 +1895,8 @@ class _LLVMGen:
 
     @staticmethod
     def _is_function_designator_type(type_: Type) -> bool:
-        return bool(type_.declarator_ops) and type_.declarator_ops[0][0] == "fn"
+        ops = type_declarator_ops(type_)
+        return bool(ops) and ops[0][0] == "fn"
 
     def _function_designator(self, name: str, type_: Type) -> int:
         c = llvm()
@@ -1832,17 +1910,14 @@ class _LLVMGen:
         else:
             return_type, params = signature
         ret_lt = self._type_to_llvm(return_type)
-        parameter_types, is_variadic = params
-        real_params = [
-            self._type_to_llvm(param)
-            for param in (parameter_types or ())
-            if param.name != "void" or param.declarator_ops
-        ]
+        parameter_types: tuple[Type, ...] | None = params[0]
+        is_variadic = params[1]
+        real_params: list[int] = []
+        for param in parameter_types or ():
+            if param.name != "void" or type_declarator_ops(param):
+                real_params.append(self._type_to_llvm(param))
         n = len(real_params)
-        param_arr = optional_zero_ptr_array(n)
-        if param_arr is not None:
-            for i, param_type in enumerate(real_params):
-                param_arr[i] = param_type
+        param_arr = None if n == 0 else ptr_array(real_params)
         fn_t = c.FunctionType(ret_lt, param_arr, n, is_variadic)
         if name not in self._func_types:
             self._func_types[name] = fn_t
@@ -1873,7 +1948,7 @@ class _LLVMGen:
         pointee = pointer_type.pointee()
         if pointee is None:
             return None
-        if pointee.name == "void" and not pointee.declarator_ops:
+        if pointee.name == "void" and not type_declarator_ops(pointee):
             return None
         if self._is_function_designator_type(pointee):
             return None
@@ -1892,10 +1967,41 @@ class _LLVMGen:
         return max(self._type_size(pointee), 1)
 
     def _lookup_local(self, name: str) -> int | None:
-        for scope in reversed(self._locals):
-            if name in scope:
-                return scope[name]
+        index = len(self._locals)
+        while index > 0:
+            index -= 1
+            scope = self._locals[index]
+            local = self._lookup_local_in_scope(scope, name)
+            if local is not None:
+                return local
         return None
+
+    def _lookup_local_in_scope(self, scope: dict[str, int], name: str) -> int | None:
+        for local_name, value in scope.items():
+            if local_name == name:
+                return value
+        return None
+
+    def _current_local_scope(self) -> dict[str, int]:
+        index = len(self._locals) - 1
+        return self._locals[index]
+
+    def _current_local_contains(self, name: str) -> bool:
+        if not self._locals:
+            return False
+        scope = self._current_local_scope()
+        for local_name, _value in scope.items():  # noqa: SIM110 - keep AOT-friendly loop.
+            if local_name == name:
+                return True
+        return False
+
+    def _set_current_local(self, name: str, value: int) -> None:
+        if not self._locals:
+            return
+        index = len(self._locals) - 1
+        scope = self._locals[index]
+        scope[name] = value
+        self._locals[index] = scope
 
     # ── unary ────────────────────────────────────────────────
 
@@ -2003,9 +2109,31 @@ class _LLVMGen:
         right_c_type = self._type_map.get(expr.right)
         left = self._emit_expr(expr.left)
         right = self._emit_expr(expr.right)
+        left_is_null_pointer_constant = self._is_zero_int_literal(expr.left)
+        right_is_null_pointer_constant = self._is_zero_int_literal(expr.right)
 
         if op in {"==", "!=", "<", ">", "<=", ">="}:
-            return self._compare(op, left, right, left_c_type, right_c_type)
+            if op == "==" or op == "!=":
+                null_cmp = self._compare_pointer_null(
+                    op,
+                    left,
+                    right,
+                    left_c_type,
+                    right_c_type,
+                    left_is_null_pointer_constant,
+                    right_is_null_pointer_constant,
+                )
+                if null_cmp is not None:
+                    return null_cmp
+            return self._compare(
+                op,
+                left,
+                right,
+                left_c_type,
+                right_c_type,
+                left_is_null_pointer_constant,
+                right_is_null_pointer_constant,
+            )
 
         result_type = self._type_map.require(expr)
         self._type_to_llvm(result_type)
@@ -2129,6 +2257,40 @@ class _LLVMGen:
             raise llvm_backend_error(self._result.filename, f"Unsupported binary: {op}")
         return result
 
+    def _compare_pointer_null(
+        self,
+        op: str,
+        left: int,
+        right: int,
+        left_c_type: Type | None,
+        right_c_type: Type | None,
+        left_is_null_pointer_constant: bool,
+        right_is_null_pointer_constant: bool,
+    ) -> int | None:
+        if self._is_pointer_comparison_type(left_c_type) and right_is_null_pointer_constant:
+            return self._compare_pointer_truth(op, left)
+        if self._is_pointer_comparison_type(right_c_type) and left_is_null_pointer_constant:
+            return self._compare_pointer_truth(op, right)
+        return None
+
+    def _is_pointer_comparison_type(self, type_: Type | None) -> bool:
+        if type_ is None:
+            return False
+        return type_.pointer_depth > 0 or len(type_.array_lengths) > 0
+
+    def _compare_pointer_truth(self, op: str, value: int) -> int:
+        c = llvm()
+        value_type = c.TypeOf(value)
+        if c.GetTypeKind(value_type) == LLVMTypeKind.ARRAY:
+            value = self._build_cast(value, c.PointerType(c.Int8Type(), 0))
+            value_type = c.TypeOf(value)
+        null = c.ConstNull(value_type)
+        if op == "==":
+            cmp = c.BuildICmp(self._builder, 32, value, null, b"cmp")
+        else:
+            cmp = c.BuildICmp(self._builder, 33, value, null, b"cmp")
+        return c.BuildZExt(self._builder, cmp, c.Int32Type(), b"cmp.ext")
+
     def _compare(
         self,
         op: str,
@@ -2136,6 +2298,8 @@ class _LLVMGen:
         right: int,
         left_c_type: Type | None,
         right_c_type: Type | None,
+        left_is_null_pointer_constant: bool,
+        right_is_null_pointer_constant: bool,
     ) -> int:
         c = llvm()
         lt = c.TypeOf(left)
@@ -2196,9 +2360,15 @@ class _LLVMGen:
             # Normalize pointer ↔ integer comparisons: convert
             # the integer operand to a pointer so icmp is valid.
             if lk == LLVMTypeKind.POINTER and rk == LLVMTypeKind.INTEGER:
-                right = c.BuildIntToPtr(self._builder, right, lt, b"cmp.cast")
+                if right_is_null_pointer_constant:
+                    right = c.ConstNull(lt)
+                else:
+                    right = c.BuildIntToPtr(self._builder, right, lt, b"cmp.cast")
             elif rk == LLVMTypeKind.POINTER and lk == LLVMTypeKind.INTEGER:
-                left = c.BuildIntToPtr(self._builder, left, rt, b"cmp.cast")
+                if left_is_null_pointer_constant:
+                    left = c.ConstNull(rt)
+                else:
+                    left = c.BuildIntToPtr(self._builder, left, rt, b"cmp.cast")
             elif lk == LLVMTypeKind.INTEGER and rk == LLVMTypeKind.INTEGER:
                 common_type = self._common_integer_c_type(left_c_type, right_c_type)
                 if common_type is not None:
@@ -2241,6 +2411,11 @@ class _LLVMGen:
                 raise llvm_backend_error(self._result.filename, f"Unsupported compare: {op}")
             cmp = c.BuildICmp(self._builder, pred, left, right, b"cmp")
         return c.BuildZExt(self._builder, cmp, c.Int32Type(), b"cmp.ext")
+
+    def _is_zero_int_literal(self, expr: Expr) -> bool:
+        if isinstance(expr, IntLiteral):
+            return self._parse_int_value(expr.value) == 0
+        return False
 
     def _logical(self, expr: BinaryExpr) -> int:
         c = llvm()
@@ -2793,14 +2968,8 @@ class _LLVMGen:
     ) -> int:
         c = llvm()
         n = len(values)
-        params = optional_zero_ptr_array(n)
-        args = optional_zero_ptr_array(n)
-        if n:
-            assert params is not None and args is not None
-            for i, param_type in enumerate(param_types):
-                params[i] = param_type
-            for i, value in enumerate(values):
-                args[i] = value
+        params = None if n == 0 else ptr_array(param_types)
+        args = None if n == 0 else ptr_array(values)
         fn_t = c.FunctionType(return_type, params, n, False)
         fn = c.GetNamedFunction(self._mod, name.encode())
         if not fn:
@@ -3094,25 +3263,23 @@ class _LLVMGen:
                     param_types = types
                 else:
                     _return_type, params = callable_signature
-                    parameter_types, is_variadic = params
-                    param_types = [
-                        self._type_to_llvm(pt)
-                        for pt in (parameter_types or ())
-                        if pt.name != "void" or pt.declarator_ops
-                    ]
+                    parameter_types: tuple[Type, ...] | None = params[0]
+                    is_variadic = params[1]
+                    param_types = []
+                    for pt in parameter_types or ():
+                        if pt.name != "void" or type_declarator_ops(pt):
+                            param_types.append(self._type_to_llvm(pt))
                 n = len(param_types)
-                param_ts = optional_zero_ptr_array(n)
-                if param_ts is not None:
-                    for i, t in enumerate(param_types):
-                        param_ts[i] = t
+                param_ts = None if n == 0 else ptr_array(param_types)
                 fn_t = c.FunctionType(ret_lt, param_ts, n, is_variadic)
                 fn = c.AddFunction(self._mod, callee_name.encode(), fn_t)
                 self._func_types[callee_name] = fn_t
-                self._func_param_types[callee_name] = [param_types[i] for i in range(n)]
+                stored_param_types: list[int] = []
+                for i in range(n):
+                    stored_param_types.append(param_types[i])
+                self._func_param_types[callee_name] = stored_param_types
             vals = self._coerce_call_args(vals, callee_name, arg_c_types)
-            args_arr = zero_ptr_array(len(vals))
-            for i, v in enumerate(vals):
-                args_arr[i] = v
+            args_arr = None if len(vals) == 0 else ptr_array(vals)
             # Void-returning calls must not be named in LLVM IR.
             ret_kind = c.GetTypeKind(c.GetReturnType(fn_t))
             call_name = b"" if ret_kind == LLVMTypeKind.VOID else b"call"
@@ -3139,33 +3306,33 @@ class _LLVMGen:
         if callable_signature is None:
             raise llvm_backend_error(self._result.filename, "Indirect call target is not callable")
         return_type, params = callable_signature
-        parameter_types, is_var = params
+        parameter_types: tuple[Type, ...] | None = params[0]
+        is_var = params[1]
         ret_lt = self._type_to_llvm(return_type)
-        param_types = [
-            self._type_to_llvm(pt)
-            for pt in (parameter_types or ())
-            if pt.name != "void" or pt.declarator_ops
-        ]
+        param_types: list[int] = []
+        for pt in parameter_types or ():
+            if pt.name != "void" or type_declarator_ops(pt):
+                param_types.append(self._type_to_llvm(pt))
         n = len(param_types)
-        param_arr = optional_zero_ptr_array(n)
-        if param_arr is not None:
-            for i, lt in enumerate(param_types):
-                param_arr[i] = lt
+        param_arr = None if n == 0 else ptr_array(param_types)
         fn_t = c.FunctionType(ret_lt, param_arr, n, is_var)
 
         vals, _types, arg_c_types = self._build_call_args(expr)
         # Coerce using extracted param types.
         for i, v in enumerate(vals):
             if i < n:
-                pt = param_types[i]
+                param_lt = param_types[i]
                 vt = c.TypeOf(v)
-                pk = c.GetTypeKind(pt)
+                pk = c.GetTypeKind(param_lt)
                 vk = c.GetTypeKind(vt)
                 if pk == LLVMTypeKind.INTEGER and vk == LLVMTypeKind.INTEGER:
-                    vals[i] = self._cast_integer_value(v, pt, arg_c_types[i], b"arg.ext")
-        args_arr = zero_ptr_array(len(vals))
-        for i, v in enumerate(vals):
-            args_arr[i] = v
+                    vals[i] = self._cast_integer_value(
+                        v,
+                        param_lt,
+                        arg_c_types[i],
+                        b"arg.ext",
+                    )
+        args_arr = None if len(vals) == 0 else ptr_array(vals)
         ret_kind = c.GetTypeKind(ret_lt)
         call_name = b"" if ret_kind == LLVMTypeKind.VOID else b"call"
         if len(vals) == 0:
@@ -3282,11 +3449,8 @@ class _LLVMGen:
             values = [ap]
             param_types = [ptr_t]
         n = len(values)
-        params = zero_ptr_array(n)
-        vals = zero_ptr_array(n)
-        for i, value in enumerate(values):
-            params[i] = param_types[i]
-            vals[i] = value
+        params = ptr_array(param_types)
+        vals = ptr_array(values)
         fn_t = c.FunctionType(c.VoidType(), params, n, False)
         fn = c.GetNamedFunction(self._mod, intrinsic_name.encode())
         if not fn:
@@ -3520,7 +3684,7 @@ class _LLVMGen:
         for vname, vtype in allocas:
             lt = self._type_to_llvm(vtype)
             a = c.BuildAlloca(self._builder, lt, f"{vname}.addr".encode())
-            self._locals[-1][vname] = a
+            self._set_current_local(vname, a)
 
         stmts = expr.body.statements
         if not stmts:
@@ -3610,7 +3774,7 @@ class _LLVMGen:
         return c.BuildICmp(self._builder, 33, val, c.ConstInt(t, 0, False), name)
 
     def _resolve_type(self, ts: TypeSpec) -> Type:
-        resolved_ops = self._resolve_declarator_ops(ts.declarator_ops)
+        resolved_ops = self._resolve_declarator_ops(type_spec_declarator_ops(ts))
         if ts.name == "typeof" and ts.typeof_expr is not None:
             base_type = self._type_map.get(ts.typeof_expr)
             if base_type is None:
@@ -3637,7 +3801,7 @@ class _LLVMGen:
                 qualifiers = _merge_qualifiers(typedef_type.qualifiers, ts.qualifiers)
                 return Type(
                     typedef_type.name,
-                    declarator_ops=resolved_ops + typedef_type.declarator_ops,
+                    declarator_ops=resolved_ops + type_declarator_ops(typedef_type),
                     qualifiers=qualifiers,
                 )
             name = ts.name
@@ -3648,6 +3812,9 @@ class _LLVMGen:
     def _resolve_declarator_ops(self, ops: tuple[DeclaratorOp, ...]) -> tuple[TypeOp, ...]:
         resolved: list[TypeOp] = []
         for kind, value in ops:
+            if kind == "ptr":
+                resolved.append(("ptr", 0))
+                continue
             if kind == "arr":
                 if isinstance(value, ArrayDecl):
                     if value.length is None:
@@ -3901,12 +4068,13 @@ class _LLVMGen:
         members = self._sema.record_definitions.get(record_name)
         if not members:
             return self._type_to_llvm(Type(record_name))
-        member_types = zero_ptr_array(len(members))
+        field_types: list[int] = []
         for index, member in enumerate(members):
             member_type: Type | None = member_type_overrides.get(index)
             if member_type is None:
                 member_type = member.type_
-            member_types[index] = self._record_field_llvm_type(member_type)
+            field_types.append(self._record_field_llvm_type(member_type))
+        member_types = ptr_array(field_types)
         return c.StructType(member_types, len(members), False)
 
     def _eval_array_init(self, init: InitList, array_type: Type) -> int | None:
@@ -3919,7 +4087,9 @@ class _LLVMGen:
             return None
         length = max(length_value, 0)
         elem_lt = self._type_to_llvm(elem_type)
-        elems = [c.ConstNull(elem_lt) for _ in range(length)]
+        elems: list[int] = []
+        for _ in range(length):
+            elems.append(c.ConstNull(elem_lt))
         next_index = 0
         item_index = 0
         while item_index < len(init.items):
@@ -4020,16 +4190,14 @@ class _LLVMGen:
         union_value: int | None = None
         initialized_union = False
         is_union = record_type.name.startswith("union ")
-        fields = (
-            []
-            if is_union
-            else [
-                c.ConstNull(
-                    self._type_to_llvm(self._record_init_member_type(members, overrides, i))
+        fields: list[int] = []
+        if not is_union:
+            for i in range(len(members)):
+                fields.append(
+                    c.ConstNull(
+                        self._type_to_llvm(self._record_init_member_type(members, overrides, i))
+                    )
                 )
-                for i in range(len(members))
-            ]
-        )
         nested_items: dict[int, list[InitItem]] = {}
         nested_order: list[int] = []
         item_index = 0
@@ -4163,7 +4331,9 @@ class _LLVMGen:
             if not isinstance(length_value, int) or length_value < 0:
                 return 0, None
             elem_lt = self._type_to_llvm(elem_type)
-            elems = [c.ConstNull(elem_lt) for _ in range(length_value)]
+            elems: list[int] = []
+            for _ in range(length_value):
+                elems.append(c.ConstNull(elem_lt))
             item_index = start
             for elem_index in range(length_value):
                 if item_index >= len(items) or items[item_index].designators:
@@ -4188,11 +4358,10 @@ class _LLVMGen:
         item_index = start
         union_member: RecordMemberInfo | None = None
         union_value: int | None = None
-        fields = (
-            []
-            if is_union
-            else [c.ConstNull(self._type_to_llvm(member.type_)) for member in members]
-        )
+        fields: list[int] = []
+        if not is_union:
+            for member in members:
+                fields.append(c.ConstNull(self._type_to_llvm(member.type_)))
         for member_index, member in enumerate(members):
             if item_index >= len(items) or items[item_index].designators:
                 break
@@ -4242,7 +4411,9 @@ class _LLVMGen:
             return None
         if record_type.name.startswith("union "):
             return self._const_union(record_type, members[0], val)
-        fields = [c.ConstNull(self._type_to_llvm(member.type_)) for member in members]
+        fields: list[int] = []
+        for member in members:
+            fields.append(c.ConstNull(self._type_to_llvm(member.type_)))
         fields[0] = val
         return self._const_struct(record_type, fields)
 
@@ -4261,7 +4432,9 @@ class _LLVMGen:
         members = self._sema.record_definitions.get(record_name)
         if members is None:
             return None
-        fields = [c.ConstNull(self._type_to_llvm(item.type_)) for item in members]
+        fields: list[int] = []
+        for item in members:
+            fields.append(c.ConstNull(self._type_to_llvm(item.type_)))
         if len(path) > 1:
             val = self._eval_record_path_init(path[1:], designators, initializer)
         elif designators:
@@ -4289,9 +4462,7 @@ class _LLVMGen:
         c = llvm()
         if not values:
             return c.ConstArray(elem_lt, None, 0)
-        arr = zero_ptr_array(len(values))
-        for index, value in enumerate(values):
-            arr[index] = value
+        arr = ptr_array(values)
         return c.ConstArray(elem_lt, arr, len(values))
 
     def _const_aggregate_element(self, value: int, index: int, fallback_type: int) -> int:
@@ -4313,9 +4484,7 @@ class _LLVMGen:
         lt = record_lt if record_lt is not None else self._type_to_llvm(record_type)
         if not fields:
             return c.ConstNull(lt)
-        arr = zero_ptr_array(len(fields))
-        for index, value in enumerate(fields):
-            arr[index] = value
+        arr = ptr_array(fields)
         return c.ConstNamedStruct(lt, arr, len(fields))
 
     def _const_union(

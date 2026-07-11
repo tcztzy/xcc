@@ -171,7 +171,7 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
     if isinstance(expr, StatementExpr):
         if self._current_return_type is None:
             raise SemaError("Statement expression outside of a function")
-        inner_scope = Scope(scope)
+        inner_scope = scope.child()
         result_type: Type = VOID
         result_overload: str | None = None
         for statement in expr.body.statements:
@@ -512,7 +512,7 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         control_type = self._decay_array_value(self._analyze_expr(expr.control, scope))
         selected_expr: Expr | None = None
         default_expr: Expr | None = None
-        default_association_index: int | None = None
+        default_association_index = 0
         seen_type_associations: dict[Type, tuple[int, str, str | None]] = {}
         association_type_descriptions: list[str] = []
         for association_index, (assoc_type_spec, assoc_expr) in enumerate(
@@ -534,7 +534,7 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
                 if association_column is None:
                     association_column = mapped_column
             if assoc_type_spec is None:
-                if default_expr is not None and default_association_index is not None:
+                if default_expr is not None and default_association_index > 0:
                     previous_default_location = None
                     current_default_location = None
                     if default_association_index <= len(expr.association_source_locations):

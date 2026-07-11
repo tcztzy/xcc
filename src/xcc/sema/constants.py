@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from xcc.ast import (
     AlignofExpr,
     BinaryExpr,
@@ -18,21 +20,27 @@ from xcc.ast import (
     UnaryExpr,
 )
 from xcc.types import (
+    EVM_ADDRESS,
+    EVM_UINT256,
     INT,
+    INT128,
     LLONG,
     LONG,
     UINT,
+    UINT128,
     ULLONG,
     ULONG,
     Type,
 )
 
 from .symbols import EnumConstSymbol, Scope, SemaError, VarSymbol
-from .type_helpers import SIGNED_INTEGER_TYPE_LIMITS, UNSIGNED_INTEGER_TYPE_LIMITS
+
+if TYPE_CHECKING:
+    from . import Analyzer
 
 HEX_DIGITS = "0123456789abcdefABCDEF"
 OCTAL_DIGITS = "01234567"
-SIMPLE_ESCAPES = {
+SIMPLE_ESCAPES: dict[str, int] = {
     "'": ord("'"),
     '"': ord('"'),
     "?": ord("?"),
@@ -45,42 +53,23 @@ SIMPLE_ESCAPES = {
     "t": 9,
     "v": 11,
 }
-DECIMAL_LITERAL_CANDIDATES: dict[str, tuple[Type, ...]] = {
-    "": (INT, LONG, LLONG),
-    "u": (UINT, ULONG, ULLONG),
-    "l": (LONG, LLONG),
-    "ul": (ULONG, ULLONG),
-    "lu": (ULONG, ULLONG),
-    "ll": (LLONG,),
-    "ull": (ULLONG,),
-    "llu": (ULLONG,),
-}
-NON_DECIMAL_LITERAL_CANDIDATES: dict[str, tuple[Type, ...]] = {
-    "": (INT, UINT, LONG, ULONG, LLONG, ULLONG),
-    "u": (UINT, ULONG, ULLONG),
-    "l": (LONG, ULONG, LLONG, ULLONG),
-    "ul": (ULONG, ULLONG),
-    "lu": (ULONG, ULLONG),
-    "ll": (LLONG, ULLONG),
-    "ull": (ULLONG,),
-    "llu": (ULLONG,),
-}
 
 
-def _allows_const_var_folding(analyzer: object) -> bool:
-    return analyzer._allow_const_var_folding  # type: ignore
+def _allows_const_var_folding(analyzer: "Analyzer") -> bool:
+    return analyzer._allow_const_var_folding
 
 
-def parse_int_literal(analyzer: object, lexeme: str | int) -> tuple[int, Type] | None:
-    if isinstance(lexeme, int):
-        return lexeme, INT
+def parse_int_literal(analyzer: "Analyzer", lexeme: str) -> tuple[int, Type] | None:
     if not isinstance(lexeme, str):
         return None
-    suffix_start = len(lexeme)
-    while suffix_start > 0 and lexeme[suffix_start - 1] in "uUlL":
+    lexeme_text = lexeme
+    suffix_start = len(lexeme_text)
+    while suffix_start > 0 and lexeme_text[suffix_start - 1] in "uUlL":
         suffix_start -= 1
-    body = lexeme[:suffix_start]
-    suffix = lexeme[suffix_start:].lower()
+    body = lexeme_text[:suffix_start]
+    suffix = _normalized_integer_suffix(lexeme_text, suffix_start)
+    if suffix is None:
+        return None
     is_decimal = True
     if body.startswith(("0x", "0X")):
         digits = body[2:]
@@ -89,41 +78,105 @@ def parse_int_literal(analyzer: object, lexeme: str | int) -> tuple[int, Type] |
         value = int(digits, 16)
         is_decimal = False
     elif body.startswith("0") and len(body) > 1:
-        if any(ch not in "01234567" for ch in body):
+        has_non_octal_digit = False
+        for ch in body:
+            if ch not in "01234567":
+                has_non_octal_digit = True
+                break
+        if has_non_octal_digit:
             return None
         value = int(body, 8)
         is_decimal = False
     elif body.isdigit():
-        value = int(body)
+        value = int(body, 10)
     else:
         return None
-    candidates = (DECIMAL_LITERAL_CANDIDATES if is_decimal else NON_DECIMAL_LITERAL_CANDIDATES).get(
-        suffix
-    )
+    candidates = _integer_literal_candidates(is_decimal, suffix)
     if candidates is None:
         return None
     for candidate_type in candidates:
-        if analyzer._fits_integer_literal_value(value, candidate_type):  # type: ignore
+        if analyzer._fits_integer_literal_value(value, candidate_type):
             return value, candidate_type
     return None
 
 
+def _integer_literal_candidates(is_decimal: bool, suffix: str) -> tuple[Type, ...] | None:
+    if is_decimal:
+        if suffix == "":
+            return (INT, LONG, LLONG)
+        if suffix == "u":
+            return (UINT, ULONG, ULLONG)
+        if suffix == "l":
+            return (LONG, LLONG)
+        if suffix == "ul" or suffix == "lu":
+            return (ULONG, ULLONG)
+        if suffix == "ll":
+            return (LLONG,)
+        if suffix == "ull" or suffix == "llu":
+            return (ULLONG,)
+        return None
+    if suffix == "":
+        return (INT, UINT, LONG, ULONG, LLONG, ULLONG)
+    if suffix == "u":
+        return (UINT, ULONG, ULLONG)
+    if suffix == "l":
+        return (LONG, ULONG, LLONG, ULLONG)
+    if suffix == "ul" or suffix == "lu":
+        return (ULONG, ULLONG)
+    if suffix == "ll":
+        return (LLONG, ULLONG)
+    if suffix == "ull" or suffix == "llu":
+        return (ULLONG,)
+    return None
+
+
+def _normalized_integer_suffix(lexeme: str, suffix_start: int) -> str | None:
+    suffix = ""
+    index = suffix_start
+    while index < len(lexeme):
+        ch = lexeme[index]
+        if ch in "uU":
+            suffix += "u"
+        elif ch in "lL":
+            suffix += "l"
+        else:
+            return None
+        index += 1
+    return suffix
+
+
 def fits_integer_literal_value(value: int, type_: Type) -> bool:
-    signed_bounds = SIGNED_INTEGER_TYPE_LIMITS.get(type_)
-    if signed_bounds is not None:
-        return signed_bounds[0] <= value <= signed_bounds[1]
-    unsigned_max = UNSIGNED_INTEGER_TYPE_LIMITS.get(type_)
-    return unsigned_max is not None and 0 <= value <= unsigned_max
+    if type_ == INT:
+        return -(1 << 31) <= value <= (1 << 31) - 1
+    if type_ == LONG:
+        return -(1 << 63) <= value <= (1 << 63) - 1
+    if type_ == LLONG:
+        return -(1 << 63) <= value <= (1 << 63) - 1
+    if type_ == INT128:
+        return -(1 << 127) <= value <= (1 << 127) - 1
+    if type_ == UINT:
+        return 0 <= value <= (1 << 32) - 1
+    if type_ == ULONG:
+        return 0 <= value <= (1 << 64) - 1
+    if type_ == ULLONG:
+        return 0 <= value <= (1 << 64) - 1
+    if type_ == UINT128:
+        return 0 <= value <= (1 << 128) - 1
+    if type_ == EVM_ADDRESS:
+        return 0 <= value <= (1 << 160) - 1
+    if type_ == EVM_UINT256:
+        return 0 <= value <= (1 << 256) - 1
+    return False
 
 
-def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | None:
+def eval_int_constant_expr(analyzer: "Analyzer", expr: Expr, scope: Scope) -> int | None:
     if isinstance(expr, IntLiteral):
-        parsed = analyzer._parse_int_literal(expr.value)  # type: ignore
+        parsed = analyzer._parse_int_literal(expr.value)
         return None if parsed is None else parsed[0]
     if isinstance(expr, CharLiteral):
-        return analyzer._char_const_value(expr.value)  # type: ignore
+        return analyzer._char_const_value(expr.value)
     if isinstance(expr, UnaryExpr) and expr.op in {"+", "-", "!", "~"}:
-        operand_value = analyzer._eval_int_constant_expr(expr.operand, scope)  # type: ignore
+        operand_value = analyzer._eval_int_constant_expr(expr.operand, scope)
         if operand_value is None:
             return None
         if expr.op == "+":
@@ -136,65 +189,65 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
     if isinstance(expr, BinaryExpr):
         return _eval_binary_int_constant_expr(analyzer, expr, scope)
     if isinstance(expr, ConditionalExpr):
-        condition_value = analyzer._eval_int_constant_expr(expr.condition, scope)  # type: ignore
+        condition_value = analyzer._eval_int_constant_expr(expr.condition, scope)
         if condition_value is None:
             return None
         branch = expr.then_expr if condition_value else expr.else_expr
-        return analyzer._eval_int_constant_expr(branch, scope)  # type: ignore
+        return analyzer._eval_int_constant_expr(branch, scope)
     if isinstance(expr, CastExpr):
-        if not analyzer._is_integer_type(analyzer._resolve_type(expr.type_spec)):  # type: ignore
+        if not analyzer._is_integer_type(analyzer._resolve_type(expr.type_spec)):
             return None
-        return analyzer._eval_int_constant_expr(expr.expr, scope)  # type: ignore
+        return analyzer._eval_int_constant_expr(expr.expr, scope)
     if isinstance(expr, SizeofExpr):
         if expr.type_spec is not None:
-            analyzer._register_type_spec(expr.type_spec)  # type: ignore
-            if analyzer._is_invalid_sizeof_type_spec(expr.type_spec):  # type: ignore
+            analyzer._register_type_spec(expr.type_spec)
+            if analyzer._is_invalid_sizeof_type_spec(expr.type_spec):
                 return None
-            return analyzer._sizeof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore
+            return analyzer._sizeof_type(analyzer._resolve_type(expr.type_spec))
         if expr.expr is not None:
-            operand_type = analyzer._type_map.get(expr.expr)  # type: ignore
+            operand_type = analyzer._type_map.get(expr.expr)
             if operand_type is None:
                 try:
-                    operand_type = analyzer._analyze_expr(expr.expr, scope)  # type: ignore
+                    operand_type = analyzer._analyze_expr(expr.expr, scope)
                 except SemaError:
                     return None
             if operand_type is not None:
-                return analyzer._sizeof_type(operand_type)  # type: ignore
+                return analyzer._sizeof_type(operand_type)
         return None
     if isinstance(expr, AlignofExpr):
         if expr.type_spec is not None:
-            analyzer._register_type_spec(expr.type_spec)  # type: ignore
-            if analyzer._is_invalid_alignof_type_spec(expr.type_spec):  # type: ignore
+            analyzer._register_type_spec(expr.type_spec)
+            if analyzer._is_invalid_alignof_type_spec(expr.type_spec):
                 return None
-            return analyzer._alignof_type(analyzer._resolve_type(expr.type_spec))  # type: ignore
+            return analyzer._alignof_type(analyzer._resolve_type(expr.type_spec))
         if expr.expr is None:
             return None
         if isinstance(expr.expr, Identifier):
             symbol = scope.lookup(expr.expr.name)
             if isinstance(symbol, VarSymbol) and symbol.alignment is not None:
                 return symbol.alignment
-        operand_type = analyzer._type_map.get(expr.expr)  # type: ignore
+        operand_type = analyzer._type_map.get(expr.expr)
         if operand_type is None:
             try:
-                operand_type = analyzer._analyze_expr(expr.expr, scope)  # type: ignore
+                operand_type = analyzer._analyze_expr(expr.expr, scope)
             except SemaError:
                 return None
         if operand_type is None:
             return None
-        return analyzer._alignof_type(operand_type)  # type: ignore
+        return analyzer._alignof_type(operand_type)
     if isinstance(expr, BuiltinOffsetofExpr):
         return None
     if isinstance(expr, BuiltinTypesCompatExpr):
-        analyzer._register_type_spec(expr.type1)  # type: ignore
-        analyzer._register_type_spec(expr.type2)  # type: ignore
-        type1 = analyzer._unqualified_type(analyzer._resolve_type(expr.type1))  # type: ignore
-        type2 = analyzer._unqualified_type(analyzer._resolve_type(expr.type2))  # type: ignore
+        analyzer._register_type_spec(expr.type1)
+        analyzer._register_type_spec(expr.type2)
+        type1 = analyzer._unqualified_type(analyzer._resolve_type(expr.type1))
+        type2 = analyzer._unqualified_type(analyzer._resolve_type(expr.type2))
         return 1 if type1 == type2 else 0
     if isinstance(expr, GenericExpr):
         return _eval_generic_int_constant_expr(analyzer, expr, scope)
     if isinstance(expr, CommaExpr):
-        analyzer._analyze_expr(expr.left, scope)  # type: ignore
-        return analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore
+        analyzer._analyze_expr(expr.left, scope)
+        return analyzer._eval_int_constant_expr(expr.right, scope)
     if isinstance(expr, Identifier):
         symbol = scope.lookup(expr.name)
         if isinstance(symbol, EnumConstSymbol):
@@ -208,7 +261,7 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
     if isinstance(expr, SubscriptExpr):
         if not _allows_const_var_folding(analyzer):
             return None
-        index = analyzer._eval_int_constant_expr(expr.index, scope)  # type: ignore
+        index = analyzer._eval_int_constant_expr(expr.index, scope)
         if index is None:
             return None
         if isinstance(expr.base, Identifier):
@@ -222,7 +275,7 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
                     init_val = item.initializer
                     if isinstance(init_val, InitList):
                         return None
-                    return analyzer._eval_int_constant_expr(init_val, scope)  # type: ignore
+                    return analyzer._eval_int_constant_expr(init_val, scope)
     if isinstance(expr, MemberExpr):
         if not _allows_const_var_folding(analyzer):
             return None
@@ -230,10 +283,10 @@ def eval_int_constant_expr(analyzer: object, expr: Expr, scope: Scope) -> int | 
     return None
 
 
-def _eval_member_expr(analyzer: object, expr: "MemberExpr", scope: Scope) -> int | None:
+def _eval_member_expr(analyzer: "Analyzer", expr: "MemberExpr", scope: Scope) -> int | None:
     """Evaluate a member access expression in a const context."""
     # Evaluate the base expression first
-    base_val = analyzer._eval_int_constant_expr(expr.base, scope)  # type: ignore
+    base_val = analyzer._eval_int_constant_expr(expr.base, scope)
     if base_val is not None:
         # If base is a scalar, the member access resolves to that scalar
         # (scalar initializes struct's first member recursively).
@@ -251,16 +304,16 @@ def _eval_member_expr(analyzer: object, expr: "MemberExpr", scope: Scope) -> int
 
 
 def _lookup_member_in_init(
-    analyzer: object,
+    analyzer: "Analyzer",
     init_list: "InitList",
-    base_type: object,
+    base_type: Type,
     member_name: str,
     scope: Scope,
 ) -> int | None:
     """Find a member's initializer value in an InitList."""
-    if not analyzer._is_record_name(base_type.name):  # type: ignore
+    if not analyzer._is_record_name(base_type.name):
         return None
-    members = analyzer._record_members(base_type.name)  # type: ignore
+    members = analyzer._record_members(base_type.name)
     if members is None:
         return None
     for idx, m in enumerate(members):
@@ -273,28 +326,28 @@ def _lookup_member_in_init(
 
 
 def _eval_binary_int_constant_expr(
-    analyzer: object,
+    analyzer: "Analyzer",
     expr: BinaryExpr,
     scope: Scope,
 ) -> int | None:
-    left_value = analyzer._eval_int_constant_expr(expr.left, scope)  # type: ignore
+    left_value = analyzer._eval_int_constant_expr(expr.left, scope)
     if left_value is None:
         return None
     if expr.op == "&&":
         if not left_value:
             return 0
-        right_value = analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore
+        right_value = analyzer._eval_int_constant_expr(expr.right, scope)
         if right_value is None:
             return None
         return 1 if right_value else 0
     if expr.op == "||":
         if left_value:
             return 1
-        right_value = analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore
+        right_value = analyzer._eval_int_constant_expr(expr.right, scope)
         if right_value is None:
             return None
         return 1 if right_value else 0
-    right_value = analyzer._eval_int_constant_expr(expr.right, scope)  # type: ignore
+    right_value = analyzer._eval_int_constant_expr(expr.right, scope)
     if right_value is None:
         return None
     if expr.op == "+":
@@ -341,35 +394,35 @@ def _eval_binary_int_constant_expr(
 
 
 def _eval_generic_int_constant_expr(
-    analyzer: object,
+    analyzer: "Analyzer",
     expr: GenericExpr,
     scope: Scope,
 ) -> int | None:
     selected_expr: Expr | None = None
     default_expr: Expr | None = None
-    control_type = analyzer._type_map.get(expr.control)  # type: ignore
+    control_type = analyzer._type_map.get(expr.control)
     if control_type is None:
-        control_type = analyzer._analyze_expr(expr.control, scope)  # type: ignore
-    control_type = analyzer._decay_array_value(control_type)  # type: ignore
+        control_type = analyzer._analyze_expr(expr.control, scope)
+    control_type = analyzer._decay_array_value(control_type)
     for assoc_type_spec, assoc_expr in expr.associations:
         if assoc_type_spec is None:
             default_expr = assoc_expr
             continue
-        analyzer._register_type_spec(assoc_type_spec)  # type: ignore
-        if analyzer._resolve_type(assoc_type_spec) == control_type:  # type: ignore
+        analyzer._register_type_spec(assoc_type_spec)
+        if analyzer._resolve_type(assoc_type_spec) == control_type:
             selected_expr = assoc_expr
     if selected_expr is None:
         selected_expr = default_expr
     if selected_expr is None:
         return None
-    return analyzer._eval_int_constant_expr(selected_expr, scope)  # type: ignore
+    return analyzer._eval_int_constant_expr(selected_expr, scope)
 
 
-def char_const_value(analyzer: object, lexeme: str) -> int | None:
-    body = analyzer._char_literal_body(lexeme)  # type: ignore
+def char_const_value(analyzer: "Analyzer", lexeme: str) -> int | None:
+    body = analyzer._char_literal_body(lexeme)
     if body is None:
         return None
-    units = analyzer._decode_escaped_units(body)  # type: ignore
+    units = analyzer._decode_escaped_units(body)
     if len(units) != 1:
         return None
     return units[0]
@@ -384,9 +437,9 @@ def char_literal_body(lexeme: str) -> str | None:
     return prefixless[1:-1]
 
 
-def string_literal_required_length(analyzer: object, lexeme: str) -> int | None:
-    body = analyzer._string_literal_body(lexeme)  # type: ignore
-    return None if body is None else len(analyzer._decode_escaped_units(body)) + 1  # type: ignore
+def string_literal_required_length(analyzer: "Analyzer", lexeme: str) -> int | None:
+    body = analyzer._string_literal_body(lexeme)
+    return None if body is None else len(analyzer._decode_escaped_units(body)) + 1
 
 
 def string_literal_body(lexeme: str) -> str | None:

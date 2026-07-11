@@ -1,4 +1,4 @@
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from xcc.ast import (
     DeclGroupStmt,
@@ -14,6 +14,9 @@ from xcc.ast import (
 from xcc.types import Type
 
 from .symbols import FunctionSignature, Scope, SemaError, VarSymbol
+
+if TYPE_CHECKING:
+    from . import Analyzer
 
 
 class _FileScopeAnalyzer(Protocol):
@@ -114,7 +117,7 @@ class _FileScopeAnalyzer(Protocol):
 
 
 def analyze_file_scope_decl(analyzer: _FileScopeAnalyzer, declaration: Stmt) -> None:
-    a = analyzer
+    a = cast("Analyzer", analyzer)
     if isinstance(declaration, DeclGroupStmt):
         for grouped_decl in declaration.declarations:
             a._analyze_file_scope_decl(grouped_decl)
