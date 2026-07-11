@@ -225,8 +225,14 @@ class _TypeBinder:
     def _collect_function(self, statement: ast.FunctionDef, owner: str | None) -> None:
         function_name = f"{owner}.{statement.name}" if owner is not None else statement.name
         parameters: list[tuple[str, str]] = []
+        parameter_defaults: list[ast.expr | None] = []
         positional_args = statement.args.posonlyargs + statement.args.args
-        for index, arg in enumerate(positional_args):
+        positional_defaults: tuple[ast.expr | None, ...] = (None,) * (
+            len(positional_args) - len(statement.args.defaults)
+        ) + tuple(statement.args.defaults)
+        for index, (arg, default) in enumerate(
+            zip(positional_args, positional_defaults, strict=True)
+        ):
             annotation = arg.annotation
             if (
                 owner is not None
@@ -235,6 +241,7 @@ class _TypeBinder:
                 and arg.arg in {"self", "cls"}
             ):
                 parameters.append((arg.arg, owner))
+                parameter_defaults.append(default)
                 continue
             if annotation is None:
                 self._add_error(
@@ -244,8 +251,13 @@ class _TypeBinder:
                 )
                 continue
             parameters.append((arg.arg, annotation_name(annotation)))
+            parameter_defaults.append(default)
             self._resolve_annotation(annotation, arg)
-        for arg in statement.args.kwonlyargs:
+        for arg, default in zip(
+            statement.args.kwonlyargs,
+            statement.args.kw_defaults,
+            strict=True,
+        ):
             if arg.annotation is None:
                 self._add_error(
                     "XCC-AOT-TYPE-0001",
@@ -254,6 +266,7 @@ class _TypeBinder:
                 )
                 continue
             parameters.append((arg.arg, annotation_name(arg.annotation)))
+            parameter_defaults.append(default)
             self._resolve_annotation(arg.annotation, arg)
         if statement.returns is None:
             self._add_error(
@@ -268,6 +281,7 @@ class _TypeBinder:
             function_name,
             tuple(parameters),
             return_type,
+            tuple(parameter_defaults),
         )
 
     def _resolve_annotation(self, node: ast.expr, owner: ast.AST) -> AotType:

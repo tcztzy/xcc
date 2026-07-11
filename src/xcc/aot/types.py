@@ -49,6 +49,7 @@ class AotFunctionInfo:
     name: str
     parameters: tuple[tuple[str, str], ...]
     return_type: AotType
+    parameter_defaults: tuple[ast.expr | None, ...] = ()
 
 
 @dataclass(frozen=True)

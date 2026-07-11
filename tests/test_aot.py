@@ -234,6 +234,22 @@ class AotTypeBinderTests(unittest.TestCase):
         self.assertEqual(analysis.width_aliases["uint32"].bits, 32)
         self.assertFalse(analysis.width_aliases["uint32"].signed)
 
+    def test_width_alias_names_are_aot_known_python_names(self) -> None:
+        source = (
+            "int32 = int\n"
+            "uint64 = int\n"
+            "usize = int\n"
+            "def pack(a: int32, b: uint64, c: usize) -> int32:\n"
+            "    return a\n"
+        )
+        analysis = analyze_source(source, filename="width_alias_contract.py")
+        function = analysis.types.functions["pack"]
+        self.assertEqual(function.parameters[0], ("a", "int32"))
+        self.assertEqual(function.parameters[1], ("b", "uint64"))
+        self.assertEqual(function.parameters[2], ("c", "usize"))
+        self.assertEqual(function.return_type.bits, 32)
+        self.assertTrue(function.return_type.signed)
+
     def test_rejects_missing_parameter_annotation(self) -> None:
         source = "def f(value) -> int:\n    return value\n"
         module = parse_source(source, filename="missing.py")
