@@ -101,7 +101,11 @@ def _tokenize_macro_text(text: str) -> list[_MacroToken] | None:
 
 
 def _render_macro_tokens(tokens: list[_MacroToken]) -> str:
-    return " ".join(token.text for token in tokens if token.text)
+    parts: list[str] = []
+    for token in tokens:
+        if token.text:
+            parts.append(token.text)
+    return " ".join(parts)
 
 
 def _lookup_macro_argument(
@@ -133,6 +137,10 @@ def _join_macro_arguments(args: list[list[_MacroToken]]) -> list[_MacroToken]:
 
 
 def _stringize_tokens(tokens: list[_MacroToken]) -> str:
-    text = " ".join(token.text for token in tokens if token.text)
+    parts: list[str] = []
+    for token in tokens:
+        if token.text:
+            parts.append(token.text)
+    text = " ".join(parts)
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'

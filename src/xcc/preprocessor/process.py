@@ -43,6 +43,16 @@ class _ProcessTextPreprocessor(Protocol):
         base_dir: Path | None,
     ) -> str | None: ...
 
+    def _handle_conditional_for_process(
+        self,
+        name: str,
+        body: str,
+        location: _SourceLocation,
+        stack: list[_ConditionalFrame],
+        *,
+        base_dir: Path | None,
+    ) -> tuple[str | None, list[_ConditionalFrame]]: ...
+
     def _handle_define(self, body: str) -> None: ...
 
     def _handle_undef(self, body: str, location: _SourceLocation) -> None: ...
@@ -247,7 +257,7 @@ def process_text(
                                 logical_cursor.line + len(all_lines),
                                 logical_cursor.include_level,
                             )
-                            result = self._handle_conditional(
+                            result, inner_stack = self._handle_conditional_for_process(
                                 inner_name,
                                 inner_body,
                                 inner_loc,
@@ -305,7 +315,7 @@ def process_text(
             line_index += 1
             continue
         name, body = parsed
-        conditional_result = self._handle_conditional(
+        conditional_result, stack = self._handle_conditional_for_process(
             name,
             body,
             directive_cursor.first_location(),
@@ -355,7 +365,8 @@ def process_text(
                 include_next=name == "include_next",
                 is_import=name == "import",
             )
-            out.extend_processed(include_processed)
+            if include_processed is not None:
+                out.extend_processed(include_processed)
             for directive_index, chunk in enumerate(directive_lines[1:], start=1):
                 out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
             logical_cursor.advance(len(directive_lines))
@@ -398,7 +409,8 @@ def process_text(
                 directive_cursor.first_location(),
                 base_dir=base_dir,
             )
-            out.extend_processed(embed_processed)
+            if embed_processed is not None:
+                out.extend_processed(embed_processed)
             for directive_index, chunk in enumerate(directive_lines[1:], start=1):
                 out.append(_blank_line(chunk), directive_cursor.line_location(directive_index))
             logical_cursor.advance(len(directive_lines))

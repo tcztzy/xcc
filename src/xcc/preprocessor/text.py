@@ -1,23 +1,11 @@
-import re
 from datetime import datetime
 from pathlib import Path
 
 from . import PreprocessorError
 from .macros import _Macro, _render_macro_tokens
 
-_DIRECTIVE_RE = re.compile(r"^\s*#\s*(?P<name>[A-Za-z_]\w*)(?P<body>.*)$", re.DOTALL)
-_ASM_PREFIX_RE = re.compile(r"^\s*(?:__asm__|__asm|asm)\b")
-_ASM_STMT_RE = re.compile(r"^\s*asm\b")
-_ASM_KEYWORD_RE = re.compile(r"(?<!\w)(?:__asm__|__asm|asm)\b")
-_ASM_QUALIFIERS = frozenset({"volatile", "__volatile__", "inline", "__inline__"})
-_AARCH64_SP_ASM_RE = re.compile(
-    r'^\(\s*"mov\s+%0\s*,\s*sp"\s*:\s*"=r"\s*\(\s*([A-Za-z_]\w*)\s*\)\s*\)$'
-)
-_CONTROL_STATEMENT_PREFIXES = frozenset({"if", "for", "switch", "while"})
-_ENUM_DECL_RE = re.compile(
-    r"(?<!\w)__(?:enum|enum_class)_decl\s*\(\s*([A-Za-z_]\w*)\s*,[^,]*,\s*\{"
-)
-_ENUM_DECL_CLOSE_RE = re.compile(r"^\s*\}\s*\)\s*;\s*$")
+_ASM_QUALIFIERS = ("volatile", "__volatile__", "inline", "__inline__")
+_CONTROL_STATEMENT_PREFIXES = ("if", "for", "switch", "while")
 
 
 def _macro_table_line(macro: _Macro) -> str:
@@ -54,7 +42,11 @@ def _format_include_reference(include_name: str, is_angled: bool) -> str:
 
 
 def _format_include_cycle(include_stack: tuple[str, ...], include_path: str) -> str:
-    cycle_start = include_stack.index(include_path)
+    cycle_start = 0
+    while cycle_start < len(include_stack) and include_stack[cycle_start] != include_path:
+        cycle_start += 1
+    if cycle_start == len(include_stack):
+        raise ValueError("include path is not present in include stack")
     cycle_chain = (*include_stack[cycle_start:], include_path)
     return " -> ".join(cycle_chain)
 
@@ -62,19 +54,25 @@ def _format_include_cycle(include_stack: tuple[str, ...], include_path: str) -> 
 def _format_include_search_roots(search_roots: tuple[Path, ...]) -> str:
     if not search_roots:
         return "<none>"
-    return ", ".join(str(root) for root in search_roots)
+    parts: list[str] = []
+    for root in search_roots:
+        parts.append(str(root))
+    return ", ".join(parts)
 
 
 def _parse_directive(line: str) -> tuple[str, str] | None:
-    if not line.lstrip().startswith("#"):
+    index = _skip_space(line, 0)
+    if index >= len(line) or line[index] != "#":
         return None
-    match = _DIRECTIVE_RE.match(line)
-    if match is None:
+    index = _skip_space(line, index + 1)
+    scanned = _scan_identifier(line, index)
+    if scanned is None:
         return None
-    body = match.group("body")
+    name, index = scanned
+    body = line[index:]
     if body.endswith("\n"):
         body = body[:-1]
-    return match.group("name"), body
+    return name, body
 
 
 def _blank_line(line: str) -> str:
@@ -166,8 +164,146 @@ def _expand_object_like_macros(line: str, macros: dict[str, str]) -> str:
     return "".join(result)
 
 
+def _asm_keyword_at(line: str, index: int) -> int | None:
+    for keyword in ("__asm__", "__asm", "asm"):
+        end = index + len(keyword)
+        if not line.startswith(keyword, index):
+            continue
+        if end < len(line) and _is_word_char(line[end]):
+            continue
+        return end
+    return None
+
+
+def _find_asm_keyword(line: str, index: int) -> tuple[int, int] | None:
+    cursor = index
+    while cursor < len(line):
+        if cursor > 0 and _is_word_char(line[cursor - 1]):
+            cursor += 1
+            continue
+        end = _asm_keyword_at(line, cursor)
+        if end is not None:
+            return cursor, end
+        cursor += 1
+    return None
+
+
+def _line_starts_asm_prefix(line: str) -> bool:
+    index = _skip_space(line, 0)
+    return _asm_keyword_at(line, index) is not None
+
+
+def _line_starts_bare_asm(line: str) -> bool:
+    index = _skip_space(line, 0)
+    end = index + 3
+    if not line.startswith("asm", index):
+        return False
+    return end >= len(line) or not _is_word_char(line[end])
+
+
+def _rewrite_enum_decl(line: str) -> tuple[str, bool]:
+    found = _find_enum_decl(line, 0)
+    if found is None:
+        return line, False
+    start, end, name = found
+    return line[:start] + f"enum {name} {{" + line[end:], True
+
+
+def _find_enum_decl(line: str, index: int) -> tuple[int, int, str] | None:
+    cursor = index
+    while cursor < len(line):
+        if cursor > 0 and _is_word_char(line[cursor - 1]):
+            cursor += 1
+            continue
+        prefix_end = _enum_decl_prefix_end(line, cursor)
+        if prefix_end is None:
+            cursor += 1
+            continue
+        result = _finish_enum_decl(line, prefix_end)
+        if result is None:
+            cursor += 1
+            continue
+        end, name = result
+        return cursor, end, name
+    return None
+
+
+def _enum_decl_prefix_end(line: str, index: int) -> int | None:
+    enum_prefix = "__enum_decl"
+    enum_class_prefix = "__enum_class_decl"
+    if line.startswith(enum_class_prefix, index):
+        return index + len(enum_class_prefix)
+    if line.startswith(enum_prefix, index):
+        return index + len(enum_prefix)
+    return None
+
+
+def _finish_enum_decl(line: str, index: int) -> tuple[int, str] | None:
+    cursor = _skip_space(line, index)
+    if cursor >= len(line) or line[cursor] != "(":
+        return None
+    cursor = _skip_space(line, cursor + 1)
+    scanned = _scan_identifier(line, cursor)
+    if scanned is None:
+        return None
+    name, cursor = scanned
+    cursor = _skip_space(line, cursor)
+    if cursor >= len(line) or line[cursor] != ",":
+        return None
+    cursor += 1
+    while cursor < len(line) and line[cursor] != ",":
+        cursor += 1
+    if cursor >= len(line):
+        return None
+    cursor = _skip_space(line, cursor + 1)
+    if cursor >= len(line) or line[cursor] != "{":
+        return None
+    return cursor + 1, name
+
+
+def _rewrite_enum_decl_close(line: str) -> str:
+    cursor = _skip_space(line, 0)
+    if cursor >= len(line) or line[cursor] != "}":
+        return line
+    cursor = _skip_space(line, cursor + 1)
+    if cursor >= len(line) or line[cursor] != ")":
+        return line
+    cursor = _skip_space(line, cursor + 1)
+    if cursor >= len(line) or line[cursor] != ";":
+        return line
+    cursor = _skip_space(line, cursor + 1)
+    if cursor != len(line):
+        return line
+    return "};"
+
+
+def _split_lines(source: str) -> tuple[str, ...]:
+    if not source:
+        return ()
+    lines: tuple[str, ...] = ()
+    for line in source.split("\n"):
+        lines = (*lines, line)
+    if lines and lines[-1] == "":
+        return lines[:-1]
+    return lines
+
+
+def _split_lines_keepends(source: str) -> tuple[str, ...]:
+    if not source:
+        return ()
+    raw_lines = source.split("\n")
+    lines: tuple[str, ...] = ()
+    last_index = len(raw_lines) - 1
+    for index, line in enumerate(raw_lines):
+        if index < last_index:
+            lines = (*lines, line + "\n")
+        elif line:
+            lines = (*lines, line)
+    return lines
+
+
 def _strip_gnu_asm_extensions(source: str) -> str:
-    lines = source.splitlines(keepends=True)
+    lines = _split_lines_keepends(source)
     if not lines:
         return source
     stripped_lines: list[str] = []
@@ -180,20 +316,19 @@ def _strip_gnu_asm_extensions(source: str) -> str:
                 in_asm_statement = False
             continue
         # Bare 'asm' at line start: standalone asm statement.
-        if _ASM_STMT_RE.match(line):
+        if _line_starts_bare_asm(line):
             stripped_lines.append(";\n" if line.endswith("\n") else ";")
             in_asm_statement = ";" not in line
             continue
         # __asm__ or __asm labels/attributes/statements (strip just the asm part).
         stripped = _strip_inline_asm_segments(line)
         # Translate __enum_decl(name, type, { -> enum name {
-        m = _ENUM_DECL_RE.search(stripped)
-        if m:
-            stripped = _ENUM_DECL_RE.sub(f"enum {m.group(1)} {{", stripped)
+        stripped, changed_enum_decl = _rewrite_enum_decl(stripped)
+        if changed_enum_decl:
             in_enum_decl = True
         # Translate } ); (closing of __enum_decl) -> };
         if in_enum_decl:
-            closed = _ENUM_DECL_CLOSE_RE.sub(r"};", stripped)
+            closed = _rewrite_enum_decl_close(stripped)
             if closed != stripped:
                 stripped = closed
                 in_enum_decl = False
@@ -208,22 +343,23 @@ def _strip_inline_asm_segments(line: str) -> str:
     result: list[str] = []
     index = 0
     while True:
-        match = _ASM_KEYWORD_RE.search(line, index)
+        match = _find_asm_keyword(line, index)
         if match is None:
             result.append(line[index:])
             return "".join(result)
-        result.append(line[index : match.start()])
-        open_index = _asm_operand_open_index(line, match.end())
+        match_start, match_end = match
+        result.append(line[index:match_start])
+        open_index = _asm_operand_open_index(line, match_end)
         if open_index is None:
-            index = match.end()
+            index = match_end
             continue
         close_index = _find_matching_paren(line, open_index)
         if close_index is None:
-            index = match.end()
+            index = match_end
             continue
         after = close_index + 1
         statement_end = _asm_statement_end(line, after)
-        if statement_end is not None and _asm_statement_context(line[: match.start()]):
+        if statement_end is not None and _asm_statement_context(line[:match_start]):
             asm_text = line[open_index : close_index + 1]
             rewrite = _rewrite_aarch64_stack_pointer_asm(asm_text)
             result.append(rewrite if rewrite is not None else ";")
@@ -233,11 +369,68 @@ def _strip_inline_asm_segments(line: str) -> str:
 
 
 def _rewrite_aarch64_stack_pointer_asm(asm_text: str) -> str | None:
-    match = _AARCH64_SP_ASM_RE.match(asm_text)
-    if match is None:
+    target = _aarch64_stack_pointer_target(asm_text)
+    if target is None:
         return None
-    target = match.group(1)
     return f"{target} = (unsigned long)&{target};"
+
+
+def _aarch64_stack_pointer_target(asm_text: str) -> str | None:
+    cursor = _skip_space(asm_text, 0)
+    if cursor >= len(asm_text) or asm_text[cursor] != "(":
+        return None
+    cursor = _skip_space(asm_text, cursor + 1)
+    if cursor >= len(asm_text) or asm_text[cursor] != '"':
+        return None
+    template_end = _match_aarch64_sp_template(asm_text, cursor + 1)
+    if template_end is None:
+        return None
+    cursor = template_end
+    cursor = _skip_space(asm_text, cursor)
+    if cursor >= len(asm_text) or asm_text[cursor] != ":":
+        return None
+    cursor = _skip_space(asm_text, cursor + 1)
+    if not asm_text.startswith('"=r"', cursor):
+        return None
+    cursor = _skip_space(asm_text, cursor + 4)
+    if cursor >= len(asm_text) or asm_text[cursor] != "(":
+        return None
+    cursor = _skip_space(asm_text, cursor + 1)
+    scanned = _scan_identifier(asm_text, cursor)
+    if scanned is None:
+        return None
+    target, cursor = scanned
+    cursor = _skip_space(asm_text, cursor)
+    if cursor >= len(asm_text) or asm_text[cursor] != ")":
+        return None
+    cursor = _skip_space(asm_text, cursor + 1)
+    if cursor >= len(asm_text) or asm_text[cursor] != ")":
+        return None
+    cursor = _skip_space(asm_text, cursor + 1)
+    if cursor != len(asm_text):
+        return None
+    return target
+
+
+def _match_aarch64_sp_template(asm_text: str, index: int) -> int | None:
+    if not asm_text.startswith("mov", index):
+        return None
+    cursor = index + 3
+    if cursor >= len(asm_text) or not asm_text[cursor].isspace():
+        return None
+    cursor = _skip_space(asm_text, cursor)
+    if not asm_text.startswith("%0", cursor):
+        return None
+    cursor = _skip_space(asm_text, cursor + 2)
+    if cursor >= len(asm_text) or asm_text[cursor] != ",":
+        return None
+    cursor = _skip_space(asm_text, cursor + 1)
+    if not asm_text.startswith("sp", cursor):
+        return None
+    cursor += 2
+    if cursor >= len(asm_text) or asm_text[cursor] != '"':
+        return None
+    return cursor + 1
 
 
 def _asm_operand_open_index(line: str, index: int) -> int | None:
@@ -352,7 +545,7 @@ def _reject_gnu_asm_extensions(
     primary_filename: str | None = None,
 ) -> None:
     previous_significant_line = ""
-    for line_number, line in enumerate(source.splitlines(), start=1):
+    for line_number, line in enumerate(_split_lines(source), start=1):
         if _contains_gnu_asm_statement(
             line,
             previous_significant_line=previous_significant_line,
@@ -379,19 +572,20 @@ def _reject_gnu_asm_extensions(
 def _contains_gnu_asm_statement(line: str, *, previous_significant_line: str = "") -> bool:
     index = 0
     while True:
-        match = _ASM_KEYWORD_RE.search(line, index)
+        match = _find_asm_keyword(line, index)
         if match is None:
             return False
-        prefix = line[: match.start()]
-        open_index = _asm_operand_open_index(line, match.end())
+        match_start, match_end = match
+        prefix = line[:match_start]
+        open_index = _asm_operand_open_index(line, match_end)
         if open_index is None:
-            index = match.end()
+            index = match_end
             continue
         close_index = _find_matching_paren(line, open_index)
         if close_index is None:
             if _asm_statement_context(prefix):
                 return True
-            index = match.end()
+            index = match_end
             continue
         if _asm_statement_end(line, close_index + 1) is not None and _asm_statement_context(prefix):
             if _line_starts_declaration_asm_label(line) and _can_continue_declaration(
@@ -404,7 +598,7 @@ def _contains_gnu_asm_statement(line: str, *, previous_significant_line: str = "
 
 
 def _line_starts_declaration_asm_label(line: str) -> bool:
-    return _ASM_PREFIX_RE.match(line) is not None
+    return _line_starts_asm_prefix(line)
 
 
 def _can_continue_declaration(previous_line: str) -> bool:
@@ -424,8 +618,8 @@ def _reject_gnu_asm_statements(
     code: str,
     primary_filename: str,
 ) -> None:
-    for line_number, line in enumerate(source.splitlines(), start=1):
-        if not _ASM_PREFIX_RE.match(line):
+    for line_number, line in enumerate(_split_lines(source), start=1):
+        if not _line_starts_asm_prefix(line):
             continue
         mapped_filename, mapped_line = (
             line_map[line_number - 1]

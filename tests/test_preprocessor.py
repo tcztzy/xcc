@@ -3756,6 +3756,16 @@ A(0)
                 processor._parse_header_name_operand("HDR", _SourceLocation("main.c", 1))
         self.assertIn("Invalid #include directive", str(ctx.exception))
 
+    def test_parse_header_name_operand_no_macro_allows_trailing_block_comment(self) -> None:
+        processor = _Preprocessor(FrontendOptions())
+        self.assertEqual(
+            processor._parse_header_name_operand_no_macro(
+                "<machine/_types.h> /* __uint32_t */",
+                _SourceLocation("main.c", 1),
+            ),
+            ("machine/_types.h", True),
+        )
+
     def test_resolve_include_next_handles_missing_and_matched_start_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

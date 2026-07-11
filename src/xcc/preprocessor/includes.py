@@ -22,7 +22,10 @@ def _env_path_list(name: str) -> tuple[str, ...]:
         return ()
     parts = raw.split(os.pathsep)
     # GCC/Clang treat empty include-env entries as the current working directory.
-    return tuple(part if part else "." for part in parts)
+    normalized: list[str] = []
+    for part in parts:
+        normalized.append(part if part else ".")
+    return tuple(normalized)
 
 
 def _source_dir(filename: str) -> Path | None:
@@ -81,7 +84,10 @@ def _parse_header_name_operand(
         return literal[1:-1], False
 
     if _is_angle_header_token_sequence(tokens):
-        return "".join(token.text for token in tokens[1:-1]), True
+        parts: list[str] = []
+        for token in tokens[1:-1]:
+            parts.append(token.text)
+        return "".join(parts), True
 
     _raise_invalid_include(location, invalid_directive_code)
 
@@ -123,22 +129,31 @@ def _resolve_include(
     search_roots: list[Path] = []
     if not is_angled and base_dir is not None:
         search_roots.append(base_dir)
-        search_roots.extend(Path(path) for path in quote_include_dirs)
-    search_roots.extend(Path(path) for path in include_dirs)
-    search_roots.extend(Path(path) for path in cpath_include_dirs)
-    search_roots.extend(Path(path) for path in system_include_dirs)
-    search_roots.extend(Path(path) for path in host_system_include_dirs)
-    search_roots.extend(Path(path) for path in c_include_path_dirs)
-    search_roots.extend(Path(path) for path in after_include_dirs)
+        for path in quote_include_dirs:
+            search_roots.append(Path(path))
+    for path in include_dirs:
+        search_roots.append(Path(path))
+    for path in cpath_include_dirs:
+        search_roots.append(Path(path))
+    for path in system_include_dirs:
+        search_roots.append(Path(path))
+    for path in host_system_include_dirs:
+        search_roots.append(Path(path))
+    for path in c_include_path_dirs:
+        search_roots.append(Path(path))
+    for path in after_include_dirs:
+        search_roots.append(Path(path))
 
     start_index = _include_next_start_index(search_roots, include_next_from)
-    seen_roots = {include_next_from.resolve()} if include_next_from is not None else set()
+    seen_roots: list[Path] = []
+    if include_next_from is not None:
+        seen_roots.append(include_next_from.resolve())
     searched_roots_list: list[Path] = []
     for root in search_roots[start_index:]:
         resolved_root = root.resolve()
         if resolved_root in seen_roots:
             continue
-        seen_roots.add(resolved_root)
+        seen_roots.append(resolved_root)
         searched_roots_list.append(resolved_root)
 
     searched_roots = tuple(searched_roots_list)
@@ -153,11 +168,11 @@ def _resolve_include(
 
 
 def _framework_include_candidate(root: Path, include_name: str) -> Path | None:
-    parts = Path(include_name).parts
+    parts = include_name.split("/")
     if len(parts) < 2:
         return None
     framework_name = parts[0]
-    relative_header = Path(*parts[1:])
+    relative_header = "/".join(parts[1:])
     framework_roots: list[Path] = []
     if root.name == "include" and root.parent.name == "usr":
         framework_roots.append(root.parent.parent / "System" / "Library" / "Frameworks")
@@ -241,9 +256,12 @@ def _resolve_embed(
     for path in embed_dirs:
         search_roots.append(Path(path))
     if not is_angled:
-        search_roots.extend(Path(path) for path in quote_include_dirs)
-    search_roots.extend(Path(path) for path in include_dirs)
-    search_roots.extend(Path(path) for path in system_include_dirs)
+        for path in quote_include_dirs:
+            search_roots.append(Path(path))
+    for path in include_dirs:
+        search_roots.append(Path(path))
+    for path in system_include_dirs:
+        search_roots.append(Path(path))
 
     searched_roots_list: list[Path] = []
     for root in search_roots:

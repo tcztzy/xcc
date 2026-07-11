@@ -1,22 +1,111 @@
 import ast
-import re
 from dataclasses import dataclass
-
-_IDENT_RE = re.compile(r"[A-Za-z_]\w*")
-_PP_INT_RE = re.compile(
-    r"^(?:0[xX][0-9A-Fa-f]+|[0-9]+)(?:[uU](?:ll|LL|[lL])?|(?:ll|LL|[lL])[uU]?)?$"
-)
-_EXPR_TOKEN_RE = re.compile(
-    r"0[xX][0-9A-Fa-f]+(?:[uU](?:ll|LL|[lL])?|(?:ll|LL|[lL])[uU]?)?"
-    r"|[0-9]+(?:[uU](?:ll|LL|[lL])?|(?:ll|LL|[lL])[uU]?)?"
-    r"|(?:u8|[uUL])?'(?:[^'\\\n]|\\.)+'"
-    r"|[A-Za-z_]\w*"
-    r"|\|\||&&|==|!=|<=|>=|<<|>>|[()!~+\-*/%<>&^|?:]"
-)
 
 _INT64_MIN = -(1 << 63)
 _INT64_MAX = (1 << 63) - 1
 _UINT64_MASK = (1 << 64) - 1
+
+
+def _is_identifier_start(ch: str) -> bool:
+    return ch == "_" or "A" <= ch <= "Z" or "a" <= ch <= "z"
+
+
+def _is_identifier_char(ch: str) -> bool:
+    return _is_identifier_start(ch) or "0" <= ch <= "9"
+
+
+def _is_identifier(token: str) -> bool:
+    if not token or not _is_identifier_start(token[0]):
+        return False
+    for ch in token[1:]:  # noqa: SIM110 - avoid generator lowering in AOT code.
+        if not _is_identifier_char(ch):
+            return False
+    return True
+
+
+def _is_hex_digit(ch: str) -> bool:
+    return "0" <= ch <= "9" or "A" <= ch <= "F" or "a" <= ch <= "f"
+
+
+def _valid_integer_suffix(suffix: str) -> bool:
+    if not suffix:
+        return True
+    return suffix in {
+        "u",
+        "U",
+        "l",
+        "L",
+        "ll",
+        "LL",
+        "ul",
+        "uL",
+        "Ull",
+        "ULL",
+        "ull",
+        "uLL",
+        "Ul",
+        "UL",
+        "lu",
+        "lU",
+        "LLu",
+        "LLU",
+        "llu",
+        "llU",
+        "Lu",
+        "LU",
+    }
+
+
+def _integer_token_end(expr: str, index: int) -> int | None:
+    cursor = index
+    if cursor >= len(expr) or not expr[cursor].isdigit():
+        return None
+    if expr[cursor] == "0" and cursor + 1 < len(expr) and expr[cursor + 1] in "xX":
+        cursor += 2
+        digit_start = cursor
+        while cursor < len(expr) and _is_hex_digit(expr[cursor]):
+            cursor += 1
+        if cursor == digit_start:
+            return None
+    else:
+        while cursor < len(expr) and expr[cursor].isdigit():
+            cursor += 1
+    suffix_start = cursor
+    while cursor < len(expr) and expr[cursor] in "uUlL":
+        cursor += 1
+    if not _valid_integer_suffix(expr[suffix_start:cursor]):
+        return suffix_start
+    return cursor
+
+
+def _char_literal_token_end(expr: str, index: int) -> int | None:
+    cursor = index
+    if expr.startswith("u8'", cursor):
+        cursor += 2
+    elif (
+        cursor < len(expr)
+        and expr[cursor] in "uUL"
+        and cursor + 1 < len(expr)
+        and expr[cursor + 1] == "'"
+    ):
+        cursor += 1
+    if cursor >= len(expr) or expr[cursor] != "'":
+        return None
+    cursor += 1
+    has_content = False
+    while cursor < len(expr):
+        ch = expr[cursor]
+        if ch == "\n":
+            return None
+        if ch == "'":
+            return cursor + 1 if has_content else None
+        if ch == "\\":
+            cursor += 1
+            if cursor >= len(expr) or expr[cursor] == "\n":
+                return None
+        has_content = True
+        cursor += 1
+    return None
 
 
 def _rewrite_ternary(tokens: list[str]) -> list[str]:
@@ -96,7 +185,7 @@ def _translate_expr_to_python(expr: str) -> str:
         if char_value is not None:
             mapped.append(str(char_value))
             continue
-        if _IDENT_RE.fullmatch(token):
+        if _is_identifier(token):
             mapped.append("0")
             continue
         if token == "&&":
@@ -121,7 +210,7 @@ def _collapse_function_invocations(tokens: list[str]) -> list[str]:
     index = 0
     while index < len(tokens):
         token = tokens[index]
-        if _IDENT_RE.fullmatch(token) and index + 1 < len(tokens) and tokens[index + 1] == "(":
+        if _is_identifier(token) and index + 1 < len(tokens) and tokens[index + 1] == "(":
             depth = 0
             index += 1
             while index < len(tokens):
@@ -144,7 +233,8 @@ def _collapse_function_invocations(tokens: list[str]) -> list[str]:
 
 
 def _parse_pp_integer_literal(token: str) -> int | None:
-    if _PP_INT_RE.fullmatch(token) is None:
+    token_end = _integer_token_end(token, 0)
+    if token_end != len(token):
         return None
     index = len(token)
     while index > 0 and token[index - 1] in "uUlL":
@@ -153,8 +243,9 @@ def _parse_pp_integer_literal(token: str) -> int | None:
     if digits.startswith(("0x", "0X")):
         return int(digits, 16)
     if digits.startswith("0") and len(digits) > 1:
-        if any(ch not in "01234567" for ch in digits):
-            return None
+        for ch in digits:
+            if ch not in "01234567":
+                return None
         return int(digits, 8)
     return int(digits, 10)
 
@@ -163,7 +254,10 @@ def _is_unsigned_pp_integer(token: str) -> bool:
     value = _parse_pp_integer_literal(token)
     if value is None:
         return False
-    return any(ch in "uU" for ch in token) or value > _INT64_MAX
+    for ch in token:
+        if ch in "uU":
+            return True
+    return value > _INT64_MAX
 
 
 def _parse_pp_char_literal(token: str) -> int | None:
@@ -185,7 +279,19 @@ def _parse_pp_char_literal(token: str) -> int | None:
 
 
 def _strip_condition_comments(expr: str) -> str:
-    without_block = re.sub(r"/\*.*?\*/", " ", expr, flags=re.DOTALL)
+    without_block = ""
+    index = 0
+    while index < len(expr):
+        if index + 1 < len(expr) and expr[index] == "/" and expr[index + 1] == "*":
+            end = expr.find("*/", index + 2)
+            if end < 0:
+                without_block += expr[index:]
+                break
+            without_block += " "
+            index = end + 2
+            continue
+        without_block += expr[index]
+        index += 1
     if "//" in without_block:
         return without_block.split("//", 1)[0]
     return without_block
@@ -198,11 +304,41 @@ def _tokenize_expr(expr: str) -> list[str]:
         if expr[index].isspace():
             index += 1
             continue
-        match = _EXPR_TOKEN_RE.match(expr, index)
-        if match is None:
-            raise ValueError("Invalid token")
-        tokens.append(match.group(0))
-        index = match.end()
+        char_end = _char_literal_token_end(expr, index)
+        if char_end is not None:
+            tokens.append(expr[index:char_end])
+            index = char_end
+            continue
+        int_end = _integer_token_end(expr, index)
+        if int_end is not None:
+            tokens.append(expr[index:int_end])
+            index = int_end
+            continue
+        if _is_identifier_start(expr[index]):
+            start = index
+            index += 1
+            while index < len(expr) and _is_identifier_char(expr[index]):
+                index += 1
+            tokens.append(expr[start:index])
+            continue
+        if index + 1 < len(expr) and expr[index : index + 2] in {
+            "||",
+            "&&",
+            "==",
+            "!=",
+            "<=",
+            ">=",
+            "<<",
+            ">>",
+        }:
+            tokens.append(expr[index : index + 2])
+            index += 2
+            continue
+        if expr[index] in "()!~+-*/%<>&^|?:":
+            tokens.append(expr[index])
+            index += 1
+            continue
+        raise ValueError("Invalid token")
     return tokens
 
 

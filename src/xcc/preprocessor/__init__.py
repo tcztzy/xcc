@@ -1,11 +1,9 @@
-import ast
 import platform
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 
 from xcc.host_includes import host_system_include_dirs
 from xcc.lexer import TokenKind
@@ -89,7 +87,62 @@ def _parse_expanded_line_directive(expanded: str) -> tuple[str, str | None] | No
     return line_text, filename_literal
 
 
+def _hex_digit_value(ch: str) -> int:
+    if "0" <= ch <= "9":
+        return ord(ch) - ord("0")
+    if "a" <= ch <= "f":
+        return ord(ch) - ord("a") + 10
+    if "A" <= ch <= "F":
+        return ord(ch) - ord("A") + 10
+    return -1
+
+
+def _decode_line_directive_filename_literal(literal: str) -> str | None:
+    if len(literal) < 2 or literal[0] != '"' or literal[-1] != '"':
+        return None
+    result = ""
+    index = 1
+    end = len(literal) - 1
+    while index < end:
+        ch = literal[index]
+        if ch == "\n":
+            return None
+        if ch != "\\":
+            result += ch
+            index += 1
+            continue
+        index += 1
+        if index >= end:
+            return None
+        escaped = literal[index]
+        if escaped == "\n":
+            return None
+        if escaped == '"' or escaped == "\\" or escaped == "'":
+            result += escaped
+        elif escaped == "n":
+            result += "\n"
+        elif escaped == "r":
+            result += "\r"
+        elif escaped == "t":
+            result += "\t"
+        elif escaped == "x":
+            if index + 2 >= end:
+                return None
+            high = _hex_digit_value(literal[index + 1])
+            low = _hex_digit_value(literal[index + 2])
+            if high < 0 or low < 0:
+                return None
+            result += chr(high * 16 + low)
+            index += 2
+        else:
+            result += escaped
+        index += 1
+    return result
+
+
 class _LineMapBuilder:
+    _entries: list[tuple[str, int]]
+
     def __init__(self) -> None:
         self._entries: list[tuple[str, int]] = []
 
@@ -105,6 +158,9 @@ class _LineMapBuilder:
 
 
 class _OutputBuilder:
+    _chunks: list[str]
+    _line_map: _LineMapBuilder
+
     def __init__(self) -> None:
         self._chunks: list[str] = []
         self._line_map = _LineMapBuilder()
@@ -139,11 +195,19 @@ class _LogicalCursor:
             self.filename = filename
 
 
+def _directive_cursor_locations(
+    cursor: _LogicalCursor,
+    count: int,
+) -> tuple[_SourceLocation, ...]:
+    locations: tuple[_SourceLocation, ...] = ()
+    for index in range(count):
+        locations = locations + (_SourceLocation(cursor.filename, cursor.line + index),)
+    return locations
+
+
 class _DirectiveCursor:
     def __init__(self, cursor: _LogicalCursor, count: int) -> None:
-        self._locations = tuple(
-            _SourceLocation(cursor.filename, cursor.line + index) for index in range(count)
-        )
+        self._locations: tuple[_SourceLocation, ...] = _directive_cursor_locations(cursor, count)
 
     def line_location(self, index: int) -> _SourceLocation:
         return self._locations[index]
@@ -172,12 +236,25 @@ from . import (  # noqa: E402
 _ConditionalFrame = _conditionals._ConditionalFrame
 _handle_conditional = _conditionals._handle_conditional
 _is_active = _conditionals._is_active
-_EXPR_TOKEN_RE = _expressions._EXPR_TOKEN_RE
+_require_empty_conditional_tail = _conditionals._require_empty_conditional_tail
+
+
+def _conditional_stack_without_last(
+    stack: list[_ConditionalFrame],
+) -> list[_ConditionalFrame]:
+    result: list[_ConditionalFrame] = []
+    index = 0
+    stop = len(stack) - 1
+    while index < stop:
+        result = result + [stack[index]]
+        index += 1
+    return result
+
+
 _INT64_MAX = _expressions._INT64_MAX
 _INT64_MIN = _expressions._INT64_MIN
 _PPExprOverflow = _expressions._PPExprOverflow
 _PPValue = _expressions._PPValue
-_PP_INT_RE = _expressions._PP_INT_RE
 _UINT64_MASK = _expressions._UINT64_MASK
 _collapse_function_invocations = _expressions._collapse_function_invocations
 _eval_node = _expressions._eval_node
@@ -192,6 +269,7 @@ _strip_condition_comments = _expressions._strip_condition_comments
 _tokenize_expr = _expressions._tokenize_expr
 _translate_expr_to_python = _expressions._translate_expr_to_python
 _env_path_list = _includes._env_path_list
+_parse_embed_body = _includes._parse_embed_body
 _parse_header_name_operand = _includes._parse_header_name_operand
 _parse_include_target = _includes._parse_include_target
 _resolve_include = _includes._resolve_include
@@ -203,6 +281,54 @@ _parse_macro_invocation = _macro_expansion._parse_macro_invocation
 _paste_token_pair = _macro_expansion._paste_token_pair
 _Macro = _macros._Macro
 _MacroToken = _macros._MacroToken
+
+
+def _render_macro_replacement_no_callback(macro: _Macro) -> str:
+    result = ""
+    needs_space = False
+    for token in macro.replacement:
+        if not token.text:
+            continue
+        if needs_space:
+            result += " "
+        result += token.text
+        needs_space = True
+    return result
+
+
+def _skip_macro_invocation_no_callback(text: str, index: int) -> int:
+    cursor = index
+    while cursor < len(text) and text[cursor].isspace():
+        cursor += 1
+    if cursor >= len(text) or text[cursor] != "(":
+        return index
+    depth = 0
+    while cursor < len(text):
+        ch = text[cursor]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            cursor += 1
+            if depth == 0:
+                return cursor
+            continue
+        cursor += 1
+    return index
+
+
+def _strip_block_comments_no_callback(text: str) -> str:
+    result = text
+    start = result.find("/*")
+    while start != -1:
+        end = result.find("*/", start + 2)
+        if end == -1:
+            return result
+        result = result[:start] + " " + result[end + 2 :]
+        start = result.find("/*", start + 1)
+    return result
+
+
 _join_macro_arguments = _macros._join_macro_arguments
 _lookup_macro_argument = _macros._lookup_macro_argument
 _parse_cli_define_head = _macros._parse_cli_define_head
@@ -220,6 +346,7 @@ _validate_fenv_access_pragma = _pragmas._validate_fenv_access_pragma
 _validate_gcc_visibility_pragma = _pragmas._validate_gcc_visibility_pragma
 _validate_pragma = _pragmas._validate_pragma
 _validate_stdc_pragma = _pragmas._validate_stdc_pragma
+_process_text_impl = _process.process_text
 _blank_line = _text._blank_line
 _expand_object_like_macros = _text._expand_object_like_macros
 _format_date_macro = _text._format_date_macro
@@ -231,6 +358,8 @@ _format_timestamp_macro = _text._format_timestamp_macro
 _macro_table_line = _text._macro_table_line
 _parse_directive = _text._parse_directive
 _quote_string_literal = _text._quote_string_literal
+_reject_gnu_asm_extensions_impl = _text._reject_gnu_asm_extensions
+_reject_gnu_asm_statements = _text._reject_gnu_asm_statements
 _scan_block_comment_state = _text._scan_block_comment_state
 _strip_gnu_asm_extensions = _text._strip_gnu_asm_extensions
 
@@ -240,6 +369,86 @@ _DEFINED_BARE_RE = re.compile(r"\bdefined\s+([A-Za-z_]\w*)")
 _IFNDEF_RE = re.compile(r"#\s*ifndef\s+([A-Za-z_]\w*)")
 _IF_NOT_DEFINED_RE = re.compile(r"#\s*if\s+!\s*defined\s*\(\s*([A-Za-z_]\w*)\s*\)")
 _DEFINE_RE = re.compile(r"#\s*define\s+([A-Za-z_]\w*)")
+
+
+def _guard_is_ident_start(ch: str) -> bool:
+    return ch == "_" or ("A" <= ch <= "Z") or ("a" <= ch <= "z")
+
+
+def _guard_is_ident_continue(ch: str) -> bool:
+    return _guard_is_ident_start(ch) or ("0" <= ch <= "9")
+
+
+def _guard_scan_identifier(text: str, index: int) -> tuple[str, int] | None:
+    if index >= len(text) or not _guard_is_ident_start(text[index]):
+        return None
+    start = index
+    index += 1
+    while index < len(text) and _guard_is_ident_continue(text[index]):
+        index += 1
+    return text[start:index], index
+
+
+def _guard_name_from_ifndef(line: str) -> str | None:
+    if not line.startswith("#"):
+        return None
+    tail = line[1:].lstrip()
+    if not tail.startswith("ifndef"):
+        return None
+    cursor = len("ifndef")
+    if cursor < len(tail) and not tail[cursor].isspace():
+        return None
+    tail = tail[cursor:].lstrip()
+    scanned = _guard_scan_identifier(tail, 0)
+    if scanned is None:
+        return None
+    return scanned[0]
+
+
+def _guard_name_from_if_not_defined(line: str) -> str | None:
+    if not line.startswith("#"):
+        return None
+    tail = line[1:].lstrip()
+    if not tail.startswith("if"):
+        return None
+    cursor = len("if")
+    if cursor < len(tail) and not tail[cursor].isspace():
+        return None
+    tail = tail[cursor:].lstrip()
+    if not tail.startswith("!"):
+        return None
+    tail = tail[1:].lstrip()
+    if not tail.startswith("defined"):
+        return None
+    cursor = len("defined")
+    tail = tail[cursor:].lstrip()
+    if not tail.startswith("("):
+        return None
+    tail = tail[1:].lstrip()
+    scanned = _guard_scan_identifier(tail, 0)
+    if scanned is None:
+        return None
+    name, cursor = scanned
+    tail = tail[cursor:].lstrip()
+    if not tail.startswith(")"):
+        return None
+    return name
+
+
+def _guard_name_from_define(line: str) -> str | None:
+    if not line.startswith("#"):
+        return None
+    tail = line[1:].lstrip()
+    if not tail.startswith("define"):
+        return None
+    cursor = len("define")
+    if cursor < len(tail) and not tail[cursor].isspace():
+        return None
+    tail = tail[cursor:].lstrip()
+    scanned = _guard_scan_identifier(tail, 0)
+    if scanned is None:
+        return None
+    return scanned[0]
 
 
 def _split_unclosed_block_comment_tail(text: str) -> tuple[str, str] | None:
@@ -305,17 +514,54 @@ def _detect_include_guard(source: str) -> str | None:
             continue
         if guard_name is None:
             # Expect: #ifndef GUARD or #if !defined(GUARD)
-            m = _IFNDEF_RE.match(line) or _IF_NOT_DEFINED_RE.match(line)
-            if m:
-                guard_name = m.group(1)
-            else:
+            guard_name = _guard_name_from_ifndef(line)
+            if guard_name is None:
+                guard_name = _guard_name_from_if_not_defined(line)
+            if guard_name is None:
                 return None
         else:
             # Expect: #define GUARD (same name)
-            m = _DEFINE_RE.match(line)
-            if m and m.group(1) == guard_name:
+            defined_name = _guard_name_from_define(line)
+            if defined_name == guard_name:
                 return guard_name
             return None
+    return None
+
+
+def _detect_include_guard_no_callback(source: str) -> str | None:
+    lines = source.splitlines()
+    guard_name = ""
+    found_guard = False
+    comment_open = False
+    for raw_line in lines:
+        line = raw_line.strip()
+        if comment_open:
+            end_idx = line.find("*/")
+            if end_idx == -1:
+                continue
+            line = line[end_idx + 2 :].strip()
+            comment_open = False
+        if line.startswith("/*"):
+            end_idx = line.find("*/", 2)
+            if end_idx == -1:
+                comment_open = True
+                continue
+            line = line[end_idx + 2 :].strip()
+        if not line or line.startswith("//"):
+            continue
+        if not found_guard:
+            parsed_guard = _guard_name_from_ifndef(line)
+            if parsed_guard is None:
+                parsed_guard = _guard_name_from_if_not_defined(line)
+            if parsed_guard is None:
+                return None
+            guard_name = parsed_guard
+            found_guard = True
+            continue
+        defined_name = _guard_name_from_define(line)
+        if defined_name == guard_name:
+            return guard_name
+        return None
     return None
 
 
@@ -651,7 +897,7 @@ def preprocess_source(
     processed = processor.process(source, filename=filename)
     if normalized_options.std == "gnu11":
         if not normalized_options.strip_gnu_asm_statements:
-            _text._reject_gnu_asm_statements(
+            _reject_gnu_asm_statements(
                 processed.source,
                 processed.line_map,
                 code=_PP_GNU_EXTENSION,
@@ -660,11 +906,35 @@ def preprocess_source(
         stripped = _strip_gnu_asm_extensions(processed.source)
     else:
         stripped = _strip_gnu_asm_extensions(processed.source)
+    macro_lines: list[str] = []
+    for _, macro in processor.macro_table.items():
+        macro_lines.append(_macro_table_line(macro))
     return PreprocessResult(
         stripped,
         processed.line_map,
         tuple(processor.include_trace),
-        tuple(_macro_table_line(macro) for _, macro in sorted(processor.macro_table.items())),
+        tuple(macro_lines),
+        processor._embed_used,
+        processor.pack_changes,
+    )
+
+
+def preprocess_source_no_callback(
+    source: str,
+    *,
+    filename: str = "<input>",
+    options: FrontendOptions | None = None,
+) -> PreprocessResult:
+    normalized_options = normalize_options(options)
+    processor = _Preprocessor(normalized_options)
+    processor._init_no_callback(normalized_options)
+    processed = processor.process(source, filename=filename)
+    stripped = _strip_gnu_asm_extensions(processed.source)
+    return PreprocessResult(
+        stripped,
+        processed.line_map,
+        tuple(processor.include_trace),
+        (),
         processor._embed_used,
         processor.pack_changes,
     )
@@ -741,6 +1011,72 @@ class _Preprocessor:
             self._c_include_path_dirs = _env_path_list("C_INCLUDE_PATH")
             self._host_system_include_dirs = host_system_include_dirs()
 
+    def _init_no_callback(self, options: FrontendOptions) -> None:
+        self._options = options
+        self._counter = 0
+        self._base_filename = "<input>"
+        self._embed_used = False
+        self._macros = {}
+        self._define_object_macro_no_callback("__STDC__", "1")
+        self._define_object_macro_no_callback("__STDC_VERSION__", "201112L")
+        self._define_object_macro_no_callback(
+            "__STDC_HOSTED__",
+            "1" if options.hosted else "0",
+        )
+        self._define_object_macro_no_callback("__GNUC__", "4")
+        self._define_object_macro_no_callback("__GNUC_MINOR__", "2")
+        self._define_object_macro_no_callback("__clang__", "1")
+        self._define_object_macro_no_callback("__APPLE__", "1")
+        self._define_object_macro_no_callback("__MACH__", "1")
+        self._define_object_macro_no_callback("__aarch64__", "1")
+        self._define_object_macro_no_callback("__arm64__", "1")
+        self._define_object_macro_no_callback("__arm64", "1")
+        self._define_object_macro_no_callback("__arm64__", "1")
+        self._define_object_macro_no_callback("__LP64__", "1")
+        self._define_object_macro_no_callback("_LP64", "1")
+        self._define_object_macro_no_callback("_DARWIN_C_SOURCE", "1")
+        self._define_object_macro_no_callback("__SIZE_TYPE__", "unsigned long")
+        self._define_object_macro_no_callback("__PTRDIFF_TYPE__", "long")
+        self._define_object_macro_no_callback("__INTPTR_TYPE__", "long")
+        self._define_object_macro_no_callback("__UINTPTR_TYPE__", "unsigned long")
+        self._define_object_macro_no_callback("__INTMAX_TYPE__", "long")
+        self._define_object_macro_no_callback("__UINTMAX_TYPE__", "unsigned long")
+        self._define_object_macro_no_callback("__WCHAR_TYPE__", "int")
+        self._define_object_macro_no_callback("__WINT_TYPE__", "int")
+        self._define_object_macro_no_callback("__builtin_va_list", "void *")
+        self._define_object_macro_no_callback("__builtin_ms_va_list", "void *")
+        self._define_object_macro_no_callback("__SIZEOF_POINTER__", "8")
+        self._define_object_macro_no_callback("__SIZEOF_SIZE_T__", "8")
+        self._define_object_macro_no_callback("__SIZEOF_PTRDIFF_T__", "8")
+        self._define_object_macro_no_callback("__PTRDIFF_WIDTH__", "64")
+        self._define_object_macro_no_callback("__INTPTR_WIDTH__", "64")
+        self._define_object_macro_no_callback("__UINTPTR_WIDTH__", "64")
+        for define in options.defines:
+            if "=" in define:
+                define_parts = define.split("=", 1)
+                self._define_object_macro_no_callback(define_parts[0], define_parts[1])
+            else:
+                self._define_object_macro_no_callback(define, "1")
+        self.include_trace = []
+        self._pragma_once_files = set()
+        self._pack_stack = []
+        self._pack_changes = []
+        self.macro_table = self._macros
+        if options.no_standard_includes:
+            self._cpath_include_dirs = ()
+            self._c_include_path_dirs = ()
+            self._host_system_include_dirs = ()
+        else:
+            self._cpath_include_dirs = ()
+            self._c_include_path_dirs = ()
+            self._host_system_include_dirs = ()
+
+    def _define_object_macro_no_callback(self, name: str, replacement: str) -> None:
+        tokens: tuple[_MacroToken, ...] = ()
+        if replacement:
+            tokens = (_MacroToken(TokenKind.IDENT, replacement),)
+        self._macros[name] = _Macro(name, tokens)
+
     def process(self, source: str, *, filename: str) -> _ProcessedText:
         self._base_filename = filename
         base_dir = self._source_dir(filename)
@@ -788,7 +1124,7 @@ class _Preprocessor:
         base_dir: Path | None,
         include_stack: tuple[str, ...],
     ) -> _ProcessedText:
-        return _process.process_text(
+        return _process_text_impl(
             self,
             source,
             filename=filename,
@@ -821,6 +1157,300 @@ class _Preprocessor:
             unknown_directive_code=_PP_UNKNOWN_DIRECTIVE,
         )
 
+    def _handle_conditional_for_process(
+        self,
+        name: str,
+        body: str,
+        location: _SourceLocation,
+        stack: list[_ConditionalFrame],
+        *,
+        base_dir: Path | None,
+    ) -> tuple[str | None, list[_ConditionalFrame]]:
+        result = self._handle_conditional(
+            name,
+            body,
+            location,
+            stack,
+            base_dir=base_dir,
+        )
+        return result, stack
+
+    def _handle_conditional_for_process_no_callback(
+        self,
+        name: str,
+        body: str,
+        location: _SourceLocation,
+        stack: list[_ConditionalFrame],
+        *,
+        base_dir: Path | None,
+    ) -> tuple[str | None, list[_ConditionalFrame]]:
+        result, updated_stack = self._handle_conditional_no_callback_with_stack(
+            name,
+            body,
+            location,
+            stack,
+            base_dir=base_dir,
+        )
+        return result, updated_stack
+
+    def _handle_conditional_no_callback(
+        self,
+        name: str,
+        body: str,
+        location: _SourceLocation,
+        stack: list[_ConditionalFrame],
+        *,
+        base_dir: Path | None,
+    ) -> str | None:
+        if name not in {
+            "if",
+            "ifdef",
+            "ifndef",
+            "elif",
+            "elifdef",
+            "elifndef",
+            "else",
+            "endif",
+        }:
+            return None
+        if name == "if":
+            parent_active = _is_active(stack)
+            condition = parent_active and self._eval_condition_no_callback(body, location, base_dir)
+            stack.append(_ConditionalFrame(parent_active, condition, condition))
+            return ""
+        if name == "ifdef":
+            parent_active = _is_active(stack)
+            macro_name = self._require_macro_name_no_regex(body, location)
+            condition = parent_active and self._macro_defined_no_callback(macro_name)
+            stack.append(_ConditionalFrame(parent_active, condition, condition))
+            return ""
+        if name == "ifndef":
+            parent_active = _is_active(stack)
+            macro_name = self._require_macro_name_no_regex(body, location)
+            condition = parent_active and not self._macro_defined_no_callback(macro_name)
+            stack.append(_ConditionalFrame(parent_active, condition, condition))
+            return ""
+        if not stack:
+            raise PreprocessorError(
+                f"Unexpected #{name}",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_DIRECTIVE,
+            )
+        frame = stack[-1]
+        if name == "elif" or name == "elifdef" or name == "elifndef":
+            if (name == "elifdef" or name == "elifndef") and self._options.std == "c11":
+                raise PreprocessorError(
+                    f"Unknown preprocessor directive: #{name}",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_UNKNOWN_DIRECTIVE,
+                )
+            if frame.saw_else:
+                raise PreprocessorError(
+                    f"#{name} after #else",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_DIRECTIVE,
+                )
+            if not frame.parent_active or frame.branch_taken:
+                frame.active = False
+                return ""
+            if name == "elif":
+                condition = self._eval_condition_no_callback(body, location, base_dir)
+            else:
+                macro_name = self._require_macro_name_no_regex(body, location)
+                if name == "elifdef":
+                    condition = self._macro_defined_no_callback(macro_name)
+                else:
+                    condition = not self._macro_defined_no_callback(macro_name)
+            frame.active = condition
+            frame.branch_taken = frame.branch_taken or condition
+            return ""
+        if name == "else":
+            _require_empty_conditional_tail(
+                "else",
+                body,
+                location,
+                invalid_directive_code=_PP_INVALID_DIRECTIVE,
+            )
+            if frame.saw_else:
+                raise PreprocessorError(
+                    "Duplicate #else",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_DIRECTIVE,
+                )
+            frame.saw_else = True
+            frame.active = frame.parent_active and not frame.branch_taken
+            frame.branch_taken = True
+            return ""
+        _require_empty_conditional_tail(
+            "endif",
+            body,
+            location,
+            invalid_directive_code=_PP_INVALID_DIRECTIVE,
+        )
+        stack.pop()
+        return ""
+
+    def _handle_conditional_no_callback_with_stack(
+        self,
+        name: str,
+        body: str,
+        location: _SourceLocation,
+        stack: list[_ConditionalFrame],
+        *,
+        base_dir: Path | None,
+    ) -> tuple[str | None, list[_ConditionalFrame]]:
+        if name not in {
+            "if",
+            "ifdef",
+            "ifndef",
+            "elif",
+            "elifdef",
+            "elifndef",
+            "else",
+            "endif",
+        }:
+            return None, stack
+        if name == "if":
+            parent_active = _is_active(stack)
+            condition = parent_active and self._eval_condition_no_callback(body, location, base_dir)
+            stack = stack + [_ConditionalFrame(parent_active, condition, condition)]
+            return "", stack
+        if name == "ifdef":
+            parent_active = _is_active(stack)
+            macro_name = self._require_macro_name_no_regex(body, location)
+            condition = parent_active and self._macro_defined_no_callback(macro_name)
+            stack = stack + [_ConditionalFrame(parent_active, condition, condition)]
+            return "", stack
+        if name == "ifndef":
+            parent_active = _is_active(stack)
+            macro_name = self._require_macro_name_no_regex(body, location)
+            condition = parent_active and not self._macro_defined_no_callback(macro_name)
+            stack = stack + [_ConditionalFrame(parent_active, condition, condition)]
+            return "", stack
+        if not stack:
+            raise PreprocessorError(
+                f"Unexpected #{name}",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_DIRECTIVE,
+            )
+        frame = stack[-1]
+        if name == "elif" or name == "elifdef" or name == "elifndef":
+            if (name == "elifdef" or name == "elifndef") and self._options.std == "c11":
+                raise PreprocessorError(
+                    f"Unknown preprocessor directive: #{name}",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_UNKNOWN_DIRECTIVE,
+                )
+            if frame.saw_else:
+                raise PreprocessorError(
+                    f"#{name} after #else",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_DIRECTIVE,
+                )
+            if not frame.parent_active or frame.branch_taken:
+                frame.active = False
+                return "", stack
+            if name == "elif":
+                condition = self._eval_condition_no_callback(body, location, base_dir)
+            else:
+                macro_name = self._require_macro_name_no_regex(body, location)
+                if name == "elifdef":
+                    condition = self._macro_defined_no_callback(macro_name)
+                else:
+                    condition = not self._macro_defined_no_callback(macro_name)
+            frame.active = condition
+            frame.branch_taken = frame.branch_taken or condition
+            return "", stack
+        if name == "else":
+            _require_empty_conditional_tail(
+                "else",
+                body,
+                location,
+                invalid_directive_code=_PP_INVALID_DIRECTIVE,
+            )
+            if frame.saw_else:
+                raise PreprocessorError(
+                    "Duplicate #else",
+                    location.line,
+                    1,
+                    filename=location.filename,
+                    code=_PP_INVALID_DIRECTIVE,
+                )
+            frame.saw_else = True
+            frame.active = frame.parent_active and not frame.branch_taken
+            frame.branch_taken = True
+            return "", stack
+        _require_empty_conditional_tail(
+            "endif",
+            body,
+            location,
+            invalid_directive_code=_PP_INVALID_DIRECTIVE,
+        )
+        stack = _conditional_stack_without_last(stack)
+        return "", stack
+
+    def _eval_condition_no_callback(
+        self,
+        body: str,
+        location: _SourceLocation,
+        base_dir: Path | None,
+    ) -> bool:
+        condition = _strip_condition_comments(body).strip()
+        if not condition:
+            return False
+        if condition.startswith("!"):
+            return not self._eval_condition_no_callback(condition[1:].strip(), location, base_dir)
+        if "||" in condition:
+            or_parts = condition.split("||")
+            for part in or_parts:
+                if self._eval_condition_no_callback(part.strip(), location, base_dir):
+                    return True
+            return False
+        if "&&" in condition:
+            and_parts = condition.split("&&")
+            for part in and_parts:
+                if not self._eval_condition_no_callback(part.strip(), location, base_dir):
+                    return False
+            return True
+        if condition.startswith("defined"):
+            tail = condition[len("defined") :].lstrip()
+            if tail.startswith("("):
+                tail = tail[1:].lstrip()
+                scanned = _guard_scan_identifier(tail, 0)
+                if scanned is None:
+                    return False
+                macro_name, cursor = scanned
+                tail = tail[cursor:].lstrip()
+                if not tail.startswith(")"):
+                    return False
+                return self._macro_defined_no_callback(macro_name)
+            scanned = _guard_scan_identifier(tail, 0)
+            if scanned is None:
+                return False
+            return self._macro_defined_no_callback(scanned[0])
+        if self._macro_defined_no_callback(condition):
+            return True
+        if condition.isdigit():
+            return int(condition) != 0
+        return False
+
+    def _macro_defined_no_callback(self, name: str) -> bool:
+        return self._macros.get(name) is not None
+
     def _eval_condition_for_include_root(
         self,
         text: str,
@@ -831,6 +1461,12 @@ class _Preprocessor:
 
     def _handle_define(self, body: str) -> None:
         macro = self._parse_define(body)
+        if macro is None:
+            return
+        self._macros[macro.name] = macro
+
+    def _handle_define_no_callback(self, body: str) -> None:
+        macro = self._parse_define_no_callback(body)
         if macro is None:
             return
         self._macros[macro.name] = macro
@@ -848,6 +1484,20 @@ class _Preprocessor:
             return self._parse_function_like_define(name, tail)
         replacement = tail.strip()
         return _Macro(name, tuple(_tokenize_macro_replacement(replacement)))
+
+    def _parse_define_no_callback(self, body: str) -> _Macro | None:
+        define_body = body.lstrip()
+        if not define_body:
+            return None
+        scanned = _guard_scan_identifier(define_body, 0)
+        if scanned is None:
+            return None
+        name, cursor = scanned
+        replacement: tuple[_MacroToken, ...] = ()
+        tail = define_body[cursor:]
+        if tail.startswith("("):
+            return _Macro(name, replacement, parameters=("__xcc_arg",))
+        return _Macro(name, replacement)
 
     def _parse_function_like_define(self, name: str, tail: str) -> _Macro | None:
         close_index = tail.find(")")
@@ -875,6 +1525,35 @@ class _Preprocessor:
             return self._handle_pragma_operator(line)
         expanded = self._expand_macro_text(text, location)
         result = self._handle_pragma_operator(expanded)
+        return result + trailing_newline
+
+    def _expand_line_no_callback(self, line: str, location: _SourceLocation) -> str:
+        trailing_newline = "\n" if line.endswith("\n") else ""
+        text = line[0 : len(line) - 1] if trailing_newline else line
+        result = ""
+        index = 0
+        while index < len(text):
+            ch = text[index]
+            if not _guard_is_ident_start(ch):
+                result += ch
+                index += 1
+                continue
+            start = index
+            index += 1
+            while index < len(text) and _guard_is_ident_continue(text[index]):
+                index += 1
+            name = text[start:index]
+            macro: _Macro | None = self._macros.get(name)
+            if macro is None:
+                result += name
+                continue
+            replacement = _render_macro_replacement_no_callback(macro)
+            if not replacement:
+                skipped = _skip_macro_invocation_no_callback(text, index)
+                if skipped != index:
+                    index = skipped
+                continue
+            result += replacement
         return result + trailing_newline
 
     def _handle_pragma_operator(self, text: str) -> str:
@@ -947,6 +1626,9 @@ class _Preprocessor:
         macro_name = self._require_macro_name(body, location)
         self._macros.pop(macro_name, None)
 
+    def _handle_undef_no_callback(self, body: str, location: _SourceLocation) -> None:
+        self._require_macro_name_no_regex(body, location)
+
     def _skip_guarded_include(self, include_path: Path, include_path_text: str) -> bool:
         """Check if a circular include should be skipped because the file's
         include guard is already defined."""
@@ -955,7 +1637,16 @@ class _Preprocessor:
         except OSError:
             return False
         guard = _detect_include_guard(source)
-        return bool(guard is not None and guard in self._macros)
+        return bool(guard is not None and self._macro_defined_no_callback(guard))
+
+    def _skip_guarded_include_no_callback(
+        self,
+        include_path: Path,
+        include_path_text: str,
+    ) -> bool:
+        source = include_path.read_text(encoding="utf-8", errors="surrogateescape")
+        guard = _detect_include_guard_no_callback(source)
+        return bool(guard is not None and self._macro_defined_no_callback(guard))
 
     def _handle_include(
         self,
@@ -1058,7 +1749,6 @@ class _Preprocessor:
         base_dir: Path | None,
     ) -> _ProcessedText:
         self._embed_used = True
-        _parse_embed_body = _includes._parse_embed_body
         # Try direct parse first (for literal <file> or "file"), then
         # macro-expand (for __FILE__ etc.), matching #include behavior.
         try:
@@ -1310,6 +2000,11 @@ class _Preprocessor:
             invalid_directive_code=_PP_INVALID_DIRECTIVE,
         )
 
+    def _parse_include_target_no_macro(
+        self, body: str, location: _SourceLocation
+    ) -> tuple[str, bool]:
+        return self._parse_header_name_operand_no_macro(body.strip(), location)
+
     def _parse_header_name_operand(
         self,
         operand: str,
@@ -1320,6 +2015,33 @@ class _Preprocessor:
             location,
             expand_macro_text=self._expand_macro_text,
             invalid_directive_code=_PP_INVALID_DIRECTIVE,
+        )
+
+    def _parse_header_name_operand_no_macro(
+        self,
+        operand: str,
+        location: _SourceLocation,
+    ) -> tuple[str, bool]:
+        line_comment = operand.find("//")
+        if line_comment != -1:
+            operand = operand[:line_comment]
+        operand = _strip_block_comments_no_callback(operand)
+        operand = operand.strip()
+        operand_len = len(operand)
+        if operand_len >= 2 and operand[0] == '"' and operand[operand_len - 1] == '"':
+            name = operand[1:-1]
+            if "\n" not in name:
+                return name, False
+        if operand_len >= 2 and operand[0] == "<" and operand[operand_len - 1] == ">":
+            name = operand[1:-1]
+            if "\n" not in name:
+                return name, True
+        raise PreprocessorError(
+            "Invalid #include directive",
+            location.line,
+            1,
+            filename=location.filename,
+            code=_PP_INVALID_DIRECTIVE,
         )
 
     def _resolve_include(
@@ -1390,6 +2112,28 @@ class _Preprocessor:
         parts = stripped.split()
         macro_name = parts[0] if parts else ""
         if len(parts) != 1 or _IDENT_RE.fullmatch(macro_name) is None:
+            raise PreprocessorError(
+                "Expected macro name",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_DIRECTIVE,
+            )
+        return macro_name
+
+    def _require_macro_name_no_regex(self, body: str, location: _SourceLocation) -> str:
+        stripped = _strip_condition_comments(body).strip()
+        scanned = _guard_scan_identifier(stripped, 0)
+        if scanned is None:
+            raise PreprocessorError(
+                "Expected macro name",
+                location.line,
+                1,
+                filename=location.filename,
+                code=_PP_INVALID_DIRECTIVE,
+            )
+        macro_name, cursor = scanned
+        if stripped[cursor:].strip():
             raise PreprocessorError(
                 "Expected macro name",
                 location.line,
@@ -1631,16 +2375,15 @@ class _Preprocessor:
 
         if filename_literal is None:
             return line, None
-        try:
-            mapped_filename = cast(str, ast.literal_eval(filename_literal))
-        except (SyntaxError, ValueError) as error:
+        mapped_filename = _decode_line_directive_filename_literal(filename_literal)
+        if mapped_filename is None:
             raise PreprocessorError(
                 "Invalid #line directive",
                 location.line,
                 1,
                 filename=location.filename,
                 code=_PP_INVALID_DIRECTIVE,
-            ) from error
+            )
         return line, mapped_filename
 
 
@@ -1670,7 +2413,7 @@ def _reject_gnu_asm_extensions(
     *,
     primary_filename: str | None = None,
 ) -> None:
-    _text._reject_gnu_asm_extensions(
+    _reject_gnu_asm_extensions_impl(
         source,
         line_map,
         code=_PP_GNU_EXTENSION,

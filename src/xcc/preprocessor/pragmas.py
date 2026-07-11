@@ -1,19 +1,18 @@
-import re
 from typing import NoReturn
 
 from . import PreprocessorError, _SourceLocation
 from .expressions import _strip_condition_comments
 
-_IDENT_RE = re.compile(r"[A-Za-z_]\w*")
-_STDC_PRAGMA_TOGGLE_VALUES = frozenset({"ON", "OFF", "DEFAULT"})
-_STDC_VALIDATED_PRAGMAS = frozenset({"FENV_ACCESS", "CX_LIMITED_RANGE", "FP_CONTRACT"})
-_STDC_FENV_ROUND_VALUES = frozenset(
-    {"FE_DYNAMIC", "FE_DOWNWARD", "FE_TONEAREST", "FE_TOWARDZERO", "FE_UPWARD"}
+_STDC_PRAGMA_TOGGLE_VALUES = ("ON", "OFF", "DEFAULT")
+_STDC_VALIDATED_PRAGMAS = ("FENV_ACCESS", "CX_LIMITED_RANGE", "FP_CONTRACT")
+_STDC_FENV_ROUND_VALUES = (
+    "FE_DYNAMIC",
+    "FE_DOWNWARD",
+    "FE_TONEAREST",
+    "FE_TOWARDZERO",
+    "FE_UPWARD",
 )
-_DIAGNOSTIC_PRAGMA_ACTIONS = frozenset({"error", "warning", "ignored", "fatal", "push", "pop"})
-_MODULE_NAME_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
-_PRAGMA_FP_OPTION_RE = re.compile(r"([A-Za-z_]\w*)\s*\(([^()]*)\)")
-_STRING_LITERAL_RE = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+_DIAGNOSTIC_PRAGMA_ACTIONS = ("error", "warning", "ignored", "fatal", "push", "pop")
 _DEFINED_OPERATOR = "defined"
 
 
@@ -29,6 +28,82 @@ def _raise_pragma_error(message: str, location: _SourceLocation) -> NoReturn:
 
 def _is_pp_identifier_character(ch: str) -> bool:
     return ch == "_" or ch.isalnum()
+
+
+def _is_identifier_start(ch: str) -> bool:
+    return ch == "_" or "A" <= ch <= "Z" or "a" <= ch <= "z"
+
+
+def _is_identifier_char(ch: str) -> bool:
+    return _is_identifier_start(ch) or "0" <= ch <= "9"
+
+
+def _is_identifier(text: str) -> bool:
+    if not text or not _is_identifier_start(text[0]):
+        return False
+    for ch in text[1:]:  # noqa: SIM110 - avoid generator lowering in AOT code.
+        if not _is_identifier_char(ch):
+            return False
+    return True
+
+
+def _module_name_prefix_end(text: str) -> int | None:
+    if not text or not _is_identifier_start(text[0]):
+        return None
+    cursor = 0
+    while True:
+        if cursor >= len(text) or not _is_identifier_start(text[cursor]):
+            return None
+        cursor += 1
+        while cursor < len(text) and _is_identifier_char(text[cursor]):
+            cursor += 1
+        if cursor >= len(text) or text[cursor] != ".":
+            return cursor
+        cursor += 1
+
+
+def _is_string_literal(text: str) -> bool:
+    if len(text) < 2 or text[0] != '"' or text[-1] != '"':
+        return False
+    cursor = 1
+    while cursor < len(text) - 1:
+        ch = text[cursor]
+        if ch == "\n" or ch == '"':
+            return False
+        if ch == "\\":
+            cursor += 1
+            if cursor >= len(text) - 1 or text[cursor] == "\n":
+                return False
+        cursor += 1
+    return True
+
+
+def _pragma_fp_options(text: str) -> tuple[tuple[str, str], ...]:
+    options: tuple[tuple[str, str], ...] = ()
+    cursor = 0
+    while cursor < len(text):
+        if not _is_identifier_start(text[cursor]):
+            cursor += 1
+            continue
+        name_start = cursor
+        cursor += 1
+        while cursor < len(text) and _is_identifier_char(text[cursor]):
+            cursor += 1
+        name = text[name_start:cursor]
+        arg_start = cursor
+        while arg_start < len(text) and text[arg_start].isspace():
+            arg_start += 1
+        if arg_start >= len(text) or text[arg_start] != "(":
+            continue
+        arg_cursor = arg_start + 1
+        while arg_cursor < len(text) and text[arg_cursor] not in "()":
+            arg_cursor += 1
+        if arg_cursor >= len(text) or text[arg_cursor] != ")":
+            cursor = arg_start + 1
+            continue
+        options = (*options, (name, text[arg_start + 1 : arg_cursor]))
+        cursor = arg_cursor + 1
+    return options
 
 
 def _find_defined_operator_end(expr: str, cursor: int) -> int | None:
@@ -100,7 +175,7 @@ def _validate_gcc_visibility_pragma(body: str, location: _SourceLocation) -> Non
     if not arguments.startswith("(") or not arguments.endswith(")"):
         _raise_pragma_error("Invalid #pragma GCC visibility directive", location)
     operand = arguments[1:-1].strip()
-    if not operand or _IDENT_RE.fullmatch(operand) is None:
+    if not _is_identifier(operand):
         _raise_pragma_error("Invalid #pragma GCC visibility directive", location)
 
 
@@ -135,7 +210,7 @@ def _validate_diagnostic_pragma(body: str, location: _SourceLocation) -> None:
         if remainder:
             _raise_pragma_error("Invalid #pragma diagnostic directive", location)
         return
-    if _STRING_LITERAL_RE.fullmatch(remainder) is None:
+    if not _is_string_literal(remainder):
         _raise_pragma_error("Invalid #pragma diagnostic directive", location)
     if not remainder.startswith('"-W'):
         _raise_pragma_error("Invalid #pragma diagnostic directive", location)
@@ -158,9 +233,9 @@ def _validate_clang_module_pragma(body: str, location: _SourceLocation) -> None:
         return
     if not remainder:
         _raise_pragma_error("Invalid #pragma clang module directive", location)
-    match = _MODULE_NAME_RE.match(remainder)
-    if match is not None:
-        if remainder[match.end() :].strip():
+    module_name_end = _module_name_prefix_end(remainder)
+    if module_name_end is not None:
+        if remainder[module_name_end:].strip():
             _raise_pragma_error("Invalid #pragma clang module directive", location)
         return
     _raise_pragma_error("Invalid #pragma clang module directive", location)
@@ -170,10 +245,10 @@ def _validate_clang_fp_pragma(body: str, location: _SourceLocation) -> None:
     if not body.startswith("clang fp"):
         return
     tail = body.removeprefix("clang fp").strip()
-    for match in _PRAGMA_FP_OPTION_RE.finditer(tail):
-        if match.group(1) not in {"reassociate", "reciprocal"}:
+    for name, value in _pragma_fp_options(tail):
+        if name not in {"reassociate", "reciprocal"}:
             continue
-        if match.group(2).strip() not in {"on", "off"}:
+        if value.strip() not in {"on", "off"}:
             _raise_pragma_error("Invalid #pragma clang fp directive", location)
 
 

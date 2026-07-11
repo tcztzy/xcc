@@ -16,7 +16,10 @@ class _ConditionalFrame:
 
 
 def _is_active(stack: list[_ConditionalFrame]) -> bool:
-    return all(frame.active for frame in stack)
+    for frame in stack:  # noqa: SIM110 - avoid generator lowering in AOT code.
+        if not frame.active:
+            return False
+    return True
 
 
 def _require_empty_conditional_tail(
