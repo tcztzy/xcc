@@ -334,16 +334,12 @@ class Lexer:
             if ch == "/" and self._peek(1) == "*":
                 self._advance()
                 self._advance()
-                closed = False
-                while not self._eof():
-                    if self._peek() == "*" and self._peek(1) == "/":
-                        self._advance()
-                        self._advance()
-                        closed = True
-                        break
+                while not self._eof() and not (self._peek() == "*" and self._peek(1) == "/"):
                     self._advance()
-                if not closed:
+                if self._eof():
                     self._error("Unterminated block comment")
+                self._advance()
+                self._advance()
                 continue
             break
 

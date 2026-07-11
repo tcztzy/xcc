@@ -39,8 +39,11 @@ def _ops_from_legacy(
     pointer_depth: int,
     array_lengths: tuple[int, ...],
 ) -> tuple[DeclaratorOp, ...]:
-    ops: list[DeclaratorOp] = [("arr", length) for length in array_lengths]
-    ops.extend(("ptr", 0) for _ in range(pointer_depth))
+    ops: list[DeclaratorOp] = []
+    for length in array_lengths:
+        ops.append(("arr", length))
+    for _ in range(pointer_depth):
+        ops.append(("ptr", 0))
     return tuple(ops)
 
 
@@ -79,12 +82,14 @@ class TypeSpec:
 
     def __post_init__(self) -> None:
         if self.declarator_ops:
-            pointer_depth = sum(1 for kind, _ in self.declarator_ops if kind == "ptr")
-            array_lengths = tuple(
-                int(length)
-                for kind, length in self.declarator_ops
-                if kind == "arr" and isinstance(length, int)
-            )
+            pointer_depth = 0
+            array_values: list[int] = []
+            for kind, length in self.declarator_ops:
+                if kind == "ptr":
+                    pointer_depth += 1
+                elif kind == "arr" and isinstance(length, int):
+                    array_values.append(int(length))
+            array_lengths = tuple(array_values)
             object.__setattr__(self, "pointer_depth", pointer_depth)
             object.__setattr__(self, "array_lengths", array_lengths)
         else:
@@ -114,6 +119,12 @@ class TypeSpec:
             object.__setattr__(self, "record_members", tuple(normalized_members))
         if self.record_members and not self.has_record_body:
             object.__setattr__(self, "has_record_body", True)
+
+
+def type_spec_declarator_ops(type_spec: TypeSpec) -> tuple[DeclaratorOp, ...]:
+    if type_spec.declarator_ops:
+        return type_spec.declarator_ops
+    return _ops_from_legacy(type_spec.pointer_depth, type_spec.array_lengths)
 
 
 @dataclass(frozen=True)

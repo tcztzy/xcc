@@ -1,33 +1,56 @@
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from xcc.ast import ArrayDecl, Expr, IntLiteral, TypeSpec
+from xcc.ast import ArrayDecl, Expr, IntLiteral, TypeSpec, type_spec_declarator_ops
 from xcc.lexer import Token, TokenKind
 from xcc.parser.array_sizes import (
     array_size_literal_error,
-    array_size_non_ice_error,
+    array_size_non_ice_error_for_parser,
 )
 from xcc.parser.type_specs import ParserError
 
+if TYPE_CHECKING:
+    from . import Parser
+
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
-_TYPE_QUALIFIER_ALIASES = {"__restrict": "restrict", "__restrict__": "restrict"}
 FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
 
 
-def parse_pointer_depth(parser: object) -> int:
+def _check_star(parser: Any) -> bool:
+    token = parser._current()
+    return token.kind == TokenKind.PUNCTUATOR and token.lexeme == "*"
+
+
+def _append_pointer_ops(
+    ops: tuple[DeclaratorOp, ...],
+    count: int,
+) -> tuple[DeclaratorOp, ...]:
+    result = ops
+    for _ in range(count):
+        result = result + (POINTER_OP,)
+    return result
+
+
+def _normalize_type_qualifier(lexeme: str) -> str:
+    if lexeme == "__restrict" or lexeme == "__restrict__":
+        return "restrict"
+    return lexeme
+
+
+def parse_pointer_depth(parser: "Parser") -> int:
     p = cast(Any, parser)
     p._skip_type_qualifiers()
     pointer_depth = 0
-    while p._check_punct("*"):
+    while _check_star(p):
         p._advance()
         p._skip_type_qualifiers(allow_atomic=True)
         pointer_depth += 1
     return pointer_depth
 
 
-def parse_parenthesized_atomic_type_name(parser: object) -> tuple[TypeSpec, bool]:
+def parse_parenthesized_atomic_type_name(parser: "Parser") -> tuple[TypeSpec, bool]:
     p = cast(Any, parser)
     p._expect_punct("(")
     base_is_qualified_typedef = False
@@ -59,7 +82,7 @@ def parse_parenthesized_atomic_type_name(parser: object) -> tuple[TypeSpec, bool
 
 
 def parse_atomic_type_name_declarator(
-    parser: object,
+    parser: "Parser",
     *,
     allow_abstract: bool = True,
     allow_gnu_attributes: bool = False,
@@ -69,7 +92,7 @@ def parse_atomic_type_name_declarator(
     p._skip_type_name_attributes(allow_gnu_attributes=allow_gnu_attributes)
     p._skip_calling_convention_identifiers_before_pointer()
     pointer_qualifiers: list[bool] = []
-    while p._check_punct("*"):
+    while _check_star(p):
         p._advance()
         pointer_qualifiers.append(p._skip_type_qualifiers(allow_atomic=True))
         p._skip_type_name_attributes(allow_gnu_attributes=allow_gnu_attributes)
@@ -78,7 +101,7 @@ def parse_atomic_type_name_declarator(
         allow_abstract=allow_abstract,
         allow_gnu_attributes=allow_gnu_attributes,
     )
-    declarator_ops = direct_ops + (POINTER_OP,) * len(pointer_qualifiers)
+    declarator_ops = _append_pointer_ops(direct_ops, len(pointer_qualifiers))
     top_pointer_is_qualified = direct_top_pointer_is_qualified
     if not direct_ops and pointer_qualifiers:
         top_pointer_is_qualified = pointer_qualifiers[-1]
@@ -91,7 +114,7 @@ def parse_atomic_type_name_declarator(
 
 
 def parse_atomic_type_name_direct_declarator(
-    parser: object,
+    parser: "Parser",
     *,
     allow_abstract: bool = True,
     allow_gnu_attributes: bool = False,
@@ -165,7 +188,7 @@ def build_declarator_type(
     base_type: TypeSpec,
     declarator_ops: tuple[DeclaratorOp, ...],
 ) -> TypeSpec:
-    combined_ops = declarator_ops + base_type.declarator_ops
+    combined_ops = declarator_ops + type_spec_declarator_ops(base_type)
     return TypeSpec(
         base_type.name,
         declarator_ops=combined_ops,
@@ -176,12 +199,13 @@ def build_declarator_type(
         enum_members=base_type.enum_members,
         record_tag=base_type.record_tag,
         record_members=base_type.record_members,
+        has_record_body=base_type.has_record_body,
         typeof_expr=base_type.typeof_expr,
     )
 
 
 def parse_declarator(
-    parser: object,
+    parser: "Parser",
     allow_abstract: bool,
     *,
     allow_vla: bool = False,
@@ -192,7 +216,7 @@ def parse_declarator(
     p._skip_type_qualifiers()
     p._skip_calling_convention_identifiers_before_pointer()
     pointer_count = 0
-    while p._check_punct("*"):
+    while _check_star(p):
         p._advance()
         p._skip_type_qualifiers()
         p._skip_calling_convention_identifiers_after_pointer()
@@ -204,12 +228,12 @@ def parse_declarator(
         allow_flexible_array=allow_flexible_array,
     )
     if pointer_count:
-        ops = ops + (POINTER_OP,) * pointer_count
+        ops = _append_pointer_ops(ops, pointer_count)
     return name, ops
 
 
 def parse_direct_declarator(
-    parser: object,
+    parser: "Parser",
     allow_abstract: bool,
     *,
     allow_vla: bool = False,
@@ -255,8 +279,16 @@ def parse_direct_declarator(
                 p._capture_next_fn_params = False
                 params, has_prototype, is_variadic = p._parse_params()
                 p._expect_punct(")")
-                param_types = tuple(p.type_spec for p in params) if has_prototype else None
-                p._function_def_info = (params, has_prototype, is_variadic)
+                param_types: tuple[TypeSpec, ...] | None = None
+                if has_prototype:
+                    param_type_list: list[TypeSpec] = []
+                    for param in params:
+                        param_type_list.append(param.type_spec)
+                    param_types = tuple(param_type_list)
+                p._has_function_def_info = True
+                p._function_def_params = params
+                p._function_def_has_prototype = has_prototype
+                p._function_def_is_variadic = is_variadic
                 ops = ops + (("fn", (param_types, is_variadic)),)
             else:
                 function_declarator = p._parse_function_suffix_params()
@@ -268,7 +300,7 @@ def parse_direct_declarator(
 
 
 def parse_array_declarator(
-    parser: object,
+    parser: "Parser",
     *,
     allow_vla: bool,
     allow_parameter_arrays: bool,
@@ -281,7 +313,7 @@ def parse_array_declarator(
     while allow_parameter_arrays and p._current().kind == TokenKind.KEYWORD:
         lexeme = str(p._current().lexeme)
         if lexeme in TYPE_QUALIFIER_KEYWORDS:
-            qualifier = _TYPE_QUALIFIER_ALIASES.get(lexeme, lexeme)
+            qualifier = _normalize_type_qualifier(lexeme)
             if qualifier in seen_qualifiers:
                 raise ParserError(f"Duplicate type qualifier: '{qualifier}'", p._current())
             qualifiers.append(qualifier)
@@ -326,12 +358,12 @@ def parse_array_declarator(
     if allow_vla:
         return ArrayDecl(size_expr, tuple(qualifiers), has_static_bound)
     raise ParserError(
-        array_size_non_ice_error(size_expr, p._eval_array_size_expr),
+        array_size_non_ice_error_for_parser(parser, size_expr),
         size_token,
     )
 
 
-def parse_function_suffix_params(parser: object) -> FunctionDeclarator:
+def parse_function_suffix_params(parser: "Parser") -> FunctionDeclarator:
     p = cast(Any, parser)
     if p._check_punct(")"):
         return None, False
@@ -361,7 +393,7 @@ def parse_function_suffix_params(parser: object) -> FunctionDeclarator:
     return tuple(params), is_variadic
 
 
-def parse_type_name(parser: object) -> TypeSpec:
+def parse_type_name(parser: "Parser") -> TypeSpec:
     p = cast(Any, parser)
     base_type = p._parse_type_spec(context="type-name")
     name, declarator_ops = p._parse_declarator(allow_abstract=True, allow_vla=True)
@@ -373,7 +405,7 @@ def parse_type_name(parser: object) -> TypeSpec:
     return p._build_declarator_type(base_type, declarator_ops)
 
 
-def try_parse_type_name(parser: object) -> bool:
+def try_parse_type_name(parser: "Parser") -> bool:
     p = cast(Any, parser)
     saved_index = p._index
     try:

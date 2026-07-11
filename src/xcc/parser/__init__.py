@@ -55,7 +55,17 @@ POINTER_OP: DeclaratorOp = ("ptr", 0)
 ASSIGNMENT_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|=")
 INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
-SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | FLOATING_TYPE_KEYWORDS | {"void"}
+SIMPLE_TYPE_SPEC_KEYWORDS = {
+    "int",
+    "char",
+    "short",
+    "long",
+    "signed",
+    "unsigned",
+    "float",
+    "double",
+    "void",
+}
 TYPEOF_KEYWORDS = {
     "typeof",
     "typeof_unqual",
@@ -126,7 +136,10 @@ class Parser:
         self._ordinary_type_scopes: list[dict[str, TypeSpec]] = [{}]
         self._ordinary_value_scopes: list[dict[str, int]] = [{}]
         self._capture_next_fn_params: bool = False
-        self._function_def_info: tuple[list[Param], bool, bool] | None = None
+        self._has_function_def_info = False
+        self._function_def_params: list[Param] = []
+        self._function_def_has_prototype = False
+        self._function_def_is_variadic = False
 
         # Register compiler built-in typedefs
         self._define_typedef(
@@ -237,16 +250,16 @@ class Parser:
         return None
 
     def _is_top_level_qualified_typedef(self, name: str) -> bool:
-        for typedefs, typedef_qualified, ordinary_names in zip(
-            reversed(self._typedef_scopes),
-            reversed(self._typedef_qualified_scopes),
-            reversed(self._ordinary_name_scopes),
-            strict=True,
-        ):
+        scope_index = len(self._typedef_scopes)
+        while scope_index > 0:
+            scope_index -= 1
+            typedefs = self._typedef_scopes[scope_index]
+            typedef_qualified = self._typedef_qualified_scopes[scope_index]
+            ordinary_names = self._ordinary_name_scopes[scope_index]
             if name in ordinary_names:
                 return False
-            if name in typedefs:
-                return bool(typedef_qualified.get(name, False))
+            if typedefs.get(name) is not None:
+                return bool(typedef_qualified.get(name))
         return False
 
     def _is_typedef_name(self, name: str) -> bool:
@@ -298,43 +311,42 @@ class Parser:
 
     def _looks_like_function(self) -> bool:
         saved_index = self._index
+        result = False
         try:
             decl_specs = self._consume_decl_specifiers()
-            if decl_specs.is_typedef:
-                return False
-            self._parse_type_spec()
-            self._skip_decl_attributes()
-            self._skip_calling_convention_identifiers()
-            if self._current().kind != TokenKind.IDENT:
-                # Complex declarator case (e.g. function returning function pointer)
-                name, ops = self._parse_declarator(allow_abstract=False)
-                if name is None:
-                    return False
-                if not ops or ops[0][0] != "fn":
-                    return False
-                self._skip_decl_extensions()
-                return self._check_punct("{") or self._check_punct(";")
-            self._advance()
-            self._skip_decl_attributes()
-            if not self._check_punct("("):
-                return False
-            self._advance()
-            params, has_prototype, _ = self._parse_params()
-            self._expect_punct(")")
-            self._skip_decl_extensions()
-            if self._check_punct("{") or self._check_punct(";"):
-                return True
-            # K&R: declarations follow ')' before '{'.
-            if not has_prototype and params:
-                # Skip K&R declarations until we find '{'.
-                while not self._check_punct("{") and self._current().kind != TokenKind.EOF:
+            if not decl_specs.is_typedef:
+                self._parse_type_spec()
+                self._skip_decl_attributes()
+                self._skip_calling_convention_identifiers()
+                if self._current().kind != TokenKind.IDENT:
+                    # Complex declarator case (e.g. function returning function pointer)
+                    name, ops = self._parse_declarator(allow_abstract=False)
+                    if name is not None and ops and ops[0][0] == "fn":
+                        self._skip_decl_extensions()
+                        result = self._check_punct("{") or self._check_punct(";")
+                else:
                     self._advance()
-                return self._check_punct("{")
-            return False
+                    self._skip_decl_attributes()
+                    if self._check_punct("("):
+                        self._advance()
+                        parsed_params = self._parse_params()
+                        params = parsed_params[0]
+                        has_prototype = parsed_params[1]
+                        self._expect_punct(")")
+                        self._skip_decl_extensions()
+                        if self._check_punct("{") or self._check_punct(";"):
+                            result = True
+                        elif not has_prototype and params:
+                            # K&R: declarations follow ')' before '{'.
+                            while (
+                                not self._check_punct("{") and self._current().kind != TokenKind.EOF
+                            ):
+                                self._advance()
+                            result = self._check_punct("{")
         except ParserError:
-            return False
-        finally:
-            self._index = saved_index
+            result = False
+        self._index = saved_index
+        return result
 
     def _parse_function(self) -> FunctionDef:
         decl_specs = self._consume_decl_specifiers()
@@ -344,7 +356,7 @@ class Parser:
             context="function declaration",
             allow=False,
         )
-        base_type = self._parse_type_spec()
+        base_type = self._parse_type_spec(parse_pointer_depth=False)
         is_overloadable = self._consume_overloadable_decl_attributes()
 
         # Detect simple vs complex declarator.
@@ -359,14 +371,22 @@ class Parser:
             if self._consume_overloadable_decl_attributes():
                 is_overloadable = True
             self._expect_punct("(")
-            params, has_prototype, is_variadic = self._parse_params()
+            parsed_params = self._parse_params()
+            params = parsed_params[0]
+            has_prototype = parsed_params[1]
+            is_variadic = parsed_params[2]
             self._expect_punct(")")
             self._skip_decl_extensions()
             # Parse K&R-style parameter declarations between ')' and '{'.
             is_knr = not has_prototype and params
             if is_knr and not self._check_punct("{") and not self._check_punct(";"):
                 params = self._parse_knr_declarations(params)
-            param_types = tuple(param.type_spec for param in params) if has_prototype else None
+            param_types: tuple[TypeSpec, ...] | None = None
+            if has_prototype:
+                param_type_list: list[TypeSpec] = []
+                for param in params:
+                    param_type_list.append(param.type_spec)
+                param_types = tuple(param_type_list)
             function_type = self._build_declarator_type(
                 base_type,
                 (
@@ -380,12 +400,17 @@ class Parser:
         else:
             # Complex declarator (e.g. function returning function pointer).
             self._capture_next_fn_params = True
-            self._function_def_info = None
+            self._has_function_def_info = False
+            self._function_def_params = []
+            self._function_def_has_prototype = False
+            self._function_def_is_variadic = False
             decl_name, declarator_ops = self._parse_declarator(allow_abstract=False)
             assert decl_name is not None
             function_name = str(decl_name)
-            assert self._function_def_info is not None
-            params, has_prototype, is_variadic = self._function_def_info
+            assert self._has_function_def_info
+            params = self._function_def_params
+            has_prototype = self._function_def_has_prototype
+            is_variadic = self._function_def_is_variadic
             self._skip_decl_extensions()
             function_type = self._build_declarator_type(base_type, declarator_ops)
             # Build the return type from base + all ops except the first (fn) op.
@@ -407,12 +432,20 @@ class Parser:
                 is_variadic=is_variadic,
                 is_overloadable=is_overloadable,
             )
-        if any(param.name is None for param in params):
+        has_missing_param_name = False
+        for param in params:
+            if param.name is None:
+                has_missing_param_name = True
+                break
+        if has_missing_param_name:
             raise ParserError("Expected parameter name", self._current())
-        parameter_names = {param.name for param in params if param.name is not None}
-        parameter_types = {
-            param.name: param.type_spec for param in params if param.name is not None
-        }
+        parameter_names: set[str] = set()
+        parameter_types: dict[str, TypeSpec] = {}
+        for param in params:
+            param_name = param.name
+            if param_name is not None:
+                parameter_names.add(param_name)
+                parameter_types[param_name] = param.type_spec
         body = self._parse_compound_stmt(
             initial_names=parameter_names,
             initial_types=parameter_types,
@@ -452,7 +485,10 @@ class Parser:
         while self._check_punct(","):
             self._advance()
             names.append(str(self._expect(TokenKind.IDENT).lexeme))
-        return [Param(int_type, name) for name in names]
+        params: list[Param] = []
+        for name in names:
+            params.append(Param(int_type, name))
+        return params
 
     def _parse_knr_declarations(self, params: list[Param]) -> list[Param]:
         """Parse K&R parameter type declarations and update param types."""
@@ -473,7 +509,14 @@ class Parser:
                     break
             self._expect_punct(";")
         int_type = TypeSpec("int", 0)
-        return [Param(param_types.get(str(p.name), int_type), p.name) for p in params]
+        updated_params: list[Param] = []
+        for param in params:
+            param_name = str(param.name)
+            param_type = int_type
+            if param_name in param_types:
+                param_type = param_types[param_name]
+            updated_params.append(Param(param_type, param.name))
+        return updated_params
 
     def _parse_params(self) -> tuple[list[Param], bool, bool]:
         if self._check_punct(")"):
@@ -523,12 +566,19 @@ class Parser:
             context="parameter",
             allow=False,
         )
-        base_type = self._parse_type_spec()
+        base_type = self._parse_type_spec(parse_pointer_depth=False)
+        pointer_depth = 0
+        while self._current().kind == TokenKind.PUNCTUATOR and self._current().lexeme == "*":
+            self._advance()
+            self._skip_type_qualifiers(allow_atomic=True)
+            pointer_depth += 1
         name, declarator_ops = self._parse_declarator(
             allow_abstract=True,
             allow_vla=True,
             allow_parameter_arrays=True,
         )
+        if pointer_depth:
+            declarator_ops = _declarators._append_pointer_ops(declarator_ops, pointer_depth)
         declarator_type = self._build_declarator_type(base_type, declarator_ops)
         if self._is_invalid_void_parameter_type(declarator_type):
             raise ParserError("Invalid parameter type", self._previous())
@@ -735,10 +785,10 @@ class Parser:
                     0,
                     len(base_type.declarator_ops) - len(base_typedef_type.declarator_ops),
                 )
-                raw_declarator_ops = base_type.declarator_ops[prefix_len:]
+                typedef_raw_declarator_ops = base_type.declarator_ops[prefix_len:]
                 raw_base_type = TypeSpec(
                     base_type.name,
-                    declarator_ops=raw_declarator_ops,
+                    declarator_ops=typedef_raw_declarator_ops,
                     qualifiers=base_type.qualifiers,
                     is_atomic=base_type.is_atomic,
                     atomic_target=base_type.atomic_target,
@@ -746,6 +796,7 @@ class Parser:
                     enum_members=base_type.enum_members,
                     record_tag=base_type.record_tag,
                     record_members=base_type.record_members,
+                    has_record_body=base_type.has_record_body,
                     typeof_expr=base_type.typeof_expr,
                 )
             else:
@@ -756,10 +807,10 @@ class Parser:
                     else:
                         break
                 if trailing_ptrs:
-                    raw_declarator_ops = base_type.declarator_ops[:-trailing_ptrs]
+                    pointer_raw_declarator_ops = base_type.declarator_ops[:-trailing_ptrs]
                     raw_base_type = TypeSpec(
                         base_type.name,
-                        declarator_ops=raw_declarator_ops,
+                        declarator_ops=pointer_raw_declarator_ops,
                         qualifiers=base_type.qualifiers,
                         is_atomic=base_type.is_atomic,
                         atomic_target=base_type.atomic_target,
@@ -767,6 +818,7 @@ class Parser:
                         enum_members=base_type.enum_members,
                         record_tag=base_type.record_tag,
                         record_members=base_type.record_members,
+                        has_record_body=base_type.has_record_body,
                         typeof_expr=base_type.typeof_expr,
                     )
                 else:
@@ -774,7 +826,8 @@ class Parser:
         else:
             raw_base_type = base_type
         is_first_declarator = True
-        while True:
+        more_declarations = True
+        while more_declarations:
             self._skip_decl_attributes()
             declarator_has_prefix_qualifier = False
             top_pointer_is_qualified = False
@@ -835,9 +888,10 @@ class Parser:
                         is_thread_local=decl_specs.is_thread_local,
                     )
                 )
-            if not self._check_punct(","):
-                break
-            self._advance()
+            if self._check_punct(","):
+                self._advance()
+            else:
+                more_declarations = False
         self._expect_punct(";")
         self._define_enum_member_names(base_type)
         if len(declarations) == 1:
@@ -1159,7 +1213,7 @@ class Parser:
     def _expect(self, kind: TokenKind) -> Token:
         token = self._current()
         if token.kind != kind:
-            raise ParserError(f"Expected {kind.name}", token)
+            raise ParserError("Expected token kind", token)
         self._advance()
         return token
 
@@ -1214,7 +1268,7 @@ class Parser:
         return _extensions._skip_decl_attributes(self)
 
     def _skip_gnu_attributes(self) -> bool:
-        return _extensions._skip_gnu_attributes(self, self._make_error)
+        return _extensions._skip_gnu_attributes(self)
 
     def _skip_decl_extensions(self) -> None:
         _extensions._skip_decl_extensions(self)
@@ -1226,13 +1280,13 @@ class Parser:
         return _extensions._consume_decl_attributes(self)
 
     def _consume_gnu_attributes(self) -> tuple[bool, bool]:
-        return _extensions._consume_gnu_attributes(self, self._make_error)
+        return _extensions._consume_gnu_attributes(self)
 
     def _is_gnu_attribute_start(self) -> bool:
         return _extensions._is_gnu_attribute_start(self)
 
     def _skip_ms_declspecs(self) -> bool:
-        return _extensions._skip_ms_declspecs(self, self._make_error)
+        return _extensions._skip_ms_declspecs(self)
 
     def _is_ms_declspec_start(self) -> bool:
         return _extensions._is_ms_declspec_start(self)
@@ -1256,7 +1310,7 @@ class Parser:
         return _type_specs.skip_type_qualifiers(self, allow_atomic=allow_atomic)
 
     def _skip_asm_label(self) -> bool:
-        return _extensions._skip_asm_label(self, self._make_error)
+        return _extensions._skip_asm_label(self)
 
     def _consume_decl_specifiers(self) -> DeclSpecInfo:
         return _type_specs.consume_decl_specifiers(self)

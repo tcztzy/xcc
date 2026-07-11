@@ -1,12 +1,25 @@
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from xcc.ast import ArrayDecl, Expr, RecordMemberDecl, StorageClass, TypeSpec
 from xcc.lexer import Token, TokenKind
 
+if TYPE_CHECKING:
+    from . import Parser
+
 INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
-SIMPLE_TYPE_SPEC_KEYWORDS = INTEGER_TYPE_KEYWORDS | FLOATING_TYPE_KEYWORDS | {"void"}
+SIMPLE_TYPE_SPEC_KEYWORDS = {
+    "int",
+    "char",
+    "short",
+    "long",
+    "signed",
+    "unsigned",
+    "float",
+    "double",
+    "void",
+}
 TYPEOF_KEYWORDS = {
     "typeof",
     "typeof_unqual",
@@ -25,7 +38,6 @@ _NULLABLE_QUALIFIERS = {
     "__null_unspecified",
 }
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned", "constexpr"}
-_TYPE_QUALIFIER_ALIASES = {"__restrict": "restrict", "__restrict__": "restrict"}
 _GNU_EXTENSION_TYPES = {
     "bool",
     "_Float16",
@@ -48,13 +60,62 @@ DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
 
 
+def _merge_unique_qualifiers(
+    left: tuple[str, ...],
+    right: tuple[str, ...],
+) -> tuple[str, ...]:
+    merged: tuple[str, ...] = ()
+    for qualifier in left:
+        if qualifier not in merged:
+            merged = (*merged, qualifier)
+    for qualifier in right:
+        if qualifier not in merged:
+            merged = (*merged, qualifier)
+    return merged
+
+
+def _normalize_type_qualifier(lexeme: str) -> str:
+    if lexeme == "__restrict" or lexeme == "__restrict__":
+        return "restrict"
+    return lexeme
+
+
 def _consume_trailing_type_qualifiers(
-    parser: object,
+    parser: "Parser",
     qualifiers: tuple[str, ...],
 ) -> tuple[str, ...]:
     p = cast(Any, parser)
     trailing = p._consume_type_qualifiers()
-    return tuple(dict.fromkeys((*qualifiers, *trailing)))
+    return _merge_unique_qualifiers(qualifiers, trailing)
+
+
+def _apply_pointer_depth(parser: "Parser", type_spec: TypeSpec, pointer_depth: int) -> TypeSpec:
+    if pointer_depth == 0:
+        return type_spec
+    p = cast(Any, parser)
+    return p._build_declarator_type(type_spec, _pointer_ops(pointer_depth))
+
+
+def _pointer_ops(pointer_depth: int) -> tuple[DeclaratorOp, ...]:
+    ops: tuple[DeclaratorOp, ...] = ()
+    for _ in range(pointer_depth):
+        ops = ops + (POINTER_OP,)
+    return ops
+
+
+def _parse_optional_pointer_depth(parser: "Parser", parse_pointer_depth: bool) -> int:
+    if not parse_pointer_depth:
+        return 0
+    p = cast(Any, parser)
+    return p._parse_pointer_depth()
+
+
+def _has_pointer_declarator_op(type_spec: TypeSpec) -> bool:
+    # AOT subset: keep this as a loop instead of any(generator).
+    for kind, _ in type_spec.declarator_ops:  # noqa: SIM110
+        if kind == "ptr":
+            return True
+    return False
 
 
 @dataclass
@@ -91,7 +152,7 @@ def unsupported_type_message(context: str, token: Token) -> str:
     token_kind = (
         unsupported_type_token_kind(token.kind)
         if isinstance(token.kind, TokenKind)
-        else f"unsupported token kind '{token.kind.name}'"
+        else "unsupported token kind"
     )
     if context == "type-name":
         if token.kind == TokenKind.PUNCTUATOR:
@@ -272,7 +333,7 @@ def unsupported_type_token_kind(kind: TokenKind) -> str:
 
 
 def parse_type_spec(
-    parser: object,
+    parser: "Parser",
     *,
     parse_pointer_depth: bool = True,
     context: str = "declaration",
@@ -299,7 +360,7 @@ def parse_type_spec(
                 if pointer_depth:
                     atomic_type = p._build_declarator_type(
                         atomic_type,
-                        (POINTER_OP,) * pointer_depth,
+                        _pointer_ops(pointer_depth),
                     )
             return p._apply_type_qualifiers(atomic_type, qualifiers)
         if p._current().kind not in {TokenKind.KEYWORD, TokenKind.IDENT}:
@@ -324,7 +385,7 @@ def parse_type_spec(
             if pointer_depth:
                 atomic_type = p._build_declarator_type(
                     atomic_type,
-                    (POINTER_OP,) * pointer_depth,
+                    _pointer_ops(pointer_depth),
                 )
         return p._apply_type_qualifiers(atomic_type, qualifiers)
     token = p._current()
@@ -334,11 +395,11 @@ def parse_type_spec(
             p._advance()
             type_spec = TypeSpec(token.lexeme)
             qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-            pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
+            pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
             if pointer_depth:
                 type_spec = p._build_declarator_type(
                     type_spec,
-                    (POINTER_OP,) * pointer_depth,
+                    _pointer_ops(pointer_depth),
                 )
             return p._apply_type_qualifiers(type_spec, qualifiers)
         type_spec = p._lookup_typedef(token.lexeme)
@@ -347,11 +408,11 @@ def parse_type_spec(
         typedef_has_declarator_ops = bool(type_spec.declarator_ops)
         p._advance()
         qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-        pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
+        pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
         if pointer_depth:
             type_spec = p._build_declarator_type(
                 type_spec,
-                (POINTER_OP,) * pointer_depth,
+                _pointer_ops(pointer_depth),
             )
         return apply_typedef_type_qualifiers(
             type_spec,
@@ -365,11 +426,11 @@ def parse_type_spec(
     if token.lexeme in TYPEOF_KEYWORDS:
         type_spec = p._parse_typeof_type_spec()
         qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-        pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
+        pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
         if pointer_depth:
             type_spec = p._build_declarator_type(
                 type_spec,
-                (POINTER_OP,) * pointer_depth,
+                _pointer_ops(pointer_depth),
             )
         return p._apply_type_qualifiers(type_spec, qualifiers)
     if token.lexeme == "_Complex":
@@ -377,8 +438,9 @@ def parse_type_spec(
             complex_base = p._advance()
             assert isinstance(complex_base.lexeme, str)
             qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-            pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
-            return TypeSpec(str(complex_base.lexeme), pointer_depth, qualifiers=qualifiers)
+            pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
+            type_spec = TypeSpec(str(complex_base.lexeme), qualifiers=qualifiers)
+            return _apply_pointer_depth(p, type_spec, pointer_depth)
         if (
             p._check_keyword("long")
             and p._peek().kind == TokenKind.KEYWORD
@@ -387,73 +449,79 @@ def parse_type_spec(
             p._advance()
             p._advance()
             qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-            pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
-            return TypeSpec("long double", pointer_depth, qualifiers=qualifiers)
+            pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
+            type_spec = TypeSpec("long double", qualifiers=qualifiers)
+            return _apply_pointer_depth(p, type_spec, pointer_depth)
         raise ParserError(p._unsupported_type_message(context, token), token)
     if token.lexeme in FLOATING_TYPE_KEYWORDS:
         assert isinstance(token.lexeme, str)
         type_name = str(token.lexeme)
         p._reject_optional_complex_specifier(context, allow=True)
         qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-        pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
-        return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
+        pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
+        type_spec = TypeSpec(type_name, qualifiers=qualifiers)
+        return _apply_pointer_depth(p, type_spec, pointer_depth)
     if token.lexeme == "_Bool":
         qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-        pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
-        return TypeSpec("_Bool", pointer_depth, qualifiers=qualifiers)
+        pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
+        type_spec = TypeSpec("_Bool", qualifiers=qualifiers)
+        return _apply_pointer_depth(p, type_spec, pointer_depth)
     if token.lexeme in SIMPLE_TYPE_SPEC_KEYWORDS:
         assert isinstance(token.lexeme, str)
         if token.lexeme == "void":
             qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-            pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
-            return TypeSpec("void", pointer_depth, qualifiers=qualifiers)
+            pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
+            type_spec = TypeSpec("void", qualifiers=qualifiers)
+            return _apply_pointer_depth(p, type_spec, pointer_depth)
         type_name = p._parse_integer_type_spec(token.lexeme, token, context=context)
         if type_name == "long" and p._check_keyword("double"):
             p._advance()
             type_name = "long double"
         p._reject_optional_complex_specifier(context, allow=type_name == "long double")
         qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-        pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
-        return TypeSpec(type_name, pointer_depth, qualifiers=qualifiers)
+        pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
+        type_spec = TypeSpec(type_name, qualifiers=qualifiers)
+        return _apply_pointer_depth(p, type_spec, pointer_depth)
     if token.lexeme == "enum":
         enum_tag, enum_members = p._parse_enum_spec(token)
         qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-        pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
-        return TypeSpec(
+        pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
+        type_spec = TypeSpec(
             "enum",
-            pointer_depth,
             qualifiers=qualifiers,
             enum_tag=enum_tag,
             enum_members=enum_members,
         )
+        return _apply_pointer_depth(p, type_spec, pointer_depth)
     if token.lexeme in {"struct", "union"}:
         record_tag, record_members, has_record_body = p._parse_record_spec(
             token,
             str(token.lexeme),
         )
         qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
-        pointer_depth = p._parse_pointer_depth() if parse_pointer_depth else 0
-        return TypeSpec(
+        pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
+        type_spec = TypeSpec(
             str(token.lexeme),
-            pointer_depth,
             qualifiers=qualifiers,
             record_tag=record_tag,
             record_members=record_members,
             has_record_body=has_record_body,
         )
+        return _apply_pointer_depth(p, type_spec, pointer_depth)
     raise ParserError(p._unsupported_type_message(context, token), token)
 
 
-def consume_type_qualifiers(parser: object, *, allow_atomic: bool = False) -> tuple[str, ...]:
+def consume_type_qualifiers(parser: "Parser", *, allow_atomic: bool = False) -> tuple[str, ...]:
     p = cast(Any, parser)
-    qualifiers = TYPE_QUALIFIER_KEYWORDS | ({"_Atomic"} if allow_atomic else set())
     seen: list[str] = []
     while True:
         token = p._current()
-        if token.kind == TokenKind.KEYWORD and token.lexeme in qualifiers:
+        is_type_qualifier = token.lexeme in TYPE_QUALIFIER_KEYWORDS
+        is_allowed_atomic = allow_atomic and token.lexeme == "_Atomic"
+        if token.kind == TokenKind.KEYWORD and (is_type_qualifier or is_allowed_atomic):
             token = p._advance()
             lexeme = str(token.lexeme)
-            qualifier = _TYPE_QUALIFIER_ALIASES.get(lexeme, lexeme)
+            qualifier = _normalize_type_qualifier(lexeme)
             if qualifier in seen:
                 raise ParserError(f"Duplicate type qualifier: '{qualifier}'", token)
             seen.append(qualifier)
@@ -477,13 +545,17 @@ def consume_type_qualifiers(parser: object, *, allow_atomic: bool = False) -> tu
             p._skip_ms_declspecs()
             continue
         break
-    return tuple(qualifier for qualifier in seen if qualifier in qualifiers)
+    qualifiers: tuple[str, ...] = ()
+    for qualifier in seen:
+        if qualifier in TYPE_QUALIFIER_KEYWORDS:
+            qualifiers = (*qualifiers, qualifier)
+    return qualifiers
 
 
 def apply_type_qualifiers(type_spec: TypeSpec, qualifiers: tuple[str, ...]) -> TypeSpec:
     if not qualifiers:
         return type_spec
-    merged = tuple(dict.fromkeys((*type_spec.qualifiers, *qualifiers)))
+    merged = _merge_unique_qualifiers(type_spec.qualifiers, qualifiers)
     return TypeSpec(
         type_spec.name,
         declarator_ops=type_spec.declarator_ops,
@@ -494,6 +566,7 @@ def apply_type_qualifiers(type_spec: TypeSpec, qualifiers: tuple[str, ...]) -> T
         enum_members=type_spec.enum_members,
         record_tag=type_spec.record_tag,
         record_members=type_spec.record_members,
+        has_record_body=type_spec.has_record_body,
         typeof_expr=type_spec.typeof_expr,
     )
 
@@ -516,7 +589,7 @@ def apply_typedef_type_qualifiers(
 
 
 def reject_optional_complex_specifier(
-    parser: object,
+    parser: "Parser",
     context: str,
     *,
     allow: bool = False,
@@ -529,8 +602,55 @@ def reject_optional_complex_specifier(
         raise ParserError(p._unsupported_type_message(context, token), token)
 
 
+def _integer_type_invalid_order(keyword: str, current_base: str | None) -> str:
+    prior = current_base if current_base is not None else "<none>"
+    return f"Invalid integer type keyword order: '{keyword}' after '{prior}'"
+
+
+def _consume_integer_type_keyword(
+    keyword: str,
+    token: Token,
+    current_signedness: str | None,
+    current_base: str | None,
+) -> tuple[str | None, str | None]:
+    if keyword in {"signed", "unsigned"}:
+        if current_signedness is not None:
+            raise ParserError(
+                f"Duplicate integer signedness specifier: '{keyword}'",
+                token,
+            )
+        return keyword, current_base
+    if keyword == "char":
+        if current_base is not None:
+            raise ParserError(_integer_type_invalid_order(keyword, current_base), token)
+        return current_signedness, keyword
+    if keyword == "short":
+        if current_base in {None, "int"}:
+            return current_signedness, keyword
+        raise ParserError(_integer_type_invalid_order(keyword, current_base), token)
+    if keyword == "long":
+        if current_base in {None, "int"}:
+            return current_signedness, keyword
+        if current_base == "long":
+            return current_signedness, "long long"
+        raise ParserError(_integer_type_invalid_order(keyword, current_base), token)
+    assert keyword == "int"
+    if current_base is None:
+        return current_signedness, keyword
+    if current_base in {"short", "long", "long long"}:
+        return current_signedness, current_base
+    raise ParserError(_integer_type_invalid_order(keyword, current_base), token)
+
+
+def _consume_gnu_int_type(token: Token) -> str | None:
+    assert isinstance(token.lexeme, str)
+    if token.lexeme in _GNU_EXTENSION_INT_TYPES:
+        return str(token.lexeme)
+    return None
+
+
 def parse_integer_type_spec(
-    parser: object,
+    parser: "Parser",
     first_keyword: str,
     first_token: Token,
     *,
@@ -540,58 +660,14 @@ def parse_integer_type_spec(
     signedness: str | None = None
     base: str | None = None
 
-    def invalid_order(keyword: str, *, current_base: str | None) -> str:
-        prior = current_base if current_base is not None else "<none>"
-        return f"Invalid integer type keyword order: '{keyword}' after '{prior}'"
-
-    def consume(
-        keyword: str,
-        token: Token,
-        current_signedness: str | None,
-        current_base: str | None,
-    ) -> tuple[str | None, str | None]:
-        if keyword in {"signed", "unsigned"}:
-            if current_signedness is not None:
-                raise ParserError(
-                    f"Duplicate integer signedness specifier: '{keyword}'",
-                    token,
-                )
-            return keyword, current_base
-        if keyword == "char":
-            if current_base is not None:
-                raise ParserError(invalid_order(keyword, current_base=current_base), token)
-            return current_signedness, keyword
-        if keyword == "short":
-            if current_base in {None, "int"}:
-                return current_signedness, keyword
-            raise ParserError(invalid_order(keyword, current_base=current_base), token)
-        if keyword == "long":
-            if current_base in {None, "int"}:
-                return current_signedness, keyword
-            if current_base == "long":
-                return current_signedness, "long long"
-            raise ParserError(invalid_order(keyword, current_base=current_base), token)
-        assert keyword == "int"
-        if current_base is None:
-            return current_signedness, keyword
-        if current_base in {"short", "long", "long long"}:
-            return current_signedness, current_base
-        raise ParserError(invalid_order(keyword, current_base=current_base), token)
-
-    def _consume_gnu_int_type(token: Token) -> str | None:
-        assert isinstance(token.lexeme, str)
-        if token.lexeme in _GNU_EXTENSION_INT_TYPES:
-            return str(token.lexeme)
-        return None
-
-    signedness, base = consume(first_keyword, first_token, signedness, base)
+    signedness, base = _consume_integer_type_keyword(first_keyword, first_token, signedness, base)
     while p._current().kind == TokenKind.KEYWORD:
         token = p._current()
         assert isinstance(token.lexeme, str)
         if token.lexeme not in INTEGER_TYPE_KEYWORDS:
             break
         p._advance()
-        signedness, base = consume(token.lexeme, token, signedness, base)
+        signedness, base = _consume_integer_type_keyword(token.lexeme, token, signedness, base)
 
     if base is None and p._current().kind == TokenKind.IDENT:
         gnu_base = _consume_gnu_int_type(p._current())
@@ -615,7 +691,7 @@ def parse_integer_type_spec(
 
 
 def parse_enum_spec(
-    parser: object,
+    parser: "Parser",
     token: Token,
 ) -> tuple[str | None, tuple[tuple[str, Expr | None], ...]]:
     p = cast(Any, parser)
@@ -636,7 +712,7 @@ def parse_enum_spec(
     return enum_tag, enum_members
 
 
-def parse_enum_members(parser: object) -> tuple[tuple[str, Expr | None], ...]:
+def parse_enum_members(parser: "Parser") -> tuple[tuple[str, Expr | None], ...]:
     p = cast(Any, parser)
     p._expect_punct("{")
     if p._check_punct("}"):
@@ -653,7 +729,7 @@ def parse_enum_members(parser: object) -> tuple[tuple[str, Expr | None], ...]:
     return tuple(members)
 
 
-def parse_enum_member(parser: object) -> tuple[str, Expr | None]:
+def parse_enum_member(parser: "Parser") -> tuple[str, Expr | None]:
     p = cast(Any, parser)
     token = p._expect(TokenKind.IDENT)
     assert isinstance(token.lexeme, str)
@@ -665,7 +741,7 @@ def parse_enum_member(parser: object) -> tuple[str, Expr | None]:
 
 
 def parse_record_spec(
-    parser: object,
+    parser: "Parser",
     token: Token,
     kind: str,
 ) -> tuple[str | None, tuple[RecordMemberDecl, ...], bool]:
@@ -686,7 +762,7 @@ def parse_record_spec(
     return record_tag, record_members, has_record_body
 
 
-def parse_record_members(parser: object) -> tuple[RecordMemberDecl, ...]:
+def parse_record_members(parser: "Parser") -> tuple[RecordMemberDecl, ...]:
     p = cast(Any, parser)
     p._expect_punct("{")
     members: list[RecordMemberDecl] = []
@@ -699,7 +775,7 @@ def parse_record_members(parser: object) -> tuple[RecordMemberDecl, ...]:
     return tuple(members)
 
 
-def parse_record_member_declaration(parser: object) -> list[RecordMemberDecl]:
+def parse_record_member_declaration(parser: "Parser") -> list[RecordMemberDecl]:
     p = cast(Any, parser)
     p._skip_extension_markers()
     decl_specs = p._consume_decl_specifiers()
@@ -725,7 +801,8 @@ def parse_record_member_declaration(parser: object) -> list[RecordMemberDecl]:
             return [RecordMemberDecl(base_type, None)]
         raise p._expected_identifier_error()
     members: list[RecordMemberDecl] = []
-    while True:
+    more_members = True
+    while more_members:
         name, declarator_ops = p._parse_declarator(
             allow_abstract=True,
             allow_vla=True,
@@ -759,14 +836,15 @@ def parse_record_member_declaration(parser: object) -> list[RecordMemberDecl]:
                 bit_width_expr=bit_width_expr,
             )
         )
-        if not p._check_punct(","):
-            break
-        p._advance()
+        if p._check_punct(","):
+            p._advance()
+        else:
+            more_members = False
     p._expect_punct(";")
     return members
 
 
-def consume_decl_specifiers(parser: object) -> DeclSpecInfo:
+def consume_decl_specifiers(parser: "Parser") -> DeclSpecInfo:
     p = cast(Any, parser)
     storage_class: StorageClass | None = None
     storage_class_token: Token | None = None
@@ -778,9 +856,13 @@ def consume_decl_specifiers(parser: object) -> DeclSpecInfo:
     while True:
         attr_found, attr_alignment, attr_alignment_token = p._consume_decl_attribute_alignment()
         if attr_found:
-            if attr_alignment is not None and (alignment is None or attr_alignment > alignment):
-                alignment = attr_alignment
-                alignment_token = attr_alignment_token
+            if attr_alignment is not None:
+                current_alignment: int = 0
+                if alignment is not None:
+                    current_alignment = cast(int, alignment)
+                if alignment is None or attr_alignment > current_alignment:
+                    alignment = attr_alignment
+                    alignment_token = attr_alignment_token
             continue
         current = p._current()
         if current.kind == TokenKind.KEYWORD:
@@ -822,7 +904,10 @@ def consume_decl_specifiers(parser: object) -> DeclSpecInfo:
             if alignment_token is None:
                 alignment_token = current
             current_alignment = p._consume_alignas_specifier()
-            if alignment is None or current_alignment > alignment:
+            previous_alignment: int = 0
+            if alignment is not None:
+                previous_alignment = cast(int, alignment)
+            if alignment is None or current_alignment > previous_alignment:
                 alignment = current_alignment
             continue
         # _Alignas can appear after type qualifiers
@@ -849,7 +934,7 @@ def consume_decl_specifiers(parser: object) -> DeclSpecInfo:
 
 
 def reject_invalid_alignment_context(
-    parser: object,
+    parser: "Parser",
     alignment: int | None,
     alignment_token: Token | None,
     *,
@@ -865,7 +950,7 @@ def reject_invalid_alignment_context(
     )
 
 
-def consume_alignas_specifier(parser: object) -> int:
+def consume_alignas_specifier(parser: "Parser") -> int:
     p = cast(Any, parser)
     token = p._current()
     p._advance()
@@ -906,21 +991,23 @@ def consume_alignas_specifier(parser: object) -> int:
     return alignment
 
 
-def skip_type_qualifiers(parser: object, *, allow_atomic: bool = False) -> bool:
+def skip_type_qualifiers(parser: "Parser", *, allow_atomic: bool = False) -> bool:
     p = cast(Any, parser)
-    qualifiers = TYPE_QUALIFIER_KEYWORDS | ({"_Atomic"} if allow_atomic else set())
     found = False
     while True:
-        if p._current().kind == TokenKind.KEYWORD and p._current().lexeme in qualifiers:
+        token = p._current()
+        is_type_qualifier = token.lexeme in TYPE_QUALIFIER_KEYWORDS
+        is_allowed_atomic = allow_atomic and token.lexeme == "_Atomic"
+        if token.kind == TokenKind.KEYWORD and (is_type_qualifier or is_allowed_atomic):
             found = True
             p._advance()
             continue
-        if p._current().kind == TokenKind.IDENT and p._current().lexeme in (
-            _NULLABLE_QUALIFIERS | _IGNORED_IDENT_TYPE_QUALIFIERS
-        ):
+        is_nullable_qualifier = token.lexeme in _NULLABLE_QUALIFIERS
+        is_ignored_ident_qualifier = token.lexeme in _IGNORED_IDENT_TYPE_QUALIFIERS
+        if token.kind == TokenKind.IDENT and (is_nullable_qualifier or is_ignored_ident_qualifier):
             # Contextual keywords like constexpr: treat as identifier if
             # followed by ;, ,, or =, matching consume_type_qualifiers.
-            if p._current().lexeme == "constexpr":
+            if token.lexeme == "constexpr":
                 nxt = p._peek()
                 if nxt.kind == TokenKind.PUNCTUATOR and nxt.lexeme in {";", ",", "="}:
                     break
@@ -950,7 +1037,7 @@ def is_function_object_type(type_spec: TypeSpec) -> bool:
     return bool(type_spec.declarator_ops) and type_spec.declarator_ops[0][0] == "fn"
 
 
-def define_enum_member_names(parser: object, type_spec: TypeSpec) -> None:
+def define_enum_member_names(parser: "Parser", type_spec: TypeSpec) -> None:
     p = cast(Any, parser)
     value = -1
     for member_name, value_expr in type_spec.enum_members:
@@ -978,6 +1065,7 @@ def mark_atomic_type_spec(type_spec: TypeSpec) -> TypeSpec:
         enum_members=type_spec.enum_members,
         record_tag=type_spec.record_tag,
         record_members=type_spec.record_members,
+        has_record_body=type_spec.has_record_body,
         typeof_expr=type_spec.typeof_expr,
     )
 
@@ -992,9 +1080,8 @@ def classify_invalid_atomic_type(
     is_qualified_atomic_target: bool = False,
     include_atomic: bool = True,
 ) -> str | None:
-    if is_qualified_atomic_target or (
-        type_spec.qualifiers and not any(kind == "ptr" for kind, _ in type_spec.declarator_ops)
-    ):
+    has_pointer_op = _has_pointer_declarator_op(type_spec)
+    if is_qualified_atomic_target or (type_spec.qualifiers and not has_pointer_op):
         return "qualified"
     if include_atomic and type_spec.is_atomic:
         return "atomic"
@@ -1008,7 +1095,7 @@ def classify_invalid_atomic_type(
 def is_invalid_void_object_type(type_spec: TypeSpec) -> bool:
     if type_spec.name != "void":
         return False
-    return not any(kind == "ptr" for kind, _ in type_spec.declarator_ops)
+    return not _has_pointer_declarator_op(type_spec)
 
 
 def is_invalid_void_parameter_type(type_spec: TypeSpec) -> bool:

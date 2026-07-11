@@ -9,9 +9,18 @@ def _ops_from_legacy(
     pointer_depth: int,
     array_lengths: tuple[int, ...],
 ) -> tuple[TypeOp, ...]:
-    ops: list[TypeOp] = [("arr", length) for length in array_lengths]
-    ops.extend(POINTER_OP for _ in range(pointer_depth))
+    ops: list[TypeOp] = []
+    for length in array_lengths:
+        ops.append(("arr", length))
+    for _ in range(pointer_depth):
+        ops.append(POINTER_OP)
     return tuple(ops)
+
+
+def type_declarator_ops(type_: "Type") -> tuple[TypeOp, ...]:
+    if type_.declarator_ops:
+        return type_.declarator_ops
+    return _ops_from_legacy(type_.pointer_depth, type_.array_lengths)
 
 
 def _format_function_params(params: FunctionParams) -> str:
@@ -36,8 +45,14 @@ class Type:
 
     def __post_init__(self) -> None:
         if self.declarator_ops:
-            pointer_depth = sum(1 for kind, _ in self.declarator_ops if kind == "ptr")
-            array_lengths = tuple(length for kind, length in self.declarator_ops if kind == "arr")
+            pointer_depth = 0
+            array_values: list[int] = []
+            for kind, value in self.declarator_ops:
+                if kind == "ptr":
+                    pointer_depth += 1
+                elif kind == "arr" and isinstance(value, int):
+                    array_values.append(value)
+            array_lengths = tuple(array_values)
             object.__setattr__(self, "pointer_depth", pointer_depth)
             object.__setattr__(self, "array_lengths", array_lengths)
             return
@@ -50,7 +65,7 @@ class Type:
     def __str__(self) -> str:
         prefix = "" if not self.qualifiers else f"{' '.join(self.qualifiers)} "
         suffix: list[str] = []
-        for kind, value in reversed(self.declarator_ops):
+        for kind, value in reversed(type_declarator_ops(self)):
             if kind == "ptr":
                 suffix.append("*")
             elif kind == "arr":
@@ -64,26 +79,28 @@ class Type:
     def pointer_to(self) -> "Type":
         return Type(
             self.name,
-            declarator_ops=(POINTER_OP,) + self.declarator_ops,
+            declarator_ops=(POINTER_OP,) + type_declarator_ops(self),
             qualifiers=self.qualifiers,
         )
 
     def pointee(self) -> "Type | None":
-        if not self.declarator_ops or self.declarator_ops[0][0] != "ptr":
+        ops = type_declarator_ops(self)
+        if not ops or ops[0][0] != "ptr":
             return None
-        return Type(self.name, declarator_ops=self.declarator_ops[1:], qualifiers=self.qualifiers)
+        return Type(self.name, declarator_ops=ops[1:], qualifiers=self.qualifiers)
 
     def array_of(self, length: int) -> "Type":
         return Type(
             self.name,
-            declarator_ops=(("arr", length),) + self.declarator_ops,
+            declarator_ops=(("arr", length),) + type_declarator_ops(self),
             qualifiers=self.qualifiers,
         )
 
     def element_type(self) -> "Type | None":
-        if not self.declarator_ops or self.declarator_ops[0][0] != "arr":
+        ops = type_declarator_ops(self)
+        if not ops or ops[0][0] != "arr":
             return None
-        return Type(self.name, declarator_ops=self.declarator_ops[1:], qualifiers=self.qualifiers)
+        return Type(self.name, declarator_ops=ops[1:], qualifiers=self.qualifiers)
 
     def function_of(
         self,
@@ -93,12 +110,12 @@ class Type:
     ) -> "Type":
         return Type(
             self.name,
-            declarator_ops=(("fn", (params, is_variadic)),) + self.declarator_ops,
+            declarator_ops=(("fn", (params, is_variadic)),) + type_declarator_ops(self),
             qualifiers=self.qualifiers,
         )
 
     def callable_signature(self) -> "tuple[Type, FunctionParams] | None":
-        ops = self.declarator_ops
+        ops = type_declarator_ops(self)
         if ops and ops[0][0] == "ptr":
             ops = ops[1:]
         if not ops or ops[0][0] != "fn":
@@ -108,42 +125,44 @@ class Type:
         return Type(self.name, declarator_ops=ops[1:], qualifiers=self.qualifiers), params
 
     def decay_parameter_type(self) -> "Type":
-        if not self.declarator_ops:
+        ops = type_declarator_ops(self)
+        if not ops:
             return self
-        if self.declarator_ops[0][0] == "arr":
+        if ops[0][0] == "arr":
             return Type(
                 self.name,
-                declarator_ops=(POINTER_OP,) + self.declarator_ops[1:],
+                declarator_ops=(POINTER_OP,) + ops[1:],
                 qualifiers=self.qualifiers,
             )
-        if self.declarator_ops[0][0] == "fn":
+        if ops[0][0] == "fn":
             return Type(
                 self.name,
-                declarator_ops=(POINTER_OP,) + self.declarator_ops,
+                declarator_ops=(POINTER_OP,) + ops,
                 qualifiers=self.qualifiers,
             )
         return self
 
     def is_array(self) -> bool:
-        return bool(self.declarator_ops) and self.declarator_ops[0][0] == "arr"
+        ops = type_declarator_ops(self)
+        return bool(ops) and ops[0][0] == "arr"
 
 
-INT = Type("int")
-UINT = Type("unsigned int")
-SHORT = Type("short")
-USHORT = Type("unsigned short")
-LONG = Type("long")
-ULONG = Type("unsigned long")
-LLONG = Type("long long")
-ULLONG = Type("unsigned long long")
-INT128 = Type("__int128_t")
-UINT128 = Type("__uint128_t")
-EVM_UINT256 = Type("__evm_uint256")
-EVM_ADDRESS = Type("__evm_address")
-CHAR = Type("char")
-UCHAR = Type("unsigned char")
-BOOL = Type("_Bool")
-FLOAT = Type("float")
-DOUBLE = Type("double")
-LONGDOUBLE = Type("long double")
-VOID = Type("void")
+INT: Type = Type("int")
+UINT: Type = Type("unsigned int")
+SHORT: Type = Type("short")
+USHORT: Type = Type("unsigned short")
+LONG: Type = Type("long")
+ULONG: Type = Type("unsigned long")
+LLONG: Type = Type("long long")
+ULLONG: Type = Type("unsigned long long")
+INT128: Type = Type("__int128_t")
+UINT128: Type = Type("__uint128_t")
+EVM_UINT256: Type = Type("__evm_uint256")
+EVM_ADDRESS: Type = Type("__evm_address")
+CHAR: Type = Type("char")
+UCHAR: Type = Type("unsigned char")
+BOOL: Type = Type("_Bool")
+FLOAT: Type = Type("float")
+DOUBLE: Type = Type("double")
+LONGDOUBLE: Type = Type("long double")
+VOID: Type = Type("void")

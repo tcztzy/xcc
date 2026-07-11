@@ -3565,7 +3565,7 @@ class ParserTests(unittest.TestCase):
 
         self.assertEqual(
             ctx.exception.message,
-            "Expression cannot start with unsupported token kind 'GARBAGE' (lexeme '@@')",
+            "Expression cannot start with unsupported token kind (lexeme '@@')",
         )
 
     def test_parse_decl_stmt_static_assert_dispatch(self) -> None:
@@ -4429,7 +4429,7 @@ class ParserTests(unittest.TestCase):
         unhashable_key = parser._generic_association_type_key(unhashable_array_type)
         declarator_keys = unhashable_key[-1]
         self.assertEqual(declarator_keys[0][0], "arr")
-        self.assertIn("[]", declarator_keys[0][1])
+        self.assertEqual(declarator_keys[0][1], "object")
 
         no_proto_fn_type = TypeSpec("int", declarator_ops=(("func", (None, True)),))
         no_proto_key = parser._generic_association_type_key(no_proto_fn_type)
