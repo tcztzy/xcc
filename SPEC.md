@@ -7,6 +7,7 @@ mixed ledger.
 ## Spec Map
 
 - `specs/compiler.md` → current C compiler spec, task ledger, and bug ledger.
+- `specs/aot-python.md` → AOT Python subset and strong-bootstrap contract.
 - `specs/driver.md` → shared target-selection/default contract.
 - `specs/target-llvm.md` → LLVM target contract.
 - `specs/target-aarch64-apple-darwin.md` → Darwin AArch64 target contract.

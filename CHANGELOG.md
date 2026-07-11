@@ -2,6 +2,144 @@
 
 ## Current
 
+- Began the approved strong-bootstrap Milestone 1 freeze at baseline
+  `codex/test-gate-hardening` / `182d9c7` without modifying or staging the
+  unrelated OSS application document. The initial six-module Stage 0 AOT gate
+  ran 508 tests in 448.383s: one stale source-to-LLVM ABI diagnostic assertion
+  was identified as B271, the valid union probe reproduced the known
+  `IrRaise -> exit(2)` caught-exception failure covered by B268/V367/V380, and
+  the V368 `include_next` probe remained an expected failure. No CPython
+  configure blocker work was resumed.
+- Corrected the AOT acceptance target to strong self-hosting. The current
+  `build/aot/xcc` is a Python-hosted AOT product that runs as a native C
+  compiler; it links no libpython, but its emitted graph is rooted at
+  `xcc.cc_driver`, contains no `xcc.aot` compiler definitions, and the hosted
+  AOT frontend still uses `ast.parse`. It therefore does not yet qualify as a
+  native AOT compiler or Stage 1. Added an independent `specs/aot-python.md`, a
+  current-state gap/source-change audit, a project-owned Python subset frontend
+  architecture, and a Stage 0 -> 1 -> 2 -> 3 implementation plan. Native C and
+  CPython `configure && make` checks are now explicitly final secondary gates.
+- Advanced the native AOT bootstrap driver through the autoconf executable-run
+  probe used after "C compiler works" checks. The rebuilt `build/aot/xcc`
+  compiles, links, and runs the `FILE *f = fopen("conftest.out", "w");
+  if (!f) return 1; return ferror(f) || fclose(f) != 0;` probe with run
+  status 0. The fixes keep source Python ordinary while making bootstrap-hot
+  shapes native-stable: LLVM codegen now avoids side-effect conditional
+  expressions for no-else `if` blocks, scans tuple-backed local dictionaries by
+  key/value pairs instead of `name in dict`, casts file-scope analyzer Protocol
+  receivers to the concrete `Analyzer` for field access, scans string-literal
+  quotes without `break`-carried state, and emits native string globals with an
+  explicit NUL terminator. Remaining native risks include noisy
+  `Duplicate definition: union` stdout from `<stdio.h>` and a separate pointer
+  equality crash for forms such as `int *x; return x == 0;`.
+- Advanced the native AOT CPython configure path to the first executable-run
+  probe after `configure` reports that the C compiler works. The latest
+  blocker was the autoconf `if (!f)` / `ferror(f) || fclose(f) != 0` probe:
+  native AOT did not recognize unary `!`, lost parent scopes created through
+  `Scope(parent)`, and could lose declaration statements appended immediately
+  before a `break` edge. Parser unary operator recognition now uses an
+  explicit predicate, sema child scopes use `Scope.child()` plus iterative
+  parent lookup, and declaration-list parsing avoids the append-then-break
+  shape. Focused regressions cover those strict-subset source shapes; the
+  formal native rebuild and full CPython native-AOT gate remain pending.
+- Advanced the native AOT record-type path past the earlier incomplete-record
+  false positives in system headers. File-scope analyzer Protocol calls are now
+  rewritten to the concrete `Analyzer` methods, record-body metadata is
+  preserved across parser `TypeSpec` rewrites, record tags use native-stable
+  string dictionary keys, and bootstrap-critical record/void checks avoid
+  loop state that is only observed after a `break` edge. The generated native
+  driver now accepts opaque `struct *` parameters/returns, rejects true opaque
+  by-value declarations with the expected incomplete diagnostics, accepts a
+  defined record by-value prototype as `declare i32 @f({ i32 })`, accepts
+  record `void *` members, and compiles a standalone `<stdio.h>` probe to an
+  object without the previous incomplete or void-member diagnostics.
+- Advanced the native AOT system-header path past the earlier union,
+  trailing block-comment include, lexer block-comment, typedef lookup,
+  function-pointer field, raw LLVM pointer-array, and native LLVM type
+  declarator crashes. The native bootstrap driver now rebuilds and preserves
+  pointer declarators in LLVM prototypes: function-pointer parameters,
+  `void *` parameters, array-parameter decay, and pointer return types now emit
+  LLVM `ptr` instead of falling back to scalar base types. The root cause was
+  `_LLVMGen._type_to_llvm()` relying on `reversed(ops)`, which native AOT did
+  not execute for tuple-backed declarator ops; it now uses an explicit reverse
+  index loop. A standalone native `<stdio.h>` probe now produces an object and
+  emits `fread(ptr, i64, i64, ptr)`/`fwrite(ptr, i64, i64, ptr)`, while still
+  printing repeated incomplete-type diagnostics that need a follow-up
+  diagnostic/error-propagation slice.
+- Advanced the native AOT CPython validation path through the earlier
+  system-header conditional/include-guard blocker. The bootstrap-reachable
+  preprocessor now returns AOT-updated conditional stacks explicitly, avoids
+  dynamic tuple slicing for `#endif` pop, records native no-callback macro
+  definitions, checks tuple-backed macro dictionaries through `dict.get()`,
+  uses a small no-callback include-guard detector for guarded recursive
+  includes, and initializes a minimal native predefined macro table for
+  bootstrap preprocessing. The native regression now compiles a self-recursive
+  guarded header and expands `__PTRDIFF_TYPE__` without the CPython runtime.
+  The standalone native `<stdio.h>` probe has moved past the previous
+  `Unexpected #else/#endif`, include-cycle, architecture, and builtin type
+  blockers; it is now blocked later by Apple SDK `union` declarations and
+  repeated unterminated block-comment diagnostics before the native parser
+  crashes.
+- Added a CPython build-script option that builds native AOT `xcc` first and
+  uses that executable as `CC` for `configure && make` validation.
+- Extended the native AOT bootstrap driver to accept CPython configure-style
+  compile and object-link commands without invoking the Python runtime. The
+  native path now accepts `-I`/`-D`/`-U` joined or separated operands,
+  `-std=c11`, `-std=gnu11`, rejects unknown frontend flags, and can link an
+  existing `.o` input to an executable.
+- Added a broad real compiler-path bootstrap LLVM regression that writes
+  `build/aot/probes/bootstrap-real-path.ll` and verifies the generated module
+  still includes native `main`, `_aot_compile_source_path_to_object()`,
+  `frontend._aot_compile_source_unchecked()`, and `_LLVMGen.generate()`. The
+  broad LLVM now compiles through `/opt/homebrew/opt/llvm/bin/llc` to
+  `build/aot/probes/bootstrap-real-path.o`, and the real native bootstrap smoke
+  still builds `build/aot/xcc-smoke` and compiles/links a simple C translation
+  unit without the CPython runtime.
+- Replaced the native bootstrap source-to-LLVM fast path with a direct call to
+  the real `frontend -> sema -> codegen` AOT path. The bootstrap source graph
+  now pins `_aot_compile_source_to_llvm_ir_unchecked()`,
+  `frontend._aot_compile_source_unchecked()`, `codegen.generate_llvm_ir()`, and
+  `_LLVMGen.generate()`, and the emitted native wrapper no longer hard-codes
+  `conftest.c`, `#include <...>`, or fixed smoke `main` LLVM.
+- Added an AOT source-contract regression gate that rejects `from __future__
+  import annotations` and marker-style decorators while keeping width aliases
+  as ordinary Python-visible names.
+- Advanced the Milestone 6 native bootstrap path through LLVM module
+  generation. AOT construction of `codegen._LLVMGen` now initializes the
+  runtime LLVM context, module, and builder handles through LLVM C API
+  intrinsics instead of defaulting record fields to zero. Native bootstrap
+  build now produces `build/aot/xcc`, and that generated executable can compile
+  a simple C translation unit with `build/aot/xcc -c ... -o ...` without the
+  CPython runtime.
+- Advanced the Milestone 6 broad source-to-LLVM slice beyond the previous
+  parser/sema alias blockers. The lowerer/emitter/runtime now cover `len(str)`
+  via `strlen`, tuple-backed `range(...)`, `reversed(...)`, and `pop()`, tuple
+  narrowing from union records such as `int | FunctionParams`, branch type
+  merge suppression for `continue`/`break`/`return`/`raise` paths, starred
+  tuple-backed container literals, one-argument `dict/list/set/frozenset`
+  constructors, dict subscript value typing distinct from optional `.get()`,
+  property getter attribute access, nested tuple `for` targets through a
+  temporary unpack prelude, and a temporary tuple-backed `dict.setdefault`
+  lowering. The core slice renamer now resolves package `__init__.py` imports,
+  relative module aliases, direct imported function aliases, and module-level
+  assigned helper aliases such as `_parse_directive = _text._parse_directive`
+  to qualified slice targets. LLVM text emission now joins `if` assignments
+  with real phi values and narrows tuple aliases such as `FunctionDeclarator`
+  from record unions before tuple getitem. Parser/preprocessor sources now
+  avoid several optional-local AOT traps while remaining ordinary CPython,
+  including alignment comparisons, generic default diagnostics, complex
+  function declarator capture, and preprocessor line splitting. The expanded
+  broad unchecked probe now includes parser, preprocessor, sema, codegen, and
+  type modules and compiles through `/opt/homebrew/opt/llvm/bin/llc`:
+  `build/aot/probes/broad-unchecked-expanded.ll` lowers and emits 882
+  functions, 88 records, and 62,588 LLVM lines, producing
+  `build/aot/probes/broad-unchecked-expanded.o`. This slice also adds
+  loop-carried `for` assignment phis, straight-line emission for lowered
+  `IrIf(True, ...)` blocks, typed `str(int)`/record `__str__` lowering,
+  optional-string `len(...)`, `Path.is_file()`, cross-module aliases and
+  global container annotations, and source-shape cleanups for reachable
+  comprehensions, generator expressions, optional tuple scores, and
+  branch-local temporary names.
 - Advanced the Milestone 6 source-to-LLVM AOT slice deeper into `codegen.py`.
   AOT lowering now covers signed Python integer floor division/modulo,
   shifts/bitwise ops, `try/finally` and normal-path `except CodegenError` /
@@ -26,20 +164,24 @@
   access; AOT lowering also supports tuple-of-class `isinstance` narrowing for
   common record-field access. The broader source-to-LLVM unchecked slice from
   `xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked` now lowers to AOT IR
-  successfully, currently covering 237 functions and 62 records. LLVM text
+  successfully, currently covering 239 functions and 62 records. LLVM text
   emission and runtime support now cover the newly reached `str.ljust(...)`,
-  `str.rstrip(...)`, `bytes(...)`, `int.to_bytes(...)`, and `id(...)`
-  intrinsics, with native smoke coverage for observable string/byte/id paths.
+  `str.rstrip(...)`, `str * int`, tuple concatenation/repetition,
+  `bytes(...)`, `int.to_bytes(...)`, `id(...)`, and `ord(...)` intrinsics, with
+  native smoke coverage for observable string/byte/id paths.
   The same unchecked slice now emits textual LLVM IR end-to-end, currently
-  producing 18,914 LLVM lines for those 237 functions and 62 records. The
+  producing 19,176 LLVM lines for those 239 functions and 62 records. The
   emitter/lowerer now handles Python value-semantics `and`/`or` for non-bool
   results, tuple-backed dictionary subscripts, `reversed(tuple)` element type
   preservation, tuple destructuring over homogeneous/opaque runtime tuples,
   object-to-scalar/string/tuple narrowing at use sites, non-`i64` tuple indexes,
   string ordering via `strcmp`, tuple-prefix `str.startswith(...)`, and record
-  union field-owner selection. This is textual emission progress only; native
-  execution correctness, length-aware bytes semantics, and full runtime object
-  tagging remain future bootstrap work.
+  union field-owner selection. The current broad `llc` probe reaches
+  `xcc.codegen._LLVMGen._const_from_bytes` and fails because `for byte in chunk`
+  still binds the item as a boxed pointer before an integer shift; the Milestone
+  6 implementation plan now records that blocker as the next TDD slice. This is
+  textual emission progress only; native execution correctness, length-aware
+  bytes semantics, and full runtime object tagging remain future bootstrap work.
 - Expanded Milestone 6 AOT bootstrap admission by validating ordinary
   container, private project-type, dotted type, and `Callable[[...], ...]`
   annotations structurally, plus read-only `Sequence[...]` and `Iterable[...]`
@@ -1631,3 +1773,9 @@
 - Tightened helper-module contracts with typed Protocol boundaries in
   preprocessor text processing, parser statement parsing, and file-scope sema
   declaration analysis; removed avoidable local alias imports and type ignores.
+- Native AOT bootstrap now compiles C integer literal return expressions and
+  basic binary arithmetic such as `return 6 * 3;` without looping, crashing, or
+  losing literal values. Parser operator checks avoid tuple-parameter
+  iteration, sema scalar type checks avoid tuple structural equality, typemap
+  required lookups reuse native-safe dictionary scanning, and LLVM codegen
+  parses C integer literals with an explicit digit scanner.

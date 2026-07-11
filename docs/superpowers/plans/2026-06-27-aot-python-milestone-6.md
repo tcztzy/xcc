@@ -1,5 +1,14 @@
 # AOT Python Milestone 6 Implementation Plan
 
+> **Status correction (2026-07-11):** This is a historical native C compiler
+> integration plan. It is superseded for strong self-hosting by
+> `2026-07-06-aot-python-self-hosting.md` and `specs/aot-python.md`. Completed
+> checks here prove hosted AOT emission or native C compilation only; they do
+> not prove that a native AOT compiler reads `.py`, builds Stage 2, or closes a
+> Stage 2 -> Stage 3 bootstrap loop. Preserve this document as execution
+> history, but do not use its CPython `configure && make` gate as final AOT
+> acceptance.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the existing AOT Python track into a native bootstrap path for XCC while keeping every source file valid CPython 3.11+ Python and avoiding marker syntax or decorators.
@@ -931,22 +940,45 @@ tuple-of-class `isinstance` narrowing for common record-field access, so codegen
 can keep the ordinary CPython form where ruff expects it.
 The broader source-to-LLVM unchecked slice rooted at
 `xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked` now lowers to AOT IR
-successfully, currently covering 237 functions and 62 records. LLVM text
+successfully, currently covering 239 functions and 62 records. LLVM text
 emission and runtime coverage now exists for the newly discovered
-`str.ljust`, `str.rstrip`, `bytes`, `int.to_bytes`, and `id` intrinsics, with
-native smoke coverage for observable string/byte/id paths.
+`str.ljust`, `str.rstrip`, `str * int`, tuple concatenation/repetition,
+`bytes`, `int.to_bytes`, `id`, and `ord` intrinsics, with native smoke coverage
+for observable string/byte/id paths.
 The same unchecked slice now emits textual LLVM IR end-to-end, currently
-producing 18,914 LLVM lines for those 237 functions and 62 records. The latest
+producing 19,176 LLVM lines for those 239 functions and 62 records. The latest
 lowerer/emitter work handles Python value-semantics `and`/`or` when the result
 type is not bool, tuple-backed dictionary subscripts, `reversed(tuple)` element
 type preservation, tuple destructuring over homogeneous and opaque runtime
 tuples, object-to-scalar/string/tuple narrowing at use sites, non-`i64` tuple
 indexes, string ordering through `strcmp`, tuple-prefix `str.startswith(...)`,
-and record-union field-owner selection. The remaining Step 4d work is native
-execution validation of this broader emitted code, runtime object/type tagging,
-and length-aware bytes semantics beyond the current C-string-compatible buffer
-shape; this milestone note does not claim full `llc` or native execution
-correctness for the broad source-to-LLVM slice yet.
+record-union field-owner selection, global annotation propagation into
+cross-module lowering, typed `None` arms in `__ifexp`, default non-void
+`return None`, and homogeneous tuple element unboxing in `for` and
+`enumerate(...)` loops.
+The broad source-to-LLVM unchecked slice then advanced through multiple
+textual-LLVM blockers: `len(str)` now lowers to `strlen`, tuple-backed
+`range(...)`, `reversed(...)`, and `pop()` lower through runtime helpers,
+package `__init__.py` imports are canonicalized to the actual lowered symbol,
+relative module-alias function calls and module-level assigned helper aliases
+such as `_parse_directive = _text._parse_directive` are represented in the
+slice call graph, starred tuple-backed literals lower as concatenation, dict
+subscript typing is separate from optional `.get()`, property access can lower
+through getter methods, nested tuple `for` targets lower through a temporary
+unpack prelude, `if` assignment joins emit real phi values, and tuple aliases
+such as `FunctionDeclarator` can narrow from record unions before tuple
+getitem. The expanded broad probe now includes the parser, preprocessor, sema,
+codegen, frontend, driver, options, LLVM API, and type modules needed by the
+unchecked source-to-LLVM root. The latest verified run lowers and emits
+`build/aot/probes/broad-unchecked-expanded.ll` with 882 functions, 88 records,
+and 62,588 LLVM lines, then successfully compiles it with
+`/opt/homebrew/opt/llvm/bin/llc` to
+`build/aot/probes/broad-unchecked-expanded.o`. The final fixes for this pass
+covered `Path.is_file()`, optional-string `len(...)`, `str(int)` and record
+`__str__`, cross-module aliases and global container annotations, explicit
+source rewrites for reachable comprehensions/generators, `for` loop-carried
+assignment phis, straight-line emission for lowered `IrIf(True, ...)` blocks,
+and branch-local temporary names that avoid non-dominating phi inputs.
 The generated
 `main(argc, argv)` now converts the platform C `argv` array into the AOT tuple
 ABI with
@@ -971,6 +1003,285 @@ project helper calls. The remaining gap for Step 4d is lowering the general
 project-owned frontend/backend implementation behind the unchecked frontend and
 source-to-LLVM helpers, then replacing the smoke-only native leaf
 specialization at `_aot_compile_source_to_llvm_ir()`.
+
+- [ ] **Step 4e: Fix string/bytes iteration byte typing for the broad `llc` blocker**
+
+Add this RED lowering test to `tests/test_aot_ir.py` in
+`AotScalarLoweringTests`:
+
+```python
+    def test_lowers_for_each_over_string_as_integer_byte(self) -> None:
+        module = lower_source_to_ir(
+            "def fold(data: str) -> int:\n"
+            "    raw = 0\n"
+            "    shift = 0\n"
+            "    for byte in data:\n"
+            "        raw = raw | (byte << shift)\n"
+            "        shift = shift + 8\n"
+            "    return raw\n",
+            filename="string_for_each.py",
+            entry="fold",
+        )
+
+        loop = module.functions[0].body[2]
+
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        self.assertEqual(loop.target, "byte")
+        self.assertEqual(_for_each_target_type(loop.iterable.type), IrIntType(64, signed=True))
+        self.assertIn(
+            "IrName(name='byte', type=IrIntType(bits=64, signed=True))",
+            repr(loop.body.statements[0]),
+        )
+```
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_ir.AotScalarLoweringTests.test_lowers_for_each_over_string_as_integer_byte -v
+```
+
+Expected before implementation: FAIL because the loop item is represented as
+`IrRecordType(name='object')`.
+
+Implement the minimum lowerer change in `src/xcc/aot/lower.py`:
+
+```python
+def _for_each_target_type(iterable_type: IrType) -> IrType:
+    if isinstance(iterable_type, IrStringType):
+        return IrIntType(64, signed=True)
+    if isinstance(iterable_type, IrTupleType) and len(iterable_type.elements) == 1:
+        return iterable_type.elements[0]
+    return IrRecordType("object")
+```
+
+Run the same focused test again.
+
+Expected after implementation: PASS, and the lowered shift in the loop body
+uses `IrName("byte", IrIntType(64, signed=True))`.
+
+- [ ] **Step 4f: Emit string/bytes `for` loops as byte loads**
+
+Add this RED LLVM test to `tests/test_aot_llvm.py` in `AotLlvmTextTests`:
+
+```python
+    def test_for_each_over_string_loads_integer_bytes(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "string_for_each.py",
+            (),
+            (
+                IrFunction(
+                    "fold",
+                    (IrParam("data", IrStringType()),),
+                    int64,
+                    (
+                        IrAssign("raw", IrConstInt(0, int64)),
+                        IrForEach(
+                            "byte",
+                            IrName("data", IrStringType()),
+                            IrBranch(
+                                (
+                                    IrAssign(
+                                        "raw",
+                                        IrBinary(
+                                            "|",
+                                            IrName("raw", int64),
+                                            IrBinary(
+                                                "<<",
+                                                IrName("byte", int64),
+                                                IrConstInt(0, int64),
+                                                int64,
+                                            ),
+                                            int64,
+                                        ),
+                                    ),
+                                )
+                            ),
+                        ),
+                        IrReturn(IrName("raw", int64)),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call i64 @strlen(ptr %data)", llvm_ir)
+        self.assertIn("getelementptr i8, ptr %data", llvm_ir)
+        self.assertIn("load i8, ptr", llvm_ir)
+        self.assertIn("zext i8", llvm_ir)
+        self.assertIn("shl i64", llvm_ir)
+        self.assertNotIn("@__xcc_aot_tuple_get(ptr %data", llvm_ir)
+```
+
+Run:
+
+```bash
+uv run python -m unittest tests.test_aot_llvm.AotLlvmTextTests.test_for_each_over_string_loads_integer_bytes -v
+```
+
+Expected before implementation: FAIL because `_emit_for_each()` emits
+`__xcc_aot_tuple_get(ptr %data, ...)` and leaves the item as a pointer.
+
+Implement the minimum emitter change in `src/xcc/aot/llvm_text.py` by keeping
+the existing `_emit_for_each()` loop/phi structure and branching only at the
+length and item-load sites. Replace the existing tuple-only length emission:
+
+```python
+        length = self._tmp("len")
+        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+```
+
+with:
+
+```python
+        string_iterable = isinstance(iterable.type, IrStringType) and enumerate_call is None
+        length = self._tmp("len")
+        if string_iterable:
+            lines.append(f"  {length} = call i64 @strlen(ptr {iterable.value})")
+        else:
+            lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+```
+
+Then replace the existing item load and target binding block that begins with:
+
+```python
+        item = self._tmp("item")
+        lines.append(f"  {item} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})")
+```
+
+with this explicit string branch followed by the existing tuple/enumerate
+logic in the `else` arm:
+
+```python
+        if string_iterable:
+            slots = _for_each_target_slots(statement.target)
+            if len(slots) != 1 or slots[0] is None:
+                self._error("string for-each expects one named target")
+            pointer = self._tmp("stritemptr")
+            byte = self._tmp("strbyte")
+            wide = self._tmp("strbyte64")
+            lines.append(f"  {pointer} = getelementptr i8, ptr {iterable.value}, i64 {index}")
+            lines.append(f"  {byte} = load i8, ptr {pointer}")
+            lines.append(f"  {wide} = zext i8 {byte} to i64")
+            names[slots[0]] = _EmittedValue(wide, IrIntType(64, signed=True))
+        else:
+            item = self._tmp("item")
+            lines.append(
+                f"  {item} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})"
+            )
+            if enumerate_call is not None:
+                self._bind_enumerate_targets(statement, index, item, names, lines)
+            else:
+                item_type: IrType = IrRecordType("object")
+                if isinstance(iterable.type, IrTupleType) and len(iterable.type.elements) == 1:
+                    item_type = iterable.type.elements[0]
+                slots = _for_each_target_slots(statement.target)
+                if len(slots) > 1:
+                    if isinstance(item_type, IrTupleType) and len(item_type.elements) == len(slots):
+                        target_types = item_type.elements
+                    elif (isinstance(item_type, IrTupleType) and not item_type.elements) or (
+                        isinstance(item_type, IrRecordType) and item_type.name == "object"
+                    ):
+                        target_types = (IrRecordType("object"),) * len(slots)
+                    else:
+                        self._error("tuple for-each target expects tuple item type")
+                    for slot_index, (target, target_type) in enumerate(
+                        zip(slots, target_types, strict=True)
+                    ):
+                        if target is None:
+                            continue
+                        names[target] = self._emit_runtime_tuple_get(
+                            item,
+                            slot_index,
+                            target_type,
+                            lines,
+                        )
+                else:
+                    for target in _for_each_targets(statement.target):
+                        names[target] = self._emit_runtime_boxed_value(item, item_type, lines)
+```
+
+Add this guard if the string branch is factored into a helper instead:
+
+```python
+        if len(slots) != 1 or slots[0] is None:
+            self._error("string for-each expects one named target")
+```
+
+The observable requirements are: string iteration emits `strlen`,
+`getelementptr`, `load i8`, `zext i8 to i64`, binds exactly one target as
+`int64`, and does not call the tuple runtime for the string value.
+
+Run the focused LLVM test again.
+
+Expected after implementation: PASS.
+
+- [x] **Step 4g: Re-run the broad unchecked `llc` probe**
+
+Run:
+
+```bash
+set -e
+uv run python - <<'PY'
+from pathlib import Path
+from xcc.aot.slice import lower_core_slice
+from xcc.aot.llvm_text import emit_llvm_text
+root = Path.cwd()
+paths = tuple(root / p for p in (
+    "src/xcc/ast.py",
+    "src/xcc/cc_driver.py",
+    "src/xcc/codegen.py",
+    "src/xcc/frontend.py",
+    "src/xcc/lexer.py",
+    "src/xcc/llvm_api.py",
+    "src/xcc/options.py",
+    "src/xcc/parser/__init__.py",
+    "src/xcc/parser/type_specs.py",
+    "src/xcc/preprocessor/__init__.py",
+    "src/xcc/sema/__init__.py",
+    "src/xcc/sema/constants.py",
+    "src/xcc/sema/symbols.py",
+    "src/xcc/sema/type_helpers.py",
+    "src/xcc/types.py",
+))
+module = lower_core_slice(
+    paths,
+    root_targets=("xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked",),
+)
+llvm_ir = emit_llvm_text(module)
+out = root / "build/aot/probes/broad-unchecked.ll"
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_text(llvm_ir, encoding="utf-8")
+print(out)
+print("functions", len(module.functions))
+print("records", len(module.records))
+print("llvm lines", len(llvm_ir.splitlines()))
+PY
+/opt/homebrew/opt/llvm/bin/llc \
+    -filetype=obj \
+    -o build/aot/probes/broad-unchecked.o \
+    build/aot/probes/broad-unchecked.ll
+```
+
+Expected after Step 4f: the probe no longer fails with
+`'%item...' defined with type 'ptr' but expected 'i64'` inside
+`xcc.codegen._LLVMGen._const_from_bytes`. If `llc` reports a new independent
+IR error, record that exact error below Step 4d before adding the next fix.
+
+- [x] **Step 4h: Record the verified broad-slice status**
+
+Update `CHANGELOG.md` after Step 4g with the exact result. If `llc` succeeds,
+state the printed function count, record count, LLVM line count, and object
+path. If `llc` reports a new independent blocker, state the printed counts and
+copy the first `llc` error line exactly. Do not record a generic "next blocker"
+sentence without the concrete `llc` diagnostic.
+
+Verified result: `build/aot/probes/broad-unchecked-expanded.ll` emitted 882
+functions, 88 records, and 62,588 LLVM lines; `/opt/homebrew/opt/llvm/bin/llc`
+compiled it successfully to
+`build/aot/probes/broad-unchecked-expanded.o`.
 
 - [ ] **Step 5: Run the CPython build target smoke with native `xcc`**
 

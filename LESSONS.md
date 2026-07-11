@@ -1,5 +1,123 @@
 # Lessons
 
+- A native artifact and an all-source hosted admission pass do not prove strong
+  self-hosting. The acceptance gate must show a native compiler actually reads
+  `.py`, runs its own parser/binder/lowerer/emitter, builds the next native
+  stage without Python, and repeats to a stable Stage 3.
+- When the documented Python subset includes a construct, rewriting compiler
+  core source to avoid that construct hides lowerer/runtime debt. Fix the
+  AOT-owned semantics first; allow a core rewrite only after an explicit subset
+  exclusion and CPython/native behavioral oracles.
+- Tuple-backed dictionaries in native AOT are sequences of key/value pairs.
+  Python `name in dict` can lower as tuple-element membership and compare the
+  key against the whole pair, so use `.get()` only when zero is not a meaningful
+  value; otherwise scan `for key, value in dict.items()` explicitly.
+- Protocol casts can be runtime no-ops but still important AOT type evidence.
+  If native code accesses fields through a Protocol-typed parameter, cast to
+  the concrete implementation before field access so record layout offsets come
+  from the concrete type, not the Protocol stub.
+- Avoid `value = ...; break` when the value is consumed after the loop in
+  bootstrap-native code. The AOT loop phi can keep the pre-break value; express
+  scans as a loop condition (`while qpos < 0 and index < len(raw)`) or return
+  directly from the found branch.
+- Native AOT currently represents `bytes` as C strings in several lowering
+  paths, so `len(bytes_with_trailing_nul)` can become `strlen(...)` and exclude
+  the final NUL. When creating LLVM string constants, pass the non-NUL payload
+  length to `ConstString(..., DontNull=False)` and size the global as
+  `payload_len + 1`.
+- A source-shape fix can be present in native LLVM and still leave a deeper
+  backend crash. The pointer/null compare path now has a `ConstNull` branch,
+  but `int *x; return x == 0;` still crashes in the native compiler; keep such
+  cases as explicit follow-up probes instead of assuming a source-shape
+  regression proves runtime success.
+- Native AOT constructor lowering currently cannot be trusted to pass
+  positional arguments into bootstrap objects. When a field such as
+  `Scope._parent` is semantically required, use an explicit helper like
+  `Scope.child()` that allocates the object and assigns the field directly.
+- Avoid `while True` loops that append semantic state and then immediately
+  `break` when native code consumes the appended values after the loop. Use an
+  explicit `more_*` loop condition so the loop exit does not also carry the
+  last semantic mutation.
+- Parser operator recognition in bootstrap-hot paths should use direct
+  `_check_punct()` predicates rather than scanning an operator tuple into a
+  flag that is read after `break`. This keeps unary forms such as `!f` visible
+  to native AOT without adding syntax.
+- Protocol-typed helper calls lower to Protocol stubs unless the AOT slice
+  rewrites them to the concrete receiver type. For bootstrap helpers such as
+  `_FileScopeAnalyzer`, map every reachable protocol method to
+  `Analyzer.<method>` or side-effecting sema calls can silently become no-ops.
+- Avoid assigning loop-carried state immediately before `break` when native AOT
+  observes that state after the loop. Prefer an early return or a loop
+  condition that carries the value explicitly; otherwise helpers like
+  `_is_invalid_void_object_type()` can lose a detected pointer op on the break
+  edge.
+- Tuple-valued dictionary keys are risky in bootstrap-native lookup paths
+  until native dict equality is fully CPython-compatible. For record tag keys,
+  concatenate the stable string parts into one key instead of storing
+  `(kind, tag)` tuples.
+- AOT tuple-backed dictionaries do not make `name in dict` equivalent to
+  CPython dictionary-key membership. In bootstrap hot paths, use `.get(name)`
+  for non-null object values or explicitly scan key/value pairs when zero is a
+  meaningful value.
+- Avoid loop-carried "closed flag plus break" state in AOT hot paths. A direct
+  loop condition plus post-loop EOF/error check lowers more reliably than a
+  mutable flag whose value is assigned before `break`.
+- Native no-callback preprocessor include parsing must strip closed block
+  comments around header operands. `#include "x.h" /* self */` should parse as
+  the same guarded include target as `#include "x.h"`.
+- Do not rely on dataclass `__post_init__` to normalize legacy fields in native
+  AOT objects. If code can see both `pointer_depth` and `declarator_ops`, add
+  an explicit helper such as `type_spec_declarator_ops()` or
+  `type_declarator_ops()` and use it at semantic/codegen boundaries.
+- Avoid tuple multiplication/repetition for declarator operator construction in
+  bootstrap-reachable parser code. Build pointer-op tuples with an explicit
+  loop so native AOT does not depend on `@__xcc_aot_tuple_repeat` for type
+  correctness.
+- Raw C pointer arrays returned by LLVM helper leaves must not be mutated via
+  Python subscript assignment in native AOT. Collect values in a Python list or
+  tuple-backed sequence and call `ptr_array(values)` once, or add a dedicated
+  raw-array setter.
+- Do not rely on `reversed(tuple_ops)` for bootstrap-critical declarator
+  lowering. Native AOT can skip tuple-backed reversed iteration, leaving LLVM
+  type construction to fall back to scalar base types; use an explicit reverse
+  index loop when pointer/array/function ops determine correctness.
+- Native AOT object construction currently allocates record fields directly and
+  does not run ordinary `__init__` side effects. Bootstrap objects whose
+  constructors populate dictionaries or external handles, such as
+  `_Preprocessor._macros`, need either a native-specific initialization wrapper
+  or general constructor lowering before downstream code can rely on those
+  fields.
+- Bootstrap-reachable code should avoid negative string indexes until AOT
+  lowering has a dedicated string-index normalization path. In native bootstrap
+  LLVM, `operand[-1]` became a raw pointer `-1` access and broke system-header
+  `#include <...>` parsing; use `operand[len(operand) - 1]` in strict-subset
+  code when the tail character is needed.
+- AOT record construction must account for classes whose `__init__` performs
+  runtime side effects. Direct field-by-field allocation is fine for plain
+  records, but bootstrap objects such as `_LLVMGen` need constructor lowering
+  that recreates handle initialization; otherwise fields like LLVM module
+  pointers silently default to zero and fail much later at a native boundary.
+- Entry-driven AOT slice call graphs must canonicalize package `__init__.py`
+  imports before dependency discovery. A call imported as
+  `from xcc.parser import parse` needs to target `xcc.parser.__init__.parse`
+  when the source file is `parser/__init__.py`; otherwise the caller emits an
+  unresolved package-level symbol and the real callee is never lowered.
+- Entry-driven AOT slice call graphs must also canonicalize module-level
+  function alias assignments, not only import statements. A helper binding such
+  as `_parse_directive = _text._parse_directive` needs the same qualified
+  target and signature as a direct `_text._parse_directive(...)` call, or the
+  lowered caller will retain an unbound local helper name.
+- For bootstrap-reachable CPython source, avoid carrying structured optional
+  temporaries as `tuple[...] | None` or `Token | None` when a bool plus
+  non-optional fields expresses the same state. The current AOT emitter can
+  narrow pointer-shaped values at use sites, but `None`-initialized record or
+  tuple fields can otherwise leak through casts and break field access or
+  tuple getitem emission.
+- AOT type narrowing from an `if` branch should only merge back into the
+  following path when that branch can fall through. Branches ending in
+  `continue`, `break`, `return`, or `raise` must not leak narrowed names such
+  as `value: int` into later sibling branches that may need to narrow the same
+  variable to a tuple-backed union arm.
 - Bootstrap AOT helpers should not compare against module-level string
   constants until the lowerer supports those constants as runtime values. In
   the current lowering path, an uppercase global such as `_AOT_SMOKE_SOURCE`
@@ -1197,3 +1315,19 @@
   its parameter and then read the caller's original record. That distinguishes
   true by-value argument slot copies from accidentally aliasing caller storage
   through the indirect dispatch path.
+- In AOT LLVM text emission, branch-local Python temporaries are still SSA
+  names. Do not propagate a name assigned only in one `if` arm unless the other
+  arm has a dominating previous value, and prefer unique source temporary names
+  for unrelated `elif` branches so the emitter does not build useless phi nodes
+  with non-dominating incoming values.
+- If `ty` calls a `cast(...)` redundant but AOT lowering relied on it for union
+  narrowing, fix the lowerer's guard narrowing instead of preserving a
+  checker-only cast. Broad `llc` probes catch these gaps because CPython and
+  static type checkers can both pass while the AOT IR still carries a union
+  record into string or integer operations.
+- In bootstrap-critical native paths, avoid tuple structural equality,
+  tuple-parameter iteration, direct dict indexing by computed integer object
+  ids, and `int(str, base)` unless those forms have focused native coverage.
+  CPython can make all of them look harmless while the current AOT runtime may
+  lower them to pointer equality, list-style tuple indexing, or incomplete
+  string runtime behavior.
