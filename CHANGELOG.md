@@ -2,6 +2,30 @@
 
 ## Current
 
+- Completed the approved strong-bootstrap Milestone 2 contract: binder and
+  lowerer public APIs now consume an immutable project-owned AST, with CPython
+  `ast.parse` confined to an explicit Stage 0 adapter. The adapter covers all
+  77 owned-node kinds used by active `src/xcc` source with no unsupported
+  nodes. This does not implement the project-owned lexer/parser or claim
+  Stage 1.
+- Added a deterministic source contract that binds parser identity to its
+  backend, retains the exact source/AST snapshot it hashes, resolves nested
+  imports plus parent packages, records allowed stdlib dependencies, rejects
+  unknown/hosted-only dependencies in subset mode, and emits a canonical
+  version-1 source/cache manifest. Common rendering is structural and
+  CPython-text independent; spans use 0-based UTF-8 byte columns.
+- Added hosted/native `xcc-aot build` command contracts, explicit LLVM,
+  normalized-IR, manifest, cache, `llc`, assembler, and linker-command options,
+  and a real linked native CLI shell. The shell rejects CPython parsing and
+  reports subset build dispatch as unavailable until Milestone 5; it is not a
+  native AOT compiler. LLVM normalization now changes metadata only and cannot
+  mask path-shaped program constants.
+- Verified Milestone 2 with 505 fast AOT tests passing, plus the complete
+  84-test bootstrap module. The latter retained exactly the frozen
+  B268/V367/V380 valid-union failure and V368 expected failure, with no new
+  failure/error. Lint and type gates pass. The secondary native C slice is kept
+  separate from `xcc.aot` modules so their same-named AST records cannot pollute
+  its legacy flat class table; this remains an integration gate, not Stage 1.
 - Completed the approved Milestone 1 Stage 0 freeze. The final six-module AOT
   gate ran 508 tests in 505.034s with only the recorded B268/V367/V380 valid
   union status-2 failure and the V368 expected failure; B271 and B272 no longer

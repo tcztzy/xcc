@@ -252,6 +252,63 @@ test ABI assertions. `uv run tox -e lint` and `uv run tox -e type` both passed.
 The Stage 0 freeze tag is `aot-stage0-m1-20260711`; it is a Milestone 1 baseline,
 not evidence of Stage 1 or strong self-hosting.
 
+## Milestone 2 Contract Result
+
+Milestone 2 replaces the direct CPython-AST common path with an immutable,
+project-owned AST. `ast.parse` now appears in production AOT code only in
+`cpython_ast_adapter.py`, which is one of three explicit Stage 0-only modules.
+`AotModule`, type-default metadata, subset validation, binder, lowerer, slice,
+and native oracle helpers all consume owned nodes. The adapter converted every
+active `src/xcc` module with zero `UnsupportedNode` values across the 77-node
+active inventory. Owned child sequences are tuples; spans and child edges are
+constructor inputs; structural rendering does not depend on CPython-generated
+text. Span tests freeze 1-based lines, 0-based UTF-8 byte columns, and
+end-exclusive positions.
+
+The source contract now binds parser kind to its callback, reads and hashes
+each UTF-8 source once, retains that exact source and owned AST for downstream
+analysis, includes nested static imports and parent package initializers,
+records allowed stdlib roots, rejects unknown external roots, and emits a
+canonical version-1 manifest in dependency/SCC order. A subset backend rejects
+`xcc.aot.__main__`, `xcc.aot.hosted_cli`, and
+`xcc.aot.cpython_ast_adapter`. Milestone 2 performs no persistent cache reads
+or writes; the manifest separately records an explicit `--no-cache` request.
+
+The hosted and native command surfaces accept the same required build options,
+tool paths, and duplicate/unknown-option rules. Native mode rejects both joined
+and separated CPython parser selection even when `--help` is also present. The
+Stage 0 acceptance command built `build/aot/contract/hosted-xcc-aot`; the
+resulting executable reports `xcc-aot 0.2 native-contract`, rejects
+`--parser=cpython`, and links without libpython. The emitted Python entry is
+namespaced to avoid collision with the C process `main`. LLVM normalization is
+limited to declared metadata lines and cannot rewrite path-shaped program
+constants.
+
+This artifact is deliberately only the native CLI contract shell. Its native
+`build --parser=subset` path reports that the pipeline is unavailable before
+Milestone 5. It does not contain the project parser, does not prove compiler
+layer reachability, and is not Stage 1. The project-owned lexer/parser remains
+Milestone 3; status/error ABI and runtime semantics remain Milestone 4; native
+source loading, hash/manifest operations, compiler call-graph closure, and tool
+spawning remain Milestone 5/6. No CPython `configure && make` work was run, and
+no non-`src/xcc/aot` compiler-core source was modified for Milestone 2.
+
+The final fast Milestone 2 AOT gate ran 505 tests in 22.773 seconds with no
+failures. `uv run tox -e lint` and `uv run tox -e type` passed. The complete
+bootstrap module then ran 84 tests in 1306.630 seconds with exactly the frozen
+B268/V367/V380 valid-union status-2 failure and the V368 expected failure; it
+had no new failure or error. During that gate, B284 exposed that the secondary
+native C slice's flat short-name class table mixed the new owned
+`py_ast.FunctionDef` with the C compiler's `ast.FunctionDef`. All-source
+admission still covers every native candidate, while the secondary C compiler
+slice now excludes `xcc.aot` implementation modules it cannot reach. This is a
+boundary fix, not evidence for AOT compiler reachability.
+
+The Milestone 2 implementation is split into `7c2ea83` (owned AST and common
+frontend migration) and `fb792da` (source, CLI, tool, and bootstrap boundary
+contracts). The following status/spec commit records the acceptance evidence;
+none of these commits includes the unrelated OSS application document.
+
 ## Priority Correction
 
 P0 is now strong-bootstrap infrastructure: project-owned AST/parser, explicit

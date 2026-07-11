@@ -47,13 +47,16 @@ required runtime input.
 - planned cmd: `build/aot/stage2/xcc-aot build --parser=subset --no-cache
   --source-root src/xcc --entry xcc.aot.cli:main --output
   build/aot/stage3/xcc-aot`.
-- planned file: `src/xcc/aot/py_ast.py` -> project-owned subset AST.
+- file: `src/xcc/aot/py_ast.py` -> immutable project-owned subset AST.
 - planned file: `src/xcc/aot/py_lexer.py` -> project-owned subset lexer.
 - planned file: `src/xcc/aot/py_parser.py` -> project-owned subset parser.
-- planned file: `src/xcc/aot/cpython_ast_adapter.py` -> Stage 0-only CPython AST
+- file: `src/xcc/aot/cpython_ast_adapter.py` -> Stage 0-only CPython AST
   adapter to the project-owned AST.
-- planned file: `src/xcc/aot/cli.py` and `src/xcc/aot/__main__.py` -> identical
-  hosted/native build CLI contract.
+- file: `src/xcc/aot/source_contract.py` -> source snapshot, dependency order,
+  parser/cache policy, and canonical manifest contract.
+- file: `src/xcc/aot/cli.py` -> subset-compatible native CLI root;
+  `src/xcc/aot/hosted_cli.py` and `src/xcc/aot/__main__.py` -> Stage 0 process
+  adapter exposing the same build options.
 - file: `src/xcc/aot/binder.py` -> type and symbol binding over project-owned AST.
 - file: `src/xcc/aot/ir.py` -> target-independent AOT IR.
 - file: `src/xcc/aot/lower.py` -> typed AST to AOT IR.
@@ -92,7 +95,7 @@ V384: Bootstrap outputs ! deterministic module ordering, source manifest, normal
 ## §T TASKS
 id|status|task|cites
 T1|x|freeze current hosted Stage 0 and split the large worktree into bisectable logical commits|V379,V382,V384
-T2|.|define strong-bootstrap source contract, project-owned AST, and hosted/native AOT CLI|V369,V374,I.cmd
+T2|x|define strong-bootstrap source contract, project-owned AST, and hosted/native AOT CLI|V369,V374,I.cmd
 T3|.|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
 T4|.|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
 T5|.|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
@@ -108,3 +111,15 @@ B269|2026-07-11|native AOT used object identity where supported `Path` value equ
 B270|2026-07-11|bootstrap acceptance was rooted at the native C driver and all-source hosted admission while `xcc.aot` was absent from native reachability and depended on `ast.parse`|V369,V370,V376,V381,V383
 B271|2026-07-11|the malformed source-to-LLVM leaf regression asserted the obsolete two-argument ABI after the helper gained include, define, undefine, and language inputs|V384
 B272|2026-07-11|four direct codegen helper tests retained the old `_compare` call shape after null-pointer-constant evidence became explicit ABI inputs|V384
+B273|2026-07-11|all-source admission treated the reflective CPython AST adapter as a native candidate because Stage 0-only modules had no explicit production boundary|V370,V383
+B274|2026-07-11|the initial CLI artifact test assumed emitted LLVM began with a `ModuleID` comment instead of checking the stable entry symbols|V384
+B275|2026-07-11|the AOT CLI used ordinary one-argument `print`, but statement lowering did not connect that supported source form to the existing `IrPrint` emitter/runtime path|V374,V376
+B276|2026-07-11|the hosted CLI emitted the Python entry function as `main`, colliding with the generated C process wrapper symbol|V376,V384
+B277|2026-07-11|source resolution discarded its decoded source/owned AST, so the CLI reread and reparsed an entry after hashing it and could compile a different snapshot than the manifest|V372,V384
+B278|2026-07-11|owned AST metadata required hosted `object.__setattr__`, frozen nodes contained mutable lists, and common rendering fell back to CPython-generated text|V370,V384
+B279|2026-07-11|the CPython-free string-annotation recognizer drifted from the accepted grammar by accepting numeric `Literal`, rejecting grouped union/empty tuple forms, and mishandling escaped quotes|V374,V379
+B280|2026-07-11|the native CLI entry briefly called an omitted helper and then compared an inferred i64 loop index with `argc:int32`, producing unresolved or invalid LLVM in the real build|V376,V384
+B281|2026-07-11|LLVM normalization replaced the source-root text globally and could alter semantic string constants rather than metadata only|V377,V384
+B282|2026-07-11|source closure scanned only top-level imports, omitted parent package initializers, silently ignored unknown externals, and allowed a subset manifest to include hosted-only modules|V370,V372,V384
+B283|2026-07-11|native-candidate admission rejected the owned AST's ordinary `dataclass(frozen=True, kw_only=True)` declaration because the decorator subset allowed only `frozen`|V370,V374
+B284|2026-07-11|the secondary native C bootstrap preloaded every module into a flat short-name class table, so `xcc.aot.py_ast.FunctionDef` displaced `xcc.ast.FunctionDef` and lost `is_variadic`|V376,V381,V383

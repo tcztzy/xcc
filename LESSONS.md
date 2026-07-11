@@ -1,5 +1,21 @@
 # Lessons
 
+- A source manifest must describe the exact bytes and owned AST passed to the
+  compiler. Hashing one read and then rereading/reparsing the entry leaves a
+  race in which the manifest and artifact can describe different snapshots.
+- Project-owned AST structure cannot depend on adapter-only mutation or
+  CPython `ast.unparse` text. Make spans and child edges ordinary constructor
+  inputs, keep child sequences immutable, and render every semantic key or
+  deterministic diagnostic structurally.
+- A mocked tool-runner assertion does not prove a native CLI links. Lower and
+  emit the real entry in a focused test, then run the planned `llc`/link command;
+  this exposed both an omitted helper definition and an i64/int32 loop compare.
+- Deterministic IR normalization must be syntax-aware enough to distinguish
+  metadata from program constants. Replacing an absolute root across the whole
+  LLVM file can hide a real Stage 2/3 semantic difference.
+- Freeze source columns before writing the project lexer: CPython AST columns
+  are 0-based UTF-8 byte offsets with end-exclusive ends, while
+  `SyntaxError.offset` is a 1-based character offset and needs normalization.
 - A native artifact and an all-source hosted admission pass do not prove strong
   self-hosting. The acceptance gate must show a native compiler actually reads
   `.py`, runs its own parser/binder/lowerer/emitter, builds the next native

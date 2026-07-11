@@ -108,6 +108,101 @@ Rejected features include dynamic import hooks, `eval`, `exec`, arbitrary
 reflection, monkeypatching, metaclasses, escaping generators, async/coroutines,
 and runtime class-layout mutation.
 
+### Milestone 2 Frozen Syntax and AST Surface
+
+The Stage 0 adapter has a fixed CPython 3.11 grammar oracle
+(`feature_version=(3, 11)`). The active `src/xcc` source inventory currently
+uses these 77 owned-node kinds:
+
+```text
+Add And AnnAssign Assert Assign Attribute AugAssign BinOp BitAnd BitOr BitXor
+BoolOp Break Call ClassDef Compare Constant Continue Dict DictComp Div Eq
+ExceptHandler Expr FloorDiv For FormattedValue FunctionDef GeneratorExp Gt GtE
+If IfExp Import ImportFrom In Invert Is IsNot JoinedStr LShift List ListComp
+Load Lt LtE Mod Module Mult Name Not NotEq NotIn Or Pass RShift Raise Return Set
+SetComp Slice Starred Store Sub Subscript Try Tuple USub UnaryOp While With
+alias arg arguments comprehension keyword withitem
+```
+
+This inventory is a parser-implementation target, not native reachability
+evidence. The accepted grammar is the source-contract constructs above plus
+ordinary comprehensions, f-strings, and statically known `with` forms used by
+the active compiler source. Async nodes, `await`/`yield`, lambda, match,
+`global`/`nonlocal`, delete, and unknown adapter nodes are rejected. Allowed
+decorators are the ordinary Python decorators `dataclass`, `staticmethod`,
+`classmethod`, `property`, and `cache`; `dataclass` may use literal-`True`
+`frozen` and `kw_only` keywords only.
+
+Supported annotation grammar is names and dotted project types, `|` unions,
+grouping parentheses, width aliases, `Iterable[T]`, `Sequence[T]`,
+`list[T]`, `set[T]`, `frozenset[T]`, `dict[K, V]`, fixed/variadic/empty
+`tuple[...]`, `Callable[[...], R]`, and string-valued `Literal[...]`.
+Numeric/bool `Literal` is rejected because its native type semantics is not the
+string layout. String forward references use this same grammar without calling
+CPython's parser.
+
+Owned AST nodes have immutable tuple child fields. `span`, `text`, and
+`children` are constructor inputs, so the project parser can create complete
+nodes without mutation or CPython APIs. `children` must contain the same owned
+nodes as the typed fields in field order. `text` is nonsemantic source/oracle
+metadata: binder, lowerer, keys, and diagnostics use the structural renderer
+and must behave identically when `text` is empty. `Constant.value` is limited by
+the parser contract to `None`, bool, int, float, complex, str, bytes, or
+ellipsis; `UnsupportedNode` and its opaque payload are adapter diagnostics and
+are rejected before the native common path.
+
+Source spans use 1-based lines, 0-based UTF-8 byte columns, and end-exclusive
+end positions, matching CPython AST rather than Unicode code-point columns.
+Hosted `SyntaxError.offset` is normalized to that same convention.
+
+### Milestone 2 Module, Manifest, and Cache Contract
+
+`--source-root` names one package directory and `--entry` must name a module
+inside it. Resolution reads strict UTF-8 bytes once, hashes those exact bytes,
+and retains the decoded source and owned AST used downstream. It recursively
+collects static imports anywhere in the owned tree, includes every parent
+package `__init__.py`, rejects unknown external import roots, records allowed
+stdlib roots separately, and orders project modules dependency-first. Strongly
+connected components and members within a component use lexical order.
+
+The canonical JSON manifest is version 1. Each unit records module identity,
+root-relative and canonical paths, raw-byte SHA-256, project dependencies,
+allowed external dependency roots, and deterministic order. It also records
+the parser backend and cache policy. Parser kind and callback travel as one
+`ParserBackend`; a caller cannot independently label a CPython callback as the
+subset backend. The subset backend rejects `xcc.aot.__main__`,
+`xcc.aot.hosted_cli`, and `xcc.aot.cpython_ast_adapter` as explicit Stage 0-only
+modules.
+
+Milestone 2 has no persistent AST/IR cache: reads and writes are both disabled.
+The manifest records whether `--no-cache` was explicitly requested. A later
+cache implementation may add an enabled policy, but `--no-cache` must always
+force zero cache reads and writes and preserve source-file opens.
+
+Normalized LLVM removes the declared source root only from nonsemantic LLVM
+metadata (`ModuleID`, `source_filename`, and `DIFile`) and trims trailing line
+space. It must not rewrite global constants, function bodies, symbols, or other
+program data containing the same path text.
+
+### Native Operation Inventory and Ownership
+
+| Layer | Required operations | Milestone 2 state | Native closure |
+|---|---|---|---|
+| CLI contract | argv tuple indexing, string split/prefix/membership, option state, deterministic status/diagnostic | Native contract shell lowers and links; hosted and native validate required/duplicate/unknown options; native rejects CPython parser | Full build dispatch remains M5 |
+| source loader | canonical path checks, strict byte reads/UTF-8 decode, parent/import closure, SCC order | Contract and hosted implementation complete | Native path/read intrinsics remain M5 |
+| manifest | raw SHA-256 and canonical JSON | Hosted implementation complete and bound to the same source snapshot | Owned hash/JSON writer or native shims remain M5 |
+| frontend | indentation/token/literal scanning and owned-node construction | Owned immutable AST and CPython adapter complete | Lexer/parser remain M3 |
+| common compiler | walk/structural render, subset validation, binding, typed lowering, IR text emission | Public binder/lowerer APIs consume only owned AST | Emitted call-graph closure remains M5 |
+| runtime/error | strings/bytes/path, tuples/lists/maps/sets, allocation, status/error propagation | Existing assets only; known semantic gaps remain | Status ABI/runtime work remains M4 |
+| tools | write LLVM/assembly/object, invoke configured `llc`, optional assembler, and linker command, check status | Hosted runner accepts explicit paths | Native spawn/file boundary and audit remain M5/M6 |
+
+`pathlib`, `hashlib`, `json`, and `subprocess` imports in the hosted
+implementation are therefore not evidence that equivalent native operations
+already exist. All-source admission checks syntax and types only. A configured
+linker command may be a system compiler driver such as `cc`; the audit treats
+that single configured command as the linker boundary and still rejects any
+Python executable.
+
 For an accepted construct, changing ordinary XCC core source to avoid a
 lowerer/runtime bug is not a valid implementation. The binder, lowerer, or
 runtime must be fixed. A core source rewrite is allowed only when the construct

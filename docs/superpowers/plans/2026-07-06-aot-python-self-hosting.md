@@ -134,6 +134,10 @@ documented test matrix.
 
 ## Milestone 2: Freeze the Source Contract, Owned AST, and AOT CLI
 
+**Status:** completed 2026-07-11. This completes the contract and Stage 0
+adapter/native CLI shell only; lexer/parser, native compiler reachability, and
+Stage 1 remain later milestones.
+
 **Goal:** Define one source contract and one compiler CLI shared by hosted and
 native execution.
 
@@ -505,7 +509,7 @@ native C smoke, and CPython build gates all pass.
 
 - [ ] Worktree split into bisectable logical commits.
 - [ ] Every non-AOT AOT-driven hunk has ledger and two-sided oracle evidence.
-- [ ] Project-owned AST exists and binder/lowerer no longer require CPython AST.
+- [x] Project-owned AST exists and binder/lowerer no longer require CPython AST.
 - [ ] Project-owned subset lexer/parser matches the Stage 0 oracle.
 - [ ] Explicit status/result/error ABI implements supported handlers.
 - [ ] Native AOT CLI and all compiler layers are reachable.
