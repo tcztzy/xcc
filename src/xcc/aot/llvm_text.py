@@ -44,6 +44,7 @@ from xcc.aot.ir import (
     IrType,
     IrWhile,
 )
+from xcc.aot.status import analyze_fallibility
 
 _BUILTIN_VALUE_NAMES = {"bool", "int", "object", "str", "tuple"}
 _TYPE_CONSTANTS = {
@@ -199,6 +200,8 @@ _LLVM_C_API_INTRINSICS = {
 _PROTOCOL_RECORD_ALIASES = {
     "_StatementParser": "Parser",
 }
+_ERROR_LLVM_TYPE = "%__xcc_aot_error"
+_ERROR_LLVM_DECLARATION = "%__xcc_aot_error = type { ptr, ptr, ptr, i32, i32, i32, i32, ptr }"
 
 
 @dataclass(frozen=True)
@@ -225,6 +228,7 @@ class _Emitter:
         self.records = {record.name: record for record in module.records}
         self.record_type_ids = {name: index + 1 for index, name in enumerate(sorted(self.records))}
         self.functions = {function.name: function for function in module.functions}
+        self.fallible_functions = analyze_fallibility(module)
         self.index = 0
         self.string_index = 0
         self.string_constants: list[str] = []
@@ -234,12 +238,19 @@ class _Emitter:
         self.extra_declarations: set[str] = set()
         self.needs_puts = False
         self.needs_runtime_prelude = False
+        self.current_function: IrFunction | None = None
+        self.current_function_is_fallible = False
+        self.current_result_out: str | None = None
+        self.current_error_out: str | None = None
 
     def emit(self) -> str:
         declarations = [self._emit_record(record) for record in self.module.records]
         functions = [self._emit_function(function) for function in self.module.functions]
         main = self._emit_main()
         lines: list[str] = []
+        if self.fallible_functions:
+            lines.append(_ERROR_LLVM_DECLARATION)
+            lines.append("")
         if self.needs_runtime_prelude:
             lines.append(runtime_prelude())
             lines.append("")
@@ -268,6 +279,8 @@ class _Emitter:
         return f"%{record.name} = type {{ {fields} }}"
 
     def _emit_function(self, function: IrFunction) -> str:
+        if function.name in self.fallible_functions:
+            return self._emit_generic_function(function, fallible=True)
         if function.name == "xcc.cc_driver._aot_compile_source_to_llvm_ir":
             return self._emit_aot_compile_source_to_llvm_ir_function(function)
         if function.name == "xcc.cc_driver._aot_exec_argv":
@@ -327,22 +340,46 @@ class _Emitter:
             )
         if function.name == "xcc.types.Type.__str__":
             return self._emit_core_type_str_function(function)
+        return self._emit_generic_function(function, fallible=False)
+
+    def _emit_generic_function(self, function: IrFunction, *, fallible: bool) -> str:
         self.index = 0
         params = ", ".join(
             f"{self._param_llvm_type(param.type)} %{param.name}" for param in function.params
         )
-        lines = [
-            f"define {self._llvm_type(function.return_type)} "
-            f"{_llvm_symbol(function.name)}({params}) {{"
-        ]
+        result_out = None if isinstance(function.return_type, IrNoneType) else "%result_out"
+        if fallible:
+            status_params = [] if not params else [params]
+            if result_out is not None:
+                status_params.append("ptr %result_out")
+            status_params.append("ptr %error_out")
+            params = ", ".join(status_params)
+        llvm_return_type = "i32" if fallible else self._llvm_type(function.return_type)
+        lines = [f"define {llvm_return_type} {_llvm_symbol(function.name)}({params}) {{"]
         lines.append("entry:")
+        previous_function = self.current_function
+        previous_fallible = self.current_function_is_fallible
+        previous_result_out = self.current_result_out
+        previous_error_out = self.current_error_out
+        self.current_function = function
+        self.current_function_is_fallible = fallible
+        self.current_result_out = result_out if fallible else None
+        self.current_error_out = "%error_out" if fallible else None
         names = {
             param.name: _EmittedValue(f"%{param.name}", param.type) for param in function.params
         }
-        for statement in function.body:
-            self._emit_statement(statement, names, lines, function.return_type)
-        if not _block_is_terminated(lines):
-            self._emit_default_return(lines, function.return_type)
+        try:
+            for statement in function.body:
+                self._emit_statement(statement, names, lines, function.return_type)
+                if _block_is_terminated(lines):
+                    break
+            if not _block_is_terminated(lines):
+                self._emit_default_return(lines, function.return_type)
+        finally:
+            self.current_function = previous_function
+            self.current_function_is_fallible = previous_fallible
+            self.current_result_out = previous_result_out
+            self.current_error_out = previous_error_out
         lines.append("}")
         return "\n".join(lines)
 
@@ -377,6 +414,23 @@ class _Emitter:
             self._emit_set_item(statement, names, lines)
             return
         if isinstance(statement, IrReturn):
+            if self.current_function_is_fallible:
+                if isinstance(return_type, IrNoneType):
+                    lines.append("  ret i32 0")
+                    return
+                if self.current_result_out is None:
+                    self._error("fallible non-void function is missing result_out")
+                if isinstance(statement.value, IrConstNone):
+                    stored = self._default_value(return_type)
+                else:
+                    value = self._emit_expr(statement.value, names, lines)
+                    stored = self._value_for_result_type(value, return_type, lines)
+                lines.append(
+                    f"  store {self._storage_llvm_type(return_type)} {stored}, "
+                    f"ptr {self.current_result_out}"
+                )
+                lines.append("  ret i32 0")
+                return
             if isinstance(return_type, IrNoneType):
                 lines.append("  ret void")
                 return
@@ -415,12 +469,10 @@ class _Emitter:
             lines.append(f"  {self._tmp('printed')} = call i32 @puts(ptr {value.value})")
             return
         if isinstance(statement, IrRaise):
-            value = self._emit_expr(statement.message, names, lines)
-            self.needs_puts = True
-            self.extra_declarations.add("declare void @exit(i32)")
-            lines.append(f"  {self._tmp('raised')} = call i32 @puts(ptr {value.value})")
-            lines.append("  call void @exit(i32 2)")
-            self._emit_status_return(lines, return_type)
+            if not self.current_function_is_fallible or self.current_error_out is None:
+                self._error("raise requires a fallible function status ABI")
+            self._emit_error_record(statement, names, lines)
+            lines.append("  ret i32 2")
             return
         self._error(f"Unsupported LLVM statement: {type(statement).__name__}")
 
@@ -1354,6 +1406,33 @@ class _Emitter:
         args = [self._emit_expr(arg, names, lines) for arg in expr.args]
         rendered_args = ", ".join(f"{self._param_llvm_type(arg.type)} {arg.value}" for arg in args)
         target = _llvm_symbol(expr.target)
+        if expr.target in self.fallible_functions:
+            if not self.current_function_is_fallible or self.current_error_out is None:
+                self._error(f"fallible call from non-fallible function: {expr.target}")
+            result_slot = None
+            call_args = [] if not rendered_args else [rendered_args]
+            if not isinstance(expr.type, IrNoneType):
+                result_slot = self._tmp("callresult")
+                lines.append(f"  {result_slot} = alloca {self._storage_llvm_type(expr.type)}")
+                call_args.append(f"ptr {result_slot}")
+            call_args.append(f"ptr {self.current_error_out}")
+            status = self._tmp("callstatus")
+            lines.append(f"  {status} = call i32 {target}({', '.join(call_args)})")
+            failed = self._tmp("callfailed")
+            failure_label = self._label("call.error")
+            success_label = self._label("call.ok")
+            lines.append(f"  {failed} = icmp ne i32 {status}, 0")
+            lines.append(f"  br i1 {failed}, label %{failure_label}, label %{success_label}")
+            lines.append(f"{failure_label}:")
+            lines.append(f"  ret i32 {status}")
+            lines.append(f"{success_label}:")
+            if result_slot is None:
+                return _EmittedValue("null", expr.type)
+            result = self._tmp("call")
+            lines.append(
+                f"  {result} = load {self._storage_llvm_type(expr.type)}, ptr {result_slot}"
+            )
+            return _EmittedValue(result, expr.type)
         if isinstance(expr.type, IrNoneType):
             lines.append(f"  call void {target}({rendered_args})")
             return _EmittedValue("null", expr.type)
@@ -4128,6 +4207,8 @@ class _Emitter:
             )
             args = "i32 %argc, ptr %argv_tuple"
         result_type = self._llvm_type(return_type)
+        if function.name in self.fallible_functions:
+            return self._emit_fallible_main(function, signature, args)
         if isinstance(return_type, IrNoneType):
             lines.append(f"  call {result_type} {_llvm_symbol(function.name)}({args})")
             lines.append("  ret i32 0")
@@ -4153,6 +4234,75 @@ class _Emitter:
         lines.append("}")
         return "\n".join(lines)
 
+    def _emit_fallible_main(
+        self,
+        function: IrFunction,
+        signature: str,
+        args: str,
+    ) -> str:
+        return_type = function.return_type
+        lines = [signature + " {", "entry:"]
+        if self._main_uses_c_argv_bridge(function):
+            self.needs_runtime_prelude = True
+            lines.append(
+                "  %argv_tuple = call ptr @__xcc_aot_c_argv_to_tuple(i32 %argc, ptr %argv)"
+            )
+            args = "i32 %argc, ptr %argv_tuple"
+        lines.append(f"  %error_record = alloca {_ERROR_LLVM_TYPE}")
+        call_args = [] if not args else [args]
+        if not isinstance(return_type, IrNoneType):
+            lines.append(f"  %result_out = alloca {self._storage_llvm_type(return_type)}")
+            call_args.append("ptr %result_out")
+        call_args.append("ptr %error_record")
+        lines.append(f"  %status = call i32 {_llvm_symbol(function.name)}({', '.join(call_args)})")
+        lines.append("  %failed = icmp ne i32 %status, 0")
+        lines.append("  br i1 %failed, label %uncaught, label %success")
+        lines.append("uncaught:")
+        error_values = (
+            ("type", "ptr", 0),
+            ("message", "ptr", 1),
+            ("filename", "ptr", 2),
+            ("line", "i32", 3),
+            ("column", "i32", 4),
+        )
+        for name, llvm_type, index in error_values:
+            lines.append(
+                f"  %error.{name}.ptr = getelementptr inbounds {_ERROR_LLVM_TYPE}, "
+                f"ptr %error_record, i32 0, i32 {index}"
+            )
+            lines.append(f"  %error.{name} = load {llvm_type}, ptr %error.{name}.ptr")
+        diagnostic_format = self._string_constant("%s:%d:%d: %s: %s\n")
+        self.extra_declarations.add("declare i32 @dprintf(i32, ptr, ...)")
+        lines.append(
+            "  %diagnostic = call i32 (i32, ptr, ...) @dprintf("
+            f"i32 2, ptr {diagnostic_format}, ptr %error.filename, i32 %error.line, "
+            "i32 %error.column, ptr %error.type, ptr %error.message)"
+        )
+        lines.append("  ret i32 %status")
+        lines.append("success:")
+        if isinstance(return_type, IrNoneType):
+            lines.append("  ret i32 0")
+        else:
+            result_type = self._llvm_type(return_type)
+            lines.append(f"  %result = load {result_type}, ptr %result_out")
+            if isinstance(return_type, IrStringType):
+                self.needs_puts = True
+                lines.append("  %printed = call i32 @puts(ptr %result)")
+                lines.append("  ret i32 0")
+            elif isinstance(return_type, IrIntType):
+                if return_type.bits == 32:
+                    lines.append("  ret i32 %result")
+                else:
+                    lines.append(f"  %exit = trunc {result_type} %result to i32")
+                    lines.append("  ret i32 %exit")
+            elif isinstance(return_type, IrBoolType):
+                lines.append("  %exit = zext i1 %result to i32")
+                lines.append("  ret i32 %exit")
+            else:
+                self._error(f"Unsupported main return type: {type(return_type).__name__}")
+        lines.append("}")
+        return "\n".join(lines)
+
     def _main_signature_and_args(self, function: IrFunction) -> tuple[str, str]:
         if not function.params:
             return "define i32 @main()", ""
@@ -4174,22 +4324,51 @@ class _Emitter:
             and isinstance(function.params[1].type, IrTupleType)
         )
 
-    def _emit_status_return(self, lines: list[str], return_type: IrType) -> None:
-        if isinstance(return_type, IrIntType):
-            lines.append(f"  ret {self._llvm_type(return_type)} 2")
-            return
-        if isinstance(return_type, IrBoolType):
-            lines.append("  ret i1 false")
-            return
-        if isinstance(return_type, IrNoneType):
-            lines.append("  ret void")
-            return
-        if isinstance(return_type, (IrRecordType, IrStringType, IrTupleType)):
-            lines.append(f"  ret {self._llvm_type(return_type)} null")
-            return
-        self._error(f"Unsupported raise return type: {type(return_type).__name__}")
+    def _emit_error_record(
+        self,
+        statement: IrRaise,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> None:
+        if self.current_error_out is None:
+            self._error("error record emission requires error_out")
+        message = self._emit_expr(statement.message, names, lines)
+        if not isinstance(message.type, IrStringType):
+            self._error("raise message must lower to a string")
+        payload = (
+            self._box_to_runtime_ptr(self._emit_expr(statement.payload, names, lines), lines)
+            if statement.payload is not None
+            else "null"
+        )
+        values = (
+            ("type", "ptr", self._string_constant(statement.exception)),
+            ("message", "ptr", message.value),
+            ("filename", "ptr", self._string_constant(self.module.filename)),
+            ("line", "i32", str(statement.span.line or 0)),
+            ("column", "i32", str(statement.span.column or 0)),
+            ("endline", "i32", str(statement.span.end_line or 0)),
+            ("endcolumn", "i32", str(statement.span.end_column or 0)),
+            ("payload", "ptr", payload),
+        )
+        for index, (name, llvm_type, value) in enumerate(values):
+            field_ptr = self._tmp(f"error{name}")
+            lines.append(
+                f"  {field_ptr} = getelementptr inbounds {_ERROR_LLVM_TYPE}, "
+                f"ptr {self.current_error_out}, i32 0, i32 {index}"
+            )
+            lines.append(f"  store {llvm_type} {value}, ptr {field_ptr}")
 
     def _emit_default_return(self, lines: list[str], return_type: IrType) -> None:
+        if self.current_function_is_fallible:
+            if not isinstance(return_type, IrNoneType):
+                if self.current_result_out is None:
+                    self._error("fallible non-void function is missing result_out")
+                lines.append(
+                    f"  store {self._storage_llvm_type(return_type)} "
+                    f"{self._default_value(return_type)}, ptr {self.current_result_out}"
+                )
+            lines.append("  ret i32 0")
+            return
         if isinstance(return_type, IrNoneType):
             lines.append("  ret void")
             return

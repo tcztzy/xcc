@@ -44,6 +44,14 @@ IrType = (
 
 
 @dataclass(frozen=True)
+class IrSourceSpan:
+    line: int | None = None
+    column: int | None = None
+    end_line: int | None = None
+    end_column: int | None = None
+
+
+@dataclass(frozen=True)
 class IrParam:
     name: str
     type: IrType
@@ -264,6 +272,23 @@ class IrPrint:
 class IrRaise:
     exception: str
     message: IrExpr
+    span: IrSourceSpan = IrSourceSpan()
+    payload: IrExpr | None = None
+
+
+@dataclass(frozen=True)
+class IrExceptHandler:
+    exceptions: tuple[str, ...]
+    target: str | None
+    body: IrBranch
+
+
+@dataclass(frozen=True)
+class IrTry:
+    body: IrBranch
+    handlers: tuple[IrExceptHandler, ...] = ()
+    orelse: IrBranch = IrBranch(())
+    finalbody: IrBranch = IrBranch(())
 
 
 IrStmt = (
@@ -277,6 +302,7 @@ IrStmt = (
     | IrContinue
     | IrPrint
     | IrRaise
+    | IrTry
 )
 
 

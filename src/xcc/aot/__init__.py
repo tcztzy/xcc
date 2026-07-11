@@ -27,6 +27,7 @@ from xcc.aot.ir import (
     IrConstString,
     IrContinue,
     IrEnumMember,
+    IrExceptHandler,
     IrExpr,
     IrField,
     IrFloatType,
@@ -45,10 +46,12 @@ from xcc.aot.ir import (
     IrRecordType,
     IrReturn,
     IrSetItem,
+    IrSourceSpan,
     IrStmt,
     IrStringConcat,
     IrStringJoin,
     IrStringType,
+    IrTry,
     IrTuple,
     IrTupleSlice,
     IrTupleType,
@@ -81,6 +84,7 @@ from xcc.aot.source_contract import (
     render_source_manifest,
     resolve_source_set,
 )
+from xcc.aot.status import analyze_fallibility
 from xcc.aot.subset import AotModuleSummary, check_subset
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType, AotTypeAnalysis
 
@@ -113,6 +117,7 @@ __all__ = (
     "IrConstructRecord",
     "IrContinue",
     "IrEnumMember",
+    "IrExceptHandler",
     "IrExpr",
     "IrField",
     "IrFloatType",
@@ -131,6 +136,7 @@ __all__ = (
     "IrRecordType",
     "IrReturn",
     "IrSetItem",
+    "IrSourceSpan",
     "IrStmt",
     "IrStringConcat",
     "IrStringJoin",
@@ -138,6 +144,7 @@ __all__ = (
     "IrTuple",
     "IrTupleSlice",
     "IrTupleType",
+    "IrTry",
     "IrType",
     "IrWhile",
     "NativeSmokeResult",
@@ -148,6 +155,7 @@ __all__ = (
     "analyze_path",
     "analyze_module",
     "analyze_source",
+    "analyze_fallibility",
     "bind_types",
     "check_subset",
     "build_native_bootstrap",

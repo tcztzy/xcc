@@ -4260,7 +4260,11 @@ class AotLlvmTextTests(unittest.TestCase):
             )
         )
         with self.assertRaises(AotError) as ctx:
-            emitter._emit_status_return([], object())  # type: ignore[arg-type]
+            emitter._emit_error_record(
+                IrRaise("ValueError", IrConstString("bad")),
+                {},
+                [],
+            )
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
         with self.assertRaises(AotError) as ctx:
             emitter._emit_statement(IrBreak(), {}, [], IrNoneType())

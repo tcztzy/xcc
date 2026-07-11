@@ -97,7 +97,7 @@ id|status|task|cites
 T1|x|freeze current hosted Stage 0 and split the large worktree into bisectable logical commits|V379,V382,V384
 T2|x|define strong-bootstrap source contract, project-owned AST, and hosted/native AOT CLI|V369,V374,I.cmd
 T3|x|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
-T4|.|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
+T4|~|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
 T5|.|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
 T6|.|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378
 T7|.|build Stage 2 from `.py` with Stage 1 and no Python process/cache dependency|V369,V370,V371,V372,V373,V378
@@ -137,3 +137,10 @@ B295|2026-07-11|grouping extent lookup selected the oldest record, so nested par
 B296|2026-07-11|the common `module.parse_source` boundary retained a function-local CPython adapter import, so static subset dependency closure still reached the hosted parser|V370,V376
 B297|2026-07-11|the owned numeric decoder annotated its heterogeneous literal result with `complex`, which is intentionally outside the binder's declared annotation subset, preventing the parser from admitting itself|V370,V374,V383
 B298|2026-07-11|switching the common parse boundary to the owned parser dropped the public `invalid syntax` diagnostic prefix expected by the CPython-compatible API|V379,V384
+B299|2026-07-11|the first status-ABI LLVM test asserted a nonexistent dot in generated string symbols and omitted the required varargs function type from `dprintf` call syntax|V380,V384
+B300|2026-07-11|the first uncaught-error wrapper named both its error-record alloca and a basic block `%error`, so `llc` rejected the otherwise structurally correct status ABI|V380,V384
+B301|2026-07-11|the LLVM private-helper regression still called the removed temporary `_emit_status_return` path after status/error records replaced type-default raise returns|V380,V384
+B302|2026-07-11|fallibility pre-analysis raised a raw `AssertionError` for deliberately malformed IR before the LLVM validator could emit its stable `XCC-AOT-LLVM-0001` diagnostic|V380,V384
+B303|2026-07-11|bootstrap slice call rewriting and dependency scans omitted the new `IrTry` variant and discarded `IrRaise` span/payload data|V376,V380,V384
+B304|2026-07-11|the new slice raise-call scan reused a branch-local `targets` name already inferred as `list[str]`, violating the tuple return contract under mypy|V379,V384
+B305|2026-07-11|the initial status/slice additions left import ordering and one fallibility predicate line outside the repository's ruff format contract|V379,V384
