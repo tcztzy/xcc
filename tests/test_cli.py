@@ -87,17 +87,26 @@ class CliTests(unittest.TestCase):
         llvm_ir = cc_driver._aot_compile_source_to_llvm_ir(
             "smoke.c",
             "int main(void){return 1;}\n",
+            (),
+            (),
+            (),
+            "c11",
         )
         self.assertIn('source_filename = "smoke.c"', llvm_ir)
         self.assertIn("ret i32 1", llvm_ir)
 
-    def test_aot_fixed_smoke_helpers_remain_cpython_callable(self) -> None:
-        self.assertEqual(
-            cc_driver._aot_smoke_llvm_ir(),
-            "define i32 @main() {\nentry:\n  ret i32 0\n}\n",
+    def test_aot_smoke_source_to_llvm_uses_frontend_backend_under_cpython(self) -> None:
+        llvm_ir = cc_driver._aot_compile_source_to_llvm_ir(
+            "smoke.c",
+            "int main(void){return 0;}\n",
+            (),
+            (),
+            (),
+            "c11",
         )
-        self.assertTrue(cc_driver._aot_is_smoke_source("int main(void){return 0;}\n"))
-        self.assertFalse(cc_driver._aot_is_smoke_source("int main(void){return 1;}\n"))
+        self.assertIn('source_filename = "smoke.c"', llvm_ir)
+        self.assertIn("define i32 @main()", llvm_ir)
+        self.assertIn("ret i32 0", llvm_ir)
 
     def test_aot_smoke_compiler_rejects_failed_llvm_write_under_cpython(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -147,6 +156,23 @@ class CliTests(unittest.TestCase):
             self.assertEqual(bad_args, 1)
             self.assertEqual(bad_flags, 1)
             self.assertEqual(bad_source, 1)
+            exec_argv.assert_not_called()
+            self.assertFalse((root / "smoke.o.ll").exists())
+
+    def test_aot_smoke_compiler_rejects_unknown_frontend_flag_under_cpython(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "smoke.c"
+            output = root / "smoke.o"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+
+            with patch("xcc.cc_driver._aot_exec_argv") as exec_argv:
+                code = cc_driver._aot_compile_smoke_source_to_object(
+                    5,
+                    ("xcc", "--compile", str(source), "-o", str(output)),
+                )
+
+            self.assertEqual(code, 1)
             exec_argv.assert_not_called()
             self.assertFalse((root / "smoke.o.ll").exists())
 

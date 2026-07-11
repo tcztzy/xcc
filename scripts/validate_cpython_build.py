@@ -10,6 +10,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from xcc.aot.bootstrap import build_native_bootstrap
+
 
 DEFAULT_LLC = Path("/opt/homebrew/opt/llvm/bin/llc")
 
@@ -156,6 +158,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=Path,
         help="LLVM llc path to expose through XCC_LLC; defaults to Homebrew llc if present",
     )
+    parser.add_argument(
+        "--native-aot-cc",
+        type=Path,
+        help="build native AOT xcc at this path first and use it as CC",
+    )
     return parser
 
 
@@ -182,10 +189,15 @@ def main(argv: Sequence[str] | None = None, *, run_step: RunStep = run_step) -> 
         shutil.rmtree(build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
     llc = args.llc if args.llc is not None else detect_default_llc()
+    cc = args.cc
+    if args.native_aot_cc is not None:
+        cc_path = args.native_aot_cc.resolve()
+        built = build_native_bootstrap(_repo_root(), cc_path, llc=None if llc is None else str(llc))
+        cc = str(built)
     options = BuildOptions(
         cpython_root=cpython_root,
         build_dir=build_dir,
-        cc=args.cc,
+        cc=cc,
         jobs=args.jobs,
         pythonpath=tuple(path.resolve() for path in args.pythonpath),
         configure_args=tuple(args.configure_arg),

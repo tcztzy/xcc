@@ -20,7 +20,7 @@ from xcc.frontend import (
     read_source,
 )
 from xcc.lexer import LexerError
-from xcc.options import FrontendOptions, StdMode, normalize_options
+from xcc.options import FrontendOptions, StdMode
 from xcc.parser import ParserError
 from xcc.preprocessor import PreprocessorError
 from xcc.sema import SemaError
@@ -33,7 +33,6 @@ DriverAction = Literal["link", "compile", "assembly", "delegate"]
 _LLVM_LLC_OVERVIEW = "OVERVIEW: llvm system compiler"
 _LLVM_LLC_USAGE = "USAGE: llc [options] <input bitcode>"
 _AOT_BOOTSTRAP_LLC = "/opt/homebrew/opt/llvm/bin/llc"
-_AOT_SMOKE_SOURCE = "int main(void){return 0;}\n"
 
 
 @dataclass(frozen=True)
@@ -468,18 +467,6 @@ def _delegate_argv(config: DriverConfig) -> tuple[str, ...] | list[str]:
     return config.clang_argv
 
 
-def _aot_smoke_llvm_ir() -> str:
-    return "define i32 @main() {\nentry:\n  ret i32 0\n}\n"
-
-
-def _aot_is_smoke_compile_command(argc: int32, c_flag: str, output_flag: str) -> bool:
-    return argc == 5 and c_flag == "-c" and output_flag == "-o"
-
-
-def _aot_is_smoke_source(source: str) -> bool:
-    return source == "int main(void){return 0;}\n"
-
-
 def _aot_smoke_llvm_path(object_path: str) -> str:
     return object_path + ".ll"
 
@@ -494,6 +481,39 @@ def _aot_smoke_llc_argv(llvm_path: str, object_path: str) -> tuple[str, ...]:
     )
 
 
+def _aot_arg_is_c_source(arg: str) -> bool:
+    return arg.endswith(".c")
+
+
+def _aot_arg_is_object_file(arg: str) -> bool:
+    return arg.endswith(".o")
+
+
+def _aot_default_object_path(source_path: str) -> str:
+    if source_path.endswith(".c"):
+        return source_path[:-2] + ".o"
+    return source_path + ".o"
+
+
+def _aot_link_object_path(output_path: str) -> str:
+    return output_path + ".o"
+
+
+def _aot_is_linker_flag(arg: str) -> bool:
+    return arg.startswith("-L") or arg.startswith("-l")
+
+
+def _aot_link_argv(
+    object_path: str,
+    output_path: str,
+    link_flags: tuple[str, ...],
+) -> tuple[str, ...]:
+    argv: tuple[str, ...] = ("cc", object_path, "-o", output_path)
+    for flag in link_flags:
+        argv = argv + (flag,)
+    return argv
+
+
 def _aot_read_text_file(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
@@ -503,15 +523,54 @@ def _aot_write_text_file(path: str, text: str) -> bool:
     return True
 
 
-def _aot_compile_source_to_llvm_ir_unchecked(source_path: str, source_text: str) -> str:
-    options: FrontendOptions = normalize_options(None)
+def _aot_default_system_include_dirs() -> tuple[str, ...]:
+    return (
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/"
+        "XcodeDefault.xctoolchain/usr/lib/clang/21/include",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/"
+        "MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/"
+        "MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/usr/include",
+        "/usr/include",
+    )
+
+
+def _aot_compile_source_to_llvm_ir_unchecked(
+    source_path: str,
+    source_text: str,
+    include_dirs: tuple[str, ...],
+    defines: tuple[str, ...],
+    undefs: tuple[str, ...],
+    std: str,
+) -> str:
+    options = FrontendOptions(
+        std="gnu11" if std == "gnu11" else "c11",
+        include_dirs=include_dirs,
+        system_include_dirs=_aot_default_system_include_dirs(),
+        defines=defines,
+        undefs=undefs,
+    )
     result: FrontendResult = _aot_compile_source_unchecked(source_text, source_path, options)
     return generate_llvm_ir(result)
 
 
-def _aot_compile_source_to_llvm_ir(source_path: str, source_text: str) -> str:
+def _aot_compile_source_to_llvm_ir(
+    source_path: str,
+    source_text: str,
+    include_dirs: tuple[str, ...],
+    defines: tuple[str, ...],
+    undefs: tuple[str, ...],
+    std: str,
+) -> str:
     try:
-        return _aot_compile_source_to_llvm_ir_unchecked(source_path, source_text)
+        return _aot_compile_source_to_llvm_ir_unchecked(
+            source_path,
+            source_text,
+            include_dirs,
+            defines,
+            undefs,
+            std,
+        )
     except (FrontendError, CodegenError, PreprocessorError, LexerError, ParserError, SemaError):
         return ""
 
@@ -526,24 +585,124 @@ def _aot_exec_argv(argv: tuple[str, ...]) -> int32:
     return completed.returncode
 
 
-def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
-    if argc != 5 or len(argv) != 5:
-        return 1
-    c_flag: str = argv[1]
-    output_flag: str = argv[3]
-    if not _aot_is_smoke_compile_command(argc, c_flag, output_flag):
-        return 1
-    source_path: str = argv[2]
-    object_path: str = argv[4]
+def _aot_compile_source_path_to_object(
+    source_path: str,
+    object_path: str,
+    include_dirs: tuple[str, ...],
+    defines: tuple[str, ...],
+    undefs: tuple[str, ...],
+    std: str,
+) -> bool:
     source_text: str = _aot_read_text_file(source_path)
-    llvm_text: str = _aot_compile_source_to_llvm_ir(source_path, source_text)
+    llvm_text: str = _aot_compile_source_to_llvm_ir(
+        source_path,
+        source_text,
+        include_dirs,
+        defines,
+        undefs,
+        std,
+    )
     llvm_path: str = _aot_smoke_llvm_path(object_path)
     if llvm_text == "":
-        return 1
+        return False
     if not _aot_write_text_file(llvm_path, llvm_text):
-        return 1
+        return False
     llc_argv: tuple[str, ...] = _aot_smoke_llc_argv(llvm_path, object_path)
-    return _aot_exec_argv(llc_argv)
+    return _aot_exec_argv(llc_argv) == 0
+
+
+def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
+    count: int = len(argv)
+    if argc < 2 or count < 2:
+        return 1
+    compile_only = False
+    source_path = ""
+    object_input = ""
+    output_path = ""
+    link_flags: tuple[str, ...] = ()
+    include_dirs: tuple[str, ...] = ()
+    defines: tuple[str, ...] = ()
+    undefs: tuple[str, ...] = ()
+    std = "c11"
+    index = 1
+    while index < count:
+        arg: str = argv[index]
+        if arg == "-c":
+            compile_only = True
+        elif arg == "-o":
+            index += 1
+            if index >= count:
+                return 1
+            output_path = argv[index]
+        elif arg.startswith("-o") and len(arg) > 2:
+            output_path = arg[2:]
+        elif arg == "-I" or arg == "-D" or arg == "-U":
+            index += 1
+            if index >= count:
+                return 1
+            if arg == "-I":
+                include_dirs = include_dirs + (argv[index],)
+            elif arg == "-D":
+                defines = defines + (argv[index],)
+            else:
+                undefs = undefs + (argv[index],)
+        elif arg.startswith("-I") and len(arg) > 2:
+            include_dirs = include_dirs + (arg[2:],)
+        elif arg.startswith("-D") and len(arg) > 2:
+            defines = defines + (arg[2:],)
+        elif arg.startswith("-U") and len(arg) > 2:
+            undefs = undefs + (arg[2:],)
+        elif arg == "-std=c11":
+            std = "c11"
+        elif arg == "-std=gnu11":
+            std = "gnu11"
+        elif _aot_arg_is_c_source(arg):
+            if source_path != "" or object_input != "":
+                return 1
+            source_path = arg
+        elif _aot_arg_is_object_file(arg):
+            if object_input != "" or source_path != "":
+                return 1
+            object_input = arg
+        elif _aot_is_linker_flag(arg):
+            link_flags = link_flags + (arg,)
+        elif arg.startswith("-"):
+            return 1
+        else:
+            return 1
+        index += 1
+    if compile_only:
+        if source_path == "" or object_input != "":
+            return 1
+        object_path = output_path if output_path != "" else _aot_default_object_path(source_path)
+        if _aot_compile_source_path_to_object(
+            source_path,
+            object_path,
+            include_dirs,
+            defines,
+            undefs,
+            std,
+        ):
+            return 0
+        return 1
+    executable_path = output_path if output_path != "" else "a.out"
+    if object_input != "":
+        link_argv = _aot_link_argv(object_input, executable_path, link_flags)
+        return _aot_exec_argv(link_argv)
+    if source_path == "":
+        return 1
+    object_path = _aot_link_object_path(executable_path)
+    if not _aot_compile_source_path_to_object(
+        source_path,
+        object_path,
+        include_dirs,
+        defines,
+        undefs,
+        std,
+    ):
+        return 1
+    link_argv = _aot_link_argv(object_path, executable_path, link_flags)
+    return _aot_exec_argv(link_argv)
 
 
 def _compile_frontend_inputs(

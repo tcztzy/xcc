@@ -152,6 +152,45 @@ class CPythonBuildScriptTests(unittest.TestCase):
         expected_pythonpath = os.pathsep.join((str(mypyc_lib.resolve()), existing_pythonpath))
         self.assertEqual(seen_pythonpath, [expected_pythonpath, expected_pythonpath])
 
+    def test_main_can_build_native_aot_cc_before_cpython_steps(self) -> None:
+        validate = _load_cpython_build_module()
+        calls = []
+
+        def fake_build_native(root, output, *, llc=None, cc="cc"):
+            calls.append(("build_native", root, output, llc, cc))
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            return output
+
+        def fake_run(step):
+            calls.append(("run", step.command, step.env["CC"]))
+            return validate.CommandResult(step.command, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cpython = Path(tmp) / "cpython"
+            cpython.mkdir()
+            (cpython / "configure").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            with (
+                patch.object(validate, "build_native_bootstrap", fake_build_native),
+                redirect_stdout(io.StringIO()),
+            ):
+                code = validate.main(
+                    [
+                        "--cpython",
+                        str(cpython),
+                        "--build-dir",
+                        str(Path(tmp) / "build"),
+                        "--native-aot-cc",
+                        str(Path(tmp) / "native-xcc"),
+                    ],
+                    run_step=fake_run,
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[0][0], "build_native")
+        self.assertEqual(calls[1][0], "run")
+        self.assertEqual(calls[1][2], str((Path(tmp) / "native-xcc").resolve()))
+
 
 class CPythonBuildToxConfigTests(unittest.TestCase):
     def test_tox_defines_explicit_cpython_build_gate(self) -> None:
