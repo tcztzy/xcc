@@ -60,23 +60,6 @@ class AotCliTests(unittest.TestCase):
         )
         self.assertEqual((status, stderr), (2, ""))
         self.assertIn("rejects parser: other", stdout)
-        status, stdout, stderr = _run(
-            hosted_main,
-            (
-                "xcc-aot",
-                "build",
-                "--source-root",
-                "src/xcc",
-                "--entry",
-                "xcc.aot.cli:main",
-                "--output",
-                "out",
-                "--parser=subset",
-            ),
-        )
-        self.assertEqual((status, stdout), (2, ""))
-        self.assertIn("unavailable before Milestone 3", stderr)
-
     def test_hosted_usage_rejects_missing_duplicate_and_unknown_options(self) -> None:
         for argv, message in (
             (("xcc-aot", "build"), "missing required option"),
@@ -177,6 +160,77 @@ class AotCliTests(unittest.TestCase):
                 compile_executable.call_args.kwargs["linker"],
                 "/configured/cc",
             )
+
+    def test_hosted_parser_oracle_command_emits_canonical_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "pkg"
+            root.mkdir()
+            (root / "__init__.py").write_text("ROOT = 1\n", encoding="utf-8")
+            (root / "entry.py").write_text(
+                "def main() -> int:\n    return 0\n",
+                encoding="utf-8",
+            )
+            status, stdout, stderr = _run(
+                hosted_main,
+                (
+                    "xcc-aot",
+                    "parser-oracle",
+                    f"--source-root={root}",
+                    "--entry=pkg.entry:main",
+                ),
+            )
+
+        self.assertEqual((status, stderr), (0, ""))
+        payload = json.loads(stdout)
+        self.assertEqual(payload["entry"], "pkg.entry")
+        self.assertEqual(payload["failures"], [])
+        self.assertEqual(payload["version"], 1)
+
+    def test_hosted_subset_build_never_calls_cpython_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "pkg"
+            root.mkdir()
+            (root / "__init__.py").write_text("", encoding="utf-8")
+            (root / "cli.py").write_text(
+                "int32 = int\n"
+                "def main(argc: int32, argv: tuple[str, ...]) -> int32:\n"
+                "    return 0\n",
+                encoding="utf-8",
+            )
+            output = base / "out" / "xcc-aot"
+            normalized_path = base / "artifacts" / "subset.ir"
+            manifest_path = base / "artifacts" / "sources.json"
+            argv = (
+                "xcc-aot",
+                "build",
+                f"--source-root={root}",
+                "--entry=pkg.cli:main",
+                f"--output={output}",
+                "--parser=subset",
+                "--no-cache",
+                f"--emit-normalized-ir={normalized_path}",
+                f"--source-manifest={manifest_path}",
+            )
+            with (
+                patch(
+                    "xcc.aot.cpython_ast_adapter.parse_cpython_source",
+                    side_effect=AssertionError("hosted adapter reached"),
+                ),
+                patch("xcc.aot.hosted_cli.compile_llvm_executable") as compile_executable,
+            ):
+                status, stdout, stderr = _run(hosted_main, argv)
+
+            reachability = normalized_path.with_suffix(".reachability")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            reachability_text = reachability.read_text(encoding="utf-8")
+
+        self.assertEqual((status, stdout, stderr), (0, "", ""))
+        self.assertEqual(manifest["parser"], "subset")
+        self.assertIn("parser=subset", reachability_text)
+        self.assertIn("native_call_graph=false", reachability_text)
+        self.assertNotIn("cpython_ast_adapter", reachability_text)
+        compile_executable.assert_called_once()
 
     def test_normalized_llvm_only_rewrites_root_and_trailing_space(self) -> None:
         self.assertEqual(

@@ -6,12 +6,14 @@ from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
     AotDiagnostic,
     AotError,
+    AotModule,
     analyze_path,
     analyze_source,
     bind_types,
     check_subset,
     parse_source,
 )
+from xcc.aot.cpython_ast_adapter import parse_cpython_source
 from xcc.aot.diag import node_location
 from xcc.aot.py_ast import Pass
 from xcc.aot.binder import (
@@ -109,7 +111,12 @@ class AotSubsetCheckerTests(unittest.TestCase):
         self.assertEqual(summary.functions, ("add",))
 
     def test_rejects_lambda_expression(self) -> None:
-        module = parse_source("value = lambda x: x\n", filename="bad.py")
+        source = "value = lambda x: x\n"
+        module = AotModule(
+            "bad.py",
+            source,
+            parse_cpython_source(source, filename="bad.py"),
+        )
         with self.assertRaises(AotError) as ctx:
             check_subset(module)
         diagnostic = ctx.exception.diagnostics[0]
@@ -414,7 +421,7 @@ class AotAnalysisApiTests(unittest.TestCase):
     def test_analyze_source_raises_first_stage_error(self) -> None:
         with self.assertRaises(AotError) as ctx:
             analyze_source("value = lambda x: x\n", filename="bad.py")
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-SUBSET-0001")
+        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-PARSE-0001")
 
     def test_analyze_path_reads_python_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

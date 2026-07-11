@@ -6,11 +6,12 @@ from xcc.aot.analysis import analyze_module
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_analysis_to_ir
-from xcc.aot.module import AotModule, parse_source
+from xcc.aot.module import AotModule
 from xcc.aot.native import compile_llvm_executable
 from xcc.aot.source_contract import (
     CachePolicy,
     ParserBackend,
+    SourceSet,
     render_source_manifest,
     resolve_source_set,
 )
@@ -20,7 +21,9 @@ int32 = int
 _HOSTED_VERSION = "xcc-aot 0.2 hosted"
 _USAGE = (
     "usage: python -m xcc.aot build --source-root PATH "
-    "--entry MODULE:FUNCTION --output PATH --parser=cpython|subset [options]"
+    "--entry MODULE:FUNCTION --output PATH --parser=cpython|subset [options]\n"
+    "       python -m xcc.aot parser-oracle --source-root PATH "
+    "--entry MODULE:FUNCTION"
 )
 
 
@@ -61,6 +64,16 @@ def _hosted_main(argc: int32, argv: tuple[str, ...]) -> int32:
     if command == "--version":
         print(_HOSTED_VERSION)
         return 0
+    if command == "parser-oracle":
+        if any(argument in {"-h", "--help"} for argument in argv[2:]):
+            print(_USAGE)
+            return 0
+        try:
+            source_root, entry_module = _parse_parser_oracle_options(argv[2:])
+        except ValueError as error:
+            print(f"xcc-aot: {error}", file=sys.stderr)
+            return 2
+        return _run_parser_oracle(source_root, entry_module)
     if command != "build":
         print(f"xcc-aot: unknown command: {command}", file=sys.stderr)
         return 2
@@ -71,12 +84,6 @@ def _hosted_main(argc: int32, argv: tuple[str, ...]) -> int32:
         options = _parse_build_options(argv[2:])
     except ValueError as error:
         print(f"xcc-aot: {error}", file=sys.stderr)
-        return 2
-    if options.parser == "subset":
-        print(
-            "xcc-aot: subset parser backend is unavailable before Milestone 3",
-            file=sys.stderr,
-        )
         return 2
     _run_hosted_build(options)
     return 0
@@ -152,12 +159,53 @@ def _parse_build_options(arguments: tuple[str, ...]) -> BuildOptions:
     )
 
 
+def _parse_parser_oracle_options(arguments: tuple[str, ...]) -> tuple[Path, str]:
+    values: dict[str, str] = {}
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        name = argument
+        value = ""
+        if "=" in argument:
+            name, value = argument.split("=", 1)
+        elif name in {"--entry", "--source-root"}:
+            index += 1
+            if index >= len(arguments):
+                raise ValueError(f"missing value for {name}")
+            value = arguments[index]
+        else:
+            raise ValueError(f"unknown option: {argument}")
+        if name not in {"--entry", "--source-root"}:
+            raise ValueError(f"unknown option: {name}")
+        if name in values:
+            raise ValueError(f"duplicate option: {name}")
+        if not value:
+            raise ValueError(f"empty value for {name}")
+        values[name] = value
+        index += 1
+    for required in ("--source-root", "--entry"):
+        if required not in values:
+            raise ValueError(f"missing required option: {required}")
+    entry = values["--entry"]
+    if entry.count(":") != 1:
+        raise ValueError(f"invalid entry: {entry}")
+    module_name, function_name = entry.split(":", 1)
+    if not module_name or not function_name.isidentifier():
+        raise ValueError(f"invalid entry: {entry}")
+    return Path(values["--source-root"]), module_name
+
+
 def _run_hosted_build(options: BuildOptions) -> None:
     module_name, function_name = options.entry.split(":", 1)
+    backend = (
+        ParserBackend("subset", _subset_parser)
+        if options.parser == "subset"
+        else ParserBackend("cpython", _hosted_parser)
+    )
     source_set = resolve_source_set(
         options.source_root,
         module_name,
-        ParserBackend("cpython", _hosted_parser),
+        backend,
         CachePolicy(options.no_cache),
     )
     entry_unit = next(
@@ -198,6 +246,11 @@ def _run_hosted_build(options: BuildOptions) -> None:
         )
     if options.source_manifest is not None:
         _write_text(options.source_manifest, render_source_manifest(source_set))
+    if options.parser == "subset" and options.emit_normalized_ir is not None:
+        _write_text(
+            options.emit_normalized_ir.with_suffix(".reachability"),
+            _render_subset_source_closure(source_set),
+        )
     compile_llvm_executable(
         llvm_text,
         options.output,
@@ -219,7 +272,42 @@ def normalize_llvm(llvm_text: str, source_root: str) -> str:
 
 
 def _hosted_parser(source: str, filename: str) -> AotModule:
-    return parse_source(source, filename=filename)
+    from xcc.aot.cpython_ast_adapter import parse_cpython_source
+
+    return AotModule(
+        filename,
+        source,
+        parse_cpython_source(source, filename=filename),
+    )
+
+
+def _subset_parser(source: str, filename: str) -> AotModule:
+    from xcc.aot.py_parser import parse_subset_source
+
+    return parse_subset_source(source, filename=filename)
+
+
+def _run_parser_oracle(source_root: Path, entry_module: str) -> int32:
+    from xcc.aot.parser_oracle import render_parser_oracle_report, run_parser_oracle
+
+    report = run_parser_oracle(source_root, entry_module)
+    print(render_parser_oracle_report(report), end="")
+    return 0 if not report.failures else 1
+
+
+def _render_subset_source_closure(source_set: SourceSet) -> str:
+    lines = (
+        "format=xcc-aot-subset-source-closure-v1",
+        "parser=subset",
+        "native_call_graph=false",
+        f"entry={source_set.entry_module}",
+    )
+    result = list(lines)
+    for unit in source_set.units:
+        result.append(f"module={unit.module}")
+        for dependency in unit.dependencies:
+            result.append(f"edge={unit.module}->{dependency}")
+    return "\n".join(result) + "\n"
 
 
 def _write_text(path: Path, text: str) -> None:

@@ -1972,7 +1972,7 @@ def _char_at(text: str, index: int) -> str:
     return text[index]
 
 
-def _decode_number(text: str) -> int | float | complex:
+def _decode_number(text: str) -> object:
     cleaned = text.replace("_", "")
     if cleaned.endswith(("j", "J")):
         return complex(0.0, float(cleaned[:-1]))

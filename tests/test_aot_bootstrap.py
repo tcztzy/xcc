@@ -70,7 +70,7 @@ class AotBootstrapGraphTests(unittest.TestCase):
         self.assertEqual(report.total, 1)
         self.assertEqual(len(report.failed), 1)
         self.assertIn("xcc.bad", report.failed[0])
-        self.assertIn("XCC-AOT-SUBSET-0001", report.failed[0])
+        self.assertIn("XCC-AOT-PARSE-0001", report.failed[0])
 
 
 class AotBootstrapEntryTests(unittest.TestCase):

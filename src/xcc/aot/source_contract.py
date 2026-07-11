@@ -46,6 +46,7 @@ HOSTED_ONLY_MODULES = frozenset(
         "xcc.aot.__main__",
         "xcc.aot.cpython_ast_adapter",
         "xcc.aot.hosted_cli",
+        "xcc.aot.parser_oracle",
     }
 )
 

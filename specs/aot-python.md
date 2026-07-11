@@ -134,3 +134,6 @@ B292|2026-07-11|a generator expression used as the sole call argument omitted th
 B293|2026-07-11|an open-ended slice selected its lower bound as the span end and omitted the consumed colon|V370,V384
 B294|2026-07-11|owned tuple nodes ended at their final element and omitted a trailing comma from the CPython-compatible source span|V370,V384
 B295|2026-07-11|grouping extent lookup selected the oldest record, so nested parentheses propagated the inner opening delimiter to enclosing nodes|V370,V384
+B296|2026-07-11|the common `module.parse_source` boundary retained a function-local CPython adapter import, so static subset dependency closure still reached the hosted parser|V370,V376
+B297|2026-07-11|the owned numeric decoder annotated its heterogeneous literal result with `complex`, which is intentionally outside the binder's declared annotation subset, preventing the parser from admitting itself|V370,V374,V383
+B298|2026-07-11|switching the common parse boundary to the owned parser dropped the public `invalid syntax` diagnostic prefix expected by the CPython-compatible API|V379,V384

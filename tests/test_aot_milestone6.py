@@ -58,6 +58,7 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
                 "xcc.aot.__main__",
                 "xcc.aot.cpython_ast_adapter",
                 "xcc.aot.hosted_cli",
+                "xcc.aot.parser_oracle",
             },
             set(HOSTED_ONLY_MODULES),
         )
