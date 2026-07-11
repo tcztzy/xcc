@@ -24,6 +24,7 @@ from xcc.aot.ir import (
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.native import compile_llvm_executable
 from xcc.aot.slice import AotSliceInput, lower_core_entry_slice
+from xcc.aot.source_contract import HOSTED_ONLY_MODULES
 
 
 @dataclass(frozen=True)
@@ -81,7 +82,10 @@ def collect_bootstrap_sources(root: Path) -> tuple[AotSliceInput, ...]:
     for path in sorted(src_xcc.rglob("*.py")):
         resolved = path.resolve()
         relative = resolved.relative_to(src_xcc)
-        modules.append(AotSliceInput(_bootstrap_module_name(relative), resolved))
+        module_name = _bootstrap_module_name(relative)
+        if module_name in HOSTED_ONLY_MODULES:
+            continue
+        modules.append(AotSliceInput(module_name, resolved))
     modules.sort(key=_bootstrap_input_name)
     return tuple(modules)
 
@@ -115,7 +119,11 @@ def plan_bootstrap_entry(root: Path) -> AotBootstrapEntryPlan:
 
 def lower_bootstrap_entry_smoke(root: Path) -> IrModule:
     plan_bootstrap_entry(root)
-    modules = collect_bootstrap_sources(root)
+    modules = tuple(
+        module
+        for module in collect_bootstrap_sources(root)
+        if not module.name.startswith("xcc.aot.")
+    )
     return lower_core_entry_slice(
         tuple(module.path for module in modules),
         _bootstrap_entry_smoke_wrapper(),
@@ -137,7 +145,7 @@ def build_native_bootstrap(
         output,
         filename="<bootstrap>",
         llc=llc,
-        cc=cc,
+        linker=cc,
         extra_link_args=_llvm_c_link_args(llc),
         diagnostic_code="XCC-AOT-BOOTSTRAP-0003",
     )

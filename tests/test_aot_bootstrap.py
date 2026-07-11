@@ -24,6 +24,7 @@ from xcc.aot import (
     summarize_bootstrap_admission,
 )
 from xcc.aot import slice as aot_slice
+from xcc.aot.source_contract import HOSTED_ONLY_MODULES
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,10 +32,13 @@ ROOT = Path(__file__).resolve().parents[1]
 class AotBootstrapGraphTests(unittest.TestCase):
     def test_collects_all_src_xcc_modules_in_deterministic_order(self) -> None:
         modules = collect_bootstrap_sources(ROOT)
-        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py")))
+        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py"))) - len(
+            HOSTED_ONLY_MODULES
+        )
         self.assertEqual(len(modules), expected_count)
         self.assertEqual(modules[0].name, "xcc.__init__")
         self.assertIn("xcc.aot.bootstrap", {module.name for module in modules})
+        self.assertTrue(HOSTED_ONLY_MODULES.isdisjoint({module.name for module in modules}))
         self.assertEqual(modules[-1].name, "xcc.x86_64_asm")
 
     def test_rejects_non_repository_root(self) -> None:
@@ -44,7 +48,9 @@ class AotBootstrapGraphTests(unittest.TestCase):
 
     def test_summarizes_bootstrap_admission(self) -> None:
         report = summarize_bootstrap_admission(ROOT)
-        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py")))
+        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py"))) - len(
+            HOSTED_ONLY_MODULES
+        )
         self.assertEqual(report.total, expected_count)
         self.assertEqual(report.failed, ())
 
@@ -81,6 +87,14 @@ class AotBootstrapEntryTests(unittest.TestCase):
         self.assertIn("xcc.x86_64_asm", plan.modules)
         self.assertIn("xcc.aarch64_asm", plan.modules)
         self.assertIn("xcc.llvm_api", plan.modules)
+
+    def test_legacy_c_bootstrap_slice_excludes_aot_compiler_modules(self) -> None:
+        with patch("xcc.aot.bootstrap.lower_core_entry_slice") as lower_slice:
+            lower_bootstrap_entry_smoke(ROOT)
+
+        paths = lower_slice.call_args.args[0]
+        self.assertTrue(paths)
+        self.assertFalse(any("/src/xcc/aot/" in str(path) for path in paths))
 
     def test_entry_plan_reports_missing_bootstrap_modules(self) -> None:
         with TemporaryDirectory() as temp_dir:

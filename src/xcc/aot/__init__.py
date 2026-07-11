@@ -72,6 +72,15 @@ from xcc.aot.slice import (
     lower_core_entry_slice,
     lower_core_slice,
 )
+from xcc.aot.source_contract import (
+    CachePolicy,
+    ParserBackend,
+    ParserKind,
+    SourceSet,
+    SourceUnit,
+    render_source_manifest,
+    resolve_source_set,
+)
 from xcc.aot.subset import AotModuleSummary, check_subset
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType, AotTypeAnalysis
 
@@ -89,6 +98,7 @@ __all__ = (
     "AotSliceInput",
     "AotType",
     "AotTypeAnalysis",
+    "CachePolicy",
     "IrAssign",
     "IrBinary",
     "IrBoolType",
@@ -131,6 +141,10 @@ __all__ = (
     "IrType",
     "IrWhile",
     "NativeSmokeResult",
+    "ParserBackend",
+    "ParserKind",
+    "SourceSet",
+    "SourceUnit",
     "analyze_path",
     "analyze_module",
     "analyze_source",
@@ -154,5 +168,7 @@ __all__ = (
     "run_native_core_smoke",
     "run_native_smoke",
     "run_bootstrap_self_host_smoke",
+    "render_source_manifest",
+    "resolve_source_set",
     "summarize_bootstrap_admission",
 )

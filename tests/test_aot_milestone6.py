@@ -4,6 +4,7 @@ from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import analyze_path, analyze_source
+from xcc.aot.source_contract import HOSTED_ONLY_MODULES, source_module_name
 
 ROOT = Path(__file__).resolve().parents[1]
 CC_DRIVER_PATH = ROOT / "src/xcc/cc_driver.py"
@@ -37,15 +38,34 @@ AOT_SUBSET_PATH = ROOT / "src/xcc/aot/subset.py"
 
 
 class AotMilestone6AdmissionTests(unittest.TestCase):
-    def test_all_src_xcc_modules_are_aot_admitted(self) -> None:
+    def test_all_native_candidate_src_xcc_modules_are_aot_admitted(self) -> None:
         failures: list[str] = []
-        for path in sorted((ROOT / "src/xcc").rglob("*.py")):
+        source_root = ROOT / "src/xcc"
+        for path in sorted(source_root.rglob("*.py")):
+            if source_module_name(source_root, path) in HOSTED_ONLY_MODULES:
+                continue
             with self.subTest(path=path.relative_to(ROOT)):
                 try:
                     analyze_path(path)
                 except Exception as exc:
                     failures.append(f"{path.relative_to(ROOT)}: {exc}")
         self.assertEqual([], failures)
+
+    def test_hosted_only_modules_are_explicit_and_cpython_parseable(self) -> None:
+        source_root = ROOT / "src/xcc"
+        self.assertEqual(
+            {
+                "xcc.aot.__main__",
+                "xcc.aot.cpython_ast_adapter",
+                "xcc.aot.hosted_cli",
+            },
+            set(HOSTED_ONLY_MODULES),
+        )
+        for module_name in sorted(HOSTED_ONLY_MODULES):
+            relative = module_name.split(".")[1:]
+            path = source_root.joinpath(*relative).with_suffix(".py")
+            with self.subTest(module=module_name):
+                compile(path.read_text(encoding="utf-8"), str(path), "exec")
 
     def test_binds_bootstrap_container_and_callable_annotations(self) -> None:
         source = (

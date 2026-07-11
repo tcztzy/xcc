@@ -1,4 +1,3 @@
-import ast
 import os
 import pickle
 import subprocess
@@ -7,9 +6,11 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from xcc.aot import py_ast as ast
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
+from xcc.aot.module import parse_source
 from xcc.aot.slice import core_entry_wrapper, lower_core_entry_slice
 
 
@@ -98,22 +99,36 @@ def compile_llvm_executable(
     *,
     filename: str,
     llc: str | None = None,
-    cc: str = "cc",
+    assembler: str | None = None,
+    linker: str = "cc",
     extra_link_args: tuple[str, ...] = (),
     diagnostic_code: str = "XCC-AOT-NATIVE-0001",
 ) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     ll_path = output.parent / f"{output.name}.ll"
+    assembly_path = output.parent / f"{output.name}.s"
     obj_path = output.parent / f"{output.name}.o"
     ll_path.write_text(llvm_ir, encoding="utf-8")
     llc_path = llc or os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
+    if assembler is None:
+        _run_tool(
+            (llc_path, "-filetype=obj", str(ll_path), "-o", str(obj_path)),
+            filename,
+            diagnostic_code=diagnostic_code,
+        )
+    else:
+        _run_tool(
+            (llc_path, "-filetype=asm", str(ll_path), "-o", str(assembly_path)),
+            filename,
+            diagnostic_code=diagnostic_code,
+        )
+        _run_tool(
+            (assembler, str(assembly_path), "-o", str(obj_path)),
+            filename,
+            diagnostic_code=diagnostic_code,
+        )
     _run_tool(
-        (llc_path, "-filetype=obj", str(ll_path), "-o", str(obj_path)),
-        filename,
-        diagnostic_code=diagnostic_code,
-    )
-    _run_tool(
-        (cc, str(obj_path), *extra_link_args, "-o", str(output)),
+        (linker, str(obj_path), *extra_link_args, "-o", str(output)),
         filename,
         diagnostic_code=diagnostic_code,
     )
@@ -146,7 +161,7 @@ def _run_python_entry(source: str, entry: str) -> object:
 def _source_defines_entry_function(source: str, entry: str) -> bool:
     if not entry.isidentifier():
         return False
-    module = ast.parse(source)
+    module = parse_source(source, filename="<python-oracle>").tree
     for statement in module.body:
         if isinstance(statement, ast.FunctionDef) and statement.name == entry:
             return True

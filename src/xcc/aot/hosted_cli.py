@@ -1,0 +1,227 @@
+import sys
+from dataclasses import dataclass, replace
+from pathlib import Path
+
+from xcc.aot.analysis import analyze_module
+from xcc.aot.diag import AotDiagnostic, AotError
+from xcc.aot.llvm_text import emit_llvm_text
+from xcc.aot.lower import lower_analysis_to_ir
+from xcc.aot.module import AotModule, parse_source
+from xcc.aot.native import compile_llvm_executable
+from xcc.aot.source_contract import (
+    CachePolicy,
+    ParserBackend,
+    render_source_manifest,
+    resolve_source_set,
+)
+
+int32 = int
+
+_HOSTED_VERSION = "xcc-aot 0.2 hosted"
+_USAGE = (
+    "usage: python -m xcc.aot build --source-root PATH "
+    "--entry MODULE:FUNCTION --output PATH --parser=cpython|subset [options]"
+)
+
+
+@dataclass(frozen=True)
+class BuildOptions:
+    source_root: Path
+    entry: str
+    output: Path
+    parser: str
+    no_cache: bool
+    emit_llvm: Path | None
+    emit_normalized_ir: Path | None
+    source_manifest: Path | None
+    llc: str | None
+    assembler: str | None
+    linker: str
+
+
+def hosted_main(argc: int32, argv: tuple[str, ...]) -> int32:
+    try:
+        return _hosted_main(argc, argv)
+    except AotError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except OSError as error:
+        print(f"xcc-aot: {error}", file=sys.stderr)
+        return 1
+
+
+def _hosted_main(argc: int32, argv: tuple[str, ...]) -> int32:
+    if argc <= 1:
+        print(_USAGE)
+        return 2
+    command = argv[1]
+    if command in {"-h", "--help"}:
+        print(_USAGE)
+        return 0
+    if command == "--version":
+        print(_HOSTED_VERSION)
+        return 0
+    if command != "build":
+        print(f"xcc-aot: unknown command: {command}", file=sys.stderr)
+        return 2
+    if any(argument in {"-h", "--help"} for argument in argv[2:]):
+        print(_USAGE)
+        return 0
+    try:
+        options = _parse_build_options(argv[2:])
+    except ValueError as error:
+        print(f"xcc-aot: {error}", file=sys.stderr)
+        return 2
+    if options.parser == "subset":
+        print(
+            "xcc-aot: subset parser backend is unavailable before Milestone 3",
+            file=sys.stderr,
+        )
+        return 2
+    _run_hosted_build(options)
+    return 0
+
+
+def _parse_build_options(arguments: tuple[str, ...]) -> BuildOptions:
+    values: dict[str, str] = {}
+    no_cache = False
+    index = 0
+    value_names = {
+        "--assembler",
+        "--emit-llvm",
+        "--emit-normalized-ir",
+        "--entry",
+        "--linker",
+        "--llc",
+        "--output",
+        "--parser",
+        "--source-manifest",
+        "--source-root",
+    }
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--no-cache":
+            if no_cache:
+                raise ValueError("duplicate option: --no-cache")
+            no_cache = True
+            index += 1
+            continue
+        name = argument
+        value = ""
+        if "=" in argument:
+            name, value = argument.split("=", 1)
+        elif name in value_names:
+            index += 1
+            if index >= len(arguments):
+                raise ValueError(f"missing value for {name}")
+            value = arguments[index]
+        else:
+            raise ValueError(f"unknown option: {argument}")
+        if name not in value_names:
+            raise ValueError(f"unknown option: {name}")
+        if name in values:
+            raise ValueError(f"duplicate option: {name}")
+        if not value:
+            raise ValueError(f"empty value for {name}")
+        values[name] = value
+        index += 1
+    for required in ("--source-root", "--entry", "--output", "--parser"):
+        if required not in values:
+            raise ValueError(f"missing required option: {required}")
+    parser = values["--parser"]
+    if parser not in {"cpython", "subset"}:
+        raise ValueError(f"unsupported parser: {parser}")
+    entry = values["--entry"]
+    if entry.count(":") != 1:
+        raise ValueError(f"invalid entry: {entry}")
+    module_name, function_name = entry.split(":", 1)
+    if not module_name or not function_name.isidentifier():
+        raise ValueError(f"invalid entry: {entry}")
+    return BuildOptions(
+        Path(values["--source-root"]),
+        entry,
+        Path(values["--output"]),
+        parser,
+        no_cache,
+        Path(values["--emit-llvm"]) if "--emit-llvm" in values else None,
+        Path(values["--emit-normalized-ir"]) if "--emit-normalized-ir" in values else None,
+        Path(values["--source-manifest"]) if "--source-manifest" in values else None,
+        values.get("--llc"),
+        values.get("--assembler"),
+        values.get("--linker", "cc"),
+    )
+
+
+def _run_hosted_build(options: BuildOptions) -> None:
+    module_name, function_name = options.entry.split(":", 1)
+    source_set = resolve_source_set(
+        options.source_root,
+        module_name,
+        ParserBackend("cpython", _hosted_parser),
+        CachePolicy(options.no_cache),
+    )
+    entry_unit = next(
+        (unit for unit in source_set.units if unit.module == module_name),
+        None,
+    )
+    if entry_unit is None:
+        raise AotError(
+            (
+                AotDiagnostic(
+                    "XCC-AOT-CLI-0001",
+                    f"Entry module missing from source set: {module_name}",
+                    filename="<cli>",
+                ),
+            )
+        )
+    ir_module = lower_analysis_to_ir(
+        analyze_module(entry_unit.parsed),
+        entry=function_name,
+        include_functions={function_name},
+    )
+    qualified_entry = f"{module_name}.{function_name}"
+    ir_module = replace(
+        ir_module,
+        functions=tuple(
+            replace(function, name=qualified_entry) if function.name == function_name else function
+            for function in ir_module.functions
+        ),
+        entry=qualified_entry,
+    )
+    llvm_text = emit_llvm_text(ir_module)
+    if options.emit_llvm is not None:
+        _write_text(options.emit_llvm, llvm_text)
+    if options.emit_normalized_ir is not None:
+        _write_text(
+            options.emit_normalized_ir,
+            normalize_llvm(llvm_text, source_set.source_root),
+        )
+    if options.source_manifest is not None:
+        _write_text(options.source_manifest, render_source_manifest(source_set))
+    compile_llvm_executable(
+        llvm_text,
+        options.output,
+        filename=entry_unit.canonical_path,
+        llc=options.llc,
+        assembler=options.assembler,
+        linker=options.linker,
+    )
+
+
+def normalize_llvm(llvm_text: str, source_root: str) -> str:
+    normalized: list[str] = []
+    for line in llvm_text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("; ModuleID =", "source_filename =", "!DIFile(")):
+            line = line.replace(source_root, "$SOURCE_ROOT")
+        normalized.append(line.rstrip())
+    return "\n".join(normalized) + "\n"
+
+
+def _hosted_parser(source: str, filename: str) -> AotModule:
+    return parse_source(source, filename=filename)
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
