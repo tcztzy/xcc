@@ -228,6 +228,23 @@ and one expected failure:
 The union failure is a frozen Stage 0 limitation, not authorization to implement
 the exception ABI during Milestone 1. CPython `configure && make` was not run.
 
+The preserved worktree was split into these logical commits before the final
+Milestone 1 gate:
+
+- `5d11369`: strong-bootstrap spec, design, audit, plan, and initial ledger;
+- `a3d7932`: hosted binder function-default metadata;
+- `45f404c`: AOT IR and lowerer expansion;
+- `f5aeeb6`: LLVM emitter and runtime expansion;
+- `2327b2d`: native oracle harness hardening;
+- `4e05d45`: native C integration boundary;
+- `6cf3711`: quarantined parser/bootstrap source shapes;
+- `5ec8ef8`: quarantined preprocessor/bootstrap source shapes;
+- `5f14f26`: quarantined sema/codegen source shapes plus B272; and
+- `6dfb290`: bootstrap slicing and native gates.
+
+The hunk ledger maps every preserved non-AOT source hunk to the applicable
+integration or quarantine commit. Missing native gates remain explicit debt.
+
 ## Priority Correction
 
 P0 is now strong-bootstrap infrastructure: project-owned AST/parser, explicit

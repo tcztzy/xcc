@@ -2,6 +2,12 @@
 
 ## Current
 
+- Split the approved Milestone 1 worktree into ten logical commits covering
+  strong-bootstrap documents, hosted binder, IR/lowering, emitter/runtime,
+  native oracle tooling, the native C integration boundary, three explicitly
+  quarantined core-source groups, and bootstrap slicing/gates. The checked
+  source-change ledger now maps all 726 non-AOT source hunks across 32 files to
+  their owning commit while preserving missing native-oracle status.
 - Updated four direct LLVM codegen helper fixtures to pass the explicit
   left/right null-pointer-constant facts added to `_LLVMGen._compare`; the
   initial Milestone 1 codegen baseline exposed the stale helper ABI as B272.
