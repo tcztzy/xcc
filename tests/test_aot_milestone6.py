@@ -1,3 +1,4 @@
+import ast
 import unittest
 from pathlib import Path
 
@@ -198,6 +199,45 @@ class AotMilestone6AdmissionTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 analysis = analyze_path(path)
                 self.assertGreater(len(analysis.types.functions), 0)
+
+
+class AotRepositorySourceContractTests(unittest.TestCase):
+    def test_runtime_source_uses_no_future_annotations(self) -> None:
+        offenders: list[str] = []
+        for path in sorted((ROOT / "src/xcc").rglob("*.py")):
+            tree = compile(
+                path.read_text(encoding="utf-8"),
+                str(path),
+                "exec",
+                ast.PyCF_ONLY_AST,
+            )
+            for statement in tree.body:
+                if (
+                    isinstance(statement, ast.ImportFrom)
+                    and statement.module == "__future__"
+                    and any(alias.name == "annotations" for alias in statement.names)
+                ):
+                    offenders.append(str(path.relative_to(ROOT)))
+        self.assertEqual([], offenders)
+
+    def test_runtime_source_defines_no_marker_decorators(self) -> None:
+        forbidden = {"nogil", "aot", "native", "compiled", "jit"}
+        offenders: list[str] = []
+        for path in sorted((ROOT / "src/xcc").rglob("*.py")):
+            tree = compile(
+                path.read_text(encoding="utf-8"),
+                str(path),
+                "exec",
+                ast.PyCF_ONLY_AST,
+            )
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue
+                for decorator in node.decorator_list:
+                    name = ast.unparse(decorator).split("(", 1)[0]
+                    if name.rsplit(".", 1)[-1] in forbidden:
+                        offenders.append(f"{path.relative_to(ROOT)}:{node.lineno}:{name}")
+        self.assertEqual([], offenders)
 
 
 if __name__ == "__main__":

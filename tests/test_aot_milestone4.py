@@ -151,6 +151,12 @@ class AotMilestone4SliceTests(unittest.TestCase):
         )
         names = {function.name for function in module.functions}
         self.assertIn("xcc.lexer.Lexer._skip_whitespace_and_comments", names)
+        skip = next(
+            function
+            for function in module.functions
+            if function.name == "xcc.lexer.Lexer._skip_whitespace_and_comments"
+        )
+        self.assertNotIn("closed", repr(skip.body))
 
     def test_entry_driven_core_slice_handles_duplicate_roots_and_record_discovery(self) -> None:
         module = lower_core_slice(

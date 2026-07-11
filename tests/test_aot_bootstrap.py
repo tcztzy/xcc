@@ -1,4 +1,5 @@
 import ast
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -13,6 +14,9 @@ from xcc.aot import (
     build_native_bootstrap,
     collect_bootstrap_sources,
     emit_llvm_text,
+    IrBoolType,
+    IrCall,
+    IrReturn,
     lower_bootstrap_entry_smoke,
     lower_source_to_ir,
     plan_bootstrap_entry,
@@ -97,6 +101,175 @@ class AotBootstrapEntryTests(unittest.TestCase):
 
 
 class AotBootstrapLoweringTests(unittest.TestCase):
+    def test_bootstrap_compiler_path_reaches_frontend_and_codegen(self) -> None:
+        module = lower_bootstrap_entry_smoke(ROOT)
+        functions = {function.name for function in module.functions}
+        self.assertIn("xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked", functions)
+        self.assertIn("xcc.frontend._aot_compile_source_unchecked", functions)
+        self.assertIn("xcc.codegen.generate_llvm_ir", functions)
+        self.assertIn("xcc.codegen._LLVMGen.generate", functions)
+
+    def test_bootstrap_llvm_has_no_conftest_include_fast_path(self) -> None:
+        llvm_ir = emit_llvm_text(lower_bootstrap_entry_smoke(ROOT))
+        self.assertNotIn("conftest.c", llvm_ir)
+        self.assertNotIn("#include <", llvm_ir)
+        self.assertNotIn("call ptr @strstr(ptr %source_path", llvm_ir)
+
+    def test_bootstrap_real_compiler_path_emits_llc_parseable_llvm(self) -> None:
+        module = lower_bootstrap_entry_smoke(ROOT)
+        llvm_ir = emit_llvm_text(module)
+        out = ROOT / "build/aot/probes/bootstrap-real-path.ll"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(llvm_ir, encoding="utf-8")
+        self.assertIn("define i32 @main(i32 %argc, ptr %argv)", llvm_ir)
+        self.assertIn("xcc.cc_driver._aot_compile_source_path_to_object", llvm_ir)
+        self.assertIn("xcc.frontend._aot_compile_source_unchecked", llvm_ir)
+        self.assertIn("xcc.codegen._LLVMGen.generate", llvm_ir)
+
+    def test_rewrites_preprocessor_protocol_calls_to_concrete_preprocessor(self) -> None:
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.preprocessor.__init__.preprocess_source",
+                {},
+            ),
+            "xcc.preprocessor.__init__.preprocess_source_no_callback",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.preprocessor.process._ProcessTextPreprocessor._expand_line",
+                {},
+            ),
+            "xcc.preprocessor.__init__._Preprocessor._expand_line_no_callback",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "_ProcessTextPreprocessor._should_collect_function_macro_continuation",
+                {
+                    "_ProcessTextPreprocessor._should_collect_function_macro_continuation": (
+                        "xcc.preprocessor.process._ProcessTextPreprocessor."
+                        "_should_collect_function_macro_continuation"
+                    )
+                },
+            ),
+            "xcc.preprocessor.__init__._Preprocessor._should_collect_function_macro_continuation",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.preprocessor.process._ProcessTextPreprocessor._handle_include",
+                {},
+            ),
+            "xcc.preprocessor.__init__._Preprocessor._handle_include",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.preprocessor.process._ProcessTextPreprocessor._handle_conditional",
+                {},
+            ),
+            "xcc.preprocessor.__init__._Preprocessor._handle_conditional_no_callback",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.preprocessor.process._ProcessTextPreprocessor."
+                "_handle_conditional_for_process",
+                {},
+            ),
+            "xcc.preprocessor.__init__._Preprocessor."
+            "_handle_conditional_for_process_no_callback",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "_ProcessTextPreprocessor._handle_define",
+                {
+                    "_ProcessTextPreprocessor._handle_define": (
+                        "xcc.preprocessor.process._ProcessTextPreprocessor._handle_define"
+                    )
+                },
+            ),
+            "xcc.preprocessor.__init__._Preprocessor._handle_define_no_callback",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.preprocessor.process._ProcessTextPreprocessor._handle_undef",
+                {},
+            ),
+            "xcc.preprocessor.__init__._Preprocessor._handle_undef_no_callback",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.preprocessor.__init__._Preprocessor._parse_include_target",
+                {},
+            ),
+            "xcc.preprocessor.__init__._Preprocessor._parse_include_target_no_macro",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.preprocessor.__init__._Preprocessor._skip_guarded_include",
+                {},
+            ),
+            "xcc.preprocessor.__init__._Preprocessor._skip_guarded_include_no_callback",
+        )
+
+    def test_rewrites_statement_parser_protocol_calls_to_concrete_parser(self) -> None:
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.parser.statements._StatementParser._parse_statement",
+                {},
+            ),
+            "xcc.parser.__init__.Parser._parse_statement",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "_StatementParser._check_keyword",
+                {
+                    "_StatementParser._check_keyword": (
+                        "xcc.parser.statements._StatementParser._check_keyword"
+                    )
+                },
+            ),
+            "xcc.parser.__init__.Parser._check_keyword",
+        )
+
+    def test_rewrites_file_scope_analyzer_protocol_calls_to_concrete_analyzer(self) -> None:
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.sema.declarations._FileScopeAnalyzer._register_type_spec",
+                {},
+            ),
+            "xcc.sema.__init__.Analyzer._register_type_spec",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "_FileScopeAnalyzer._resolve_type",
+                {
+                    "_FileScopeAnalyzer._resolve_type": (
+                        "xcc.sema.declarations._FileScopeAnalyzer._resolve_type"
+                    )
+                },
+            ),
+            "xcc.sema.__init__.Analyzer._resolve_type",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.sema.declarations._FileScopeAnalyzer."
+                "_register_function_typed_file_scope_decl",
+                {},
+            ),
+            "xcc.sema.__init__.Analyzer._register_function_typed_file_scope_decl",
+        )
+
+    def test_file_scope_analyzer_protocol_fields_are_cast_to_concrete_analyzer(self) -> None:
+        source = (ROOT / "src/xcc/sema/declarations.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "analyze_file_scope_decl"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertIn("a = cast('Analyzer', analyzer)", method_source)
+        self.assertNotIn("a = analyzer", method_source)
+
     def test_lowers_bootstrap_entry_smoke_wrapper(self) -> None:
         module = lower_bootstrap_entry_smoke(ROOT)
         functions = {function.name: function for function in module.functions}
@@ -120,17 +293,30 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         body = repr(function.body)
         self.assertNotIn("target='Path'", body)
         self.assertNotIn("target='str'", body)
-        self.assertIn("target='_aot_read_text_file'", body)
-        self.assertIn("target='_aot_write_text_file'", body)
+        self.assertIn("target='_aot_compile_source_path_to_object'", body)
         self.assertIn("target='_aot_exec_argv'", body)
         llvm_ir = emit_llvm_text(module)
         self.assertIn(
             "define i32 @_aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
             llvm_ir,
         )
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 1)", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 4)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 %", llvm_ir)
         self.assertNotIn("call ptr @__getitem", llvm_ir)
+
+    def test_smoke_compiler_body_accepts_configure_compile_flags(self) -> None:
+        source = (ROOT / "src/xcc/cc_driver.py").read_text(encoding="utf-8")
+        module = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/cc_driver.py"),
+            include_records=frozenset(),
+            include_functions={"_aot_compile_smoke_source_to_object"},
+        )
+        body = repr(module.functions[0].body)
+        self.assertIn("target='_aot_arg_is_c_source'", body)
+        self.assertIn("target='_aot_default_object_path'", body)
+        self.assertIn("target='_aot_compile_source_path_to_object'", body)
+        self.assertIn("target='_aot_exec_argv'", body)
+        self.assertIn("target='__str_startswith'", body)
 
     def test_bootstrap_entry_uses_project_owned_smoke_compiler(self) -> None:
         module = lower_bootstrap_entry_smoke(ROOT)
@@ -142,16 +328,61 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         smoke_compiler = functions["xcc.cc_driver._aot_compile_smoke_source_to_object"]
         self.assertNotEqual(smoke_compiler.body, ())
         self.assertIn("target='len'", repr(smoke_compiler.body))
-        self.assertIn("target='xcc.cc_driver._aot_compile_source_to_llvm_ir'", repr(smoke_compiler.body))
+        self.assertIn(
+            "target='xcc.cc_driver._aot_compile_source_path_to_object'",
+            repr(smoke_compiler.body),
+        )
+        self.assertIn("target='xcc.cc_driver._aot_arg_is_c_source'", repr(smoke_compiler.body))
+        self.assertIn("target='xcc.cc_driver._aot_is_linker_flag'", repr(smoke_compiler.body))
+        self.assertIn("target='xcc.cc_driver._aot_link_argv'", repr(smoke_compiler.body))
+        self.assertIn("target='xcc.cc_driver._aot_exec_argv'", repr(smoke_compiler.body))
         self.assertNotIn("target='xcc.cc_driver._aot_is_smoke_source'", repr(smoke_compiler.body))
         self.assertNotIn("target='xcc.cc_driver._aot_smoke_llvm_ir'", repr(smoke_compiler.body))
+        self.assertIn("xcc.cc_driver._aot_compile_source_path_to_object", functions)
         self.assertIn("xcc.cc_driver._aot_compile_source_to_llvm_ir", functions)
-        self.assertIn("xcc.cc_driver._aot_is_smoke_compile_command", functions)
+        self.assertIn("xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked", functions)
+        self.assertNotIn("xcc.cc_driver._aot_is_smoke_source", functions)
+        self.assertNotIn("xcc.cc_driver._aot_is_autoconf_stdio_run_probe", functions)
+        self.assertNotIn("xcc.cc_driver._aot_smoke_llvm_ir", functions)
+        self.assertIn("xcc.cc_driver._aot_arg_is_c_source", functions)
+        self.assertIn("xcc.cc_driver._aot_default_object_path", functions)
+        self.assertIn("xcc.cc_driver._aot_link_object_path", functions)
+        self.assertIn("xcc.cc_driver._aot_is_linker_flag", functions)
+        self.assertIn("xcc.cc_driver._aot_link_argv", functions)
+        self.assertNotIn("xcc.cc_driver._aot_is_smoke_compile_command", functions)
         self.assertIn("xcc.cc_driver._aot_smoke_llvm_path", functions)
         self.assertIn("xcc.cc_driver._aot_smoke_llc_argv", functions)
         self.assertIn("xcc.cc_driver._aot_read_text_file", functions)
         self.assertIn("xcc.cc_driver._aot_write_text_file", functions)
         self.assertIn("xcc.cc_driver._aot_exec_argv", functions)
+        self.assertIn("xcc.preprocessor.__init__.preprocess_source_no_callback", functions)
+        self.assertIn(
+            "xcc.preprocessor.__init__._Preprocessor."
+            "_handle_conditional_for_process_no_callback",
+            functions,
+        )
+        self.assertIn(
+            "xcc.preprocessor.__init__._Preprocessor._parse_include_target_no_macro",
+            functions,
+        )
+        self.assertIn(
+            "xcc.preprocessor.__init__._Preprocessor._parse_header_name_operand_no_macro",
+            functions,
+        )
+        self.assertIn("xcc.preprocessor.__init__._Preprocessor._expand_line_no_callback", functions)
+        self.assertIn("xcc.preprocessor.__init__._Preprocessor._expand_macro_text", functions)
+        self.assertIn(
+            "xcc.preprocessor.__init__._Preprocessor._handle_define_no_callback",
+            functions,
+        )
+        self.assertIn(
+            "xcc.preprocessor.__init__._Preprocessor._handle_undef_no_callback",
+            functions,
+        )
+        self.assertIn(
+            "xcc.preprocessor.__init__._Preprocessor._skip_guarded_include_no_callback",
+            functions,
+        )
 
         llvm_ir = emit_llvm_text(module)
 
@@ -172,8 +403,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             llvm_ir,
         )
         self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %argv)", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 1)", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 2)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv,", llvm_ir)
         self.assertNotIn("load_args:", llvm_ir)
         self.assertNotIn("write_llvm_path:", llvm_ir)
         self.assertNotIn("exec_llc:", llvm_ir)
@@ -185,27 +415,42 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "call ptr @xcc.cc_driver._aot_read_text_file(ptr %",
             llvm_ir,
         )
+        self.assertIn("define i1 @xcc.cc_driver._aot_arg_is_c_source(", llvm_ir)
+        self.assertIn("define ptr @xcc.cc_driver._aot_default_object_path(", llvm_ir)
+        self.assertIn("define ptr @xcc.cc_driver._aot_link_object_path(", llvm_ir)
+        self.assertIn("define i1 @xcc.cc_driver._aot_is_linker_flag(", llvm_ir)
+        self.assertIn("define ptr @xcc.cc_driver._aot_link_argv(", llvm_ir)
         self.assertIn(
-            "define i1 @xcc.cc_driver._aot_is_smoke_compile_command("
-            "i32 %argc, ptr %c_flag, ptr %output_flag)",
+            "define i1 @xcc.cc_driver._aot_compile_source_path_to_object(",
             llvm_ir,
         )
         self.assertIn(
-            "call i1 @xcc.cc_driver._aot_is_smoke_compile_command("
-            "i32 %argc, ptr %",
+            "call i1 @xcc.cc_driver._aot_compile_source_path_to_object(",
             llvm_ir,
         )
+        self.assertIn("call ptr @xcc.cc_driver._aot_link_argv(", llvm_ir)
         self.assertNotIn("%arg1_cmp = call i32 @strcmp", llvm_ir)
         self.assertNotIn("%arg3_cmp = call i32 @strcmp", llvm_ir)
         self.assertIn(
             "define ptr @xcc.cc_driver._aot_compile_source_to_llvm_ir("
-            "ptr %source_path, ptr %source_text)",
+            "ptr %source_path, ptr %source_text, ptr %include_dirs, "
+            "ptr %defines, ptr %undefs, ptr %std)",
             llvm_ir,
         )
         self.assertIn(
             "call ptr @xcc.cc_driver._aot_compile_source_to_llvm_ir(ptr %",
             llvm_ir,
         )
+        self.assertIn(
+            "call ptr @xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked(",
+            llvm_ir,
+        )
+        self.assertIn("define ptr @xcc.cc_driver._aot_default_system_include_dirs(", llvm_ir)
+        self.assertNotIn("call ptr @strstr(ptr %source_path", llvm_ir)
+        self.assertNotIn("call ptr @strstr(ptr %source_text", llvm_ir)
+        self.assertNotIn("conftest.c", llvm_ir)
+        self.assertNotIn("#include <", llvm_ir)
+        self.assertNotIn("define i32 @main()", llvm_ir)
         self.assertNotIn("%source_file = call ptr @fopen", llvm_ir)
         self.assertNotIn("%source_read = call i64 @fread", llvm_ir)
         self.assertNotIn("%source_len_ok = icmp eq i64 %source_read, 26", llvm_ir)
@@ -241,12 +486,45 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "call i32 @xcc.cc_driver._aot_exec_argv(ptr %",
             llvm_ir,
         )
-        self.assertIn("ret i32 %", llvm_ir)
+        self.assertIn("ret i32 %exec", llvm_ir)
         self.assertIn("call i32 @__xcc_aot_execvp_tuple(ptr %argv)", llvm_ir)
         self.assertNotIn("call i32 @__xcc_aot_execvp_tuple(ptr %llc_argv)", llvm_ir)
         self.assertNotIn("%llc_argv = alloca ptr, i64 6", llvm_ir)
         self.assertNotIn("call i32 @execvp(ptr @.str", llvm_ir)
         self.assertIn("/opt/homebrew/opt/llvm/bin/llc", llvm_ir)
+        self.assertIn("declare i32 @fork()", llvm_ir)
+        self.assertIn("declare i32 @waitpid(i32, ptr, i32)", llvm_ir)
+        self.assertIn("declare void @_exit(i32)", llvm_ir)
+        self.assertIn("call i32 @fork()", llvm_ir)
+        self.assertIn("call i32 @waitpid(", llvm_ir)
+        self.assertIn(
+            "define ptr @xcc.preprocessor.__init__._Preprocessor._expand_macro_text(",
+            llvm_ir,
+        )
+        self.assertIn(
+            "define ptr @xcc.preprocessor.__init__._Preprocessor._expand_line_no_callback(",
+            llvm_ir,
+        )
+        self.assertIn(
+            "define void @xcc.preprocessor.__init__._Preprocessor._handle_define_no_callback(",
+            llvm_ir,
+        )
+        self.assertIn(
+            "define ptr @xcc.preprocessor.__init__._Preprocessor._parse_include_target_no_macro(",
+            llvm_ir,
+        )
+        self.assertIn(
+            "define i1 @xcc.preprocessor.__init__._Preprocessor._skip_guarded_include_no_callback(",
+            llvm_ir,
+        )
+        parser_start = llvm_ir.index(
+            "define ptr @xcc.preprocessor.__init__._Preprocessor."
+            "_parse_header_name_operand_no_macro("
+        )
+        parser_end = llvm_ir.index("\ndefine ", parser_start + 1)
+        parser_llvm = llvm_ir[parser_start:parser_end]
+        self.assertNotRegex(parser_llvm, r"getelementptr i8, ptr %[^,]+, i64 -1")
+        self.assertRegex(parser_llvm, r"sub i64 %[^,]+, 1")
         self.assertIn("declare ptr @fopen(ptr, ptr)", llvm_ir)
         self.assertIn("declare i64 @fwrite(ptr, i64, i64, ptr)", llvm_ir)
         self.assertIn("declare i32 @execvp(ptr, ptr)", llvm_ir)
@@ -345,7 +623,31 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertEqual([function.name for function in module.functions], ["_LLVMGen._decode_string"])
         self.assertNotIn("Dict", repr(module.functions[0].body))
 
-    def test_codegen_encode_string_units_lowers_with_typed_units_list(self) -> None:
+    def test_codegen_string_literal_quote_scan_lowers_without_break_lost_phi(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_string_literal_bytes"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertIn("self._string_literal_quote_pos(raw)", method_source)
+        self.assertNotIn("enumerate(raw)", method_source)
+        self.assertNotIn("break", method_source)
+        self.assertIn("def _string_literal_quote_pos", source)
+        literal_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_string_literal"
+        ]
+        self.assertEqual(len(literal_methods), 1)
+        literal_source = ast.unparse(literal_methods[0])
+        self.assertIn("init_len + 1", literal_source)
+        self.assertIn("c.ConstString(data, init_len, False)", literal_source)
+
+    def test_codegen_encode_string_units_lowers_without_comprehension_placeholders(self) -> None:
         source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
         module = lower_source_to_ir(
             source,
@@ -357,7 +659,10 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             [function.name for function in module.functions],
             ["_LLVMGen._encode_string_units"],
         )
-        self.assertIn("IrTupleType(elements=(IrIntType", repr(module.functions[0].body))
+        body = repr(module.functions[0].body)
+        self.assertIn("IrForEach", body)
+        self.assertNotIn("__ListComp", body)
+        self.assertNotIn("__GeneratorExp", body)
 
     def test_codegen_member_path_lowers_without_starred_list_literal(self) -> None:
         class_types = {}
@@ -515,6 +820,50 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "_LLVMGen._unary should not use Python unary literals in LLVM API args",
         )
 
+    def test_codegen_parse_int_value_lowers_without_runtime_int_or_negative_index(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        parse_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_parse_int_value"
+        ]
+        self.assertEqual(len(parse_methods), 1)
+        method = parse_methods[0]
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "int"
+                for node in ast.walk(method)
+            ),
+            "_LLVMGen._parse_int_value should not depend on runtime int(str, base)",
+        )
+        self.assertFalse(
+            any(
+                isinstance(node, ast.Subscript)
+                and isinstance(node.slice, ast.UnaryOp)
+                and isinstance(node.slice.op, ast.USub)
+                for node in ast.walk(method)
+            ),
+            "_LLVMGen._parse_int_value should not use negative string indexes",
+        )
+
+    def test_typemap_require_lowers_without_direct_int_key_subscript(self) -> None:
+        source = (ROOT / "src/xcc/sema/symbols.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        require_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "require"
+        ]
+        self.assertEqual(len(require_methods), 1)
+        method = require_methods[0]
+        self.assertFalse(
+            any(isinstance(node, ast.Subscript) for node in ast.walk(method)),
+            "TypeMap.require should not lower dict[id(node)] as tuple indexing",
+        )
+
     def test_codegen_function_designator_lowers_without_setdefault(self) -> None:
         source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -525,6 +874,30 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         ]
         self.assertEqual(len(function_designator_methods), 1)
         self.assertNotIn("setdefault", ast.unparse(function_designator_methods[0]))
+
+    def test_codegen_declare_func_lowers_param_cache_without_listcomp(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        declare_func_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_declare_func"
+        ]
+        self.assertEqual(len(declare_func_methods), 1)
+        method = declare_func_methods[0]
+        self.assertFalse(
+            any(isinstance(node, ast.ListComp) for node in ast.walk(method)),
+            "_declare_func should cache parameter types through a typed loop",
+        )
+        self.assertTrue(
+            any(
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "stored_param_types"
+                for node in ast.walk(method)
+            ),
+            "_declare_func should annotate stored_param_types before appending values",
+        )
 
     def test_codegen_const_from_bytes_lowers_without_any_call(self) -> None:
         source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
@@ -642,6 +1015,30 @@ class AotBootstrapLoweringTests(unittest.TestCase):
                     f"{method.name} should annotate value_type before Optional narrowing",
                 )
 
+    def test_codegen_eval_array_init_lowers_zero_fill_without_listcomp(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        eval_array_init_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_eval_array_init"
+        ]
+        self.assertEqual(len(eval_array_init_methods), 1)
+        method = eval_array_init_methods[0]
+        self.assertFalse(
+            any(isinstance(node, ast.ListComp) for node in ast.walk(method)),
+            "_eval_array_init should build default element constants through a typed loop",
+        )
+        self.assertTrue(
+            any(
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "elems"
+                for node in ast.walk(method)
+            ),
+            "_eval_array_init should annotate elems before appending values",
+        )
+
     def test_codegen_eval_record_init_lowers_without_nested_function(self) -> None:
         source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
@@ -696,6 +1093,10 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("record_name", annotated_names)
         self.assertIn("field_index", annotated_names)
         self.assertIn("member", annotated_names)
+        self.assertFalse(
+            any(isinstance(node, ast.ListComp) for node in ast.walk(method)),
+            "_eval_record_path_init should build field constants through a typed loop",
+        )
 
     def test_codegen_llvmgen_lowers_without_dead_term_flag(self) -> None:
         source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
@@ -814,6 +1215,263 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("LONGDOUBLE.name", repr(module.functions[0].body))
         self.assertNotIn("DOUBLE.name", repr(module.functions[0].body))
 
+    def test_incomplete_record_check_lowers_without_loop_flag_or_dict_membership(self) -> None:
+        source = (ROOT / "src/xcc/sema/type_resolution.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "is_invalid_incomplete_record_object_type"
+        ]
+        self.assertEqual(len(methods), 1)
+        method = methods[0]
+        method_source = ast.unparse(method)
+        self.assertNotIn("for ", method_source)
+        self.assertNotIn("not in self._record_definitions", method_source)
+        self.assertIn("self._record_members(key) is None", method_source)
+        self.assertNotIn("key in self._record_definitions", ast.unparse(tree))
+        self.assertNotIn("type_.name not in self._record_definitions", ast.unparse(tree))
+
+    def test_void_object_check_lowers_without_break_latched_flag(self) -> None:
+        source = (ROOT / "src/xcc/sema/__init__.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_is_invalid_void_object_type"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertNotIn("break", method_source)
+        self.assertNotIn("has_pointer_op", method_source)
+        self.assertIn("return False", method_source)
+        self.assertIn("return True", method_source)
+
+    def test_scope_record_tags_use_string_keys_for_native_dict_lookup(self) -> None:
+        source = (ROOT / "src/xcc/sema/symbols.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name in {"define_record_tag", "lookup_record_tag_current"}
+        ]
+        self.assertEqual(len(methods), 2)
+        for method in methods:
+            with self.subTest(method=method.name):
+                method_source = ast.unparse(method)
+                self.assertIn("kind + ' ' + tag", method_source)
+                self.assertFalse(any(isinstance(node, ast.Tuple) for node in ast.walk(method)))
+
+    def test_anonymous_record_names_use_explicit_native_state_updates(self) -> None:
+        records_source = (ROOT / "src/xcc/sema/records.py").read_text(encoding="utf-8")
+        records_tree = ast.parse(records_source)
+        records_functions = {
+            node.name: node
+            for node in ast.walk(records_tree)
+            if isinstance(node, ast.FunctionDef)
+        }
+        key_source = ast.unparse(records_functions["anonymous_record_key"])
+        name_source = ast.unparse(records_functions["record_type_name"])
+        self.assertIn("key = type_spec.name", key_source)
+        self.assertIn("str(id(member))", key_source)
+        self.assertIn("anonymous_record_key(type_spec)", name_source)
+        self.assertNotIn("(type_spec.name, type_spec.record_members)", name_source)
+
+        analyzer_source = (ROOT / "src/xcc/sema/__init__.py").read_text(encoding="utf-8")
+        analyzer_tree = ast.parse(analyzer_source)
+        methods = [
+            node
+            for node in ast.walk(analyzer_tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_record_type_name"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertIn("self._anon_record_counter = result[1]", method_source)
+        self.assertIn(
+            "self._anon_record_names[anonymous_record_key(type_spec)] = name",
+            method_source,
+        )
+        self.assertNotIn("name, self._anon_record_counter =", method_source)
+
+    def test_scope_parent_lookup_lowers_without_recursive_method_calls(self) -> None:
+        source = (ROOT / "src/xcc/sema/symbols.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name in {"lookup_record_tag", "lookup", "lookup_typedef"}
+        ]
+        self.assertEqual(len(methods), 3)
+        for method in methods:
+            with self.subTest(method=method.name):
+                method_source = ast.unparse(method)
+                self.assertIn("while scope is not None", method_source)
+                self.assertNotIn(f"self._parent.{method.name}", method_source)
+
+    def test_sema_child_scopes_do_not_depend_on_constructor_parent_argument(self) -> None:
+        symbols_source = (ROOT / "src/xcc/sema/symbols.py").read_text(encoding="utf-8")
+        symbols_tree = ast.parse(symbols_source)
+        helpers = [
+            node
+            for node in ast.walk(symbols_tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "child"
+        ]
+        self.assertEqual(len(helpers), 1)
+        helper_source = ast.unparse(helpers[0])
+        self.assertIn("scope = Scope()", helper_source)
+        self.assertIn("scope._parent = self", helper_source)
+        for module_path in (
+            ROOT / "src/xcc/sema/__init__.py",
+            ROOT / "src/xcc/sema/statements.py",
+            ROOT / "src/xcc/sema/expressions.py",
+        ):
+            with self.subTest(module=module_path.name):
+                source = module_path.read_text(encoding="utf-8")
+                self.assertNotIn("Scope(scope)", source)
+                self.assertNotIn("Scope(self._file_scope)", source)
+
+    def test_record_member_parser_avoids_break_after_appending_member(self) -> None:
+        source = (ROOT / "src/xcc/parser/type_specs.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "parse_record_member_declaration"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertNotIn("while True:", method_source)
+        self.assertIn("more_members = True", method_source)
+        self.assertIn("more_members = False", method_source)
+
+    def test_decl_stmt_parser_avoids_break_after_appending_declaration(self) -> None:
+        source = (ROOT / "src/xcc/parser/__init__.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_parse_decl_stmt"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertNotIn("while True:", method_source)
+        self.assertIn("more_declarations = True", method_source)
+        self.assertIn("more_declarations = False", method_source)
+
+    def test_unary_parser_lowers_without_break_latched_operator_flag(self) -> None:
+        source = (ROOT / "src/xcc/parser/expressions.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "parse_unary"
+        ]
+        helpers = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_check_unary_operator"
+        ]
+        self.assertEqual(len(methods), 1)
+        self.assertEqual(len(helpers), 1)
+        method_source = ast.unparse(methods[0])
+        helper_source = ast.unparse(helpers[0])
+        self.assertNotIn("has_unary_operator", method_source)
+        self.assertNotIn("break", method_source)
+        self.assertIn("_check_unary_operator(parser)", method_source)
+        self.assertIn("parser._check_punct('!')", helper_source)
+
+    def test_codegen_if_without_else_avoids_conditional_block_side_effect(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_emit_if"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertIn("else_bb = None", method_source)
+        self.assertIn("if stmt.else_body is not None", method_source)
+        self.assertIn("if else_bb is not None", method_source)
+        self.assertNotIn("if stmt.else_body else None", method_source)
+
+    def test_codegen_lookup_local_lowers_without_reversed_scope_iteration(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_lookup_local"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertIn("index = len(self._locals)", method_source)
+        self.assertIn("while index > 0", method_source)
+        self.assertNotIn("reversed(self._locals)", method_source)
+        self.assertIn("self._lookup_local_in_scope(scope, name)", method_source)
+        self.assertIn("def _set_current_local", source)
+        self.assertIn("def _current_local_contains", source)
+        self.assertIn("def _lookup_local_in_scope", source)
+        self.assertIn("scope.items()", source)
+        self.assertNotIn("name in scope", source)
+        self.assertNotIn("current_scope.get", source)
+        self.assertNotIn("self._locals[-1]", source)
+
+    def test_codegen_pointer_null_compare_avoids_inttoptr_for_zero_literal(self) -> None:
+        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        binary_methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_binary"
+        ]
+        self.assertEqual(len(binary_methods), 1)
+        binary_source = ast.unparse(binary_methods[0])
+        self.assertIn("self._compare_pointer_null", binary_source)
+        self.assertIn("if null_cmp is not None", binary_source)
+        methods = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_compare"
+        ]
+        self.assertEqual(len(methods), 1)
+        method_source = ast.unparse(methods[0])
+        self.assertIn("right_is_null_pointer_constant", method_source)
+        self.assertIn("left_is_null_pointer_constant", method_source)
+        self.assertIn("right = c.ConstNull(lt)", method_source)
+        self.assertIn("left = c.ConstNull(rt)", method_source)
+        self.assertIn("def _is_zero_int_literal", source)
+        self.assertIn("def _is_pointer_comparison_type", source)
+        self.assertIn("type_.pointer_depth > 0", source)
+        self.assertIn("len(type_.array_lengths) > 0", source)
+        self.assertIn("c.BuildICmp(self._builder, 32, value, null", source)
+        self.assertIn("def _compare_pointer_truth", source)
+
+    def test_sema_integer_literal_parser_avoids_untagged_union_and_global_dicts(self) -> None:
+        source = (ROOT / "src/xcc/sema/constants.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        functions = {
+            node.name: node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef)
+        }
+        parser_source = ast.unparse(functions["parse_int_literal"])
+        candidates_source = ast.unparse(functions["_integer_literal_candidates"])
+        limits_source = ast.unparse(functions["fits_integer_literal_value"])
+        self.assertIn("lexeme: str", parser_source)
+        self.assertNotIn("isinstance(lexeme, int)", parser_source)
+        self.assertIn("_integer_literal_candidates(is_decimal, suffix)", parser_source)
+        self.assertIn("int(body, 10)", parser_source)
+        self.assertNotIn("int(body)", parser_source)
+        self.assertNotIn(".get(", parser_source)
+        self.assertIn("return (INT, LONG, LLONG)", candidates_source)
+        self.assertNotIn(".get(", candidates_source)
+        self.assertNotIn(".get(", limits_source)
+
     def test_codegen_union_size_lowers_without_generator_max(self) -> None:
         class_types = {}
         for module_path in (
@@ -874,6 +1532,30 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertEqual(functions[name].body, ())
+        llvm_ir = emit_llvm_text(module)
+        self.assertIn("define ptr @xcc.llvm_api.ptr_array(ptr %values)", llvm_ir)
+        self.assertIn("define ptr @xcc.llvm_api.zero_ptr_array(i64 %size)", llvm_ir)
+        self.assertIn("define ptr @xcc.llvm_api.optional_zero_ptr_array(i64 %size)", llvm_ir)
+        self.assertIn("declare ptr @calloc(i64, i64)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %values, i64 %index)", llvm_ir)
+        self.assertNotIn("define ptr @xcc.llvm_api.ptr_array(ptr %values) {\nentry:\n  ret ptr null", llvm_ir)
+
+    def test_slice_lowers_imported_global_string_container_membership(self) -> None:
+        module = aot_slice.lower_core_slice(
+            (
+                ROOT / "src/xcc/ast.py",
+                ROOT / "src/xcc/lexer.py",
+                ROOT / "src/xcc/parser/__init__.py",
+                ROOT / "src/xcc/parser/expressions.py",
+                ROOT / "src/xcc/parser/type_specs.py",
+            ),
+            root_targets=("xcc.parser.expressions.is_parenthesized_type_name_start",),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("@xcc.parser.expressions.is_parenthesized_type_name_start", llvm_ir)
+        self.assertNotIn("@__cmp_In", llvm_ir)
 
     def test_frontend_unchecked_success_helper_body_is_ordinary_lowerable(self) -> None:
         class_types = {}
@@ -922,6 +1604,80 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("Path", edge_map)
         self.assertNotIn("*", edge_map)
         self.assertEqual(edge_map["lex_tokens"], "xcc.lexer.lex")
+        package_map = aot_slice._module_rename_map(
+            "xcc.frontend",
+            "from xcc.parser import parse\n"
+            "def f() -> int:\n"
+            "    return 1\n",
+            {"xcc.frontend", "xcc.parser.__init__"},
+        )
+        self.assertEqual(package_map["parse"], "xcc.parser.__init__.parse")
+        relative_module_map = aot_slice._module_rename_map(
+            "xcc.sema.__init__",
+            "from . import type_resolution as _type_resolution\n"
+            "def f() -> bool:\n"
+            "    return _type_resolution.is_record_name('struct X')\n",
+            {"xcc.sema.__init__", "xcc.sema.type_resolution"},
+        )
+        self.assertEqual(relative_module_map["_type_resolution"], "xcc.sema.type_resolution")
+        renamed = aot_slice._rename_statement_calls(
+            (
+                IrReturn(
+                    IrCall(
+                        "_type_resolution.is_record_name",
+                        (),
+                        IrBoolType(),
+                    )
+                ),
+            ),
+            relative_module_map,
+        )
+        self.assertEqual(
+            renamed,
+            (
+                IrReturn(
+                    IrCall(
+                        "xcc.sema.type_resolution.is_record_name",
+                        (),
+                        IrBoolType(),
+                    )
+                ),
+            ),
+        )
+        assigned_alias_map = aot_slice._module_rename_map(
+            "xcc.preprocessor.__init__",
+            "from . import text as _text\n"
+            "_parse_directive = _text._parse_directive\n"
+            "def f() -> int:\n"
+            "    return 1\n",
+            {"xcc.preprocessor.__init__", "xcc.preprocessor.text"},
+        )
+        self.assertEqual(
+            assigned_alias_map["_parse_directive"],
+            "xcc.preprocessor.text._parse_directive",
+        )
+        records_analysis = analyze_path(ROOT / "src/xcc/sema/records.py")
+        function_types = {
+            "xcc.sema.records.record_type_name": records_analysis.types.functions[
+                "record_type_name"
+            ]
+        }
+        text_analysis = analyze_path(ROOT / "src/xcc/preprocessor/text.py")
+        function_types["xcc.preprocessor.text._parse_directive"] = text_analysis.types.functions[
+            "_parse_directive"
+        ]
+        aliased_types = aot_slice._function_types_with_module_aliases(
+            function_types,
+            {
+                "record_type_name": "xcc.sema.records.record_type_name",
+                "_parse_directive": "xcc.preprocessor.text._parse_directive",
+            },
+        )
+        self.assertEqual(aliased_types["record_type_name"].return_type.name, "tuple[str, int]")
+        self.assertEqual(
+            len(aliased_types["_parse_directive"].parameters),
+            len(function_types["xcc.preprocessor.text._parse_directive"].parameters),
+        )
 
 
 class AotBootstrapNativeBuildTests(unittest.TestCase):
@@ -990,6 +1746,458 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         output = build_native_bootstrap(ROOT, ROOT / "build/aot/xcc-smoke")
         self.assertTrue(output.exists())
+        with TemporaryDirectory() as temp_dir:
+            work = Path(temp_dir)
+            source = work / "main.c"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+            obj = work / "main.o"
+            compile_result = subprocess.run(
+                (str(output), "-c", str(source), "-o", str(obj)),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            self.assertTrue(obj.exists())
+
+            exe = work / "main"
+            link_result = subprocess.run(
+                (str(output), str(source), "-o", str(exe)),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(link_result.returncode, 0, link_result.stderr)
+            run_result = subprocess.run((str(exe),), check=False)
+            self.assertEqual(run_result.returncode, 0)
+
+    def test_real_native_bootstrap_links_configure_style_object_when_llc_exists(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-configure-driver"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "conftest.c"
+            obj = root / "conftest.o"
+            exe = root / "conftest"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+            compile_result = subprocess.run(
+                (str(executable), "-c", "-I.", "-DNAME=1", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            self.assertTrue(obj.exists())
+            link_result = subprocess.run(
+                (str(executable), str(obj), "-o", str(exe)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(link_result.returncode, 0, link_result.stderr)
+            self.assertTrue(exe.exists())
+
+    def test_v367_native_bootstrap_missing_include_exits_nonzero(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-v367"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "missing_include.c"
+            obj = root / "missing_include.o"
+            source.write_text(
+                "#include <xcc_v367_missing_header.h>\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Include not found", result.stdout + result.stderr)
+            self.assertFalse(obj.exists())
+
+    @unittest.expectedFailure
+    def test_v368_native_bootstrap_include_next_uses_following_system_root(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-v368"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            include_next_source = root / "include_next.c"
+            include_next_obj = root / "include_next.o"
+            include_next_source.write_text(
+                "#include <inttypes.h>\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            include_next_result = subprocess.run(
+                (
+                    str(executable),
+                    "-c",
+                    str(include_next_source),
+                    "-o",
+                    str(include_next_obj),
+                ),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                include_next_result.returncode,
+                0,
+                include_next_result.stdout + include_next_result.stderr,
+            )
+            self.assertNotIn(
+                "Circular include detected",
+                include_next_result.stdout + include_next_result.stderr,
+            )
+            self.assertTrue(include_next_obj.exists())
+
+    def test_real_native_bootstrap_handles_conditional_include_and_union_when_llc_exists(
+        self,
+    ) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-conditional-driver"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            header = root / "guarded.h"
+            source = root / "main.c"
+            obj = root / "main.o"
+            header.write_text(
+                "#ifndef GUARDED_H\n"
+                "#define GUARDED_H\n"
+                '#include "guarded.h" /* self */\n'
+                "int guarded;\n"
+                "#else\n"
+                "int bad;\n"
+                "#endif\n",
+                encoding="utf-8",
+            )
+            source.write_text(
+                '#include "guarded.h"\n'
+                "__PTRDIFF_TYPE__ native_ptrdiff;\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            compile_result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj), "-I", str(root)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            self.assertEqual(compile_result.stdout, "")
+            self.assertTrue(obj.exists())
+
+            union_source = root / "union.c"
+            union_obj = root / "union.o"
+            union_source.write_text(
+                "union U { int x; long y; };\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            union_result = subprocess.run(
+                (str(executable), "-c", str(union_source), "-o", str(union_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(union_result.returncode, 0, union_result.stdout + union_result.stderr)
+            self.assertEqual(union_result.stdout.strip(), "")
+            self.assertTrue(union_obj.exists())
+
+            typedef_source = root / "typedef.c"
+            typedef_obj = root / "typedef.o"
+            typedef_source.write_text(
+                "typedef struct { int x; } __mbstate_t;\n"
+                "__mbstate_t value;\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            typedef_result = subprocess.run(
+                (str(executable), "-c", str(typedef_source), "-o", str(typedef_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                typedef_result.returncode,
+                0,
+                typedef_result.stdout + typedef_result.stderr,
+            )
+            self.assertEqual(typedef_result.stdout.strip(), "")
+            self.assertTrue(typedef_obj.exists())
+
+            fnptr_source = root / "fnptr.c"
+            fnptr_obj = root / "fnptr.o"
+            fnptr_source.write_text(
+                "int (*fn)(void *);\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            fnptr_result = subprocess.run(
+                (str(executable), "-c", str(fnptr_source), "-o", str(fnptr_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                fnptr_result.returncode,
+                0,
+                fnptr_result.stdout + fnptr_result.stderr,
+            )
+            self.assertEqual(fnptr_result.stdout.strip(), "")
+            self.assertTrue(fnptr_obj.exists())
+
+            record_source = root / "record_void_ptr.c"
+            record_obj = root / "record_void_ptr.o"
+            record_source.write_text(
+                "struct S { void *cookie; int (*close)(void *); };\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            record_result = subprocess.run(
+                (str(executable), "-c", str(record_source), "-o", str(record_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                record_result.returncode,
+                0,
+                record_result.stdout + record_result.stderr,
+            )
+            self.assertEqual(record_result.stdout.strip(), "")
+            self.assertTrue(record_obj.exists())
+
+            fnparam_source = root / "fnparam.c"
+            fnparam_obj = root / "fnparam.o"
+            fnparam_source.write_text(
+                "int funopen(int (*)(void *, char *, int));\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            fnparam_result = subprocess.run(
+                (str(executable), "-c", str(fnparam_source), "-o", str(fnparam_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                fnparam_result.returncode,
+                0,
+                fnparam_result.stdout + fnparam_result.stderr,
+            )
+            self.assertEqual(fnparam_result.stdout.strip(), "")
+            self.assertTrue(fnparam_obj.exists())
+            fnparam_llvm = fnparam_obj.with_suffix(fnparam_obj.suffix + ".ll")
+            self.assertIn(
+                "declare i32 @funopen(ptr)",
+                fnparam_llvm.read_text(encoding="utf-8"),
+            )
+
+            proto_pointer_source = root / "proto_pointer.c"
+            proto_pointer_obj = root / "proto_pointer.o"
+            proto_pointer_source.write_text(
+                "void takes(void *p);\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            proto_pointer_result = subprocess.run(
+                (str(executable), "-c", str(proto_pointer_source), "-o", str(proto_pointer_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                proto_pointer_result.returncode,
+                0,
+                proto_pointer_result.stdout + proto_pointer_result.stderr,
+            )
+            self.assertEqual(proto_pointer_result.stdout.strip(), "")
+            self.assertTrue(proto_pointer_obj.exists())
+            proto_pointer_llvm = proto_pointer_obj.with_suffix(proto_pointer_obj.suffix + ".ll")
+            self.assertIn(
+                "declare void @takes(ptr)",
+                proto_pointer_llvm.read_text(encoding="utf-8"),
+            )
+
+            proto_return_source = root / "proto_return.c"
+            proto_return_obj = root / "proto_return.o"
+            proto_return_source.write_text(
+                "int *returns_ptr(void);\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            proto_return_result = subprocess.run(
+                (str(executable), "-c", str(proto_return_source), "-o", str(proto_return_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                proto_return_result.returncode,
+                0,
+                proto_return_result.stdout + proto_return_result.stderr,
+            )
+            self.assertEqual(proto_return_result.stdout.strip(), "")
+            self.assertTrue(proto_return_obj.exists())
+            proto_return_llvm = proto_return_obj.with_suffix(proto_return_obj.suffix + ".ll")
+            self.assertIn(
+                "declare ptr @returns_ptr()",
+                proto_return_llvm.read_text(encoding="utf-8"),
+            )
+
+            binop_source = root / "binop.c"
+            binop_obj = root / "binop.o"
+            binop_source.write_text(
+                "int main(void){return 6 * 3;}\n",
+                encoding="utf-8",
+            )
+            try:
+                binop_result = subprocess.run(
+                    (str(executable), "-c", str(binop_source), "-o", str(binop_obj)),
+                    cwd=root,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5.0,
+                )
+            except subprocess.TimeoutExpired as exc:
+                stdout = (
+                    exc.stdout.decode("utf-8", "replace")
+                    if isinstance(exc.stdout, bytes)
+                    else (exc.stdout or "")
+                )
+                stderr = (
+                    exc.stderr.decode("utf-8", "replace")
+                    if isinstance(exc.stderr, bytes)
+                    else (exc.stderr or "")
+                )
+                self.fail(stdout + stderr)
+            self.assertEqual(
+                binop_result.returncode,
+                0,
+                binop_result.stdout + binop_result.stderr,
+            )
+            self.assertEqual(binop_result.stdout.strip(), "")
+            self.assertTrue(binop_obj.exists())
+            binop_llvm = binop_obj.with_suffix(binop_obj.suffix + ".ll")
+            self.assertIn(
+                "ret i32 18",
+                binop_llvm.read_text(encoding="utf-8"),
+            )
+
+            pointer_null_source = root / "pointer_null.c"
+            pointer_null_obj = root / "pointer_null.o"
+            pointer_null_source.write_text(
+                "int main(void){int *cursor = 0; return cursor != 0;}\n",
+                encoding="utf-8",
+            )
+            pointer_null_result = subprocess.run(
+                (
+                    str(executable),
+                    "-c",
+                    str(pointer_null_source),
+                    "-o",
+                    str(pointer_null_obj),
+                ),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5.0,
+            )
+            self.assertEqual(
+                pointer_null_result.returncode,
+                0,
+                pointer_null_result.stdout + pointer_null_result.stderr,
+            )
+            self.assertEqual(pointer_null_result.stdout.strip(), "")
+            self.assertTrue(pointer_null_obj.exists())
+            pointer_null_llvm = pointer_null_obj.with_suffix(pointer_null_obj.suffix + ".ll")
+            pointer_null_text = pointer_null_llvm.read_text(encoding="utf-8")
+            self.assertIn("icmp ne ptr", pointer_null_text)
+            self.assertNotIn("inttoptr", pointer_null_text)
+
+            opaque_record_source = root / "opaque_record.c"
+            opaque_record_obj = root / "opaque_record.o"
+            opaque_record_source.write_text(
+                "struct O;\n"
+                "int accepts_opaque(struct O *p);\n"
+                "struct O *returns_opaque(void);\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            opaque_record_result = subprocess.run(
+                (str(executable), "-c", str(opaque_record_source), "-o", str(opaque_record_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                opaque_record_result.returncode,
+                0,
+                opaque_record_result.stdout + opaque_record_result.stderr,
+            )
+            self.assertEqual(opaque_record_result.stdout.strip(), "")
+            self.assertTrue(opaque_record_obj.exists())
+            opaque_record_llvm = opaque_record_obj.with_suffix(opaque_record_obj.suffix + ".ll")
+            opaque_record_text = opaque_record_llvm.read_text(encoding="utf-8")
+            self.assertIn("declare i32 @accepts_opaque(ptr)", opaque_record_text)
+            self.assertIn("declare ptr @returns_opaque()", opaque_record_text)
+
+            defined_record_source = root / "defined_record.c"
+            defined_record_obj = root / "defined_record.o"
+            defined_record_source.write_text(
+                "struct D { int x; };\n"
+                "int accepts_defined(struct D value);\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+            defined_record_result = subprocess.run(
+                (str(executable), "-c", str(defined_record_source), "-o", str(defined_record_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                defined_record_result.returncode,
+                0,
+                defined_record_result.stdout + defined_record_result.stderr,
+            )
+            self.assertEqual(defined_record_result.stdout.strip(), "")
+            self.assertTrue(defined_record_obj.exists())
 
 
 class AotBootstrapSelfHostHarnessTests(unittest.TestCase):

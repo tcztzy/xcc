@@ -115,8 +115,9 @@ def plan_bootstrap_entry(root: Path) -> AotBootstrapEntryPlan:
 
 def lower_bootstrap_entry_smoke(root: Path) -> IrModule:
     plan_bootstrap_entry(root)
+    modules = collect_bootstrap_sources(root)
     return lower_core_entry_slice(
-        (root / "src/xcc/cc_driver.py", root / "src/xcc/options.py"),
+        tuple(module.path for module in modules),
         _bootstrap_entry_smoke_wrapper(),
     )
 
@@ -137,6 +138,7 @@ def build_native_bootstrap(
         filename="<bootstrap>",
         llc=llc,
         cc=cc,
+        extra_link_args=_llvm_c_link_args(llc),
         diagnostic_code="XCC-AOT-BOOTSTRAP-0003",
     )
 
@@ -172,6 +174,14 @@ def run_bootstrap_self_host_smoke(
 
 def _bootstrap_module_name(relative: Path) -> str:
     return "xcc." + ".".join(relative.with_suffix("").parts)
+
+
+def _llvm_c_link_args(llc: str | None) -> tuple[str, ...]:
+    llc_path = Path(llc or "/opt/homebrew/opt/llvm/bin/llc")
+    lib_dir = llc_path.parent.parent / "lib"
+    if not (lib_dir / "libLLVM.dylib").exists():
+        return ()
+    return (f"-L{lib_dir}", "-lLLVM")
 
 
 def _bootstrap_input_name(module: AotSliceInput) -> str:
