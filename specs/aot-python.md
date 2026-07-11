@@ -96,7 +96,7 @@ V384: Bootstrap outputs ! deterministic module ordering, source manifest, normal
 id|status|task|cites
 T1|x|freeze current hosted Stage 0 and split the large worktree into bisectable logical commits|V379,V382,V384
 T2|x|define strong-bootstrap source contract, project-owned AST, and hosted/native AOT CLI|V369,V374,I.cmd
-T3|.|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
+T3|~|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
 T4|.|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
 T5|.|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
 T6|.|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378
@@ -123,3 +123,5 @@ B281|2026-07-11|LLVM normalization replaced the source-root text globally and co
 B282|2026-07-11|source closure scanned only top-level imports, omitted parent package initializers, silently ignored unknown externals, and allowed a subset manifest to include hosted-only modules|V370,V372,V384
 B283|2026-07-11|native-candidate admission rejected the owned AST's ordinary `dataclass(frozen=True, kw_only=True)` declaration because the decorator subset allowed only `frozen`|V370,V374
 B284|2026-07-11|the secondary native C bootstrap preloaded every module into a flat short-name class table, so `xcc.aot.py_ast.FunctionDef` displaced `xcc.ast.FunctionDef` and lost `is_variadic`|V376,V381,V383
+B285|2026-07-11|the first owned lexer emitted `NEWLINE` end spans after advancing to the next physical line instead of at the end of the newline token|V370,V384
+B286|2026-07-11|the owned lexer treated the empty EOF sentinel as a member of character-class strings, accepting a trailing line-continuation backslash and taking incorrect numeric/string EOF branches|V370,V384
