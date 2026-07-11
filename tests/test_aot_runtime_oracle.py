@@ -28,8 +28,14 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "        if value == 4:\n"
             "            break\n"
             "        total = total + value\n"
+            "    index: int = 0\n"
+            "    while True:\n"
+            "        index = index + 1\n"
+            "        if index == 3:\n"
+            "            break\n"
+            "        total = total + index\n"
             "    return total\n",
-            expected=4,
+            expected=7,
             filename="for-break-continue.py",
         )
 

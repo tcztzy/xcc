@@ -801,8 +801,7 @@ def parse_record_member_declaration(parser: "Parser") -> list[RecordMemberDecl]:
             return [RecordMemberDecl(base_type, None)]
         raise p._expected_identifier_error()
     members: list[RecordMemberDecl] = []
-    more_members = True
-    while more_members:
+    while True:
         name, declarator_ops = p._parse_declarator(
             allow_abstract=True,
             allow_vla=True,
@@ -836,10 +835,9 @@ def parse_record_member_declaration(parser: "Parser") -> list[RecordMemberDecl]:
                 bit_width_expr=bit_width_expr,
             )
         )
-        if p._check_punct(","):
-            p._advance()
-        else:
-            more_members = False
+        if not p._check_punct(","):
+            break
+        p._advance()
     p._expect_punct(";")
     return members
 

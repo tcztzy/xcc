@@ -1347,7 +1347,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
                 self.assertNotIn("Scope(scope)", source)
                 self.assertNotIn("Scope(self._file_scope)", source)
 
-    def test_record_member_parser_avoids_break_after_appending_member(self) -> None:
+    def test_record_member_parser_lowers_supported_break_after_member(self) -> None:
         source = (ROOT / "src/xcc/parser/type_specs.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
         methods = [
@@ -1358,9 +1358,36 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         ]
         self.assertEqual(len(methods), 1)
         method_source = ast.unparse(methods[0])
-        self.assertNotIn("while True:", method_source)
-        self.assertIn("more_members = True", method_source)
-        self.assertIn("more_members = False", method_source)
+        self.assertIn("while True:", method_source)
+        self.assertIn("break", method_source)
+        self.assertNotIn("more_members", method_source)
+
+        class_types = {}
+        function_types = {}
+        support_modules = {
+            "xcc.ast",
+            "xcc.lexer",
+            "xcc.types",
+        }
+        for module in collect_bootstrap_sources(ROOT):
+            if module.name not in support_modules and not module.name.startswith("xcc.parser"):
+                continue
+            analysis = analyze_path(module.path)
+            class_types.update(analysis.types.classes)
+            function_types.update(analysis.types.functions)
+        lowered = lower_source_to_ir(
+            source,
+            filename=str(ROOT / "src/xcc/parser/type_specs.py"),
+            include_records=frozenset(),
+            include_functions={"parse_record_member_declaration"},
+            extra_classes=class_types,
+            extra_functions=function_types,
+        )
+        self.assertEqual(
+            [function.name for function in lowered.functions],
+            ["parse_record_member_declaration"],
+        )
+        self.assertIn("IrBreak", repr(lowered.functions[0].body))
 
     def test_decl_stmt_parser_avoids_break_after_appending_declaration(self) -> None:
         source = (ROOT / "src/xcc/parser/__init__.py").read_text(encoding="utf-8")
