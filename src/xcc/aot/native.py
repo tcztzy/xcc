@@ -99,6 +99,7 @@ def compile_llvm_executable(
     filename: str,
     llc: str | None = None,
     cc: str = "cc",
+    extra_link_args: tuple[str, ...] = (),
     diagnostic_code: str = "XCC-AOT-NATIVE-0001",
 ) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -112,7 +113,7 @@ def compile_llvm_executable(
         diagnostic_code=diagnostic_code,
     )
     _run_tool(
-        (cc, str(obj_path), "-o", str(output)),
+        (cc, str(obj_path), *extra_link_args, "-o", str(output)),
         filename,
         diagnostic_code=diagnostic_code,
     )

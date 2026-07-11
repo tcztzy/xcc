@@ -141,6 +141,64 @@ class AotNativeRealSmokeTests(unittest.TestCase):
         self.assertEqual(result.native_returncode, 0)
 
     @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_real_none_initialized_loop_local_native_smoke_matches_cpython_stdout(self) -> None:
+        result = run_native_smoke(
+            "def message() -> str:\n"
+            "    expanded = None\n"
+            "    while expanded is None:\n"
+            "        expanded = 'done'\n"
+            "    return expanded\n",
+            entry="message",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.python_result, "done")
+        self.assertEqual(result.native_stdout, "done\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_real_tuple_negative_index_native_smoke_matches_cpython_stdout(self) -> None:
+        result = run_native_smoke(
+            "def message() -> str:\n"
+            "    values = ('first', 'last')\n"
+            "    return values[-1]\n",
+            entry="message",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.python_result, "last")
+        self.assertEqual(result.native_stdout, "last\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_real_string_slice_native_smoke_matches_cpython_stdout(self) -> None:
+        result = run_native_smoke(
+            "def message() -> str:\n"
+            "    text = 'abcdef'\n"
+            "    start = 1\n"
+            "    stop = 4\n"
+            "    return text[start:stop]\n",
+            entry="message",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.python_result, "bcd")
+        self.assertEqual(result.native_stdout, "bcd\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_real_optional_string_equality_native_smoke_matches_cpython_stdout(self) -> None:
+        result = run_native_smoke(
+            "def message() -> str:\n"
+            "    storage_class: str | None = None\n"
+            "    if storage_class == 'typedef':\n"
+            "        return 'bad'\n"
+            "    return 'ok'\n",
+            entry="message",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.python_result, "ok")
+        self.assertEqual(result.native_stdout, "ok\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
     def test_real_int_to_bytes_native_smoke_matches_single_byte_stdout(self) -> None:
         result = run_native_smoke(
             "def message() -> bytes:\n"
