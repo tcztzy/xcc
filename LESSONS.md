@@ -1363,3 +1363,15 @@
   CPython can make all of them look harmless while the current AOT runtime may
   lower them to pointer equality, list-style tuple indexing, or incomplete
   string runtime behavior.
+- A loop-header phi is not the post-loop value for every exit. A `break` edge
+  must contribute the environment at the actual break predecessor; otherwise
+  an append or assignment immediately before `break` is silently discarded.
+- A test named `llc_parseable` must execute `llc`. Text generation alone can
+  miss invalid pointer arithmetic and other LLVM verifier/parser failures in a
+  very large real bootstrap module.
+- Treat an `unexpected success` as evidence to audit, not as a reason to weaken
+  assertions. When the full native behavior/object oracle passes, remove the
+  stale expected-failure marker and promote the probe to an ordinary gate.
+- Removing a function-name special emitter also removes its private signature
+  contract. Replace name-shaped tests with generic ABI/handler assertions so a
+  bodyless fallback or reintroduced bypass cannot masquerade as success.

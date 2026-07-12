@@ -2,6 +2,29 @@
 
 ## Current
 
+- Completed the approved strong-bootstrap Milestone 4. Fallible native AOT
+  functions now use a compositional status/result/error ABI with typed payloads,
+  source spans, cross-call propagation, handler ancestry dispatch, rethrow, and
+  supported `else`/`finally` behavior. Only the outer native CLI converts an
+  uncaught error to stderr and a process exit status.
+- Completed the required native runtime semantics for supported tuple/dict,
+  string/bytes, path equality, negative indexing, constructors, iteration, and
+  `for`/`while` control flow. Break edges now carry the current iteration's SSA
+  values into the loop exit, fixing the anonymous-record typedef failure without
+  another parser source workaround. The H419/H420 record-member loop workaround
+  was retired back to ordinary Python `while True`/`break`.
+- Removed the legacy source-to-LLVM special emitter/bodyless leaf boundary, so
+  its ordinary Python `try/except` body reaches the generic status ABI. Factory
+  raises use their declared exception-record type, conditional expressions
+  narrow both branches, and bytes concat/repeat/encode/iteration use their
+  length-aware runtime representation.
+- Verified Milestone 4 with 389/389 status/runtime/IR/LLVM tests, a direct
+  `status-oracle.ll` to arm64 object `llc` gate, lint/type checks, and the complete
+  85-test bootstrap module in 4550.733s. The real native smoke, configure-style
+  object/link fixture, conditional include/union/anonymous typedef suite, V367
+  missing-include diagnostic, and V368 `include_next` object oracle all pass as
+  ordinary tests. This completes T4 only; native `xcc.aot` reachability and
+  Stage 1 remain Milestone 5/6 work. CPython `configure && make` was not run.
 - Completed the approved strong-bootstrap Milestone 3 frontend: the project now
   has a hand-written Python lexer and recursive-descent/Pratt parser that build
   immutable owned AST nodes without `ast.parse`, generated tables, cached AST,

@@ -371,6 +371,55 @@ parser), `c08cf82` (hosted oracle, common/backend boundary, and subset CLI), and
 status/spec commit records this evidence; none of these commits includes the
 unrelated OSS application document.
 
+## Milestone 4 Exception/Runtime Result
+
+Milestone 4 replaces the temporary default-return/process-exit exception path
+with a compositional native ABI:
+
+```text
+status fn(args..., result_out, error_out)
+```
+
+Fallibility is propagated through the project call graph. Error records carry
+the exception type, message, source span, and typed payload; lowered handlers
+dispatch through exception ancestry, and supported rethrow, `try` `else`, and
+`finally` control flow execute without converting an inner error directly into
+a process exit. The generated process `main` is the sole uncaught-error stderr
+and exit boundary. The source-to-LLVM wrapper now uses its ordinary Python
+`try/except` body and generic status emission rather than a private emitter or
+bodyless leaf.
+
+The supported runtime subset now has CPython/native behavior oracles for
+`for`/`while`/`break`/`continue`, tuple comparison and membership, dict lookup,
+membership and mutation, negative indexing, constructors, string/bytes
+operations, and `Path` equality. Loop exits reached by `break` merge values
+from the actual break predecessor, so assignments made in the current
+iteration are preserved. This fixed anonymous-record typedef compilation in
+the real native driver without rewriting the parser. H419/H420 were retired to
+ordinary `while True`/`break`, with their CPython and native oracles recorded in
+the source-change ledger.
+
+Current acceptance evidence:
+
+- the four planned status/runtime/IR/LLVM modules pass 389/389 tests in 6.234s;
+- `/opt/homebrew/opt/llvm/bin/llc` accepts
+  `build/aot/status/status-oracle.ll` and emits an arm64 Mach-O object;
+- the advertised real-bootstrap parseability test now invokes `llc` and passes;
+- the complete bootstrap module passes 85/85 tests in 4550.733s, including the
+  native smoke, configure-style object/link fixture, conditional
+  include/union/anonymous typedef suite, V367 missing-include diagnostic, and
+  V368 `include_next` object oracle; V368 is no longer an expected failure;
+- `uv run tox -e lint`, `uv run tox -e type`, and `git diff --check` pass.
+
+The implementation is split across `435c7e2` (status ABI), `74bc292` (typed
+handlers), `1e5012e` (runtime value semantics), `2cad22a` (first workaround
+retirement), `41f074b` (real bootstrap runtime closure), and `933d519` (final
+native semantics and integration closure). No CPython `configure && make` work
+was run. The known B325/B326 complete-`py311` baseline failures were not
+retested or expanded in this milestone. T4 is complete, but this is not
+Milestone 5 native `xcc.aot` reachability, not Stage 1, and not strong-bootstrap
+completion.
+
 ## Priority Correction
 
 P0 is now strong-bootstrap infrastructure: project-owned AST/parser, explicit
