@@ -406,9 +406,11 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             llvm_ir,
         )
         self.assertIn(
-            "call i32 @aot_bootstrap_smoke_main(i32 %argc, ptr %argv_tuple)",
+            "call i32 @aot_bootstrap_smoke_main("
+            "i32 %argc, ptr %argv_tuple, ptr %result_out, ptr %error_record)",
             llvm_ir,
         )
+        self.assertIn("%failed = icmp ne i32 %status, 0", llvm_ir)
         self.assertIn("define ptr @__xcc_aot_c_argv_to_tuple(i32 %argc32, ptr %argv)", llvm_ir)
         self.assertNotIn("__xcc_aot_bootstrap_cc_delegate", llvm_ir)
         self.assertNotIn("@__xcc_aot_cc", llvm_ir)
@@ -512,29 +514,36 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("call i32 @fork()", llvm_ir)
         self.assertIn("call i32 @waitpid(", llvm_ir)
         self.assertIn(
-            "define ptr @xcc.preprocessor.__init__._Preprocessor._expand_macro_text(",
+            "@xcc.preprocessor.__init__._Preprocessor._expand_macro_text(",
             llvm_ir,
         )
         self.assertIn(
-            "define ptr @xcc.preprocessor.__init__._Preprocessor._expand_line_no_callback(",
+            "@xcc.preprocessor.__init__._Preprocessor._expand_line_no_callback(",
             llvm_ir,
         )
         self.assertIn(
-            "define void @xcc.preprocessor.__init__._Preprocessor._handle_define_no_callback(",
+            "@xcc.preprocessor.__init__._Preprocessor._handle_define_no_callback(",
             llvm_ir,
         )
         self.assertIn(
-            "define ptr @xcc.preprocessor.__init__._Preprocessor._parse_include_target_no_macro(",
+            "@xcc.preprocessor.__init__._Preprocessor._parse_include_target_no_macro(",
             llvm_ir,
         )
         self.assertIn(
-            "define i1 @xcc.preprocessor.__init__._Preprocessor._skip_guarded_include_no_callback(",
+            "@xcc.preprocessor.__init__._Preprocessor._skip_guarded_include_no_callback(",
             llvm_ir,
         )
-        parser_start = llvm_ir.index(
-            "define ptr @xcc.preprocessor.__init__._Preprocessor."
+        parser_symbol = (
+            "@xcc.preprocessor.__init__._Preprocessor."
             "_parse_header_name_operand_no_macro("
         )
+        parser_match = re.search(
+            rf"^define [^\n]+{re.escape(parser_symbol)}",
+            llvm_ir,
+            re.MULTILINE,
+        )
+        assert parser_match is not None
+        parser_start = parser_match.start()
         parser_end = llvm_ir.index("\ndefine ", parser_start + 1)
         parser_llvm = llvm_ir[parser_start:parser_end]
         self.assertNotRegex(parser_llvm, r"getelementptr i8, ptr %[^,]+, i64 -1")

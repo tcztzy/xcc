@@ -103,6 +103,7 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "    values: tuple[int, ...] = tuple([1, 2, 3])\n"
             "    data: bytes = bytes(4)\n"
             "    encoded: bytes = (65).to_bytes(2, 'big')\n"
+            "    padded: bytes = encoded[:1].ljust(3, b'Z')\n"
             "    text: str = 'alpha,beta'.replace('beta', 'gamma')\n"
             "    if text.split(',')[1] != 'gamma':\n"
             "        return 1\n"
@@ -110,6 +111,8 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "        return 2\n"
             "    if encoded[-1] != 65:\n"
             "        return 3\n"
+            "    if padded != b'\\x00ZZ' or len(padded) != 3:\n"
+            "        return 4\n"
             "    return len(values) + len(data)\n",
             expected=7,
             filename="constructors-strings-bytes.py",

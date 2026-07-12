@@ -368,6 +368,12 @@ class AotLlvmTextTests(unittest.TestCase):
                     tuple_type,
                     (IrReturn(IrName("value", tuple_type)),),
                 ),
+                IrFunction(
+                    "as_bytes",
+                    (IrParam("value", IrRecordType("bytes | None")),),
+                    IrBytesType(),
+                    (IrReturn(IrName("value", IrBytesType())),),
+                ),
             ),
         )
 
@@ -375,6 +381,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertIn("define ptr @as_string(ptr %value)", llvm_ir)
         self.assertIn("define ptr @as_tuple(ptr %value)", llvm_ir)
+        self.assertIn("define ptr @as_bytes(ptr %value)", llvm_ir)
         self.assertIn("ret ptr %value", llvm_ir)
 
     def test_emits_ifexp_select_with_typed_false_arm(self) -> None:

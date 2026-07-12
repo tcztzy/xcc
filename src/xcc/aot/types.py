@@ -43,6 +43,7 @@ class AotClassInfo:
     fields: dict[str, AotType]
     bases: tuple[str, ...] = ()
     int_constants: dict[str, int] = field(default_factory=dict)
+    init_field_parameters: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

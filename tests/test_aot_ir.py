@@ -1195,8 +1195,8 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(returned, IrReturn)
         self.assertIsInstance(returned.value, IrCall)
         assert isinstance(returned.value, IrCall)
-        self.assertEqual(returned.value.target, "__str_ljust")
-        self.assertEqual(returned.value.args[0].type, IrStringType())
+        self.assertEqual(returned.value.target, "__bytes_ljust")
+        self.assertEqual(returned.value.args[0].type, IrBytesType())
 
     def test_infers_optional_tuple_backed_method_call_assignment_type(self) -> None:
         module = lower_source_to_ir(
@@ -4126,6 +4126,25 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(assigned.value.target, "__ifexp")
         self.assertEqual(assigned.value.type, values_type)
 
+    def test_value_or_empty_dict_keeps_dict_type_when_function_returns_int(self) -> None:
+        module = lower_source_to_ir(
+            "class Type:\n"
+            "    pass\n"
+            "def choose(values: dict[int, Type] | None) -> int:\n"
+            "    overrides = values or {}\n"
+            "    return 0\n",
+            filename="dict_or_empty_int_fallback.py",
+            entry="choose",
+        )
+        values_type = IrDictType(IrIntType(64, signed=True), IrRecordType("Type"))
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertIsInstance(assigned.value, IrCall)
+        assert isinstance(assigned.value, IrCall)
+        self.assertEqual(assigned.value.target, "__ifexp")
+        self.assertEqual(assigned.value.type, values_type)
+
     def test_uses_extra_global_annotation_for_imported_record_constant(self) -> None:
         module = lower_source_to_ir(
             "class Type:\n"
@@ -5667,6 +5686,32 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual([function.name for function in module.functions], ["Pair.total", "entry"])
         self.assertEqual(module.functions[1].body[0].target, "pair")
         self.assertEqual(module.functions[1].body[1].value.target, "Pair.total")
+
+    def test_exception_constructor_maps_init_parameters_to_payload_fields(self) -> None:
+        source = (
+            "class Problem(ValueError):\n"
+            "    def __init__(\n"
+            "        self, message: str, line: int | None = None, *, code: str = 'E'\n"
+            "    ) -> None:\n"
+            "        self.line = line\n"
+            "        self.code = code\n"
+            "def fail() -> None:\n"
+            "    raise Problem('bad', 7, code='X')\n"
+        )
+        module = lower_source_to_ir(source, filename="exception_payload_fields.py", entry="fail")
+
+        raised = next(function for function in module.functions if function.name == "fail").body[0]
+        self.assertIsInstance(raised, IrRaise)
+        assert isinstance(raised, IrRaise)
+        self.assertIsInstance(raised.payload, IrConstructRecord)
+        assert isinstance(raised.payload, IrConstructRecord)
+        self.assertEqual(
+            raised.payload.args,
+            (
+                IrConstInt(7, IrIntType(64, signed=True)),
+                IrConstString("X"),
+            ),
+        )
 
     def test_lowers_missing_concrete_record_field_as_nested_default_constructor(self) -> None:
         source = (

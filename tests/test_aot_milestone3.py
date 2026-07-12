@@ -504,7 +504,8 @@ class AotMilestone3CoreNativeTests(unittest.TestCase):
             llc=_real_llc(),
         )
         self.assertEqual(result.native_returncode, 2)
-        self.assertIn("Unsupported language standard: c99", result.native_stdout)
+        self.assertEqual(result.native_stdout, "")
+        self.assertIn("Unsupported language standard: c99", result.native_stderr)
 
     @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
     def test_native_type_pointer_array_str_matches_cpython(self) -> None:

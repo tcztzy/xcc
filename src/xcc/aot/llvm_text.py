@@ -1943,6 +1943,8 @@ class _Emitter:
             return self._emit_string_lower_call(expr, names, lines)
         if expr.target == "__str_ljust":
             return self._emit_string_ljust_call(expr, names, lines)
+        if expr.target == "__bytes_ljust":
+            return self._emit_bytes_ljust_call(expr, names, lines)
         if expr.target == "__str_lstrip":
             return self._emit_string_strip_call(expr, names, lines, "lstrip")
         if expr.target == "__str_rstrip":
@@ -1960,6 +1962,8 @@ class _Emitter:
             return self._emit_string_predicate_call(expr, predicate_mode, names, lines)
         if expr.target == "__bytes":
             return self._emit_bytes_call(expr, names, lines)
+        if expr.target == "__bytes_slice":
+            return self._emit_bytes_slice_call(expr, names, lines)
         if expr.target == "__id":
             return self._emit_id_call(expr, names, lines)
         if expr.target == "__ord":
@@ -2529,6 +2533,31 @@ class _Emitter:
         result = self._tmp("ljust")
         lines.append(
             f"  {result} = call ptr @__xcc_aot_string_ljust("
+            f"ptr {value.value}, i64 {width.value}, ptr {fill.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_bytes_ljust_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 3:
+            self._error("__bytes_ljust expects three arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        width = self._emit_expr(expr.args[1], names, lines)
+        fill = self._emit_expr(expr.args[2], names, lines)
+        if not isinstance(value.type, IrBytesType) or not isinstance(fill.type, IrBytesType):
+            self._error("__bytes_ljust expects bytes receiver and fill")
+        if not isinstance(width.type, IrIntType) or width.type.bits != 64:
+            self._error("__bytes_ljust expects an int64 width")
+        if not isinstance(expr.type, IrBytesType):
+            self._error("__bytes_ljust expects a bytes result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("bytesljust")
+        lines.append(
+            f"  {result} = call ptr @__xcc_aot_bytes_ljust("
             f"ptr {value.value}, i64 {width.value}, ptr {fill.value})"
         )
         return _EmittedValue(result, expr.type)
@@ -3528,7 +3557,7 @@ class _Emitter:
             result = self._tmp("narrowbool")
             lines.append(f"  {result} = icmp ne ptr {value.value}, null")
             return _EmittedValue(result, requested_type)
-        if isinstance(requested_type, IrStringType | IrTupleType):
+        if isinstance(requested_type, IrStringType | IrBytesType | IrTupleType):
             return _EmittedValue(value.value, requested_type)
         return None
 
@@ -4307,6 +4336,34 @@ class _Emitter:
         )
         return _EmittedValue(result, expr.type)
 
+    def _emit_bytes_slice_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 3:
+            self._error("__bytes_slice expects three arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        start = self._emit_expr(expr.args[1], names, lines)
+        stop = self._emit_expr(expr.args[2], names, lines)
+        if (
+            not isinstance(value.type, IrBytesType)
+            or not isinstance(start.type, IrIntType)
+            or not isinstance(stop.type, IrIntType)
+            or not isinstance(expr.type, IrBytesType)
+        ):
+            self._error("__bytes_slice expects (bytes, int, int) -> bytes")
+        start_i64 = self._coerce_index_i64(start, lines, "__bytes_slice")
+        stop_i64 = self._coerce_index_i64(stop, lines, "__bytes_slice")
+        result = self._tmp("bytesslice")
+        self.needs_runtime_prelude = True
+        lines.append(
+            f"  {result} = call ptr @__xcc_aot_bytes_slice("
+            f"ptr {value.value}, i64 {start_i64}, i64 {stop_i64})"
+        )
+        return _EmittedValue(result, expr.type)
+
     def _pointer_compare_value(self, value: _EmittedValue) -> str:
         if isinstance(value.type, IrNoneType):
             return "null"
@@ -4849,6 +4906,8 @@ class _Emitter:
             self.needs_puts = True
             lines.append("  %printed = call i32 @puts(ptr %result)")
             lines.append("  ret i32 0")
+        elif isinstance(return_type, IrBytesType):
+            self._emit_main_bytes_result(lines)
         elif isinstance(return_type, IrIntType):
             if return_type.bits == 32:
                 lines.append("  ret i32 %result")
@@ -4920,6 +4979,8 @@ class _Emitter:
                 self.needs_puts = True
                 lines.append("  %printed = call i32 @puts(ptr %result)")
                 lines.append("  ret i32 0")
+            elif isinstance(return_type, IrBytesType):
+                self._emit_main_bytes_result(lines)
             elif isinstance(return_type, IrIntType):
                 if return_type.bits == 32:
                     lines.append("  ret i32 %result")
@@ -4933,6 +4994,18 @@ class _Emitter:
                 self._error(f"Unsupported main return type: {type(return_type).__name__}")
         lines.append("}")
         return "\n".join(lines)
+
+    def _emit_main_bytes_result(self, lines: list[str]) -> None:
+        self.needs_runtime_prelude = True
+        self.extra_declarations.add("declare i64 @write(i32, ptr, i64)")
+        newline = self._string_constant("\n")
+        lines.append("  %result.data = call ptr @__xcc_aot_bytes_data(ptr %result)")
+        lines.append("  %result.length = call i64 @__xcc_aot_bytes_len(ptr %result)")
+        lines.append(
+            "  %result.written = call i64 @write(i32 1, ptr %result.data, i64 %result.length)"
+        )
+        lines.append(f"  %newline.written = call i64 @write(i32 1, ptr {newline}, i64 1)")
+        lines.append("  ret i32 0")
 
     def _main_signature_and_args(self, function: IrFunction) -> tuple[str, str]:
         if not function.params:
@@ -5277,7 +5350,9 @@ def _record_union_can_runtime_narrow(record_name: str, requested_type: IrType) -
     if isinstance(requested_type, IrIntType):
         return "int" in parts
     if isinstance(requested_type, IrStringType):
-        return any(part in {"bytes", "str"} for part in parts)
+        return "str" in parts
+    if isinstance(requested_type, IrBytesType):
+        return "bytes" in parts
     if isinstance(requested_type, IrTupleType):
         return any(_record_union_part_is_tuple_runtime(part) for part in parts)
     return False

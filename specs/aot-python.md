@@ -160,3 +160,18 @@ B318|2026-07-11|introducing a distinct dict IR type left method dispatch and Par
 B319|2026-07-11|the first length-aware bytes object allocated no trailing zero beyond its logical payload, so exporting its data pointer to C string APIs could read past the allocation|V368,V376,V384
 B320|2026-07-11|IR regressions still asserted the obsolete tuple-backed-dict and string-backed-bytes type identities after those values gained distinct semantic types|V384
 B321|2026-07-11|the distinct bytes expression variant was imported but omitted from bootstrap slice call-target exhaustiveness, while adjacent imports and type predicates missed lint normalization|V376,V379,V384
+B322|2026-07-12|the quarantined record-member parser rewrote ordinary `while True`/`break` into a loop flag even after native lowering and runtime behavior supported the accepted control flow|V375,V382,V384
+B323|2026-07-12|the distinct bytes representation implemented indexing and length but omitted bytes slicing, `ljust`, and optional-bytes narrowing, so the real bootstrap stopped at `_const_from_bytes`|V368,V375,V376
+B324|2026-07-12|the Milestone 3 uncaught-error oracle still expected diagnostics on stdout after the status ABI moved the sole process-boundary diagnostic to stderr|V380,V384
+B325|2026-07-12|the first complete `py311` run exposed a pre-existing C parser rejection of overloadable function declarations with parenthesized function-pointer parameters|V379
+B326|2026-07-12|the first complete `py311` run exposed a pre-existing C parser diagnostic drift where an unsupported `?` unary operator reached integer-literal parsing|V379
+B327|2026-07-12|the bytes runtime gained a distinct object ABI but the native process wrapper still rejected bytes-valued entry results instead of writing their length-aware payload|V368,V375,V384
+B328|2026-07-12|the length-aware bytes main-wrapper write call exceeded the repository's 100-column lint contract|V379,V384
+B329|2026-07-12|full-slice lowering narrowed `bytes | None` names to bytes in IR, but the emitter retained the pre-guard union type and rejected an ABI-compatible bytes slice operand|V368,V375,V384
+B330|2026-07-12|value-producing boolean lowering merged tuple operands but not dict operands, so `typed_dict or {}` inherited an enclosing integer fallback and the real bootstrap emitter rejected a dict value as `int`|V375,V384
+B331|2026-07-12|record construction aligned call operands directly with stored fields, so custom exception constructors that accepted an unstored message shifted every typed payload field and made status-error emission ill-typed|V380,V384
+B332|2026-07-12|the real bootstrap emitter regression retained the pre-status two-argument entry-call assertion after the process wrapper gained explicit result and error out-parameters|V380,V384
+B333|2026-07-12|native-reachability assertions hard-coded pre-status helper return types, so correctly fallible preprocessor symbols appeared absent after transitive status analysis changed their ABI|V376,V380,V384
+B334|2026-07-12|the return-type-agnostic bootstrap assertion located a helper's first call site instead of its later definition, so body-shape checks inspected the caller after status propagation introduced that call|V380,V384
+B335|2026-07-12|the constructor-field binding guard exceeded the repository's 100-column lint contract|V379,V384
+B336|2026-07-12|the first manual wrap of the constructor-field guard passed line length but not the repository's canonical ruff formatter layout|V379,V384

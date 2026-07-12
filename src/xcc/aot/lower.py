@@ -1076,7 +1076,7 @@ class _Lowerer:
         if isinstance(expr, ast.Subscript):
             value = self._lower_expr(expr.value, names, expected)
             if isinstance(expr.slice, ast.Slice):
-                if isinstance(value.type, IrStringType):
+                if isinstance(value.type, IrStringType | IrBytesType):
                     int64 = IrIntType(64, signed=True)
                     start = (
                         self._lower_expr(expr.slice.lower, names, int64)
@@ -1088,6 +1088,8 @@ class _Lowerer:
                         if expr.slice.upper is not None
                         else IrCall("len", (value,), int64)
                     )
+                    if isinstance(value.type, IrBytesType):
+                        return IrCall("__bytes_slice", (value, start, stop), IrBytesType())
                     return IrCall("__str_slice", (value, start, stop), IrStringType())
                 return IrTupleSlice(
                     value,
@@ -1463,6 +1465,9 @@ class _Lowerer:
             if isinstance(receiver.type, IrStringType):
                 return self._lower_string_endswith_call(expr, receiver, names)
         if isinstance(expr.func, ast.Attribute) and expr.func.attr == "ljust":
+            receiver = self._lower_expr(expr.func.value, names, IrRecordType("object"))
+            if isinstance(receiver.type, IrBytesType):
+                return self._lower_bytes_ljust_call(expr, receiver, names)
             receiver = self._lower_string_receiver(expr.func.value, names)
             if isinstance(receiver.type, IrStringType):
                 return self._lower_string_ljust_call(expr, receiver, names)
@@ -2090,6 +2095,36 @@ class _Lowerer:
             IrStringType(),
         )
 
+    def _lower_bytes_ljust_call(
+        self,
+        expr: ast.Call,
+        receiver: IrExpr,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if expr.keywords or len(expr.args) not in {1, 2}:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        int64 = IrIntType(64, signed=True)
+        fill = (
+            self._lower_expr(expr.args[1], names, IrBytesType())
+            if len(expr.args) == 2
+            else IrConstBytes(b" ")
+        )
+        if isinstance(fill, IrConstBytes) and len(fill.value) != 1:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                "bytes.ljust fill must be exactly one byte",
+                expr,
+            )
+        return IrCall(
+            "__bytes_ljust",
+            (receiver, self._lower_expr(expr.args[0], names, int64), fill),
+            IrBytesType(),
+        )
+
     def _lower_string_strip_call(
         self,
         expr: ast.Call,
@@ -2491,6 +2526,15 @@ class _Lowerer:
                 keyword_values,
                 field_items,
             )
+        mapped_args = self._lower_init_mapped_constructor_args(
+            record_name,
+            expr,
+            names,
+            keyword_values,
+            field_items,
+        )
+        if mapped_args is not None:
+            return mapped_args
         args: list[IrExpr] = []
         for index, (field_name, field_type) in enumerate(field_items):
             ir_type = self._aot_type_to_ir_type(field_type)
@@ -2500,6 +2544,50 @@ class _Lowerer:
                 args.append(self._lower_expr(keyword_values[field_name], names, ir_type))
             else:
                 args.append(self._default_expr(ir_type))
+        return tuple(args)
+
+    def _lower_init_mapped_constructor_args(
+        self,
+        record_name: str,
+        expr: ast.Call,
+        names: dict[str, IrType],
+        keyword_values: dict[str, ast.expr],
+        field_items: tuple[tuple[str, AotType], ...],
+    ) -> tuple[IrExpr, ...] | None:
+        class_info = self.class_types[record_name]
+        field_parameters = class_info.init_field_parameters
+        if not field_items or any(
+            field_name not in field_parameters for field_name, _ in field_items
+        ):
+            return None
+        init_target = self._record_method_target(IrRecordType(record_name), "__init__")
+        function_info = self.function_types.get(init_target)
+        if function_info is None:
+            return None
+        parameters = function_info.parameters
+        defaults = function_info.parameter_defaults
+        if parameters and parameters[0][0] in {"self", "cls"}:
+            parameters = parameters[1:]
+            defaults = defaults[1:]
+        parameter_indexes = {
+            parameter_name: index
+            for index, (parameter_name, _parameter_type) in enumerate(parameters)
+        }
+        if any(parameter not in parameter_indexes for parameter in field_parameters.values()):
+            return None
+        args: list[IrExpr] = []
+        for field_name, field_type in field_items:
+            ir_type = self._aot_type_to_ir_type(field_type)
+            parameter_name = field_parameters[field_name]
+            parameter_index = parameter_indexes[parameter_name]
+            parameter_annotation = parameters[parameter_index][1]
+            if parameter_index < len(expr.args):
+                args.append(self._lower_expr(expr.args[parameter_index], names, ir_type))
+            elif parameter_name in keyword_values:
+                args.append(self._lower_expr(keyword_values[parameter_name], names, ir_type))
+            else:
+                default = defaults[parameter_index] if parameter_index < len(defaults) else None
+                args.append(self._default_call_arg_expr(parameter_annotation, ir_type, default))
         return tuple(args)
 
     def _lower_lexer_constructor_args(
@@ -3365,7 +3453,9 @@ class _Lowerer:
         non_none = tuple(part for part in parts if part != "None")
         if not non_none or len(non_none) == len(parts):
             return None
-        if len(non_none) == 1 and non_none[0] in {"bytes", "str"}:
+        if len(non_none) == 1 and non_none[0] == "bytes":
+            return IrBytesType()
+        if len(non_none) == 1 and non_none[0] == "str":
             return IrStringType()
         if any(part not in self.class_types for part in non_none):
             return None
@@ -3903,6 +3993,14 @@ def _value_bool_op_result_type(
     rest_type: IrType,
     expected: IrType,
 ) -> IrType:
+    if isinstance(first_type, IrDictType) and isinstance(rest_type, IrDictType):
+        generic_dict = IrDictType(IrRecordType("object"), IrRecordType("object"))
+        if first_type == generic_dict:
+            return rest_type
+        if rest_type == generic_dict or first_type == rest_type:
+            return first_type
+        if isinstance(expected, IrDictType):
+            return expected
     if isinstance(first_type, IrTupleType) and isinstance(rest_type, IrTupleType):
         if not first_type.elements:
             return rest_type

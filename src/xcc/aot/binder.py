@@ -103,6 +103,7 @@ class _TypeBinder:
             bases = tuple(annotation_name(base) for base in statement.bases)
             fields: dict[str, AotType] = {}
             int_constants: dict[str, int] = {}
+            init_field_parameters: dict[str, str] = {}
             for child in statement.body:
                 if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
                     fields[child.target.id] = self._resolve_annotation(child.annotation, child)
@@ -114,12 +115,18 @@ class _TypeBinder:
                     and type(child.value.value) is int
                 ):
                     int_constants[child.targets[0].id] = child.value.value
-            self._collect_init_fields(statement, fields, return_types)
+            self._collect_init_fields(
+                statement,
+                fields,
+                return_types,
+                init_field_parameters,
+            )
             self.classes[statement.name] = AotClassInfo(
                 statement.name,
                 fields,
                 bases,
                 int_constants,
+                init_field_parameters,
             )
 
     def _collect_init_fields(
@@ -127,12 +134,15 @@ class _TypeBinder:
         class_node: ast.ClassDef,
         fields: dict[str, AotType],
         return_types: dict[str, AotType],
+        init_field_parameters: dict[str, str],
     ) -> None:
         for child in class_node.body:
             if not isinstance(child, ast.FunctionDef) or child.name != "__init__":
                 continue
             local_types = self._function_local_types(child, class_node.name)
             for target, value, annotation in _init_self_assignments(child.body):
+                if isinstance(value, ast.Name):
+                    init_field_parameters[target.attr] = value.id
                 if target.attr in fields:
                     continue
                 if annotation is not None:
