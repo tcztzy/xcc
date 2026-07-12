@@ -97,7 +97,7 @@ id|status|task|cites
 T1|x|freeze current hosted Stage 0 and split the large worktree into bisectable logical commits|V379,V382,V384
 T2|x|define strong-bootstrap source contract, project-owned AST, and hosted/native AOT CLI|V369,V374,I.cmd
 T3|x|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
-T4|~|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
+T4|x|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
 T5|.|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
 T6|.|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378
 T7|.|build Stage 2 from `.py` with Stage 1 and no Python process/cache dependency|V369,V370,V371,V372,V373,V378
@@ -175,3 +175,21 @@ B333|2026-07-12|native-reachability assertions hard-coded pre-status helper retu
 B334|2026-07-12|the return-type-agnostic bootstrap assertion located a helper's first call site instead of its later definition, so body-shape checks inspected the caller after status propagation introduced that call|V380,V384
 B335|2026-07-12|the constructor-field binding guard exceeded the repository's 100-column lint contract|V379,V384
 B336|2026-07-12|the first manual wrap of the constructor-field guard passed line length but not the repository's canonical ruff formatter layout|V379,V384
+B337|2026-07-12|the bootstrap test named `llc_parseable` only wrote LLVM text and never invoked `llc`, allowing malformed pointer arithmetic to pass its advertised gate|V376,V384
+B338|2026-07-12|bytes concatenation and repetition lowered through generic integer `IrBinary`, emitting invalid `add ptr`/`mul ptr` in the real codegen closure|V368,V375,V384
+B339|2026-07-12|after bytes gained a distinct object ABI, `str.encode()` retained its old C-string identity lowering, producing a mixed string/bytes concat in the real codegen closure|V368,V375,V384
+B340|2026-07-12|bytes `for` iteration reused tuple length/get semantics and exposed each element as a pointer, so integer shifts in the real codegen closure emitted `shl i64 ptr`|V368,V375,V384
+B341|2026-07-12|a legacy source-to-LLVM wrapper emitter bypassed its structured `IrTry` and hard-coded a pre-status direct call to a fallible helper, returning null into the native file writer|V376,V380,V384
+B342|2026-07-12|the source-to-LLVM wrapper remained a bodyless native-emitted leaf after its legacy emitter was removed, replacing its ordinary Python `try/except` body with `ret null`|V376,V380,V384
+B343|2026-07-12|`raise exception_factory()` used the factory's textual call target as the runtime error tag instead of its declared exception-record return type, bypassing matching typed handlers|V375,V380,V384
+B344|2026-07-12|the first factory-aware raise patch unconditionally lowered every exception constructor as an ordinary call, rejecting supported built-in `ValueError(...)` raises before their status boundary|V380,V384
+B345|2026-07-12|the bootstrap CLI converted a caught compile error to result code 2 while preserving its error record, but the process wrapper printed diagnostics only for nonzero ABI status and silently discarded the message|V367,V380,V384
+B346|2026-07-12|conditional-expression lowering narrowed only the true branch, so `current() if token is None else token` retained `Token | None` in the else branch and blocked factory-method reachability|V375,V384
+B347|2026-07-12|LLVM loop exits reused the condition-header value after `break`, discarding assignments from the current iteration and making an anonymous-record typedef appear incomplete|V375,V384
+B348|2026-07-12|an optional-receiver regression still expected `Type | None` in the `x is None` conditional-expression else arm after B346 correctly narrowed that arm to `Type`|V375,V384
+B349|2026-07-12|a legacy malformed-leaf regression retained the removed source-to-LLVM special emitter's private signature contract after the wrapper moved to generic status-aware emission|V376,V380,V384
+B350|2026-07-12|the bytes-concatenation runtime addition exceeded the repository's 100-column lint contract in one emitted `memcpy` line|V379,V384
+B351|2026-07-12|new bytes/status/loop-exit emitter lines passed length checks but not the repository's canonical ruff formatter layout|V379,V384
+B352|2026-07-12|the bootstrap entry integration test retained a pre-status two-argument smoke-compiler definition assertion after fallibility analysis added result/error out-parameters|V380,V384
+B353|2026-07-12|adjacent bootstrap integration assertions still expected direct bool/pointer returns from three now-fallible source compilation helpers instead of status/result/error calls|V380,V384
+B354|2026-07-12|the V368 `include_next` native probe retained an `expectedFailure` marker after path value semantics made the full compile/object oracle pass|V368,V384

@@ -57,7 +57,6 @@ from xcc.aot.module import parse_source
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
 
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
-    "xcc.cc_driver._aot_compile_source_to_llvm_ir",
     "xcc.cc_driver._aot_exec_argv",
     "xcc.cc_driver._aot_read_text_file",
     "xcc.cc_driver._aot_write_text_file",
@@ -79,15 +78,7 @@ _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.sema.type_helpers._aot_integer_type_summary",
     "xcc.types.Type.__str__",
 }
-_BOOTSTRAP_REAL_COMPILER_TARGETS = (
-    "xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked",
-    "xcc.frontend._aot_compile_source_unchecked",
-    "xcc.codegen.generate_llvm_ir",
-    "xcc.codegen._LLVMGen.generate",
-)
-_NATIVE_EMITTED_LEAF_DEPENDENCIES = {
-    "xcc.cc_driver._aot_compile_source_to_llvm_ir": _BOOTSTRAP_REAL_COMPILER_TARGETS,
-}
+_NATIVE_EMITTED_LEAF_DEPENDENCIES: dict[str, tuple[str, ...]] = {}
 _PROTOCOL_METHOD_TARGETS = {
     "xcc.preprocessor.__init__.preprocess_source": (
         "xcc.preprocessor.__init__.preprocess_source_no_callback"

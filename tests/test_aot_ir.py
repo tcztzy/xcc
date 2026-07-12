@@ -1649,12 +1649,18 @@ class AotScalarLoweringTests(unittest.TestCase):
             returned.value,
             IrCall(
                 "__llvm_ModuleCreateWithName",
-                (IrName("name", IrStringType()),),
+                (
+                    IrCall(
+                        "__str_encode",
+                        (IrName("name", IrStringType()),),
+                        IrBytesType(),
+                    ),
+                ),
                 IrIntType(64, signed=True),
             ),
         )
 
-    def test_lowers_str_encode_as_c_string_identity_for_llvm_api_call(self) -> None:
+    def test_lowers_str_encode_as_bytes_for_llvm_api_call(self) -> None:
         module = lower_source_to_ir(
             "from xcc.llvm_api import llvm\n"
             "def lookup(module: int, name: str) -> int:\n"
@@ -1671,18 +1677,29 @@ class AotScalarLoweringTests(unittest.TestCase):
                 "__llvm_GetNamedFunction",
                 (
                     IrName("module", IrIntType(64, signed=True)),
-                    IrName("name", IrStringType()),
+                    IrCall(
+                        "__str_encode",
+                        (IrName("name", IrStringType()),),
+                        IrBytesType(),
+                    ),
                 ),
                 IrIntType(64, signed=True),
             ),
         )
 
         encoded = lower_source_to_ir(
-            "def encoded(name: str) -> str:\n"
+            "def encoded(name: str) -> bytes:\n"
             "    return name.encode('utf-8')\n",
             filename="str_encode_arg.py",
         )
-        self.assertEqual(encoded.functions[0].body[0].value, IrName("name", IrStringType()))
+        self.assertEqual(
+            encoded.functions[0].body[0].value,
+            IrCall(
+                "__str_encode",
+                (IrName("name", IrStringType()),),
+                IrBytesType(),
+            ),
+        )
 
     def test_lowers_bytes_literal_as_c_string_for_llvm_api_call(self) -> None:
         module = lower_source_to_ir(
@@ -3462,7 +3479,7 @@ class AotScalarLoweringTests(unittest.TestCase):
                     IrConstNone(),
                     IrCall(
                         "Type.callable_signature",
-                        (IrName("callee_type", IrRecordType("Type | None")),),
+                        (IrName("callee_type", IrRecordType("Type")),),
                         callable_signature_type,
                     ),
                 ),
@@ -4228,6 +4245,28 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(assigned.value.target, "__ifexp")
         self.assertEqual(assigned.value.type, IrRecordType("Type | None"))
         self.assertEqual(function.return_type, IrIntType(64, signed=True))
+
+    def test_ifexp_narrows_optional_record_in_none_test_else_branch(self) -> None:
+        module = lower_source_to_ir(
+            "class Token:\n"
+            "    kind: str\n"
+            "class Parser:\n"
+            "    def current(self) -> Token:\n"
+            "        return Token('EOF')\n"
+            "    def choose(self, token: Token | None = None) -> Token:\n"
+            "        culprit = self.current() if token is None else token\n"
+            "        return culprit\n",
+            filename="ifexp_none_else.py",
+            entry="Parser.choose",
+        )
+        function = next(function for function in module.functions if function.name == "Parser.choose")
+        assigned = function.body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertIsInstance(assigned.value, IrCall)
+        assert isinstance(assigned.value, IrCall)
+        self.assertEqual(assigned.value.type, IrRecordType("Token"))
+        self.assertEqual(assigned.value.args[2], IrName("token", IrRecordType("Token")))
 
     def test_lowers_bool_or_with_negative_isinstance_int_narrowing(self) -> None:
         module = lower_source_to_ir(
@@ -5308,6 +5347,52 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_bytes_concat_and_repeat_intrinsics(self) -> None:
+        module = lower_source_to_ir(
+            "def combine(value: bytes, count: int) -> bytes:\n"
+            "    value += b'x' * count\n"
+            "    return value + b'y'\n",
+            filename="bytes_ops.py",
+            entry="combine",
+        )
+        function = module.functions[0]
+        assigned = function.body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertIsInstance(assigned.value, IrCall)
+        assert isinstance(assigned.value, IrCall)
+        self.assertEqual(assigned.value.target, "__bytes_concat")
+        repeated = assigned.value.args[1]
+        self.assertIsInstance(repeated, IrCall)
+        assert isinstance(repeated, IrCall)
+        self.assertEqual(repeated.target, "__bytes_repeat")
+        returned = function.body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__bytes_concat")
+
+    def test_lowers_bytes_for_each_target_as_integer(self) -> None:
+        module = lower_source_to_ir(
+            "def total(data: bytes) -> int:\n"
+            "    result = 0\n"
+            "    for byte in data:\n"
+            "        result += byte\n"
+            "    return result\n",
+            filename="bytes_for.py",
+            entry="total",
+        )
+        loop = module.functions[0].body[1]
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        updated = loop.body.statements[0]
+        self.assertIsInstance(updated, IrAssign)
+        assert isinstance(updated, IrAssign)
+        self.assertIsInstance(updated.value, IrBinary)
+        assert isinstance(updated.value, IrBinary)
+        self.assertEqual(updated.value.right.type, IrIntType(64, signed=True))
+
     def test_lowers_id_builtin_call(self) -> None:
         module = lower_source_to_ir(
             "from typing import Any\n"
@@ -5711,6 +5796,26 @@ class AotScalarLoweringTests(unittest.TestCase):
                 IrConstInt(7, IrIntType(64, signed=True)),
                 IrConstString("X"),
             ),
+        )
+
+    def test_raise_factory_uses_returned_exception_record_type(self) -> None:
+        module = lower_source_to_ir(
+            "class Problem(ValueError):\n"
+            "    pass\n"
+            "def make_problem() -> Problem:\n"
+            "    return Problem()\n"
+            "def fail() -> None:\n"
+            "    raise make_problem()\n",
+            filename="raise_factory.py",
+            entry="fail",
+        )
+        raised = next(function for function in module.functions if function.name == "fail").body[0]
+        self.assertIsInstance(raised, IrRaise)
+        assert isinstance(raised, IrRaise)
+        self.assertEqual(raised.exception, "Problem")
+        self.assertEqual(
+            raised.payload,
+            IrCall("make_problem", (), IrRecordType("Problem")),
         )
 
     def test_lowers_missing_concrete_record_field_as_nested_default_constructor(self) -> None:

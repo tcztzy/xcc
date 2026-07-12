@@ -19,6 +19,7 @@ from xcc.aot import (
     IrContinue,
     IrDictType,
     IrEnumMember,
+    IrExceptHandler,
     IrField,
     IrForEach,
     IrFunction,
@@ -39,6 +40,7 @@ from xcc.aot import (
     IrStringType,
     IrTuple,
     IrTupleType,
+    IrTry,
     IrWhile,
     emit_llvm_text,
     lower_source_to_ir,
@@ -57,6 +59,96 @@ from xcc.aot.llvm_text import (
 
 
 class AotLlvmTextTests(unittest.TestCase):
+    def test_source_to_llvm_wrapper_uses_generic_status_handler_abi(self) -> None:
+        unchecked_name = "xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked"
+        wrapper_name = "xcc.cc_driver._aot_compile_source_to_llvm_ir"
+        module = IrModule(
+            "source_to_llvm_status.py",
+            (IrRecord("FrontendError", (), ("Exception",)),),
+            (
+                IrFunction(
+                    unchecked_name,
+                    (),
+                    IrStringType(),
+                    (IrRaise("FrontendError", IrConstString("bad")),),
+                ),
+                IrFunction(
+                    wrapper_name,
+                    (),
+                    IrStringType(),
+                    (
+                        IrTry(
+                            IrBranch(
+                                (
+                                    IrReturn(
+                                        IrCall(unchecked_name, (), IrStringType())
+                                    ),
+                                )
+                            ),
+                            (
+                                IrExceptHandler(
+                                    ("FrontendError",),
+                                    None,
+                                    IrBranch((IrReturn(IrConstString("")),)),
+                                ),
+                            ),
+                            IrBranch(()),
+                            IrBranch(()),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn(f"define i32 @{wrapper_name}(ptr %result_out, ptr %error_out)", llvm_ir)
+        self.assertIn(f"call i32 @{unchecked_name}(ptr %callresult", llvm_ir)
+        self.assertNotIn(f"call ptr @{unchecked_name}()", llvm_ir)
+
+    def test_emits_bytes_concat_and_repeat_runtime_calls(self) -> None:
+        module = lower_source_to_ir(
+            "def combine(value: bytes, count: int) -> bytes:\n"
+            "    return value + b'x' * count\n",
+            filename="bytes_ops.py",
+            entry="combine",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_bytes_repeat(", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_bytes_concat(", llvm_ir)
+
+    def test_emits_string_encode_as_bytes_runtime_call(self) -> None:
+        module = lower_source_to_ir(
+            "def encode(value: str) -> bytes:\n"
+            "    return value.encode()\n",
+            filename="string_encode.py",
+            entry="encode",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_string_encode(ptr %value)", llvm_ir)
+
+    def test_emits_bytes_for_each_as_length_aware_byte_load(self) -> None:
+        module = lower_source_to_ir(
+            "def total(data: bytes) -> int:\n"
+            "    result = 0\n"
+            "    for byte in data:\n"
+            "        result += byte\n"
+            "    return result\n",
+            filename="bytes_for.py",
+            entry="total",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_bytes_data(ptr %data)", llvm_ir)
+        self.assertIn("call i64 @__xcc_aot_bytes_len(ptr %data)", llvm_ir)
+        self.assertRegex(llvm_ir, r"%byteitem\d+ = load i8, ptr %byteitemptr\d+")
+        self.assertRegex(llvm_ir, r"zext i8 %byteitem\d+ to i64")
+
     def test_emits_int64_function_and_main_wrapper(self) -> None:
         module = lower_source_to_ir(
             "int64 = int\ndef answer() -> int64:\n    return 42\n",
@@ -1006,28 +1098,6 @@ class AotLlvmTextTests(unittest.TestCase):
             ctx.exception.diagnostics[0].message,
         )
 
-    def test_rejects_malformed_aot_compile_source_to_llvm_leaf(self) -> None:
-        module = IrModule(
-            "bad.py",
-            (),
-            (
-                IrFunction(
-                    "xcc.cc_driver._aot_compile_source_to_llvm_ir",
-                    (IrParam("path", IrStringType()),),
-                    IrStringType(),
-                    (),
-                ),
-            ),
-        )
-        with self.assertRaises(AotError) as ctx:
-            emit_llvm_text(module)
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        self.assertIn(
-            "AOT source-to-LLVM helper expects "
-            "(str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...], str) -> str",
-            ctx.exception.diagnostics[0].message,
-        )
-
     def test_emits_llvm_module_print_leaf(self) -> None:
         module = IrModule(
             "codegen.py",
@@ -1684,6 +1754,35 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
         self.assertIn("br label %while.cond", llvm_ir)
         self.assertIn("while.end", llvm_ir)
+
+    def test_break_exit_phi_preserves_current_loop_carried_values(self) -> None:
+        module = lower_source_to_ir(
+            "def collect() -> int:\n"
+            "    values: list[int] = []\n"
+            "    while True:\n"
+            "        values.append(7)\n"
+            "        break\n"
+            "    more: list[int] = []\n"
+            "    for value in (8, 9):\n"
+            "        more.append(value)\n"
+            "        break\n"
+            "    return len(values) + len(more)\n",
+            filename="break_carried.py",
+            entry="collect",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertRegex(
+            llvm_ir,
+            r"%loopexit\d+ = phi ptr \[ %loop\d+, %while\.cond\d+ \], "
+            r"\[ %tuple\d+, %while\.body\d+ \]",
+        )
+        self.assertRegex(
+            llvm_ir,
+            r"%loopexit\d+ = phi ptr \[ %loop\d+, %for\.cond\d+ \], "
+            r"\[ %tuple\d+, %for\.body\d+ \]",
+        )
 
     def test_emits_for_each_continue_through_increment_block(self) -> None:
         module = IrModule(

@@ -644,12 +644,16 @@ class _Lowerer:
                     IrRecordType("object"),
                 )
             payload = argument
+            raised_type = self._infer_assignment_expr_type(
+                statement.exc,
+                names,
+                IrRecordType("object"),
+            )
             if isinstance(statement.exc.func, ast.Name) and exception in self.class_types:
-                payload = self._lower_expr(
-                    statement.exc,
-                    names,
-                    IrRecordType(exception),
-                )
+                raised_type = IrRecordType(exception)
+            if isinstance(raised_type, IrRecordType) and raised_type.name in self.class_types:
+                exception = raised_type.name
+                payload = self._lower_expr(statement.exc, names, raised_type)
             message = self._exception_message(exception, payload, argument)
             return IrRaise(exception, message, span, payload)
         if isinstance(statement, ast.Assert):
@@ -721,7 +725,7 @@ class _Lowerer:
             current = self._lower_expr(statement.target, names, return_type)
             value_type: IrType = current.type
             if isinstance(statement.op, ast.Mult) and isinstance(
-                current.type, (IrStringType, IrTupleType)
+                current.type, (IrBytesType, IrStringType, IrTupleType)
             ):
                 value_type = IrIntType(64, signed=True)
             value = self._lower_expr(statement.value, names, value_type)
@@ -734,10 +738,14 @@ class _Lowerer:
                 op = "*"
             if op == "+" and isinstance(current.type, IrStringType):
                 result: IrExpr = IrStringConcat((current, value))
+            elif op == "+" and isinstance(current.type, IrBytesType):
+                result = IrCall("__bytes_concat", (current, value), current.type)
             elif op == "+" and isinstance(current.type, IrTupleType):
                 result = IrCall("__tuple_concat", (current, value), current.type)
             elif op == "*" and isinstance(current.type, IrStringType):
                 result = IrCall("__str_repeat", (current, value), current.type)
+            elif op == "*" and isinstance(current.type, IrBytesType):
+                result = IrCall("__bytes_repeat", (current, value), current.type)
             elif op == "*" and isinstance(current.type, IrTupleType):
                 result = IrCall("__tuple_repeat", (current, value), current.type)
             else:
@@ -962,6 +970,7 @@ class _Lowerer:
             )
         if isinstance(expr, ast.IfExp):
             body_names = dict(names)
+            orelse_names = dict(names)
             narrowed = self._isinstance_guard_narrowing(
                 expr.test,
                 names,
@@ -969,10 +978,14 @@ class _Lowerer:
             if narrowed is not None:
                 name, narrowed_type = narrowed
                 body_names[name] = narrowed_type
+            else_narrowed = self._is_none_guard_narrowing(expr.test, names)
+            if else_narrowed is not None:
+                name, narrowed_type = else_narrowed
+                orelse_names[name] = narrowed_type
             result_type = expected
             inferred_type = self._infer_assignment_expr_type(
                 expr,
-                body_names,
+                names,
                 IrRecordType("object"),
             )
             if not isinstance(inferred_type, IrNoneType) and not _is_object_type(inferred_type):
@@ -986,7 +999,7 @@ class _Lowerer:
                 (
                     self._lower_expr(expr.test, names, IrBoolType()),
                     self._lower_expr(expr.body, body_names, result_type),
-                    self._lower_expr(expr.orelse, names, result_type),
+                    self._lower_expr(expr.orelse, orelse_names, result_type),
                 ),
                 result_type,
             )
@@ -1140,6 +1153,16 @@ class _Lowerer:
                 ast.BitXor,
             ),
         ):
+            if isinstance(expr.op, ast.Mult) and isinstance(expected, IrBytesType):
+                int64 = IrIntType(64, signed=True)
+                return IrCall(
+                    "__bytes_repeat",
+                    (
+                        self._lower_expr(expr.left, names, IrBytesType()),
+                        self._lower_expr(expr.right, names, int64),
+                    ),
+                    IrBytesType(),
+                )
             if isinstance(expr.op, ast.Mult) and isinstance(expected, IrStringType):
                 int64 = IrIntType(64, signed=True)
                 return IrCall(
@@ -1175,6 +1198,15 @@ class _Lowerer:
                         self._lower_expr(expr.left, names, expected),
                         self._lower_expr(expr.right, names, expected),
                     )
+                )
+            if isinstance(expr.op, ast.Add) and isinstance(expected, IrBytesType):
+                return IrCall(
+                    "__bytes_concat",
+                    (
+                        self._lower_expr(expr.left, names, IrBytesType()),
+                        self._lower_expr(expr.right, names, IrBytesType()),
+                    ),
+                    IrBytesType(),
                 )
             if isinstance(expected, IrFloatType) and isinstance(
                 expr.op,
@@ -2326,7 +2358,7 @@ class _Lowerer:
             )
         if expr.args:
             self._lower_expr(expr.args[0], names, IrStringType())
-        return receiver
+        return IrCall("__str_encode", (receiver,), IrBytesType())
 
     def _lower_string_predicate_call(
         self,
@@ -2998,10 +3030,35 @@ class _Lowerer:
                 return IrBytesType()
         if isinstance(expr, ast.IfExp):
             neutral_fallback = IrRecordType("object")
-            body_type = self._infer_assignment_expr_type(expr.body, names, neutral_fallback)
-            orelse_type = self._infer_assignment_expr_type(expr.orelse, names, body_type)
+            body_names = dict(names)
+            orelse_names = dict(names)
+            body_narrowed = self._isinstance_guard_narrowing(
+                expr.test,
+                names,
+            ) or self._not_none_guard_narrowing(expr.test, names)
+            if body_narrowed is not None:
+                name, narrowed_type = body_narrowed
+                body_names[name] = narrowed_type
+            else_narrowed = self._is_none_guard_narrowing(expr.test, names)
+            if else_narrowed is not None:
+                name, narrowed_type = else_narrowed
+                orelse_names[name] = narrowed_type
+            body_type = self._infer_assignment_expr_type(
+                expr.body,
+                body_names,
+                neutral_fallback,
+            )
+            orelse_type = self._infer_assignment_expr_type(
+                expr.orelse,
+                orelse_names,
+                body_type,
+            )
             if body_type == neutral_fallback and orelse_type != neutral_fallback:
-                body_type = self._infer_assignment_expr_type(expr.body, names, orelse_type)
+                body_type = self._infer_assignment_expr_type(
+                    expr.body,
+                    body_names,
+                    orelse_type,
+                )
             if body_type == orelse_type:
                 return body_type
             if isinstance(body_type, IrNoneType) and not isinstance(orelse_type, IrNoneType):
@@ -3608,6 +3665,34 @@ class _Lowerer:
             return None
         return ast.unparse(guarded), narrowed
 
+    def _is_none_guard_narrowing(
+        self,
+        test: ast.expr,
+        names: dict[str, IrType],
+    ) -> tuple[str, IrType] | None:
+        if (
+            not isinstance(test, ast.Compare)
+            or len(test.ops) != 1
+            or not isinstance(test.ops[0], ast.Is)
+            or len(test.comparators) != 1
+        ):
+            return None
+        guarded: ast.expr | None = None
+        if _is_none_constant(test.left):
+            guarded = test.comparators[0]
+        elif _is_none_constant(test.comparators[0]):
+            guarded = test.left
+        if guarded is None or not isinstance(guarded, ast.Name | ast.Attribute):
+            return None
+        try:
+            value = self._lower_expr(guarded, names, IrRecordType("object"))
+        except AotError:
+            return None
+        narrowed = self._optional_record_inner(value.type)
+        if narrowed is None:
+            return None
+        return ast.unparse(guarded), narrowed
+
     def _none_bool_op_narrowing(
         self,
         test: ast.expr,
@@ -3928,7 +4013,7 @@ def _strip_annotation_quotes(name: str) -> str:
 
 
 def _for_each_target_type(iterable_type: IrType) -> IrType:
-    if isinstance(iterable_type, IrStringType):
+    if isinstance(iterable_type, IrBytesType | IrStringType):
         return IrIntType(64, signed=True)
     if isinstance(iterable_type, IrDictType):
         return iterable_type.key

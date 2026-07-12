@@ -39,6 +39,22 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="for-break-continue.py",
         )
 
+    def test_break_preserves_assignments_from_current_iteration(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: list[int] = []\n"
+            "    while True:\n"
+            "        values.append(7)\n"
+            "        break\n"
+            "    more: list[int] = []\n"
+            "    for value in (8, 9):\n"
+            "        more.append(value)\n"
+            "        break\n"
+            "    return len(values) + len(more)\n",
+            expected=2,
+            filename="break-current-iteration.py",
+        )
+
     def test_tuple_value_semantics(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
@@ -97,6 +113,23 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="try-cross-call.py",
         )
 
+    def test_try_except_catches_exception_returned_by_factory(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Problem(ValueError):\n"
+            "    pass\n"
+            "def make_problem() -> Problem:\n"
+            "    return Problem()\n"
+            "def fail() -> int:\n"
+            "    raise make_problem()\n"
+            "def entry() -> int:\n"
+            "    try:\n"
+            "        return fail()\n"
+            "    except Problem:\n"
+            "        return 9\n",
+            expected=9,
+            filename="try-factory-exception.py",
+        )
+
     def test_constructor_and_string_bytes_semantics(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
@@ -104,6 +137,11 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "    data: bytes = bytes(4)\n"
             "    encoded: bytes = (65).to_bytes(2, 'big')\n"
             "    padded: bytes = encoded[:1].ljust(3, b'Z')\n"
+            "    combined: bytes = b'A' + b'B' * 2\n"
+            "    text_bytes: bytes = 'AB'.encode()\n"
+            "    byte_total: int = 0\n"
+            "    for byte in b'\\x01\\x02':\n"
+            "        byte_total += byte\n"
             "    text: str = 'alpha,beta'.replace('beta', 'gamma')\n"
             "    if text.split(',')[1] != 'gamma':\n"
             "        return 1\n"
@@ -113,6 +151,12 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "        return 3\n"
             "    if padded != b'\\x00ZZ' or len(padded) != 3:\n"
             "        return 4\n"
+            "    if combined != b'ABB':\n"
+            "        return 5\n"
+            "    if text_bytes != b'AB':\n"
+            "        return 6\n"
+            "    if byte_total != 3:\n"
+            "        return 7\n"
             "    return len(values) + len(data)\n",
             expected=7,
             filename="constructors-strings-bytes.py",

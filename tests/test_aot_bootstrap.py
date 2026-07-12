@@ -30,6 +30,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AotBootstrapGraphTests(unittest.TestCase):
+    def test_source_to_llvm_wrapper_is_lowered_from_python_body(self) -> None:
+        self.assertNotIn(
+            "xcc.cc_driver._aot_compile_source_to_llvm_ir",
+            aot_slice._NATIVE_EMITTED_LEAF_FUNCTIONS,
+        )
+
     def test_collects_all_src_xcc_modules_in_deterministic_order(self) -> None:
         modules = collect_bootstrap_sources(ROOT)
         expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py"))) - len(
@@ -130,6 +136,9 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("call ptr @strstr(ptr %source_path", llvm_ir)
 
     def test_bootstrap_real_compiler_path_emits_llc_parseable_llvm(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
         module = lower_bootstrap_entry_smoke(ROOT)
         llvm_ir = emit_llvm_text(module)
         out = ROOT / "build/aot/probes/bootstrap-real-path.ll"
@@ -139,6 +148,14 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("xcc.cc_driver._aot_compile_source_path_to_object", llvm_ir)
         self.assertIn("xcc.frontend._aot_compile_source_unchecked", llvm_ir)
         self.assertIn("xcc.codegen._LLVMGen.generate", llvm_ir)
+        with TemporaryDirectory() as temp_dir:
+            result = subprocess.run(
+                (str(llc), "-filetype=obj", str(out), "-o", str(Path(temp_dir) / "probe.o")),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rewrites_preprocessor_protocol_calls_to_concrete_preprocessor(self) -> None:
         self.assertEqual(
@@ -415,7 +432,8 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("__xcc_aot_bootstrap_cc_delegate", llvm_ir)
         self.assertNotIn("@__xcc_aot_cc", llvm_ir)
         self.assertIn(
-            "define i32 @xcc.cc_driver._aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
+            "define i32 @xcc.cc_driver._aot_compile_smoke_source_to_object("
+            "i32 %argc, ptr %argv, ptr %result_out, ptr %error_out)",
             llvm_ir,
         )
         self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %argv)", llvm_ir)
@@ -437,28 +455,28 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("define i1 @xcc.cc_driver._aot_is_linker_flag(", llvm_ir)
         self.assertIn("define ptr @xcc.cc_driver._aot_link_argv(", llvm_ir)
         self.assertIn(
-            "define i1 @xcc.cc_driver._aot_compile_source_path_to_object(",
+            "define i32 @xcc.cc_driver._aot_compile_source_path_to_object(",
             llvm_ir,
         )
         self.assertIn(
-            "call i1 @xcc.cc_driver._aot_compile_source_path_to_object(",
+            "call i32 @xcc.cc_driver._aot_compile_source_path_to_object(",
             llvm_ir,
         )
         self.assertIn("call ptr @xcc.cc_driver._aot_link_argv(", llvm_ir)
         self.assertNotIn("%arg1_cmp = call i32 @strcmp", llvm_ir)
         self.assertNotIn("%arg3_cmp = call i32 @strcmp", llvm_ir)
         self.assertIn(
-            "define ptr @xcc.cc_driver._aot_compile_source_to_llvm_ir("
+            "define i32 @xcc.cc_driver._aot_compile_source_to_llvm_ir("
             "ptr %source_path, ptr %source_text, ptr %include_dirs, "
-            "ptr %defines, ptr %undefs, ptr %std)",
+            "ptr %defines, ptr %undefs, ptr %std, ptr %result_out, ptr %error_out)",
             llvm_ir,
         )
         self.assertIn(
-            "call ptr @xcc.cc_driver._aot_compile_source_to_llvm_ir(ptr %",
+            "call i32 @xcc.cc_driver._aot_compile_source_to_llvm_ir(",
             llvm_ir,
         )
         self.assertIn(
-            "call ptr @xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked(",
+            "call i32 @xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked(",
             llvm_ir,
         )
         self.assertIn("define ptr @xcc.cc_driver._aot_default_system_include_dirs(", llvm_ir)
@@ -1880,7 +1898,6 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.assertIn("Include not found", result.stdout + result.stderr)
             self.assertFalse(obj.exists())
 
-    @unittest.expectedFailure
     def test_v368_native_bootstrap_include_next_uses_following_system_root(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():

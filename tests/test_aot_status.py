@@ -6,6 +6,7 @@ from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
+    IrBranch,
     IrCall,
     IrConstInt,
     IrConstString,
@@ -407,6 +408,51 @@ class AotStatusLlvmTests(unittest.TestCase):
             main_body.group(),
         )
         self.assertIn("ret i32 %status", main_body.group())
+
+    def test_bootstrap_main_reports_preserved_caught_error_on_failure_result(self) -> None:
+        int32 = IrIntType(32, signed=True)
+        module = IrModule(
+            "bootstrap-caught.py",
+            (),
+            (
+                IrFunction(
+                    "leaf",
+                    (),
+                    int32,
+                    (IrRaise("PreprocessorError", IrConstString("Include not found")),),
+                ),
+                IrFunction(
+                    "aot_bootstrap_smoke_main",
+                    (),
+                    int32,
+                    (
+                        IrTry(
+                            IrBranch((IrReturn(IrCall("leaf", (), int32)),)),
+                            (
+                                IrExceptHandler(
+                                    ("PreprocessorError",),
+                                    None,
+                                    IrBranch((IrReturn(IrConstInt(2, int32)),)),
+                                ),
+                            ),
+                            IrBranch(()),
+                            IrBranch(()),
+                        ),
+                    ),
+                ),
+            ),
+            entry="aot_bootstrap_smoke_main",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn(
+            "store %__xcc_aot_error zeroinitializer, ptr %error_record",
+            llvm_ir,
+        )
+        self.assertIn("%report_preserved_error = and i1", llvm_ir)
+        self.assertIn("caught_error:", llvm_ir)
+        self.assertIn("%caught.error.diagnostic = call i32", llvm_ir)
 
     def test_uncaught_status_module_passes_llc(self) -> None:
         int64 = IrIntType(64, signed=True)

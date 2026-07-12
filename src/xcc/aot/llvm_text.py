@@ -221,6 +221,7 @@ class _LoopLabels:
     continue_label: str
     break_label: str
     continue_sources: list[tuple[str, dict[str, _EmittedValue]]] | None = None
+    break_sources: list[tuple[str, dict[str, _EmittedValue]]] | None = None
 
 
 @dataclass
@@ -304,8 +305,6 @@ class _Emitter:
     def _emit_function(self, function: IrFunction) -> str:
         if function.name in self.fallible_functions:
             return self._emit_generic_function(function, fallible=True)
-        if function.name == "xcc.cc_driver._aot_compile_source_to_llvm_ir":
-            return self._emit_aot_compile_source_to_llvm_ir_function(function)
         if function.name == "xcc.cc_driver._aot_exec_argv":
             return self._emit_aot_exec_argv_function(function)
         if function.name == "xcc.cc_driver._aot_read_text_file":
@@ -463,7 +462,10 @@ class _Emitter:
             self._emit_control_finally(names, lines, return_type)
             if _block_is_terminated(lines):
                 return
-            lines.append(f"  br label %{self.loop_stack[-1].break_label}")
+            loop = self.loop_stack[-1]
+            if loop.break_sources is not None:
+                loop.break_sources.append((_current_label(lines), dict(names)))
+            lines.append(f"  br label %{loop.break_label}")
             return
         if isinstance(statement, IrContinue):
             if not self.loop_stack:
@@ -1106,24 +1108,31 @@ class _Emitter:
             f"  {index} = phi i64 [ 0, %{current_label} ], [ {next_value}, %{next_label} ]"
         )
         string_iterable = isinstance(iterable.type, IrStringType) and enumerate_call is None
+        bytes_iterable = isinstance(iterable.type, IrBytesType) and enumerate_call is None
+        byte_data = iterable.value
         length = self._tmp("len")
         if string_iterable:
             lines.append(f"  {length} = call i64 @strlen(ptr {iterable.value})")
+        elif bytes_iterable:
+            byte_data = self._tmp("bytesdata")
+            lines.append(f"  {byte_data} = call ptr @__xcc_aot_bytes_data(ptr {iterable.value})")
+            lines.append(f"  {length} = call i64 @__xcc_aot_bytes_len(ptr {iterable.value})")
         else:
             lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
         condition = self._tmp("forcond")
         lines.append(f"  {condition} = icmp ult i64 {index}, {length}")
+        condition_source = _current_label(lines)
         lines.append(f"  br i1 {condition}, label %{body_label}, label %{end_label}")
         lines.append(f"{body_label}:")
         body_names = dict(cond_names)
-        if string_iterable:
+        if string_iterable or bytes_iterable:
             slots = _for_each_target_slots(statement.target)
             if len(slots) != 1 or slots[0] is None:
-                self._error("string for-each expects one named target")
-            pointer = self._tmp("stritemptr")
-            byte = self._tmp("strbyte")
-            wide = self._tmp("strbyte64")
-            lines.append(f"  {pointer} = getelementptr i8, ptr {iterable.value}, i64 {index}")
+                self._error("string/bytes for-each expects one named target")
+            pointer = self._tmp("byteitemptr")
+            byte = self._tmp("byteitem")
+            wide = self._tmp("byteitem64")
+            lines.append(f"  {pointer} = getelementptr i8, ptr {byte_data}, i64 {index}")
             lines.append(f"  {byte} = load i8, ptr {pointer}")
             lines.append(f"  {wide} = zext i8 {byte} to i64")
             body_names[slots[0]] = _EmittedValue(wide, IrIntType(64, signed=True))
@@ -1188,7 +1197,7 @@ class _Emitter:
                 else:
                     for target in _for_each_targets(statement.target):
                         body_names[target] = item_value
-        loop_labels = _LoopLabels(next_label, end_label, [])
+        loop_labels = _LoopLabels(next_label, end_label, [], [])
         self.loop_stack.append(loop_labels)
         self._emit_branch(statement.body, body_names, lines, return_type)
         self.loop_stack.pop()
@@ -1233,6 +1242,14 @@ class _Emitter:
             )
             names[name] = phi_values[name]
         lines.append(f"{end_label}:")
+        self._emit_loop_exit_phis(
+            names,
+            cond_names,
+            condition_source,
+            loop_labels.break_sources or (),
+            {name: value.type for name, value in initial_values.items()},
+            lines,
+        )
 
     def _emit_set_item(
         self,
@@ -1431,10 +1448,11 @@ class _Emitter:
             cond_names[name] = phi_values[name]
             lines.append("")
         condition = self._emit_condition(statement.condition, cond_names, lines)
+        condition_source = _current_label(lines)
         lines.append(f"  br i1 {condition.value}, label %{body_label}, label %{end_label}")
         lines.append(f"{body_label}:")
         body_names = dict(cond_names)
-        loop_labels = _LoopLabels(cond_label, end_label, [])
+        loop_labels = _LoopLabels(cond_label, end_label, [], [])
         self.loop_stack.append(loop_labels)
         self._emit_branch(statement.body, body_names, lines, return_type)
         self.loop_stack.pop()
@@ -1455,8 +1473,45 @@ class _Emitter:
             lines[line_index] = (
                 f"  {phi_values[name].value} = phi {self._storage_llvm_type(loop_type)} {incoming}"
             )
-        names.update(cond_names)
         lines.append(f"{end_label}:")
+        self._emit_loop_exit_phis(
+            names,
+            cond_names,
+            condition_source,
+            loop_labels.break_sources or (),
+            loop_types,
+            lines,
+        )
+
+    def _emit_loop_exit_phis(
+        self,
+        names: dict[str, _EmittedValue],
+        condition_names: dict[str, _EmittedValue],
+        condition_source: str,
+        break_sources: tuple[tuple[str, dict[str, _EmittedValue]], ...]
+        | list[tuple[str, dict[str, _EmittedValue]]],
+        loop_types: dict[str, IrType],
+        lines: list[str],
+    ) -> None:
+        names.update(condition_names)
+        if not break_sources:
+            return
+        for name, loop_type in loop_types.items():
+            condition_value = condition_names[name]
+            incoming = [
+                f"[ {self._value_for_result_type(condition_value, loop_type)}, "
+                f"%{condition_source} ]"
+            ]
+            for source_label, source_names in break_sources:
+                source_value = source_names.get(name, condition_value)
+                incoming.append(
+                    f"[ {self._value_for_result_type(source_value, loop_type)}, %{source_label} ]"
+                )
+            result = self._tmp("loopexit")
+            lines.append(
+                f"  {result} = phi {self._storage_llvm_type(loop_type)} " + ", ".join(incoming)
+            )
+            names[name] = _EmittedValue(result, loop_type)
 
     def _loop_carried_type(
         self,
@@ -1943,8 +1998,14 @@ class _Emitter:
             return self._emit_string_lower_call(expr, names, lines)
         if expr.target == "__str_ljust":
             return self._emit_string_ljust_call(expr, names, lines)
+        if expr.target == "__str_encode":
+            return self._emit_string_encode_call(expr, names, lines)
         if expr.target == "__bytes_ljust":
             return self._emit_bytes_ljust_call(expr, names, lines)
+        if expr.target == "__bytes_concat":
+            return self._emit_bytes_concat_call(expr, names, lines)
+        if expr.target == "__bytes_repeat":
+            return self._emit_bytes_repeat_call(expr, names, lines)
         if expr.target == "__str_lstrip":
             return self._emit_string_strip_call(expr, names, lines, "lstrip")
         if expr.target == "__str_rstrip":
@@ -2559,6 +2620,68 @@ class _Emitter:
         lines.append(
             f"  {result} = call ptr @__xcc_aot_bytes_ljust("
             f"ptr {value.value}, i64 {width.value}, ptr {fill.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_bytes_concat_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__bytes_concat expects two arguments")
+        left = self._emit_expr(expr.args[0], names, lines)
+        right = self._emit_expr(expr.args[1], names, lines)
+        if not all(isinstance(value.type, IrBytesType) for value in (left, right)):
+            self._error("__bytes_concat expects bytes arguments")
+        if not isinstance(expr.type, IrBytesType):
+            self._error("__bytes_concat expects a bytes result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("bytesconcat")
+        lines.append(
+            f"  {result} = call ptr @__xcc_aot_bytes_concat(ptr {left.value}, ptr {right.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_string_encode_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("__str_encode expects one argument")
+        value = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(value.type, IrStringType):
+            self._error("__str_encode expects a string argument")
+        if not isinstance(expr.type, IrBytesType):
+            self._error("__str_encode expects a bytes result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("strencode")
+        lines.append(f"  {result} = call ptr @__xcc_aot_string_encode(ptr {value.value})")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_bytes_repeat_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__bytes_repeat expects two arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        count = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(value.type, IrBytesType):
+            self._error("__bytes_repeat expects a bytes value")
+        if not isinstance(count.type, IrIntType) or count.type.bits != 64:
+            self._error("__bytes_repeat expects an int64 count")
+        if not isinstance(expr.type, IrBytesType):
+            self._error("__bytes_repeat expects a bytes result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("bytesrepeat")
+        lines.append(
+            f"  {result} = call ptr @__xcc_aot_bytes_repeat(ptr {value.value}, i64 {count.value})"
         )
         return _EmittedValue(result, expr.type)
 
@@ -4371,49 +4494,6 @@ class _Emitter:
             return value.value
         self._error(f"Unsupported LLVM pointer comparison type: {type(value.type).__name__}")
 
-    def _emit_aot_compile_source_to_llvm_ir_function(self, function: IrFunction) -> str:
-        self.index = 0
-        if (
-            len(function.params) != 6
-            or not isinstance(function.params[0].type, IrStringType)
-            or not isinstance(function.params[1].type, IrStringType)
-            or not isinstance(function.params[2].type, IrTupleType)
-            or not isinstance(function.params[3].type, IrTupleType)
-            or not isinstance(function.params[4].type, IrTupleType)
-            or not isinstance(function.params[5].type, IrStringType)
-            or not isinstance(function.return_type, IrStringType)
-        ):
-            self._error(
-                "AOT source-to-LLVM helper expects "
-                "(str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...], str) -> str"
-            )
-        source_path = function.params[0]
-        source_text = function.params[1]
-        include_dirs = function.params[2]
-        defines = function.params[3]
-        undefs = function.params[4]
-        std = function.params[5]
-        unchecked = _llvm_symbol("xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked")
-        return "\n".join(
-            (
-                (
-                    f"define ptr {_llvm_symbol(function.name)}("
-                    f"ptr %{source_path.name}, ptr %{source_text.name}, "
-                    f"ptr %{include_dirs.name}, ptr %{defines.name}, "
-                    f"ptr %{undefs.name}, ptr %{std.name}) {{"
-                ),
-                "entry:",
-                (
-                    f"  %llvm_ir = call ptr {unchecked}("
-                    f"ptr %{source_path.name}, ptr %{source_text.name}, "
-                    f"ptr %{include_dirs.name}, ptr %{defines.name}, "
-                    f"ptr %{undefs.name}, ptr %{std.name})"
-                ),
-                "  ret ptr %llvm_ir",
-                "}",
-            )
-        )
-
     def _emit_aot_exec_argv_function(self, function: IrFunction) -> str:
         self.index = 0
         self.needs_runtime_prelude = True
@@ -4939,6 +5019,7 @@ class _Emitter:
             )
             args = "i32 %argc, ptr %argv_tuple"
         lines.append(f"  %error_record = alloca {_ERROR_LLVM_TYPE}")
+        lines.append(f"  store {_ERROR_LLVM_TYPE} zeroinitializer, ptr %error_record")
         call_args = [] if not args else [args]
         if not isinstance(return_type, IrNoneType):
             lines.append(f"  %result_out = alloca {self._storage_llvm_type(return_type)}")
@@ -4948,33 +5029,37 @@ class _Emitter:
         lines.append("  %failed = icmp ne i32 %status, 0")
         lines.append("  br i1 %failed, label %uncaught, label %success")
         lines.append("uncaught:")
-        error_values = (
-            ("type", "ptr", 0),
-            ("message", "ptr", 1),
-            ("filename", "ptr", 2),
-            ("line", "i32", 3),
-            ("column", "i32", 4),
-        )
-        for name, llvm_type, index in error_values:
-            lines.append(
-                f"  %error.{name}.ptr = getelementptr inbounds {_ERROR_LLVM_TYPE}, "
-                f"ptr %error_record, i32 0, i32 {index}"
-            )
-            lines.append(f"  %error.{name} = load {llvm_type}, ptr %error.{name}.ptr")
-        diagnostic_format = self._string_constant("%s:%d:%d: %s: %s\n")
-        self.extra_declarations.add("declare i32 @dprintf(i32, ptr, ...)")
-        lines.append(
-            "  %diagnostic = call i32 (i32, ptr, ...) @dprintf("
-            f"i32 2, ptr {diagnostic_format}, ptr %error.filename, i32 %error.line, "
-            "i32 %error.column, ptr %error.type, ptr %error.message)"
-        )
+        self._emit_main_error_diagnostic(lines, "error")
         lines.append("  ret i32 %status")
         lines.append("success:")
+        report_preserved_error = (
+            function.name == "aot_bootstrap_smoke_main"
+            and isinstance(return_type, IrIntType)
+            and return_type.bits == 32
+        )
         if isinstance(return_type, IrNoneType):
             lines.append("  ret i32 0")
         else:
             result_type = self._llvm_type(return_type)
             lines.append(f"  %result = load {result_type}, ptr %result_out")
+            if report_preserved_error:
+                lines.append("  %result_failed = icmp ne i32 %result, 0")
+                lines.append(
+                    f"  %preserved.type.ptr = getelementptr inbounds {_ERROR_LLVM_TYPE}, "
+                    "ptr %error_record, i32 0, i32 0"
+                )
+                lines.append("  %preserved.type = load ptr, ptr %preserved.type.ptr")
+                lines.append("  %has_preserved_error = icmp ne ptr %preserved.type, null")
+                lines.append(
+                    "  %report_preserved_error = and i1 %result_failed, %has_preserved_error"
+                )
+                lines.append(
+                    "  br i1 %report_preserved_error, label %caught_error, label %success_return"
+                )
+                lines.append("caught_error:")
+                self._emit_main_error_diagnostic(lines, "caught.error")
+                lines.append("  ret i32 %result")
+                lines.append("success_return:")
             if isinstance(return_type, IrStringType):
                 self.needs_puts = True
                 lines.append("  %printed = call i32 @puts(ptr %result)")
@@ -4994,6 +5079,29 @@ class _Emitter:
                 self._error(f"Unsupported main return type: {type(return_type).__name__}")
         lines.append("}")
         return "\n".join(lines)
+
+    def _emit_main_error_diagnostic(self, lines: list[str], prefix: str) -> None:
+        error_values = (
+            ("type", "ptr", 0),
+            ("message", "ptr", 1),
+            ("filename", "ptr", 2),
+            ("line", "i32", 3),
+            ("column", "i32", 4),
+        )
+        for name, llvm_type, index in error_values:
+            lines.append(
+                f"  %{prefix}.{name}.ptr = getelementptr inbounds {_ERROR_LLVM_TYPE}, "
+                f"ptr %error_record, i32 0, i32 {index}"
+            )
+            lines.append(f"  %{prefix}.{name} = load {llvm_type}, ptr %{prefix}.{name}.ptr")
+        diagnostic_format = self._string_constant("%s:%d:%d: %s: %s\n")
+        self.extra_declarations.add("declare i32 @dprintf(i32, ptr, ...)")
+        lines.append(
+            f"  %{prefix}.diagnostic = call i32 (i32, ptr, ...) @dprintf("
+            f"i32 2, ptr {diagnostic_format}, ptr %{prefix}.filename, "
+            f"i32 %{prefix}.line, i32 %{prefix}.column, "
+            f"ptr %{prefix}.type, ptr %{prefix}.message)"
+        )
 
     def _emit_main_bytes_result(self, lines: list[str]) -> None:
         self.needs_runtime_prelude = True
