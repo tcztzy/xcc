@@ -95,6 +95,43 @@ _STRING_PREDICATE_INTRINSICS = {
     "__str_isdigit": 2,
     "__str_isalnum": 3,
     "__str_isspace": 4,
+    "__str_isidentifier": 5,
+    "__str_isupper": 6,
+}
+_OBJECT_TAG_BOOL = 1
+_OBJECT_TAG_INT = 2
+_OBJECT_TAG_FLOAT = 3
+_OBJECT_TAG_STRING = 4
+_OBJECT_TAG_BYTES = 5
+_OBJECT_TAG_COMPLEX = 6
+_OBJECT_TAG_ELLIPSIS = 7
+_OBJECT_TAG_RECORD = 8
+_OBJECT_TAG_TUPLE = 9
+_OBJECT_TAG_DICT = 10
+_TYPE_TAG_NONE = 0
+_TYPE_TAG_RECORD_BASE = 1_000_000
+_NORETURN_CALL_PREFIX = "__noreturn__:"
+_RECORD_INIT_PREFIX = "__record_init__:"
+_EXACT_BUILTIN_TYPE_TAGS = {
+    "bool": _OBJECT_TAG_BOOL,
+    "bytes": _OBJECT_TAG_BYTES,
+    "complex": _OBJECT_TAG_COMPLEX,
+    "dict": _OBJECT_TAG_DICT,
+    "float": _OBJECT_TAG_FLOAT,
+    "int": _OBJECT_TAG_INT,
+    "str": _OBJECT_TAG_STRING,
+}
+_OBJECT_BUILTIN_TAGS = {
+    "bool": (_OBJECT_TAG_BOOL,),
+    "bytes": (_OBJECT_TAG_BYTES,),
+    "dict": (_OBJECT_TAG_DICT,),
+    "float": (_OBJECT_TAG_FLOAT,),
+    "frozenset": (_OBJECT_TAG_TUPLE,),
+    "int": (_OBJECT_TAG_BOOL, _OBJECT_TAG_INT),
+    "list": (_OBJECT_TAG_TUPLE,),
+    "set": (_OBJECT_TAG_TUPLE,),
+    "str": (_OBJECT_TAG_STRING,),
+    "tuple": (_OBJECT_TAG_TUPLE,),
 }
 _LLVM_BINARY_BUILDER_INTRINSICS = frozenset(
     {
@@ -915,6 +952,9 @@ class _Emitter:
                         expr.type,
                     )
                 if expr.name == "Ellipsis" and isinstance(expr.type, IrRecordType):
+                    if _is_opaque_object_type(expr.type):
+                        self.needs_runtime_prelude = True
+                        return _EmittedValue("@__xcc_aot_object_ellipsis", expr.type)
                     return _EmittedValue("inttoptr (i64 -1 to ptr)", expr.type)
                 type_constant = self._emit_type_constant_name(expr, lines)
                 if type_constant is not None:
@@ -924,9 +964,13 @@ class _Emitter:
                 if expr.name in _BUILTIN_VALUE_NAMES or expr.name.isupper():
                     return _EmittedValue(self._default_value(expr.type), expr.type)
                 self._error(f"Unknown LLVM name: {expr.name}")
-            if _is_record_narrowing(value.type, expr.type) or (
+            if (
+                not _is_opaque_object_type(value.type)
+                and _is_record_narrowing(value.type, expr.type)
+            ) or (
                 isinstance(value.type, IrRecordType)
                 and isinstance(expr.type, IrRecordType)
+                and not _is_opaque_object_type(value.type)
                 and (
                     expr.type.name in self.records
                     or _is_known_record_union_name(expr.type.name, self.records)
@@ -1029,14 +1073,8 @@ class _Emitter:
             if not incoming:
                 continue
             if len(incoming) == 1:
-                condition_is_always_true = (
-                    isinstance(statement.condition, IrConstBool) and statement.condition.value
-                )
-                if (
-                    before_value is None
-                    and statement.else_branch is None
-                    and not condition_is_always_true
-                ):
+                fallthrough_sources = int(then_source is not None) + int(else_source is not None)
+                if before_value is None and len(incoming) < fallthrough_sources:
                     continue
                 names[name] = incoming[0][1]
                 continue
@@ -1183,25 +1221,25 @@ class _Emitter:
                     enumerate_index = self._tmp("enumindex")
                     lines.append(f"  {enumerate_index} = add i64 {index}, {enumerate_start.value}")
                 slots = _for_each_target_slots(statement.target)
+                pair = self._emit_enumerate_pair_tuple(
+                    enumerate_call.type,
+                    enumerate_index,
+                    item,
+                    lines,
+                )
                 if len(slots) == 1 and slots[0] is not None:
-                    body_names[slots[0]] = self._emit_enumerate_pair_tuple(
-                        statement,
-                        enumerate_index,
-                        item,
-                        lines,
-                    )
+                    body_names[slots[0]] = pair
                 else:
-                    self._bind_enumerate_targets(
-                        statement,
-                        enumerate_index,
-                        item,
+                    self._bind_emitted_tuple_target(
+                        statement.target,
+                        pair,
                         body_names,
                         lines,
                     )
             else:
-                item_type: IrType = IrRecordType("object")
-                if isinstance(iterable.type, IrTupleType) and len(iterable.type.elements) == 1:
-                    item_type = iterable.type.elements[0]
+                item_type: IrType = _homogeneous_tuple_element_type(iterable.type) or IrRecordType(
+                    "object"
+                )
                 if isinstance(iterable.type, IrDictType):
                     item_type = iterable.type.key
                     item_value = self._emit_runtime_tuple_get(item, 0, item_type, lines)
@@ -1328,56 +1366,19 @@ class _Emitter:
         lines.append(f"  store {self._storage_llvm_type(field.type)} {stored}, ptr {field_ptr}")
         names[target] = _EmittedValue(stored, field.type)
 
-    def _bind_enumerate_targets(
-        self,
-        statement: IrForEach,
-        index: str,
-        item: str,
-        names: dict[str, _EmittedValue],
-        lines: list[str],
-    ) -> None:
-        if not isinstance(statement.iterable, IrCall) or not isinstance(
-            statement.iterable.type, IrTupleType
-        ):
-            self._error("Malformed __enumerate loop")
-        if len(statement.iterable.type.elements) != 2:
-            self._error("__enumerate loop expects two element types")
-        slots = _for_each_target_slots(statement.target)
-        if len(slots) != 2:
-            self._error("__enumerate loop expects two targets")
-        values = (index, item)
-        for slot_index, (slot, value, type_info) in enumerate(
-            zip(
-                slots,
-                values,
-                statement.iterable.type.elements,
-                strict=True,
-            )
-        ):
-            if slot is not None:
-                if slot_index == 1:
-                    names[slot] = self._emit_runtime_boxed_value(value, type_info, lines)
-                else:
-                    names[slot] = _EmittedValue(value, type_info)
-
     def _emit_enumerate_pair_tuple(
         self,
-        statement: IrForEach,
+        enumerate_type: IrType,
         index: str,
         item: str,
         lines: list[str],
     ) -> _EmittedValue:
-        if not isinstance(statement.iterable, IrCall) or not isinstance(
-            statement.iterable.type,
-            IrTupleType,
-        ):
-            self._error("Malformed __enumerate loop")
-        if len(statement.iterable.type.elements) != 2:
+        if not isinstance(enumerate_type, IrTupleType) or len(enumerate_type.elements) != 2:
             self._error("__enumerate loop expects two element types")
         self.needs_runtime_prelude = True
         result = self._tmp("enumpair")
         index_box = self._box_to_runtime_ptr(
-            _EmittedValue(index, statement.iterable.type.elements[0]),
+            _EmittedValue(index, enumerate_type.elements[0]),
             lines,
         )
         lines.append("  ; build enumerate pair")
@@ -1389,7 +1390,7 @@ class _Emitter:
         lines.append(f"  store ptr {index_box}, ptr {index_slot}")
         lines.append(f"  {item_slot} = getelementptr ptr, ptr {result}, i64 2")
         lines.append(f"  store ptr {item}, ptr {item_slot}")
-        return _EmittedValue(result, statement.iterable.type)
+        return _EmittedValue(result, enumerate_type)
 
     def _emit_runtime_tuple_get(
         self,
@@ -1435,6 +1436,9 @@ class _Emitter:
         if isinstance(value.type, IrTupleType) and len(value.type.elements) == len(slots):
             target_types = value.type.elements
             tuple_value = value.value
+        elif isinstance(value.type, IrTupleType) and len(value.type.elements) == 1:
+            target_types = value.type.elements * len(slots)
+            tuple_value = value.value
         elif (isinstance(value.type, IrTupleType) and not value.type.elements) or (
             isinstance(value.type, IrRecordType) and value.type.name == "object"
         ):
@@ -1450,7 +1454,11 @@ class _Emitter:
             self._error("tuple assignment target expects tuple value")
         for index, (slot, target_type) in enumerate(zip(slots, target_types, strict=True)):
             if slot is not None:
-                names[slot] = self._emit_runtime_tuple_get(tuple_value, index, target_type, lines)
+                item = self._emit_runtime_tuple_get(tuple_value, index, target_type, lines)
+                if "," in slot:
+                    self._bind_emitted_tuple_target(slot, item, names, lines)
+                else:
+                    names[slot] = item
 
     def _emit_while(
         self,
@@ -1764,7 +1772,19 @@ class _Emitter:
         lines.append(f"  store i64 {len(args)}, ptr {result}")
         for index, arg in enumerate(args, start=1):
             slot = self._tmp("tupleslot")
-            item = self._box_to_runtime_ptr(arg, lines)
+            if isinstance(expr.type, IrDictType):
+                item_type: IrType = IrTupleType((expr.type.key, expr.type.value))
+            elif len(expr.type.elements) == 1:
+                item_type = expr.type.elements[0]
+            elif len(expr.type.elements) == len(args):
+                item_type = expr.type.elements[index - 1]
+            else:
+                item_type = arg.type
+            item = (
+                self._box_object_value(arg, lines)
+                if _is_opaque_object_type(item_type)
+                else self._box_to_runtime_ptr(arg, lines)
+            )
             lines.append(f"  {slot} = getelementptr ptr, ptr {result}, i64 {index}")
             lines.append(f"  store ptr {item}, ptr {slot}")
         return _EmittedValue(result, expr.type)
@@ -1805,6 +1825,62 @@ class _Emitter:
             lines.append(f"  store double {value.value}, ptr {boxed}")
             return boxed
         self._error(f"Unsupported tuple item type: {type(value.type).__name__}")
+
+    def _box_object_value(self, value: _EmittedValue, lines: list[str]) -> str:
+        if isinstance(value.type, IrNoneType):
+            return "null"
+        if _is_opaque_object_type(value.type):
+            return value.value
+        tag: int
+        if isinstance(value.type, IrBoolType):
+            tag = _OBJECT_TAG_BOOL
+        elif isinstance(value.type, IrIntType):
+            tag = _OBJECT_TAG_INT
+        elif isinstance(value.type, IrFloatType):
+            tag = _OBJECT_TAG_FLOAT
+        elif isinstance(value.type, IrStringType):
+            tag = _OBJECT_TAG_STRING
+        elif isinstance(value.type, IrBytesType):
+            tag = _OBJECT_TAG_BYTES
+        elif isinstance(value.type, IrDictType):
+            tag = _OBJECT_TAG_DICT
+        elif isinstance(value.type, IrTupleType):
+            tag = _OBJECT_TAG_TUPLE
+        elif isinstance(value.type, IrRecordType) and value.type.name == "complex":
+            tag = _OBJECT_TAG_COMPLEX
+        elif isinstance(value.type, IrRecordType):
+            tag = _OBJECT_TAG_RECORD
+        else:
+            self._error(f"Unsupported object value type: {type(value.type).__name__}")
+        self.needs_runtime_prelude = True
+        boxed = self._tmp("object")
+        payload = self._tmp("object.payload")
+        lines.append(f"  {boxed} = call ptr @malloc(i64 16)")
+        lines.append(f"  store i64 {tag}, ptr {boxed}")
+        lines.append(f"  {payload} = getelementptr i8, ptr {boxed}, i64 8")
+        if isinstance(value.type, IrBoolType):
+            widened = self._tmp("object.bool")
+            lines.append(f"  {widened} = zext i1 {value.value} to i64")
+            lines.append(f"  store i64 {widened}, ptr {payload}")
+        elif isinstance(value.type, IrIntType):
+            integer = value.value
+            if value.type.bits < 64:
+                widened = self._tmp("object.int")
+                opcode = "sext" if value.type.signed else "zext"
+                lines.append(
+                    f"  {widened} = {opcode} {self._llvm_type(value.type)} {integer} to i64"
+                )
+                integer = widened
+            elif value.type.bits > 64:
+                narrowed = self._tmp("object.int")
+                lines.append(f"  {narrowed} = trunc {self._llvm_type(value.type)} {integer} to i64")
+                integer = narrowed
+            lines.append(f"  store i64 {integer}, ptr {payload}")
+        elif isinstance(value.type, IrFloatType):
+            lines.append(f"  store double {value.value}, ptr {payload}")
+        else:
+            lines.append(f"  store ptr {value.value}, ptr {payload}")
+        return boxed
 
     def _emit_tuple_slice(
         self,
@@ -1861,14 +1937,23 @@ class _Emitter:
             self._error(f"Unsupported LLVM field receiver: {expr.field}")
         record_name = self._field_record_name(record_type.name, expr.field)
         index = self._field_index(record_name, expr.field)
+        field_type = self.records[record_name].fields[index].type
         field_ptr = self._tmp("fieldptr")
         result = self._tmp("load")
         lines.append(
             f"  {field_ptr} = getelementptr inbounds %{record_name}, ptr {value.value}, "
             f"i32 0, i32 {index}"
         )
-        lines.append(f"  {result} = load {self._storage_llvm_type(expr.type)}, ptr {field_ptr}")
-        return _EmittedValue(result, expr.type)
+        lines.append(f"  {result} = load {self._storage_llvm_type(field_type)}, ptr {field_ptr}")
+        loaded = _EmittedValue(result, field_type)
+        if field_type == expr.type:
+            return loaded
+        narrowed = self._emit_runtime_object_narrowing(loaded, expr.type, lines)
+        if narrowed is not None:
+            return narrowed
+        if _is_pointer_type(field_type) and _is_pointer_type(expr.type):
+            return _EmittedValue(result, expr.type)
+        self._error(f"Cannot load {type(field_type).__name__} field as {type(expr.type).__name__}")
 
     def _emit_call(
         self,
@@ -1880,7 +1965,17 @@ class _Emitter:
         if intrinsic is not None:
             return intrinsic
         args = [self._emit_expr(arg, names, lines) for arg in expr.args]
-        rendered_args = ", ".join(f"{self._param_llvm_type(arg.type)} {arg.value}" for arg in args)
+        function = self.functions.get(expr.target)
+        if function is not None and len(function.params) == len(args):
+            rendered_args = ", ".join(
+                f"{self._param_llvm_type(param.type)} "
+                f"{self._value_for_result_type(arg, param.type, lines)}"
+                for arg, param in zip(args, function.params, strict=True)
+            )
+        else:
+            rendered_args = ", ".join(
+                f"{self._param_llvm_type(arg.type)} {arg.value}" for arg in args
+            )
         target = _llvm_symbol(expr.target)
         if expr.target in self.fallible_functions:
             if not self.current_function_is_fallible or self.current_error_out is None:
@@ -1929,10 +2024,24 @@ class _Emitter:
     ) -> _EmittedValue | None:
         if expr.target == "__llvm_api":
             return _EmittedValue("null", expr.type)
+        if expr.target.startswith(_NORETURN_CALL_PREFIX):
+            return self._emit_noreturn_call(expr, names, lines)
+        if expr.target.startswith(_RECORD_INIT_PREFIX):
+            return self._emit_record_init_call(expr, names, lines)
+        if expr.target == "__super_init__":
+            for arg in expr.args:
+                self._emit_expr(arg, names, lines)
+            return _EmittedValue("null", IrNoneType())
         if expr.target == "bool":
             return self._emit_bool_builtin_call(expr, names, lines)
         if expr.target == "isinstance":
             return self._emit_isinstance_call(expr, names, lines)
+        if expr.target == "__type_tag":
+            return self._emit_type_tag_call(expr, names, lines)
+        if expr.target == "__type_marker":
+            return self._emit_type_marker_call(expr)
+        if expr.target == "__union_getattr":
+            return self._emit_union_getattr_call(expr, names, lines)
         if expr.target == "__record_construct0":
             return self._emit_record_construct0_call(expr, names, lines)
         if expr.target == "__llvm_FunctionType":
@@ -2034,6 +2143,8 @@ class _Emitter:
             return self._emit_string_split_call(expr, names, lines)
         if expr.target == "__str_split_limit":
             return self._emit_string_split_limit_call(expr, names, lines)
+        if expr.target == "__str_rsplit_limit":
+            return self._emit_string_rsplit_limit_call(expr, names, lines)
         if expr.target == "__str_split_whitespace":
             return self._emit_string_split_whitespace_call(expr, names, lines)
         if expr.target == "__str_splitlines":
@@ -2046,6 +2157,8 @@ class _Emitter:
             return self._emit_string_remove_affix_call(expr, names, lines, "removesuffix")
         if expr.target == "__str_lower":
             return self._emit_string_lower_call(expr, names, lines)
+        if expr.target == "__str_upper":
+            return self._emit_string_upper_call(expr, names, lines)
         if expr.target == "__str_ljust":
             return self._emit_string_ljust_call(expr, names, lines)
         if expr.target == "__str_encode":
@@ -2068,6 +2181,13 @@ class _Emitter:
             return self._emit_tuple_concat_call(expr, names, lines)
         if expr.target == "__tuple_repeat":
             return self._emit_tuple_repeat_call(expr, names, lines)
+        if expr.target in {
+            "__set_difference",
+            "__set_intersection",
+            "__set_symmetric_difference",
+            "__set_union",
+        }:
+            return self._emit_set_binary_call(expr, names, lines)
         predicate_mode = _STRING_PREDICATE_INTRINSICS.get(expr.target)
         if predicate_mode is not None:
             return self._emit_string_predicate_call(expr, predicate_mode, names, lines)
@@ -2079,6 +2199,8 @@ class _Emitter:
             return self._emit_bytes_slice_call(expr, names, lines)
         if expr.target == "__id":
             return self._emit_id_call(expr, names, lines)
+        if expr.target == "__repr":
+            return self._emit_repr_call(expr, names, lines)
         if expr.target == "__ord":
             return self._emit_ord_call(expr, names, lines)
         if expr.target == "__chr":
@@ -2101,6 +2223,16 @@ class _Emitter:
             return self._emit_dict_set_call(expr, names, lines)
         if expr.target == "__dict_items":
             return self._emit_dict_items_call(expr, names, lines)
+        if expr.target == "__dict_update":
+            return self._emit_dict_update_call(expr, names, lines)
+        if expr.target == "__dict_remove":
+            return self._emit_dict_remove_call(expr, names, lines)
+        if expr.target == "__dict_comprehension":
+            return self._emit_dict_comprehension_call(expr, names, lines)
+        if expr.target in {"__set_comprehension", "__tuple_comprehension"}:
+            return self._emit_sequence_comprehension_call(expr, names, lines)
+        if expr.target == "__sorted":
+            return self._emit_sorted_call(expr, names, lines)
         if expr.target == "__zip":
             return self._emit_zip_call(expr, names, lines)
         if expr.target in {"__all_generator", "__any_generator"}:
@@ -2287,6 +2419,14 @@ class _Emitter:
         if static_result is not None:
             return _EmittedValue("true" if static_result else "false", expr.type)
         target_ids = self._isinstance_target_type_ids(expr.args[1])
+        if _is_opaque_object_type(value.type):
+            return self._emit_tagged_object_isinstance(
+                value,
+                target_names,
+                target_ids,
+                lines,
+                expr.type,
+            )
         if isinstance(value.type, IrRecordType) and target_ids:
             return self._emit_record_isinstance(value, target_ids, lines, expr.type)
         if _is_pointer_type(value.type):
@@ -2301,6 +2441,86 @@ class _Emitter:
         if isinstance(target, IrTuple):
             return tuple(element.name for element in target.elements if isinstance(element, IrName))
         return ()
+
+    def _emit_tagged_object_isinstance(
+        self,
+        value: _EmittedValue,
+        target_names: tuple[str, ...],
+        target_ids: tuple[int, ...],
+        lines: list[str],
+        result_type: IrBoolType,
+    ) -> _EmittedValue:
+        source_label = _current_label(lines)
+        check_label = self._label("object.isinstance.check")
+        end_label = self._label("object.isinstance.end")
+        nonnull = self._tmp("object.isinstance.nonnull")
+        lines.append(f"  {nonnull} = icmp ne ptr {value.value}, null")
+        lines.append(f"  br i1 {nonnull}, label %{check_label}, label %{end_label}")
+        lines.append(f"{check_label}:")
+        tag = self._tmp("object.tag")
+        lines.append(f"  {tag} = load i64, ptr {value.value}")
+        builtin_tags = sorted(
+            {
+                object_tag
+                for target_name in target_names
+                for object_tag in _OBJECT_BUILTIN_TAGS.get(target_name, ())
+            }
+        )
+        builtin_match = "false"
+        for object_tag in builtin_tags:
+            current = self._tmp("object.isinstance.builtin")
+            lines.append(f"  {current} = icmp eq i64 {tag}, {object_tag}")
+            if builtin_match == "false":
+                builtin_match = current
+            else:
+                combined = self._tmp("object.isinstance.builtin")
+                lines.append(f"  {combined} = or i1 {builtin_match}, {current}")
+                builtin_match = combined
+        result_source = check_label
+        final_match = builtin_match
+        if target_ids:
+            record_label = self._label("object.isinstance.record")
+            merge_label = self._label("object.isinstance.merge")
+            is_record = self._tmp("object.isinstance.record")
+            lines.append(f"  {is_record} = icmp eq i64 {tag}, {_OBJECT_TAG_RECORD}")
+            lines.append(f"  br i1 {is_record}, label %{record_label}, label %{merge_label}")
+            lines.append(f"{record_label}:")
+            payload = self._tmp("object.payload")
+            record_value = self._tmp("object.record")
+            record_tag_pointer = self._tmp("object.record.tagptr")
+            record_tag = self._tmp("object.record.tag")
+            lines.append(f"  {payload} = getelementptr i8, ptr {value.value}, i64 8")
+            lines.append(f"  {record_value} = load ptr, ptr {payload}")
+            lines.append(f"  {record_tag_pointer} = getelementptr i8, ptr {record_value}, i64 -8")
+            lines.append(f"  {record_tag} = load i64, ptr {record_tag_pointer}")
+            record_match = self._tmp("object.isinstance.record")
+            lines.append(f"  {record_match} = icmp eq i64 {record_tag}, {target_ids[0]}")
+            for target_id in target_ids[1:]:
+                current = self._tmp("object.isinstance.record")
+                combined = self._tmp("object.isinstance.record")
+                lines.append(f"  {current} = icmp eq i64 {record_tag}, {target_id}")
+                lines.append(f"  {combined} = or i1 {record_match}, {current}")
+                record_match = combined
+            lines.append(f"  br label %{merge_label}")
+            lines.append(f"{merge_label}:")
+            merged_record = self._tmp("object.isinstance.record")
+            lines.append(
+                f"  {merged_record} = phi i1 [ false, %{check_label} ], "
+                f"[ {record_match}, %{record_label} ]"
+            )
+            if builtin_match == "false":
+                final_match = merged_record
+            else:
+                final_match = self._tmp("object.isinstance")
+                lines.append(f"  {final_match} = or i1 {builtin_match}, {merged_record}")
+            result_source = merge_label
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp("object.isinstance")
+        lines.append(
+            f"  {result} = phi i1 [ false, %{source_label} ], [ {final_match}, %{result_source} ]"
+        )
+        return _EmittedValue(result, result_type)
 
     def _emit_record_construct0_call(
         self,
@@ -2342,6 +2562,125 @@ class _Emitter:
                 f"i32 0, i32 {index}"
             )
             lines.append(f"  store {self._storage_llvm_type(field.type)} {stored}, ptr {field_ptr}")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_record_init_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if not expr.args or not isinstance(expr.args[0], IrConstructRecord):
+            self._error("record initializer expects a default record instance")
+        init_target = expr.target.removeprefix(_RECORD_INIT_PREFIX)
+        if init_target not in self.functions:
+            self._error(f"record initializer is not reachable: {init_target}")
+        instance = self._emit_expr(expr.args[0], names, lines)
+        instance_name = "__record_init_instance"
+        init_names = dict(names)
+        init_names[instance_name] = instance
+        self._emit_call(
+            IrCall(
+                init_target,
+                (IrName(instance_name, expr.args[0].type),) + expr.args[1:],
+                IrNoneType(),
+            ),
+            init_names,
+            lines,
+        )
+        return instance
+
+    def _emit_noreturn_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        target = expr.target.removeprefix(_NORETURN_CALL_PREFIX)
+        if target not in self.functions:
+            self._error(f"NoReturn call is not reachable: {target}")
+        result = self._emit_call(IrCall(target, expr.args, expr.type), names, lines)
+        if not _block_is_terminated(lines):
+            lines.append("  unreachable")
+        return result
+
+    def _emit_union_getattr_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) < 3 or not isinstance(expr.args[1], IrName):
+            self._error("__union_getattr expects receiver, marker, and cases")
+        receiver = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(receiver.type, IrRecordType):
+            self._error("__union_getattr expects a record union receiver")
+        marker = expr.args[1]
+        cases = expr.args[2:]
+        case_records: list[str] = []
+        for case in cases:
+            case_receiver: IrExpr | None = None
+            if isinstance(case, IrGetField):
+                case_receiver = case.value
+            elif isinstance(case, IrCall) and case.args:
+                case_receiver = case.args[0]
+            if not isinstance(case_receiver, IrName) or not isinstance(
+                case_receiver.type, IrRecordType
+            ):
+                self._error("__union_getattr case requires a concrete record receiver")
+            case_records.append(case_receiver.type.name)
+
+        case_type_ids: list[list[int]] = [[] for _case in cases]
+        assigned_ids: set[int] = set()
+        for index, record_name in enumerate(case_records):
+            type_id = self.record_type_ids.get(record_name)
+            if type_id is None:
+                self._error(f"__union_getattr record is not emitted: {record_name}")
+            case_type_ids[index].append(type_id)
+            assigned_ids.add(type_id)
+        for index, record_name in enumerate(case_records):
+            for type_id in self._record_descendant_type_ids(record_name):
+                if type_id in assigned_ids:
+                    continue
+                case_type_ids[index].append(type_id)
+                assigned_ids.add(type_id)
+
+        tag_pointer = self._tmp("unionattr.tagptr")
+        tag = self._tmp("unionattr.tag")
+        default_label = self._label("unionattr.default")
+        end_label = self._label("unionattr.end")
+        case_labels = tuple(self._label("unionattr.case") for _case in cases)
+        lines.append(f"  {tag_pointer} = getelementptr i8, ptr {receiver.value}, i64 -8")
+        lines.append(f"  {tag} = load i64, ptr {tag_pointer}")
+        lines.append(f"  switch i64 {tag}, label %{default_label} [")
+        for case_label, type_ids in zip(case_labels, case_type_ids, strict=True):
+            for type_id in type_ids:
+                lines.append(f"    i64 {type_id}, label %{case_label}")
+        lines.append("  ]")
+        lines.append(f"{default_label}:")
+        lines.append(f"  br label %{end_label}")
+        incoming = [(self._default_value(expr.type), default_label)]
+        for case, record_name, case_label in zip(
+            cases,
+            case_records,
+            case_labels,
+            strict=True,
+        ):
+            lines.append(f"{case_label}:")
+            case_names = dict(names)
+            case_names[marker.name] = _EmittedValue(
+                receiver.value,
+                IrRecordType(record_name),
+            )
+            case_value = self._emit_expr(case, case_names, lines)
+            stored_value = self._value_for_result_type(case_value, expr.type, lines)
+            source_label = _current_label(lines)
+            lines.append(f"  br label %{end_label}")
+            incoming.append((stored_value, source_label))
+        lines.append(f"{end_label}:")
+        result = self._tmp("unionattr")
+        rendered_incoming = ", ".join(f"[ {value}, %{label} ]" for value, label in incoming)
+        lines.append(f"  {result} = phi {self._llvm_type(expr.type)} {rendered_incoming}")
         return _EmittedValue(result, expr.type)
 
     def _emit_record_isinstance(
@@ -2684,6 +3023,31 @@ class _Emitter:
         )
         return _EmittedValue(result, expr.type)
 
+    def _emit_string_rsplit_limit_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 3:
+            self._error("__str_rsplit_limit expects three arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        separator = self._emit_expr(expr.args[1], names, lines)
+        maxsplit = self._emit_expr(expr.args[2], names, lines)
+        if not isinstance(value.type, IrStringType) or not isinstance(separator.type, IrStringType):
+            self._error("__str_rsplit_limit expects string receiver and separator")
+        if not isinstance(maxsplit.type, IrIntType) or maxsplit.type.bits != 64:
+            self._error("__str_rsplit_limit expects an int64 maxsplit")
+        if not isinstance(expr.type, IrTupleType):
+            self._error("__str_rsplit_limit expects a tuple result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("rsplitlimit")
+        lines.append(
+            f"  {result} = call ptr @__xcc_aot_string_rsplit_limit("
+            f"ptr {value.value}, ptr {separator.value}, i64 {maxsplit.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
     def _emit_string_replace_call(
         self,
         expr: IrCall,
@@ -2747,6 +3111,24 @@ class _Emitter:
         self.needs_runtime_prelude = True
         result = self._tmp("lower")
         lines.append(f"  {result} = call ptr @__xcc_aot_string_lower(ptr {value.value})")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_string_upper_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("__str_upper expects one argument")
+        value = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(value.type, IrStringType):
+            self._error("__str_upper expects string receiver")
+        if not isinstance(expr.type, IrStringType):
+            self._error("__str_upper expects a string result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("upper")
+        lines.append(f"  {result} = call ptr @__xcc_aot_string_upper(ptr {value.value})")
         return _EmittedValue(result, expr.type)
 
     def _emit_string_ljust_call(
@@ -2938,6 +3320,120 @@ class _Emitter:
         lines.append(f"  {result} = ptrtoint ptr {value.value} to i64")
         return _EmittedValue(result, expr.type)
 
+    def _emit_repr_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("__repr expects one argument")
+        if not isinstance(expr.type, IrStringType):
+            self._error("__repr expects a string result")
+        value = self._emit_expr(expr.args[0], names, lines)
+        boxed = self._box_object_value(value, lines)
+        self.needs_runtime_prelude = True
+        result = self._tmp("repr")
+        lines.append(f"  {result} = call ptr @__xcc_aot_object_repr(ptr {boxed})")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_type_tag_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1 or not isinstance(expr.type, IrIntType):
+            self._error("__type_tag expects one argument and an integer result")
+        value = self._emit_expr(expr.args[0], names, lines)
+        if _is_opaque_object_type(value.type):
+            return self._emit_object_type_tag(value, expr.type, lines)
+        tag = self._static_type_tag(value.type)
+        return _EmittedValue(str(tag), expr.type)
+
+    def _emit_type_marker_call(self, expr: IrCall) -> _EmittedValue:
+        if (
+            len(expr.args) != 1
+            or not isinstance(expr.args[0], IrName)
+            or not isinstance(expr.type, IrIntType)
+        ):
+            self._error("__type_marker expects one named marker and an integer result")
+        marker = expr.args[0].name
+        tag = _EXACT_BUILTIN_TYPE_TAGS.get(marker)
+        if tag is None:
+            type_id = self.record_type_ids.get(marker)
+            if type_id is None:
+                self._error(f"Unsupported exact type marker: {marker}")
+            tag = _TYPE_TAG_RECORD_BASE + type_id
+        return _EmittedValue(str(tag), expr.type)
+
+    def _emit_object_type_tag(
+        self,
+        value: _EmittedValue,
+        result_type: IrIntType,
+        lines: list[str],
+    ) -> _EmittedValue:
+        source_label = _current_label(lines)
+        check_label = self._label("object.type.check")
+        record_label = self._label("object.type.record")
+        primitive_label = self._label("object.type.primitive")
+        end_label = self._label("object.type.end")
+        nonnull = self._tmp("object.type.nonnull")
+        lines.append(f"  {nonnull} = icmp ne ptr {value.value}, null")
+        lines.append(f"  br i1 {nonnull}, label %{check_label}, label %{end_label}")
+        lines.append(f"{check_label}:")
+        tag = self._tmp("object.type.tag")
+        is_record = self._tmp("object.type.record")
+        lines.append(f"  {tag} = load i64, ptr {value.value}")
+        lines.append(f"  {is_record} = icmp eq i64 {tag}, {_OBJECT_TAG_RECORD}")
+        lines.append(f"  br i1 {is_record}, label %{record_label}, label %{primitive_label}")
+        lines.append(f"{record_label}:")
+        payload_pointer = self._tmp("object.type.payloadptr")
+        record_value = self._tmp("object.type.payload")
+        record_tag_pointer = self._tmp("object.type.recordptr")
+        record_id = self._tmp("object.type.recordid")
+        record_tag = self._tmp("object.type.recordtag")
+        lines.append(f"  {payload_pointer} = getelementptr i8, ptr {value.value}, i64 8")
+        lines.append(f"  {record_value} = load ptr, ptr {payload_pointer}")
+        lines.append(f"  {record_tag_pointer} = getelementptr i8, ptr {record_value}, i64 -8")
+        lines.append(f"  {record_id} = load i64, ptr {record_tag_pointer}")
+        lines.append(f"  {record_tag} = add i64 {record_id}, {_TYPE_TAG_RECORD_BASE}")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{primitive_label}:")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp("object.type")
+        lines.append(
+            f"  {result} = phi i64 [ {_TYPE_TAG_NONE}, %{source_label} ], "
+            f"[ {record_tag}, %{record_label} ], [ {tag}, %{primitive_label} ]"
+        )
+        return _EmittedValue(result, result_type)
+
+    def _static_type_tag(self, type_info: IrType) -> int:
+        if isinstance(type_info, IrNoneType):
+            return _TYPE_TAG_NONE
+        if isinstance(type_info, IrBoolType):
+            return _OBJECT_TAG_BOOL
+        if isinstance(type_info, IrIntType):
+            return _OBJECT_TAG_INT
+        if isinstance(type_info, IrFloatType):
+            return _OBJECT_TAG_FLOAT
+        if isinstance(type_info, IrStringType):
+            return _OBJECT_TAG_STRING
+        if isinstance(type_info, IrBytesType):
+            return _OBJECT_TAG_BYTES
+        if isinstance(type_info, IrDictType):
+            return _OBJECT_TAG_DICT
+        if isinstance(type_info, IrTupleType):
+            return _OBJECT_TAG_TUPLE
+        if isinstance(type_info, IrRecordType) and type_info.name == "complex":
+            return _OBJECT_TAG_COMPLEX
+        if isinstance(type_info, IrRecordType):
+            type_id = self.record_type_ids.get(type_info.name)
+            if type_id is not None:
+                return _TYPE_TAG_RECORD_BASE + type_id
+        self._error(f"Unsupported exact type value: {type(type_info).__name__}")
+
     def _emit_ord_call(
         self,
         expr: IrCall,
@@ -2987,8 +3483,8 @@ class _Emitter:
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue:
-        if len(expr.args) != 2:
-            self._error("__dict_get expects two arguments")
+        if len(expr.args) not in {2, 3}:
+            self._error("__dict_get expects dict, key, and optional default")
         dict_value = self._emit_expr(expr.args[0], names, lines)
         if not isinstance(dict_value.type, IrDictType):
             self._error("__dict_get expects a tuple-backed dict")
@@ -3003,9 +3499,13 @@ class _Emitter:
         next_label = self._label("dictget.next")
         end_label = self._label("dictget.end")
         result_type = self._llvm_type(expr.type)
+        initial_value = self._default_value(expr.type)
+        if len(expr.args) == 3:
+            default = self._emit_expr(expr.args[2], names, lines)
+            initial_value = self._value_for_result_type(default, expr.type, lines)
         lines.append(f"  {result_ptr} = alloca {result_type}")
         lines.append(f"  {index_ptr} = alloca i64")
-        lines.append(f"  store {result_type} {self._default_value(expr.type)}, ptr {result_ptr}")
+        lines.append(f"  store {result_type} {initial_value}, ptr {result_ptr}")
         lines.append(f"  store i64 0, ptr {index_ptr}")
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{cond_label}:")
@@ -3154,23 +3654,727 @@ class _Emitter:
             self._error("__dict_items expects a tuple result")
         return _EmittedValue(value.value, expr.type)
 
+    def _emit_dict_update_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2 or not isinstance(expr.type, IrDictType):
+            self._error("__dict_update expects two dictionaries and a dictionary result")
+        target = self._emit_expr(expr.args[0], names, lines)
+        incoming = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(target.type, IrDictType) or incoming.type != target.type:
+            self._error("__dict_update expects dictionaries with matching types")
+        self.needs_runtime_prelude = True
+        result_ptr = self._tmp("dictupdate.resultptr")
+        index_ptr = self._tmp("dictupdate.indexptr")
+        cond_label = self._label("dictupdate.cond")
+        body_label = self._label("dictupdate.body")
+        end_label = self._label("dictupdate.end")
+        lines.append(f"  {result_ptr} = alloca ptr")
+        lines.append(f"  {index_ptr} = alloca i64")
+        lines.append(f"  store ptr {target.value}, ptr {result_ptr}")
+        lines.append(f"  store i64 0, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        index = self._tmp("dictupdate.index")
+        length = self._tmp("dictupdate.len")
+        done = self._tmp("dictupdate.done")
+        lines.append(f"  {index} = load i64, ptr {index_ptr}")
+        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {incoming.value})")
+        lines.append(f"  {done} = icmp uge i64 {index}, {length}")
+        lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
+        lines.append(f"{body_label}:")
+        pair = self._tmp("dictupdate.pair")
+        lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_get(ptr {incoming.value}, i64 {index})")
+        key = self._emit_runtime_tuple_get(pair, 0, target.type.key, lines)
+        value = self._emit_runtime_tuple_get(pair, 1, target.type.value, lines)
+        current = self._tmp("dictupdate.current")
+        lines.append(f"  {current} = load ptr, ptr {result_ptr}")
+        result_name = f"__dictupdate_result_{self.index}"
+        key_name = f"__dictupdate_key_{self.index}"
+        value_name = f"__dictupdate_value_{self.index}"
+        update_names = dict(names)
+        update_names[result_name] = _EmittedValue(current, target.type)
+        update_names[key_name] = key
+        update_names[value_name] = value
+        updated = self._emit_dict_set_call(
+            IrCall(
+                "__dict_set",
+                (
+                    IrName(result_name, target.type),
+                    IrName(key_name, target.type.key),
+                    IrName(value_name, target.type.value),
+                ),
+                target.type,
+            ),
+            update_names,
+            lines,
+        )
+        lines.append(f"  store ptr {updated.value}, ptr {result_ptr}")
+        next_index = self._tmp("dictupdate.next")
+        lines.append(f"  {next_index} = add i64 {index}, 1")
+        lines.append(f"  store i64 {next_index}, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp("dictupdate")
+        lines.append(f"  {result} = load ptr, ptr {result_ptr}")
+        return _EmittedValue(result, target.type)
+
+    def _emit_dict_remove_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2 or not isinstance(expr.type, IrDictType):
+            self._error("__dict_remove expects a dictionary, key, and dictionary result")
+        target = self._emit_expr(expr.args[0], names, lines)
+        key = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(target.type, IrDictType):
+            self._error("__dict_remove expects a dictionary receiver")
+        self.needs_runtime_prelude = True
+        result_ptr = self._tmp("dictremove.resultptr")
+        index_ptr = self._tmp("dictremove.indexptr")
+        empty = self._tmp("dictremove.empty")
+        cond_label = self._label("dictremove.cond")
+        body_label = self._label("dictremove.body")
+        append_label = self._label("dictremove.append")
+        next_label = self._label("dictremove.next")
+        end_label = self._label("dictremove.end")
+        lines.append(f"  {result_ptr} = alloca ptr")
+        lines.append(f"  {index_ptr} = alloca i64")
+        lines.append(f"  {empty} = call ptr @malloc(i64 8)")
+        lines.append(f"  store i64 0, ptr {empty}")
+        lines.append(f"  store ptr {empty}, ptr {result_ptr}")
+        lines.append(f"  store i64 0, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        index = self._tmp("dictremove.index")
+        length = self._tmp("dictremove.len")
+        done = self._tmp("dictremove.done")
+        lines.append(f"  {index} = load i64, ptr {index_ptr}")
+        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {target.value})")
+        lines.append(f"  {done} = icmp uge i64 {index}, {length}")
+        lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
+        lines.append(f"{body_label}:")
+        pair = self._tmp("dictremove.pair")
+        lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_get(ptr {target.value}, i64 {index})")
+        candidate = self._emit_runtime_tuple_get(pair, 0, target.type.key, lines)
+        matches = self._emit_equality_compare(key, candidate, negate=False, lines=lines)
+        lines.append(f"  br i1 {matches.value}, label %{next_label}, label %{append_label}")
+        lines.append(f"{append_label}:")
+        current = self._tmp("dictremove.current")
+        singleton = self._tmp("dictremove.singleton")
+        singleton_slot = self._tmp("dictremove.slot")
+        appended = self._tmp("dictremove.appended")
+        lines.append(f"  {current} = load ptr, ptr {result_ptr}")
+        lines.append(f"  {singleton} = call ptr @malloc(i64 16)")
+        lines.append(f"  store i64 1, ptr {singleton}")
+        lines.append(f"  {singleton_slot} = getelementptr ptr, ptr {singleton}, i64 1")
+        lines.append(f"  store ptr {pair}, ptr {singleton_slot}")
+        lines.append(
+            f"  {appended} = call ptr @__xcc_aot_tuple_concat(ptr {current}, ptr {singleton})"
+        )
+        lines.append(f"  store ptr {appended}, ptr {result_ptr}")
+        lines.append(f"  br label %{next_label}")
+        lines.append(f"{next_label}:")
+        next_index = self._tmp("dictremove.next")
+        lines.append(f"  {next_index} = add i64 {index}, 1")
+        lines.append(f"  store i64 {next_index}, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp("dictremove")
+        lines.append(f"  {result} = load ptr, ptr {result_ptr}")
+        return _EmittedValue(result, target.type)
+
+    def _emit_dict_comprehension_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) < 5 or len(expr.args) % 2 != 1:
+            self._error("__dict_comprehension expects generator pairs, key, value, and predicate")
+        if not isinstance(expr.type, IrDictType):
+            self._error("__dict_comprehension expects a dict result")
+        generators: list[tuple[IrExpr, IrName]] = []
+        arg_index = 0
+        while arg_index < len(expr.args) - 3:
+            marker = expr.args[arg_index + 1]
+            if not isinstance(marker, IrName):
+                self._error("__dict_comprehension expects named generator targets")
+            generators.append((expr.args[arg_index], marker))
+            arg_index += 2
+        if not generators:
+            self._error("__dict_comprehension expects at least one generator")
+        self.needs_runtime_prelude = True
+        result_ptr = self._tmp("dictcomp.resultptr")
+        empty = self._tmp("dictcomp.empty")
+        lines.append(f"  {result_ptr} = alloca ptr")
+        lines.append(f"  {empty} = call ptr @malloc(i64 8)")
+        lines.append(f"  store i64 0, ptr {empty}")
+        lines.append(f"  store ptr {empty}, ptr {result_ptr}")
+        self._emit_dict_comprehension_level(
+            expr,
+            tuple(generators),
+            0,
+            names,
+            result_ptr,
+            lines,
+        )
+        result = self._tmp("dictcomp")
+        lines.append(f"  {result} = load ptr, ptr {result_ptr}")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_dict_comprehension_level(
+        self,
+        expr: IrCall,
+        generators: tuple[tuple[IrExpr, IrName], ...],
+        level: int,
+        names: dict[str, _EmittedValue],
+        result_ptr: str,
+        lines: list[str],
+    ) -> None:
+        iterable_expr, marker = generators[level]
+        iterable, enumerate_start, enumerate_type = self._emit_comprehension_iterable(
+            iterable_expr,
+            names,
+            lines,
+        )
+        if not isinstance(iterable.type, IrTupleType | IrDictType):
+            self._error("__dict_comprehension expects tuple-backed iterables")
+        index_ptr = self._tmp(f"dictcomp.{level}.indexptr")
+        cond_label = self._label("dictcomp.cond")
+        body_label = self._label("dictcomp.body")
+        next_label = self._label("dictcomp.next")
+        end_label = self._label("dictcomp.end")
+        lines.append(f"  {index_ptr} = alloca i64")
+        lines.append(f"  store i64 0, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        index = self._tmp("dictcomp.index")
+        length = self._tmp("dictcomp.len")
+        done = self._tmp("dictcomp.done")
+        lines.append(f"  {index} = load i64, ptr {index_ptr}")
+        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+        lines.append(f"  {done} = icmp uge i64 {index}, {length}")
+        lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
+        lines.append(f"{body_label}:")
+        raw = self._tmp("dictcomp.item")
+        lines.append(f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})")
+        if isinstance(iterable.type, IrDictType):
+            raw_key = self._tmp("dictcomp.key")
+            lines.append(f"  {raw_key} = call ptr @__xcc_aot_tuple_get(ptr {raw}, i64 0)")
+            raw = raw_key
+        if enumerate_type is not None:
+            if enumerate_start is None:
+                self._error("Malformed __enumerate comprehension")
+            enumerate_index = index
+            if enumerate_start.value != "0":
+                enumerate_index = self._tmp("dictcomp.enumindex")
+                lines.append(f"  {enumerate_index} = add i64 {index}, {enumerate_start.value}")
+            item = self._emit_enumerate_pair_tuple(
+                enumerate_type,
+                enumerate_index,
+                raw,
+                lines,
+            )
+        else:
+            item = self._emit_runtime_boxed_value(raw, marker.type, lines)
+        comprehension_names = dict(names)
+        if "," in marker.name:
+            self._bind_emitted_tuple_target(
+                marker.name,
+                item,
+                comprehension_names,
+                lines,
+            )
+        else:
+            comprehension_names[marker.name] = item
+        if level + 1 < len(generators):
+            self._emit_dict_comprehension_level(
+                expr,
+                generators,
+                level + 1,
+                comprehension_names,
+                result_ptr,
+                lines,
+            )
+            lines.append(f"  br label %{next_label}")
+        else:
+            self._emit_dict_comprehension_value(
+                expr,
+                comprehension_names,
+                result_ptr,
+                next_label,
+                lines,
+            )
+        lines.append(f"{next_label}:")
+        next_index = self._tmp("dictcomp.next")
+        lines.append(f"  {next_index} = add i64 {index}, 1")
+        lines.append(f"  store i64 {next_index}, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
+
+    def _emit_dict_comprehension_value(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        result_ptr: str,
+        next_label: str,
+        lines: list[str],
+    ) -> None:
+        append_label = self._label("dictcomp.append")
+        predicate = self._coerce_to_bool(
+            self._emit_expr(expr.args[-1], names, lines),
+            lines,
+        )
+        lines.append(f"  br i1 {predicate.value}, label %{append_label}, label %{next_label}")
+        lines.append(f"{append_label}:")
+        current = self._tmp("dictcomp.current")
+        result_name = f"__dictcomp_result_{self.index}"
+        lines.append(f"  {current} = load ptr, ptr {result_ptr}")
+        names[result_name] = _EmittedValue(current, expr.type)
+        updated = self._emit_dict_set_call(
+            IrCall(
+                "__dict_set",
+                (
+                    IrName(result_name, expr.type),
+                    expr.args[-3],
+                    expr.args[-2],
+                ),
+                expr.type,
+            ),
+            names,
+            lines,
+        )
+        lines.append(f"  store ptr {updated.value}, ptr {result_ptr}")
+        lines.append(f"  br label %{next_label}")
+
+    def _emit_comprehension_iterable(
+        self,
+        iterable_expr: IrExpr,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> tuple[_EmittedValue, _EmittedValue | None, IrTupleType | None]:
+        if not isinstance(iterable_expr, IrCall) or iterable_expr.target != "__enumerate":
+            return self._emit_expr(iterable_expr, names, lines), None, None
+        if len(iterable_expr.args) != 2 or not isinstance(iterable_expr.type, IrTupleType):
+            self._error("Malformed __enumerate comprehension")
+        iterable = self._emit_expr(iterable_expr.args[0], names, lines)
+        start = self._emit_expr(iterable_expr.args[1], names, lines)
+        if not isinstance(start.type, IrIntType) or start.type.bits != 64:
+            self._error("__enumerate comprehension start expects int64")
+        return iterable, start, iterable_expr.type
+
+    def _emit_sequence_comprehension_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) < 4 or len(expr.args) % 2 != 0:
+            self._error(f"{expr.target} expects generator pairs, element, and predicate")
+        if not isinstance(expr.type, IrTupleType) or len(expr.type.elements) != 1:
+            self._error(f"{expr.target} expects a homogeneous tuple result")
+        generators: list[tuple[IrExpr, IrName]] = []
+        arg_index = 0
+        while arg_index < len(expr.args) - 2:
+            marker = expr.args[arg_index + 1]
+            if not isinstance(marker, IrName):
+                self._error(f"{expr.target} expects named generator targets")
+            generators.append((expr.args[arg_index], marker))
+            arg_index += 2
+        if not generators:
+            self._error(f"{expr.target} expects at least one generator")
+        self.needs_runtime_prelude = True
+        result_ptr = self._tmp("seqcomp.resultptr")
+        empty = self._tmp("seqcomp.empty")
+        lines.append(f"  {result_ptr} = alloca ptr")
+        lines.append(f"  {empty} = call ptr @malloc(i64 8)")
+        lines.append(f"  store i64 0, ptr {empty}")
+        lines.append(f"  store ptr {empty}, ptr {result_ptr}")
+        self._emit_sequence_comprehension_level(
+            expr,
+            tuple(generators),
+            0,
+            names,
+            result_ptr,
+            lines,
+        )
+        result = self._tmp("seqcomp")
+        lines.append(f"  {result} = load ptr, ptr {result_ptr}")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_sequence_comprehension_level(
+        self,
+        expr: IrCall,
+        generators: tuple[tuple[IrExpr, IrName], ...],
+        level: int,
+        names: dict[str, _EmittedValue],
+        result_ptr: str,
+        lines: list[str],
+    ) -> None:
+        iterable_expr, marker = generators[level]
+        iterable, enumerate_start, enumerate_type = self._emit_comprehension_iterable(
+            iterable_expr,
+            names,
+            lines,
+        )
+        if not isinstance(iterable.type, IrTupleType | IrDictType):
+            self._error(f"{expr.target} expects tuple-backed iterables")
+        index_ptr = self._tmp(f"seqcomp.{level}.indexptr")
+        cond_label = self._label("seqcomp.cond")
+        body_label = self._label("seqcomp.body")
+        next_label = self._label("seqcomp.next")
+        end_label = self._label("seqcomp.end")
+        lines.append(f"  {index_ptr} = alloca i64")
+        lines.append(f"  store i64 0, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        index = self._tmp("seqcomp.index")
+        length = self._tmp("seqcomp.len")
+        done = self._tmp("seqcomp.done")
+        lines.append(f"  {index} = load i64, ptr {index_ptr}")
+        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+        lines.append(f"  {done} = icmp uge i64 {index}, {length}")
+        lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
+        lines.append(f"{body_label}:")
+        raw = self._tmp("seqcomp.item")
+        lines.append(f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})")
+        if isinstance(iterable.type, IrDictType):
+            raw_key = self._tmp("seqcomp.key")
+            lines.append(f"  {raw_key} = call ptr @__xcc_aot_tuple_get(ptr {raw}, i64 0)")
+            raw = raw_key
+        if enumerate_type is not None:
+            if enumerate_start is None:
+                self._error("Malformed __enumerate comprehension")
+            enumerate_index = index
+            if enumerate_start.value != "0":
+                enumerate_index = self._tmp("seqcomp.enumindex")
+                lines.append(f"  {enumerate_index} = add i64 {index}, {enumerate_start.value}")
+            item = self._emit_enumerate_pair_tuple(
+                enumerate_type,
+                enumerate_index,
+                raw,
+                lines,
+            )
+        else:
+            item = self._emit_runtime_boxed_value(raw, marker.type, lines)
+        comprehension_names = dict(names)
+        if "," in marker.name:
+            self._bind_emitted_tuple_target(
+                marker.name,
+                item,
+                comprehension_names,
+                lines,
+            )
+        else:
+            comprehension_names[marker.name] = item
+        if level + 1 < len(generators):
+            self._emit_sequence_comprehension_level(
+                expr,
+                generators,
+                level + 1,
+                comprehension_names,
+                result_ptr,
+                lines,
+            )
+            lines.append(f"  br label %{next_label}")
+        else:
+            self._emit_sequence_comprehension_value(
+                expr,
+                comprehension_names,
+                result_ptr,
+                next_label,
+                lines,
+            )
+        lines.append(f"{next_label}:")
+        next_index = self._tmp("seqcomp.next")
+        lines.append(f"  {next_index} = add i64 {index}, 1")
+        lines.append(f"  store i64 {next_index}, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
+
+    def _emit_sequence_comprehension_value(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        result_ptr: str,
+        next_label: str,
+        lines: list[str],
+    ) -> None:
+        value_label = self._label("seqcomp.value")
+        append_label = self._label("seqcomp.append")
+        predicate = self._coerce_to_bool(
+            self._emit_expr(expr.args[-1], names, lines),
+            lines,
+        )
+        lines.append(f"  br i1 {predicate.value}, label %{value_label}, label %{next_label}")
+        lines.append(f"{value_label}:")
+        value = self._emit_expr(expr.args[-2], names, lines)
+        if expr.target == "__set_comprehension":
+            current = self._tmp("seqcomp.current")
+            current_name = f"__seqcomp_current_{self.index}"
+            value_name = f"__seqcomp_value_{self.index}"
+            lines.append(f"  {current} = load ptr, ptr {result_ptr}")
+            membership_names = dict(names)
+            membership_names[current_name] = _EmittedValue(current, expr.type)
+            membership_names[value_name] = value
+            member = self._emit_tuple_membership(
+                IrName(value_name, value.type),
+                IrName(current_name, expr.type),
+                membership_names,
+                lines,
+                negate=False,
+            )
+            lines.append(f"  br i1 {member.value}, label %{next_label}, label %{append_label}")
+        else:
+            lines.append(f"  br label %{append_label}")
+        lines.append(f"{append_label}:")
+        current = self._tmp("seqcomp.current")
+        singleton = self._runtime_singleton_tuple(value, lines)
+        updated = self._tmp("seqcomp.updated")
+        lines.append(f"  {current} = load ptr, ptr {result_ptr}")
+        lines.append(
+            f"  {updated} = call ptr @__xcc_aot_tuple_concat(ptr {current}, ptr {singleton})"
+        )
+        lines.append(f"  store ptr {updated}, ptr {result_ptr}")
+        lines.append(f"  br label %{next_label}")
+
     def _emit_zip_call(
         self,
         expr: IrCall,
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue:
-        if len(expr.args) != 2:
-            self._error("__zip currently expects two arguments")
-        left = self._emit_expr(expr.args[0], names, lines)
-        right = self._emit_expr(expr.args[1], names, lines)
-        if not isinstance(left.type, IrTupleType) or not isinstance(right.type, IrTupleType):
+        if not expr.args:
+            self._error("__zip expects at least one argument")
+        iterables = [self._emit_expr(arg, names, lines) for arg in expr.args]
+        if any(not isinstance(iterable.type, IrTupleType) for iterable in iterables):
             self._error("__zip expects tuple-backed iterables")
         if not isinstance(expr.type, IrTupleType):
             self._error("__zip expects a tuple result")
         self.needs_runtime_prelude = True
+        if len(iterables) == 2:
+            result = self._tmp("zip")
+            lines.append(
+                f"  {result} = call ptr @__xcc_aot_zip2("
+                f"ptr {iterables[0].value}, ptr {iterables[1].value})"
+            )
+            return _EmittedValue(result, expr.type)
+
+        count = self._tmp("zip.count")
+        lines.append(f"  {count} = call i64 @__xcc_aot_tuple_len(ptr {iterables[0].value})")
+        for iterable in iterables[1:]:
+            length = self._tmp("zip.len")
+            shorter = self._tmp("zip.shorter")
+            next_count = self._tmp("zip.count")
+            lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+            lines.append(f"  {shorter} = icmp ult i64 {length}, {count}")
+            lines.append(f"  {next_count} = select i1 {shorter}, i64 {length}, i64 {count}")
+            count = next_count
+        slot_count = self._tmp("zip.slotcount")
+        allocation_size = self._tmp("zip.allocsize")
         result = self._tmp("zip")
-        lines.append(f"  {result} = call ptr @__xcc_aot_zip2(ptr {left.value}, ptr {right.value})")
+        index_ptr = self._tmp("zip.indexptr")
+        cond_label = self._label("zip.cond")
+        body_label = self._label("zip.body")
+        next_label = self._label("zip.next")
+        end_label = self._label("zip.end")
+        lines.append(f"  {slot_count} = add i64 {count}, 1")
+        lines.append(f"  {allocation_size} = mul i64 {slot_count}, 8")
+        lines.append(f"  {result} = call ptr @malloc(i64 {allocation_size})")
+        lines.append(f"  store i64 {count}, ptr {result}")
+        lines.append(f"  {index_ptr} = alloca i64")
+        lines.append(f"  store i64 0, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        index = self._tmp("zip.index")
+        done = self._tmp("zip.done")
+        lines.append(f"  {index} = load i64, ptr {index_ptr}")
+        lines.append(f"  {done} = icmp uge i64 {index}, {count}")
+        lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
+        lines.append(f"{body_label}:")
+        pair_size = (len(iterables) + 1) * 8
+        pair = self._tmp("zip.item")
+        lines.append(f"  {pair} = call ptr @malloc(i64 {pair_size})")
+        lines.append(f"  store i64 {len(iterables)}, ptr {pair}")
+        for item_index, iterable in enumerate(iterables, start=1):
+            item = self._tmp("zip.value")
+            slot = self._tmp("zip.itemslot")
+            lines.append(
+                f"  {item} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})"
+            )
+            lines.append(f"  {slot} = getelementptr ptr, ptr {pair}, i64 {item_index}")
+            lines.append(f"  store ptr {item}, ptr {slot}")
+        result_index = self._tmp("zip.resultindex")
+        result_slot = self._tmp("zip.resultslot")
+        lines.append(f"  {result_index} = add i64 {index}, 1")
+        lines.append(f"  {result_slot} = getelementptr ptr, ptr {result}, i64 {result_index}")
+        lines.append(f"  store ptr {pair}, ptr {result_slot}")
+        lines.append(f"  br label %{next_label}")
+        lines.append(f"{next_label}:")
+        next_index = self._tmp("zip.next")
+        lines.append(f"  {next_index} = add i64 {index}, 1")
+        lines.append(f"  store i64 {next_index}, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_sorted_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 4 or not isinstance(expr.args[1], IrName):
+            self._error("__sorted expects iterable, item marker, key, and reverse")
+        if not isinstance(expr.type, IrTupleType) or len(expr.type.elements) != 1:
+            self._error("__sorted expects a homogeneous tuple result")
+        iterable = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(iterable.type, IrTupleType | IrDictType):
+            self._error("__sorted expects a tuple-backed iterable or dict")
+        marker = expr.args[1]
+        reverse = self._coerce_to_bool(self._emit_expr(expr.args[3], names, lines), lines)
+        self.needs_runtime_prelude = True
+        length = self._tmp("sorted.len")
+        allocation_items = self._tmp("sorted.allocitems")
+        allocation_size = self._tmp("sorted.allocsize")
+        result = self._tmp("sorted")
+        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+        lines.append(f"  {allocation_items} = add i64 {length}, 1")
+        lines.append(f"  {allocation_size} = mul i64 {allocation_items}, 8")
+        lines.append(f"  {result} = call ptr @malloc(i64 {allocation_size})")
+        lines.append(f"  store i64 {length}, ptr {result}")
+
+        copy_index_ptr = self._tmp("sorted.copy.indexptr")
+        copy_cond_label = self._label("sorted.copy.cond")
+        copy_body_label = self._label("sorted.copy.body")
+        copy_end_label = self._label("sorted.copy.end")
+        lines.append(f"  {copy_index_ptr} = alloca i64")
+        lines.append(f"  store i64 0, ptr {copy_index_ptr}")
+        lines.append(f"  br label %{copy_cond_label}")
+        lines.append(f"{copy_cond_label}:")
+        copy_index = self._tmp("sorted.copy.index")
+        copy_done = self._tmp("sorted.copy.done")
+        lines.append(f"  {copy_index} = load i64, ptr {copy_index_ptr}")
+        lines.append(f"  {copy_done} = icmp uge i64 {copy_index}, {length}")
+        lines.append(f"  br i1 {copy_done}, label %{copy_end_label}, label %{copy_body_label}")
+        lines.append(f"{copy_body_label}:")
+        raw_item = self._tmp("sorted.copy.item")
+        lines.append(
+            f"  {raw_item} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {copy_index})"
+        )
+        if isinstance(iterable.type, IrDictType):
+            raw_key = self._tmp("sorted.copy.key")
+            lines.append(f"  {raw_key} = call ptr @__xcc_aot_tuple_get(ptr {raw_item}, i64 0)")
+            raw_item = raw_key
+        copy_slot_index = self._tmp("sorted.copy.slotindex")
+        copy_slot = self._tmp("sorted.copy.slot")
+        lines.append(f"  {copy_slot_index} = add i64 {copy_index}, 1")
+        lines.append(f"  {copy_slot} = getelementptr ptr, ptr {result}, i64 {copy_slot_index}")
+        lines.append(f"  store ptr {raw_item}, ptr {copy_slot}")
+        copy_next = self._tmp("sorted.copy.next")
+        lines.append(f"  {copy_next} = add i64 {copy_index}, 1")
+        lines.append(f"  store i64 {copy_next}, ptr {copy_index_ptr}")
+        lines.append(f"  br label %{copy_cond_label}")
+        lines.append(f"{copy_end_label}:")
+
+        outer_ptr = self._tmp("sorted.outerptr")
+        inner_ptr = self._tmp("sorted.innerptr")
+        outer_cond_label = self._label("sorted.outer.cond")
+        outer_body_label = self._label("sorted.outer.body")
+        outer_next_label = self._label("sorted.outer.next")
+        outer_end_label = self._label("sorted.outer.end")
+        inner_cond_label = self._label("sorted.inner.cond")
+        inner_body_label = self._label("sorted.inner.body")
+        swap_label = self._label("sorted.swap")
+        inner_next_label = self._label("sorted.inner.next")
+        lines.append(f"  {outer_ptr} = alloca i64")
+        lines.append(f"  {inner_ptr} = alloca i64")
+        lines.append(f"  store i64 0, ptr {outer_ptr}")
+        lines.append(f"  br label %{outer_cond_label}")
+        lines.append(f"{outer_cond_label}:")
+        outer = self._tmp("sorted.outer")
+        outer_done = self._tmp("sorted.outer.done")
+        lines.append(f"  {outer} = load i64, ptr {outer_ptr}")
+        lines.append(f"  {outer_done} = icmp uge i64 {outer}, {length}")
+        lines.append(f"  br i1 {outer_done}, label %{outer_end_label}, label %{outer_body_label}")
+        lines.append(f"{outer_body_label}:")
+        lines.append(f"  store i64 0, ptr {inner_ptr}")
+        lines.append(f"  br label %{inner_cond_label}")
+        lines.append(f"{inner_cond_label}:")
+        inner = self._tmp("sorted.inner")
+        pass_items = self._tmp("sorted.passitems")
+        pass_length = self._tmp("sorted.passlen")
+        inner_done = self._tmp("sorted.inner.done")
+        lines.append(f"  {inner} = load i64, ptr {inner_ptr}")
+        lines.append(f"  {pass_items} = sub i64 {length}, {outer}")
+        lines.append(f"  {pass_length} = sub i64 {pass_items}, 1")
+        lines.append(f"  {inner_done} = icmp uge i64 {inner}, {pass_length}")
+        lines.append(f"  br i1 {inner_done}, label %{outer_next_label}, label %{inner_body_label}")
+        lines.append(f"{inner_body_label}:")
+        left_slot_index = self._tmp("sorted.left.index")
+        right_slot_index = self._tmp("sorted.right.index")
+        left_slot = self._tmp("sorted.left.slot")
+        right_slot = self._tmp("sorted.right.slot")
+        left_raw = self._tmp("sorted.left")
+        right_raw = self._tmp("sorted.right")
+        lines.append(f"  {left_slot_index} = add i64 {inner}, 1")
+        lines.append(f"  {right_slot_index} = add i64 {inner}, 2")
+        lines.append(f"  {left_slot} = getelementptr ptr, ptr {result}, i64 {left_slot_index}")
+        lines.append(f"  {right_slot} = getelementptr ptr, ptr {result}, i64 {right_slot_index}")
+        lines.append(f"  {left_raw} = load ptr, ptr {left_slot}")
+        lines.append(f"  {right_raw} = load ptr, ptr {right_slot}")
+        left = self._emit_runtime_boxed_value(left_raw, marker.type, lines)
+        right = self._emit_runtime_boxed_value(right_raw, marker.type, lines)
+        left_names = dict(names)
+        right_names = dict(names)
+        left_names[marker.name] = left
+        right_names[marker.name] = right
+        left_key = self._emit_expr(expr.args[2], left_names, lines)
+        right_key = self._emit_expr(expr.args[2], right_names, lines)
+        left_key_name = f"__sorted_left_key_{self.index}"
+        right_key_name = f"__sorted_right_key_{self.index}"
+        comparison_names = dict(names)
+        comparison_names[left_key_name] = left_key
+        comparison_names[right_key_name] = right_key
+        left_key_expr = IrName(left_key_name, left_key.type)
+        right_key_expr = IrName(right_key_name, right_key.type)
+        ascending_swap = self._emit_expr(
+            IrCall("__cmp_Gt", (left_key_expr, right_key_expr), IrBoolType()),
+            comparison_names,
+            lines,
+        )
+        descending_swap = self._emit_expr(
+            IrCall("__cmp_Lt", (left_key_expr, right_key_expr), IrBoolType()),
+            comparison_names,
+            lines,
+        )
+        should_swap = self._tmp("sorted.shouldswap")
+        lines.append(
+            f"  {should_swap} = select i1 {reverse.value}, "
+            f"i1 {descending_swap.value}, i1 {ascending_swap.value}"
+        )
+        lines.append(f"  br i1 {should_swap}, label %{swap_label}, label %{inner_next_label}")
+        lines.append(f"{swap_label}:")
+        lines.append(f"  store ptr {right_raw}, ptr {left_slot}")
+        lines.append(f"  store ptr {left_raw}, ptr {right_slot}")
+        lines.append(f"  br label %{inner_next_label}")
+        lines.append(f"{inner_next_label}:")
+        inner_next = self._tmp("sorted.inner.next")
+        lines.append(f"  {inner_next} = add i64 {inner}, 1")
+        lines.append(f"  store i64 {inner_next}, ptr {inner_ptr}")
+        lines.append(f"  br label %{inner_cond_label}")
+        lines.append(f"{outer_next_label}:")
+        outer_next = self._tmp("sorted.outer.next")
+        lines.append(f"  {outer_next} = add i64 {outer}, 1")
+        lines.append(f"  store i64 {outer_next}, ptr {outer_ptr}")
+        lines.append(f"  br label %{outer_cond_label}")
+        lines.append(f"{outer_end_label}:")
         return _EmittedValue(result, expr.type)
 
     def _emit_generator_predicate_call(
@@ -3179,6 +4383,8 @@ class _Emitter:
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue:
+        if len(expr.args) > 3:
+            return self._emit_nested_generator_predicate_call(expr, names, lines)
         if len(expr.args) != 3 or not isinstance(expr.args[1], IrName):
             self._error(f"{expr.target} expects iterable, target, and predicate")
         if not isinstance(expr.type, IrBoolType):
@@ -3242,7 +4448,15 @@ class _Emitter:
                 item = self._emit_runtime_tuple_get(raw, 0, marker.type, lines)
             else:
                 item = self._emit_runtime_boxed_value(raw, marker.type, lines)
-        predicate_names[marker.name] = item
+        if "," in marker.name:
+            self._bind_emitted_tuple_target(
+                marker.name,
+                item,
+                predicate_names,
+                lines,
+            )
+        else:
+            predicate_names[marker.name] = item
         predicate = self._coerce_to_bool(
             self._emit_expr(expr.args[2], predicate_names, lines),
             lines,
@@ -3266,6 +4480,146 @@ class _Emitter:
             f"[ {stopped_value}, %{predicate_source} ]"
         )
         return _EmittedValue(result, expr.type)
+
+    def _emit_nested_generator_predicate_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) < 5 or len(expr.args) % 2 == 0:
+            self._error(f"{expr.target} expects generator pairs and a predicate")
+        if not isinstance(expr.type, IrBoolType):
+            self._error(f"{expr.target} expects a bool result")
+        generators: list[tuple[IrExpr, IrName]] = []
+        arg_index = 0
+        while arg_index < len(expr.args) - 1:
+            marker = expr.args[arg_index + 1]
+            if not isinstance(marker, IrName):
+                self._error(f"{expr.target} expects named generator targets")
+            generators.append((expr.args[arg_index], marker))
+            arg_index += 2
+        mode = "any" if expr.target == "__any_generator" else "all"
+        default_value = "false" if mode == "any" else "true"
+        self.needs_runtime_prelude = True
+        result_ptr = self._tmp(f"{mode}.resultptr")
+        end_label = self._label(f"{mode}.end")
+        lines.append(f"  {result_ptr} = alloca i1")
+        lines.append(f"  store i1 {default_value}, ptr {result_ptr}")
+        self._emit_nested_generator_predicate_level(
+            expr,
+            tuple(generators),
+            0,
+            names,
+            result_ptr,
+            end_label,
+            lines,
+        )
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp(mode)
+        lines.append(f"  {result} = load i1, ptr {result_ptr}")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_nested_generator_predicate_level(
+        self,
+        expr: IrCall,
+        generators: tuple[tuple[IrExpr, IrName], ...],
+        level: int,
+        names: dict[str, _EmittedValue],
+        result_ptr: str,
+        result_label: str,
+        lines: list[str],
+    ) -> None:
+        iterable_expr, marker = generators[level]
+        iterable, enumerate_start, enumerate_type = self._emit_comprehension_iterable(
+            iterable_expr,
+            names,
+            lines,
+        )
+        if not isinstance(iterable.type, IrTupleType | IrDictType):
+            self._error(f"{expr.target} expects tuple-backed iterables")
+        mode = "any" if expr.target == "__any_generator" else "all"
+        index_ptr = self._tmp(f"{mode}.{level}.indexptr")
+        cond_label = self._label(f"{mode}.cond")
+        body_label = self._label(f"{mode}.body")
+        next_label = self._label(f"{mode}.next")
+        end_label = self._label(f"{mode}.exhausted")
+        lines.append(f"  {index_ptr} = alloca i64")
+        lines.append(f"  store i64 0, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        index = self._tmp(f"{mode}.index")
+        length = self._tmp(f"{mode}.len")
+        done = self._tmp(f"{mode}.done")
+        lines.append(f"  {index} = load i64, ptr {index_ptr}")
+        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+        lines.append(f"  {done} = icmp uge i64 {index}, {length}")
+        lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
+        lines.append(f"{body_label}:")
+        raw = self._tmp(f"{mode}.item")
+        lines.append(f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})")
+        if isinstance(iterable.type, IrDictType):
+            raw_key = self._tmp(f"{mode}.key")
+            lines.append(f"  {raw_key} = call ptr @__xcc_aot_tuple_get(ptr {raw}, i64 0)")
+            raw = raw_key
+        if enumerate_type is not None:
+            if enumerate_start is None:
+                self._error("Malformed __enumerate generator")
+            enumerate_index = index
+            if enumerate_start.value != "0":
+                enumerate_index = self._tmp(f"{mode}.enumindex")
+                lines.append(f"  {enumerate_index} = add i64 {index}, {enumerate_start.value}")
+            item = self._emit_enumerate_pair_tuple(
+                enumerate_type,
+                enumerate_index,
+                raw,
+                lines,
+            )
+        else:
+            item = self._emit_runtime_boxed_value(raw, marker.type, lines)
+        predicate_names = dict(names)
+        if "," in marker.name:
+            self._bind_emitted_tuple_target(
+                marker.name,
+                item,
+                predicate_names,
+                lines,
+            )
+        else:
+            predicate_names[marker.name] = item
+        if level + 1 < len(generators):
+            self._emit_nested_generator_predicate_level(
+                expr,
+                generators,
+                level + 1,
+                predicate_names,
+                result_ptr,
+                result_label,
+                lines,
+            )
+            lines.append(f"  br label %{next_label}")
+        else:
+            predicate = self._coerce_to_bool(
+                self._emit_expr(expr.args[-1], predicate_names, lines),
+                lines,
+            )
+            stop_label = self._label(f"{mode}.stop")
+            if mode == "any":
+                lines.append(f"  br i1 {predicate.value}, label %{stop_label}, label %{next_label}")
+                stopped_value = "true"
+            else:
+                lines.append(f"  br i1 {predicate.value}, label %{next_label}, label %{stop_label}")
+                stopped_value = "false"
+            lines.append(f"{stop_label}:")
+            lines.append(f"  store i1 {stopped_value}, ptr {result_ptr}")
+            lines.append(f"  br label %{result_label}")
+        lines.append(f"{next_label}:")
+        next_index = self._tmp(f"{mode}.next")
+        lines.append(f"  {next_index} = add i64 {index}, 1")
+        lines.append(f"  store i64 {next_index}, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
 
     def _emit_optional_box_call(
         self,
@@ -3632,6 +4986,172 @@ class _Emitter:
             f"  {result} = call ptr @__xcc_aot_tuple_concat(ptr {left.value}, ptr {right.value})"
         )
         return _EmittedValue(result, expr.type)
+
+    def _emit_set_binary_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error(f"{expr.target} expects two arguments")
+        left = self._emit_expr(expr.args[0], names, lines)
+        right = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(left.type, IrTupleType) or not isinstance(right.type, IrTupleType):
+            self._error(f"{expr.target} expects tuple-backed sets")
+        if not isinstance(expr.type, IrTupleType) or len(expr.type.elements) != 1:
+            self._error(f"{expr.target} expects a homogeneous tuple result")
+        item_type = expr.type.elements[0]
+        self.needs_runtime_prelude = True
+        result_ptr = self._tmp("setop.resultptr")
+        empty = self._tmp("setop.empty")
+        lines.append(f"  {result_ptr} = alloca ptr")
+        lines.append(f"  {empty} = call ptr @malloc(i64 8)")
+        lines.append(f"  store i64 0, ptr {empty}")
+        lines.append(f"  store ptr {empty}, ptr {result_ptr}")
+        if expr.target == "__set_union":
+            self._emit_set_binary_phase(
+                left,
+                None,
+                "unique",
+                item_type,
+                expr.type,
+                result_ptr,
+                names,
+                lines,
+            )
+            self._emit_set_binary_phase(
+                right,
+                None,
+                "unique",
+                item_type,
+                expr.type,
+                result_ptr,
+                names,
+                lines,
+            )
+        elif expr.target == "__set_intersection":
+            self._emit_set_binary_phase(
+                left,
+                right,
+                "present",
+                item_type,
+                expr.type,
+                result_ptr,
+                names,
+                lines,
+            )
+        elif expr.target == "__set_difference":
+            self._emit_set_binary_phase(
+                left,
+                right,
+                "absent",
+                item_type,
+                expr.type,
+                result_ptr,
+                names,
+                lines,
+            )
+        else:
+            self._emit_set_binary_phase(
+                left,
+                right,
+                "absent",
+                item_type,
+                expr.type,
+                result_ptr,
+                names,
+                lines,
+            )
+            self._emit_set_binary_phase(
+                right,
+                left,
+                "absent",
+                item_type,
+                expr.type,
+                result_ptr,
+                names,
+                lines,
+            )
+        result = self._tmp("setop")
+        lines.append(f"  {result} = load ptr, ptr {result_ptr}")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_set_binary_phase(
+        self,
+        iterable: _EmittedValue,
+        other: _EmittedValue | None,
+        mode: str,
+        item_type: IrType,
+        result_type: IrTupleType,
+        result_ptr: str,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> None:
+        index_ptr = self._tmp("setop.indexptr")
+        cond_label = self._label("setop.cond")
+        body_label = self._label("setop.body")
+        append_label = self._label("setop.append")
+        next_label = self._label("setop.next")
+        end_label = self._label("setop.end")
+        lines.append(f"  {index_ptr} = alloca i64")
+        lines.append(f"  store i64 0, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        index = self._tmp("setop.index")
+        length = self._tmp("setop.len")
+        done = self._tmp("setop.done")
+        lines.append(f"  {index} = load i64, ptr {index_ptr}")
+        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+        lines.append(f"  {done} = icmp uge i64 {index}, {length}")
+        lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
+        lines.append(f"{body_label}:")
+        raw = self._tmp("setop.item")
+        lines.append(f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})")
+        item = self._emit_runtime_boxed_value(raw, item_type, lines)
+        current = self._tmp("setop.current")
+        lines.append(f"  {current} = load ptr, ptr {result_ptr}")
+        item_name = f"__setop_item_{self.index}"
+        result_name = f"__setop_result_{self.index}"
+        membership_names = dict(names)
+        membership_names[item_name] = item
+        membership_names[result_name] = _EmittedValue(current, result_type)
+        unique = self._emit_tuple_membership(
+            IrName(item_name, item_type),
+            IrName(result_name, result_type),
+            membership_names,
+            lines,
+            negate=True,
+        )
+        should_append = unique
+        if other is not None:
+            other_name = f"__setop_other_{self.index}"
+            membership_names[other_name] = other
+            matches_other = self._emit_tuple_membership(
+                IrName(item_name, item_type),
+                IrName(other_name, other.type),
+                membership_names,
+                lines,
+                negate=mode == "absent",
+            )
+            combined = self._tmp("setop.include")
+            lines.append(f"  {combined} = and i1 {unique.value}, {matches_other.value}")
+            should_append = _EmittedValue(combined, IrBoolType())
+        lines.append(f"  br i1 {should_append.value}, label %{append_label}, label %{next_label}")
+        lines.append(f"{append_label}:")
+        singleton = self._runtime_singleton_tuple(item, lines)
+        updated = self._tmp("setop.updated")
+        lines.append(
+            f"  {updated} = call ptr @__xcc_aot_tuple_concat(ptr {current}, ptr {singleton})"
+        )
+        lines.append(f"  store ptr {updated}, ptr {result_ptr}")
+        lines.append(f"  br label %{next_label}")
+        lines.append(f"{next_label}:")
+        next_index = self._tmp("setop.next")
+        lines.append(f"  {next_index} = add i64 {index}, 1")
+        lines.append(f"  store i64 {next_index}, ptr {index_ptr}")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
 
     def _emit_tuple_repeat_call(
         self,
@@ -4006,6 +5526,42 @@ class _Emitter:
         lines: list[str],
     ) -> _EmittedValue | None:
         if not isinstance(value.type, IrRecordType):
+            return None
+        if _is_opaque_object_type(value.type):
+            if _is_opaque_object_type(requested_type):
+                return value
+            payload = self._tmp("object.payload")
+            lines.append(f"  {payload} = getelementptr i8, ptr {value.value}, i64 8")
+            if isinstance(requested_type, IrIntType):
+                integer = self._tmp("object.int")
+                lines.append(f"  {integer} = load i64, ptr {payload}")
+                if requested_type.bits == 64:
+                    return _EmittedValue(integer, requested_type)
+                result = self._tmp("object.int")
+                if requested_type.bits < 64:
+                    lines.append(
+                        f"  {result} = trunc i64 {integer} to {self._llvm_type(requested_type)}"
+                    )
+                else:
+                    opcode = "sext" if requested_type.signed else "zext"
+                    lines.append(
+                        f"  {result} = {opcode} i64 {integer} to {self._llvm_type(requested_type)}"
+                    )
+                return _EmittedValue(result, requested_type)
+            if isinstance(requested_type, IrBoolType):
+                integer = self._tmp("object.bool")
+                result = self._tmp("object.bool")
+                lines.append(f"  {integer} = load i64, ptr {payload}")
+                lines.append(f"  {result} = icmp ne i64 {integer}, 0")
+                return _EmittedValue(result, requested_type)
+            if isinstance(requested_type, IrFloatType):
+                result = self._tmp("object.float")
+                lines.append(f"  {result} = load double, ptr {payload}")
+                return _EmittedValue(result, requested_type)
+            if _is_pointer_type(requested_type):
+                result = self._tmp("object.pointer")
+                lines.append(f"  {result} = load ptr, ptr {payload}")
+                return _EmittedValue(result, requested_type)
             return None
         if value.type.name != "object" and not _record_union_can_runtime_narrow(
             value.type.name,
@@ -4515,6 +6071,10 @@ class _Emitter:
         negate: bool,
         lines: list[str],
     ) -> _EmittedValue:
+        if _is_opaque_object_type(left.type) and isinstance(right.type, IrBoolType):
+            return self._emit_tagged_object_bool_identity(left, right, negate, lines)
+        if _is_opaque_object_type(right.type) and isinstance(left.type, IrBoolType):
+            return self._emit_tagged_object_bool_identity(right, left, negate, lines)
         predicate = "ne" if negate else "eq"
         result = self._tmp("is")
         left_optional_tag = self._optional_bool_tag(left, lines)
@@ -4540,6 +6100,48 @@ class _Emitter:
         left_value = self._pointer_compare_value(left)
         right_value = self._pointer_compare_value(right)
         lines.append(f"  {result} = icmp {predicate} ptr {left_value}, {right_value}")
+        return _EmittedValue(result, IrBoolType())
+
+    def _emit_tagged_object_bool_identity(
+        self,
+        object_value: _EmittedValue,
+        bool_value: _EmittedValue,
+        negate: bool,
+        lines: list[str],
+    ) -> _EmittedValue:
+        source_label = _current_label(lines)
+        check_label = self._label("object.identity.check")
+        payload_label = self._label("object.identity.payload")
+        end_label = self._label("object.identity.end")
+        nonnull = self._tmp("object.identity.nonnull")
+        lines.append(f"  {nonnull} = icmp ne ptr {object_value.value}, null")
+        lines.append(f"  br i1 {nonnull}, label %{check_label}, label %{end_label}")
+        lines.append(f"{check_label}:")
+        tag = self._tmp("object.identity.tag")
+        is_bool = self._tmp("object.identity.isbool")
+        lines.append(f"  {tag} = load i64, ptr {object_value.value}")
+        lines.append(f"  {is_bool} = icmp eq i64 {tag}, {_OBJECT_TAG_BOOL}")
+        lines.append(f"  br i1 {is_bool}, label %{payload_label}, label %{end_label}")
+        lines.append(f"{payload_label}:")
+        payload_pointer = self._tmp("object.identity.payloadptr")
+        payload = self._tmp("object.identity.payload")
+        expected = self._tmp("object.identity.expected")
+        matches = self._tmp("object.identity.matches")
+        lines.append(f"  {payload_pointer} = getelementptr i8, ptr {object_value.value}, i64 8")
+        lines.append(f"  {payload} = load i64, ptr {payload_pointer}")
+        lines.append(f"  {expected} = zext i1 {bool_value.value} to i64")
+        lines.append(f"  {matches} = icmp eq i64 {payload}, {expected}")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        raw_result = self._tmp("object.identity")
+        lines.append(
+            f"  {raw_result} = phi i1 [ false, %{source_label} ], "
+            f"[ false, %{check_label} ], [ {matches}, %{payload_label} ]"
+        )
+        if not negate:
+            return _EmittedValue(raw_result, IrBoolType())
+        result = self._tmp("object.identity.not")
+        lines.append(f"  {result} = xor i1 {raw_result}, true")
         return _EmittedValue(result, IrBoolType())
 
     def _emit_equality_compare(
@@ -5633,10 +7235,25 @@ class _Emitter:
     ) -> str:
         if value.type == result_type:
             return value.value
+        if _is_opaque_object_type(result_type):
+            if lines is None:
+                self._error(f"Cannot box {type(value.type).__name__} without an instruction block")
+            return self._box_object_value(value, lines)
         if isinstance(value.type, IrNoneType):
             return self._default_value(result_type)
         if _is_pointer_type(value.type) and _is_pointer_type(result_type):
             return value.value
+        if (
+            lines is not None
+            and isinstance(value.type, IrBoolType)
+            and _is_optional_bool_type(result_type)
+        ):
+            tag = self._optional_bool_tag(value, lines)
+            if tag is None:
+                self._error("Cannot encode bool as optional bool")
+            boxed = self._tmp("optional.bool.box")
+            lines.append(f"  {boxed} = inttoptr i64 {tag} to ptr")
+            return boxed
         if lines is not None and _is_pointer_type(result_type):
             return self._box_to_runtime_ptr(value, lines)
         self._error(f"Cannot store {type(value.type).__name__} as {type(result_type).__name__}")
@@ -5825,6 +7442,10 @@ def _is_optional_bool_type(type_info: IrType) -> bool:
     } == {"None", "bool"}
 
 
+def _is_opaque_object_type(type_info: IrType) -> bool:
+    return isinstance(type_info, IrRecordType) and type_info.name == "object"
+
+
 def _static_builtin_isinstance_result(
     type_info: IrType,
     target_names: tuple[str, ...],
@@ -5903,6 +7524,8 @@ def _record_union_can_runtime_narrow(record_name: str, requested_type: IrType) -
     parts = _record_union_parts(record_name)
     if len(parts) < 2:
         return False
+    if isinstance(requested_type, IrBoolType):
+        return "bool" in parts
     if isinstance(requested_type, IrIntType):
         return "int" in parts
     if isinstance(requested_type, IrStringType):
@@ -5958,7 +7581,7 @@ def _format_float_literal(value: float) -> str:
 def _block_is_terminated(lines: list[str]) -> bool:
     if not lines:
         return False
-    return lines[-1].strip().startswith(("ret ", "br "))
+    return lines[-1].strip().startswith(("ret ", "br ", "unreachable"))
 
 
 def _current_label(lines: list[str]) -> str:
@@ -5969,18 +7592,38 @@ def _current_label(lines: list[str]) -> str:
 
 
 def _for_each_targets(target: str) -> tuple[str, ...]:
-    return tuple(name for name in _for_each_target_slots(target) if name is not None)
+    names: list[str] = []
+    for slot in _for_each_target_slots(target):
+        if slot is None:
+            continue
+        if "," in slot:
+            names.extend(_for_each_targets(slot))
+        else:
+            names.append(slot)
+    return tuple(names)
 
 
 def _for_each_target_slots(target: str) -> tuple[str | None, ...]:
     stripped = target.strip()
     if stripped.startswith("(") and stripped.endswith(")"):
         stripped = stripped[1:-1]
-    slots = tuple(
-        None if part.strip() == "_" else part.strip()
-        for part in stripped.split(",")
-        if part.strip()
-    )
+    depth = 0
+    start = 0
+    parts: list[str] = []
+    for index, char in enumerate(stripped):
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            part = stripped[start:index].strip()
+            if part:
+                parts.append(part)
+            start = index + 1
+    tail = stripped[start:].strip()
+    if tail:
+        parts.append(tail)
+    slots = tuple(None if part == "_" else part for part in parts)
     return slots or (target,)
 
 

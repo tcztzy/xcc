@@ -70,6 +70,40 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="tuple-values.py",
         )
 
+    def test_starred_tuple_inference_merges_dynamic_item_type(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    tail: tuple[int, ...] = (3, 4)\n"
+            "    values = (1, 2, *(value for value in tail))\n"
+            "    return len(values) + values[-1]\n",
+            expected=8,
+            filename="starred-tuple-inference.py",
+        )
+
+    def test_three_way_zip_preserves_tuple_values(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    left: tuple[int, ...] = (1, 2)\n"
+            "    middle: tuple[int, ...] = (3, 4)\n"
+            "    right: tuple[int, ...] = (5, 6)\n"
+            "    total = 0\n"
+            "    for a, b, c in zip(left, middle, right, strict=True):\n"
+            "        total += a + b + c\n"
+            "    return total\n",
+            expected=21,
+            filename="three-way-zip.py",
+        )
+
+    def test_unannotated_tuple_repetition_infers_tuple_result(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    unit = (3,)\n"
+            "    values = unit * 4\n"
+            "    return len(values) + values[-1]\n",
+            expected=7,
+            filename="tuple-repeat-inference.py",
+        )
+
     def test_dict_lookup_membership(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
@@ -82,6 +116,116 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "    return values['alpha'] + values['beta']\n",
             expected=5,
             filename="dict-values.py",
+        )
+
+    def test_dict_update_overwrites_and_appends(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: dict[str, int] = {'alpha': 1}\n"
+            "    incoming: dict[str, int] = {'alpha': 2, 'beta': 3}\n"
+            "    values.update(incoming)\n"
+            "    return values['alpha'] * 10 + values['beta']\n",
+            expected=23,
+            filename="dict-update.py",
+        )
+
+    def test_dict_pop_statement_removes_only_existing_key(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: dict[str, int] = {'alpha': 1, 'beta': 2}\n"
+            "    values.pop('alpha', None)\n"
+            "    values.pop('missing', None)\n"
+            "    if 'alpha' in values or 'beta' not in values:\n"
+            "        return 1\n"
+            "    return values['beta']\n",
+            expected=2,
+            filename="dict-pop.py",
+        )
+
+    def test_constructor_maps_normalized_optional_field_by_parameter(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Box:\n"
+            "    def __init__(\n"
+            "        self, ignored: int, values: dict[str, int] | None = None\n"
+            "    ) -> None:\n"
+            "        self.values = values or {}\n"
+            "        self.cache: dict[str, int] = {}\n"
+            "def entry() -> int:\n"
+            "    box = Box(99, {'answer': 4})\n"
+            "    return box.values['answer'] + len(box.cache)\n",
+            expected=4,
+            filename="constructor-field-map.py",
+        )
+
+    def test_constructor_executes_computed_field_initialization(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Box:\n"
+            "    def __init__(self, values: list[int]) -> None:\n"
+            "        self.values = values\n"
+            "        self.size = len(values)\n"
+            "def entry() -> int:\n"
+            "    box = Box([3, 4])\n"
+            "    alias = box\n"
+            "    return alias.size + len(alias.values)\n",
+            expected=4,
+            filename="constructor-executes-init.py",
+        )
+
+    def test_constructor_propagates_initializer_status_to_handler(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Box:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        if value < 0:\n"
+            "            raise ValueError('negative')\n"
+            "        self.value = value\n"
+            "def entry() -> int:\n"
+            "    try:\n"
+            "        Box(-1)\n"
+            "    except ValueError:\n"
+            "        return Box(7).value\n"
+            "    return 1\n",
+            expected=7,
+            filename="constructor-init-status.py",
+        )
+
+    def test_zero_argument_super_dispatches_project_base_initializer(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Base:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        self.value = value\n"
+            "class Child(Base):\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        super().__init__(value + 1)\n"
+            "def entry() -> int:\n"
+            "    return Child(6).value\n",
+            expected=7,
+            filename="project-super-init.py",
+        )
+
+    def test_builtin_exception_super_initializer_stays_native(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Problem(ValueError):\n"
+            "    def __init__(self, code: int) -> None:\n"
+            "        super().__init__('problem')\n"
+            "        self.code = code\n"
+            "def entry() -> int:\n"
+            "    return Problem(9).code\n",
+            expected=9,
+            filename="builtin-super-init.py",
+        )
+
+    def test_unannotated_homogeneous_tuple_concat_preserves_item_type(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    left = (1, 2)\n"
+            "    right = (3, 4)\n"
+            "    values = left + right\n"
+            "    total: int = 0\n"
+            "    for value in values:\n"
+            "        total = total + value\n"
+            "    return total\n",
+            expected=10,
+            filename="tuple-concat-inference.py",
         )
 
     def test_negative_index(self) -> None:
@@ -192,6 +336,22 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="any-all-generators.py",
         )
 
+    def test_nested_any_all_generator_predicates(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    left: tuple[int, ...] = (1, 2)\n"
+            "    right: tuple[int, ...] = (2, 3)\n"
+            "    if not any(a + b == 3 for a in left for b in right):\n"
+            "        return 1\n"
+            "    if all(a < b for a in left for b in right):\n"
+            "        return 2\n"
+            "    if not all(a <= b for a in left for b in right):\n"
+            "        return 3\n"
+            "    return 0\n",
+            expected=0,
+            filename="nested-any-all-generators.py",
+        )
+
     def test_optional_bool_distinguishes_none_and_false(self) -> None:
         self.assert_native_matches_cpython(
             "def classify(flag: bool) -> int:\n"
@@ -230,6 +390,47 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="noreturn-narrowing.py",
         )
 
+    def test_noreturn_call_has_no_success_continuation(self) -> None:
+        self.assert_native_matches_cpython(
+            "from typing import NoReturn\n"
+            "def stop() -> NoReturn:\n"
+            "    raise ValueError('stop')\n"
+            "def choose(flag: bool) -> int:\n"
+            "    if flag:\n"
+            "        value = 7\n"
+            "    else:\n"
+            "        stop()\n"
+            "    return value\n"
+            "def entry() -> int:\n"
+            "    if choose(True) != 7:\n"
+            "        return 1\n"
+            "    try:\n"
+            "        return choose(False)\n"
+            "    except ValueError:\n"
+            "        return 9\n",
+            expected=9,
+            filename="noreturn-cfg.py",
+        )
+
+    def test_branch_local_assignment_does_not_escape_partial_paths(self) -> None:
+        self.assert_native_matches_cpython(
+            "def branch(value: int) -> int:\n"
+            "    result = 0\n"
+            "    if value > 0:\n"
+            "        if value == 1:\n"
+            "            scratch = 3\n"
+            "        else:\n"
+            "            result = 1\n"
+            "        result = 7\n"
+            "    else:\n"
+            "        result = 8\n"
+            "    return result\n"
+            "def entry() -> int:\n"
+            "    return branch(2)\n",
+            expected=7,
+            filename="branch-definite-assignment.py",
+        )
+
     def test_bytes_from_integer_iterable(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
@@ -264,6 +465,643 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "    return 0\n",
             expected=0,
             filename="float-list-storage.py",
+        )
+
+    def test_string_isidentifier_semantics(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    if not '_alpha2'.isidentifier():\n"
+            "        return 1\n"
+            "    if '2alpha'.isidentifier():\n"
+            "        return 2\n"
+            "    if 'bad-name'.isidentifier():\n"
+            "        return 3\n"
+            "    if ''.isidentifier():\n"
+            "        return 4\n"
+            "    return 0\n",
+            expected=0,
+            filename="string-isidentifier.py",
+        )
+
+    def test_string_rsplit_semantics(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    parts = 'a.b.c'.rsplit('.', 1)\n"
+            "    if len(parts) != 2 or parts[0] != 'a.b' or parts[1] != 'c':\n"
+            "        return 1\n"
+            "    multi = 'ab--cd--ef'.rsplit('--', 1)\n"
+            "    if len(multi) != 2 or multi[0] != 'ab--cd' or multi[1] != 'ef':\n"
+            "        return 2\n"
+            "    unsplit = 'a.b'.rsplit('.', 0)\n"
+            "    if len(unsplit) != 1 or unsplit[0] != 'a.b':\n"
+            "        return 3\n"
+            "    return 0\n",
+            expected=0,
+            filename="string-rsplit.py",
+        )
+
+    def test_string_isupper_semantics(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    if not 'TYPE_2'.isupper():\n"
+            "        return 1\n"
+            "    if 'Type'.isupper():\n"
+            "        return 2\n"
+            "    if '123'.isupper():\n"
+            "        return 3\n"
+            "    if ''.isupper():\n"
+            "        return 4\n"
+            "    return 0\n",
+            expected=0,
+            filename="string-isupper.py",
+        )
+
+    def test_tagged_object_repr_and_isinstance(self) -> None:
+        self.assert_native_matches_cpython(
+            "def identity(value: object) -> object:\n"
+            "    return value\n"
+            "def render(value: object) -> str:\n"
+            "    return repr(value)\n"
+            "def entry() -> int:\n"
+            "    if render('Type') != \"'Type'\":\n"
+            "        return 1\n"
+            "    if render(7) != '7':\n"
+            "        return 2\n"
+            "    if render(False) != 'False':\n"
+            "        return 3\n"
+            "    if render(None) != 'None':\n"
+            "        return 4\n"
+            "    if render(1.5) != '1.5':\n"
+            "        return 5\n"
+            "    if render(Ellipsis) != 'Ellipsis':\n"
+            "        return 6\n"
+            "    if not isinstance(identity('x'), str):\n"
+            "        return 7\n"
+            "    if isinstance(identity(7), str):\n"
+            "        return 8\n"
+            "    if not isinstance(identity(7), int):\n"
+            "        return 9\n"
+            "    if not isinstance(identity(False), int):\n"
+            "        return 10\n"
+            "    return 0\n",
+            expected=0,
+            filename="tagged-object.py",
+        )
+
+    def test_isinstance_accepts_pep604_type_union(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Node:\n"
+            "    pass\n"
+            "class Name(Node):\n"
+            "    pass\n"
+            "class Attribute(Node):\n"
+            "    pass\n"
+            "def accepts(value: Node) -> bool:\n"
+            "    return isinstance(value, Name | Attribute)\n"
+            "def entry() -> int:\n"
+            "    if not accepts(Name()):\n"
+            "        return 1\n"
+            "    if not accepts(Attribute()):\n"
+            "        return 2\n"
+            "    if accepts(Node()):\n"
+            "        return 3\n"
+            "    return 0\n",
+            expected=0,
+            filename="isinstance-pep604.py",
+        )
+
+    def test_sorted_tuple_and_dict_with_static_key(self) -> None:
+        self.assert_native_matches_cpython(
+            "def string_length(value: str) -> int:\n"
+            "    return len(value)\n"
+            "def entry() -> int:\n"
+            "    values: list[str] = sorted(\n"
+            "        ('aa', 'b', 'ccc'), key=string_length, reverse=True\n"
+            "    )\n"
+            "    if values != ['ccc', 'aa', 'b']:\n"
+            "        return 1\n"
+            "    mapping: dict[str, int] = {'beta': 2, 'alpha': 1}\n"
+            "    keys: list[str] = sorted(mapping)\n"
+            "    if keys != ['alpha', 'beta']:\n"
+            "        return 2\n"
+            "    return 0\n",
+            expected=0,
+            filename="sorted-values.py",
+        )
+
+    def test_continue_narrows_optional_record(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Item:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        self.value = value\n"
+            "def entry() -> int:\n"
+            "    values: tuple[Item | None, ...] = (Item(1), None, Item(2))\n"
+            "    total: int = 0\n"
+            "    for value in values:\n"
+            "        if value is None:\n"
+            "            continue\n"
+            "        total = total + value.value\n"
+            "    return total\n",
+            expected=3,
+            filename="continue-optional-record.py",
+        )
+
+    def test_union_attribute_dispatches_field_and_property(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Stored:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        self.value = value\n"
+            "class Computed:\n"
+            "    @property\n"
+            "    def value(self) -> int:\n"
+            "        return 4\n"
+            "def read(value: Stored | Computed) -> int:\n"
+            "    return value.value\n"
+            "def entry() -> int:\n"
+            "    return read(Stored(3)) + read(Computed())\n",
+            expected=7,
+            filename="union-field-property.py",
+        )
+
+    def test_any_all_generator_unpack_tuple_target(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    pairs: tuple[tuple[int, int], ...] = ((1, 1), (2, 3))\n"
+            "    if not any(left != right for left, right in pairs):\n"
+            "        return 1\n"
+            "    if all(left == right for left, right in pairs):\n"
+            "        return 2\n"
+            "    return 0\n",
+            expected=0,
+            filename="generator-unpack.py",
+        )
+
+    def test_eager_comprehension_values_filters_and_set_deduplication(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: list[int] = [value * 2 for value in (1, 2, 3) if value != 2]\n"
+            "    if values != [2, 6]:\n"
+            "        return 1\n"
+            "    generated: tuple[int, ...] = tuple(value + 1 for value in (1, 2, 3))\n"
+            "    if generated != (2, 3, 4):\n"
+            "        return 2\n"
+            "    unique: set[int] = {value for value in (2, 1, 2)}\n"
+            "    if len(unique) != 2 or 1 not in unique or 2 not in unique:\n"
+            "        return 3\n"
+            "    return 0\n",
+            expected=0,
+            filename="comprehensions.py",
+        )
+
+    def test_union_resolves_inherited_property(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Base:\n"
+            "    @property\n"
+            "    def line(self) -> int:\n"
+            "        return 5\n"
+            "class First(Base):\n"
+            "    pass\n"
+            "class Second(Base):\n"
+            "    pass\n"
+            "def read(value: First | Second) -> int:\n"
+            "    return value.line\n"
+            "def entry() -> int:\n"
+            "    return read(First()) + read(Second())\n",
+            expected=10,
+            filename="inherited-property.py",
+        )
+
+    def test_nested_union_alias_narrows_to_concrete_record(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Left:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        self.value = value\n"
+            "class Right:\n"
+            "    pass\n"
+            "Choice = Left | Right\n"
+            "def read(value: Choice | None) -> int:\n"
+            "    if not isinstance(value, Left):\n"
+            "        return 0\n"
+            "    return value.value\n"
+            "def entry() -> int:\n"
+            "    return read(Left(3)) + read(Right()) + read(None)\n",
+            expected=3,
+            filename="nested-union-alias.py",
+        )
+
+    def test_inline_nonempty_dict_literal_infers_get_types(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    value: str | None = {'left': 'x', 'right': 'yy'}.get('right')\n"
+            "    if value is None:\n"
+            "        return 1\n"
+            "    return len(value)\n",
+            expected=2,
+            filename="inline-dict-get.py",
+        )
+
+    def test_dict_get_uses_explicit_default_only_for_missing_key(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: dict[str, int] = {'known': 3}\n"
+            "    return values.get('missing', 7) + values.get('known', 7)\n",
+            expected=10,
+            filename="dict-get-default.py",
+        )
+
+    def test_set_binary_operations_preserve_value_semantics(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    left: set[int] = {1, 2, 2}\n"
+            "    right: set[int] = {2, 3}\n"
+            "    union: set[int] = left | right\n"
+            "    intersection: set[int] = left & right\n"
+            "    difference: set[int] = left - right\n"
+            "    symmetric: set[int] = left ^ right\n"
+            "    if len(union) != 3 or 1 not in union or 3 not in union:\n"
+            "        return 1\n"
+            "    if len(intersection) != 1 or 2 not in intersection:\n"
+            "        return 2\n"
+            "    if len(difference) != 1 or 1 not in difference:\n"
+            "        return 3\n"
+            "    if len(symmetric) != 2 or 1 not in symmetric or 3 not in symmetric:\n"
+            "        return 4\n"
+            "    return 0\n",
+            expected=0,
+            filename="set-binary.py",
+        )
+
+    def test_unannotated_set_union_infers_literal_element_type(self) -> None:
+        self.assert_native_matches_cpython(
+            "def extend(seen: frozenset[str]) -> int:\n"
+            "    nested = seen | {'beta'}\n"
+            "    return len(nested)\n"
+            "def entry() -> int:\n"
+            "    return extend(frozenset({'alpha'}))\n",
+            expected=2,
+            filename="set-union-inference.py",
+        )
+
+    def test_container_constructor_preserves_set_intersection_type(self) -> None:
+        self.assert_native_matches_cpython(
+            "def overlap(values: set[str], names: set[str]) -> int:\n"
+            "    if frozenset(values) & names:\n"
+            "        return len(frozenset(values) & names)\n"
+            "    return 0\n"
+            "def entry() -> int:\n"
+            "    return overlap({'alpha', 'beta'}, {'beta', 'gamma'})\n",
+            expected=1,
+            filename="container-constructor-set-intersection.py",
+        )
+
+    def test_nested_enumerate_target_in_dict_comprehension(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    pairs: tuple[tuple[int, int], ...] = ((10, 20), (30, 40))\n"
+            "    indexes: dict[int, int] = {\n"
+            "        name: index\n"
+            "        for index, (name, _value) in enumerate(pairs, start=4)\n"
+            "    }\n"
+            "    return indexes[10] * 10 + indexes[30]\n",
+            expected=45,
+            filename="nested-enumerate-comprehension.py",
+        )
+
+    def test_string_upper_conversion_semantics(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    if 'aZ_1'.upper() != 'AZ_1':\n"
+            "        return 1\n"
+            "    if ''.upper() != '':\n"
+            "        return 2\n"
+            "    return 0\n",
+            expected=0,
+            filename="string-upper.py",
+        )
+
+    def test_and_chain_none_narrows_optional_scalar_attributes(self) -> None:
+        self.assert_native_matches_cpython(
+            "class TypeInfo:\n"
+            "    def __init__(self, bits: int | None, signed: bool | None) -> None:\n"
+            "        self.bits = bits\n"
+            "        self.signed = signed\n"
+            "class IntType:\n"
+            "    def __init__(self, bits: int, signed: bool) -> None:\n"
+            "        self.bits = bits\n"
+            "        self.signed = signed\n"
+            "def convert(type_info: TypeInfo) -> IntType:\n"
+            "    if type_info.bits is not None and type_info.signed is not None:\n"
+            "        return IntType(type_info.bits, type_info.signed)\n"
+            "    return IntType(0, False)\n"
+            "def entry() -> int:\n"
+            "    result = convert(TypeInfo(32, False))\n"
+            "    if result.signed:\n"
+            "        return 1\n"
+            "    return result.bits\n",
+            expected=32,
+            filename="and-none-scalar-attributes.py",
+        )
+
+    def test_conditional_empty_list_infers_typed_nonempty_arm(self) -> None:
+        self.assert_native_matches_cpython(
+            "def collect(args: str) -> int:\n"
+            "    call_args = [] if not args else [args]\n"
+            "    call_args.append('tail')\n"
+            "    return len(call_args)\n"
+            "def entry() -> int:\n"
+            "    return collect('') * 10 + collect('head')\n",
+            expected=12,
+            filename="conditional-empty-list.py",
+        )
+
+    def test_exiting_positive_isinstance_narrows_union_complement(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Handler:\n"
+            "    def __init__(self, status: int) -> None:\n"
+            "        self.status = status\n"
+            "class Finalizer:\n"
+            "    def __init__(self, body: int) -> None:\n"
+            "        self.body = body\n"
+            "_Scope = Handler | Finalizer\n"
+            "def body_or_zero(scope: _Scope) -> int:\n"
+            "    if isinstance(scope, Handler):\n"
+            "        return 0\n"
+            "    return scope.body\n"
+            "def entry() -> int:\n"
+            "    return body_or_zero(Finalizer(7))\n",
+            expected=7,
+            filename="positive-isinstance-complement.py",
+        )
+
+    def test_else_branch_narrows_isinstance_union_complement(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Named:\n"
+            "    def __init__(self, name: str) -> None:\n"
+            "        self.name = name\n"
+            "class Sized:\n"
+            "    def __init__(self, size: int) -> None:\n"
+            "        self.size = size\n"
+            "Value = Named | Sized\n"
+            "def measure(value: Value) -> int:\n"
+            "    if isinstance(value, Named):\n"
+            "        return len(value.name)\n"
+            "    else:\n"
+            "        return value.size\n"
+            "def entry() -> int:\n"
+            "    return measure(Sized(9))\n",
+            expected=9,
+            filename="isinstance-else-complement.py",
+        )
+
+    def test_joined_isinstance_branches_restore_union_type(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Named:\n"
+            "    def __init__(self, name: str) -> None:\n"
+            "        self.name = name\n"
+            "class Sized:\n"
+            "    def __init__(self, size: int) -> None:\n"
+            "        self.size = size\n"
+            "Value = Named | Sized\n"
+            "def measure(value: Value) -> int:\n"
+            "    if isinstance(value, Named):\n"
+            "        tag = 1\n"
+            "    else:\n"
+            "        tag = 2\n"
+            "    if isinstance(value, Named):\n"
+            "        return tag + len(value.name)\n"
+            "    return tag + value.size\n"
+            "def entry() -> int:\n"
+            "    return measure(Named('x')) * 10 + measure(Sized(3))\n",
+            expected=25,
+            filename="isinstance-branch-join.py",
+        )
+
+    def test_min_max_reduce_nonempty_generator(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: tuple[int, ...] = (7, 2, 5)\n"
+            "    return max(value for value in values) * 10 + min(\n"
+            "        value for value in values\n"
+            "    )\n",
+            expected=72,
+            filename="min-max-generator.py",
+        )
+
+    def test_nested_set_comprehension_flattens_and_deduplicates(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    groups: tuple[tuple[int, ...], ...] = ((1, 2), (2, 3))\n"
+            "    values = {value for group in groups for value in group}\n"
+            "    return len(values) * 10 + sum_value(values)\n"
+            "def sum_value(values: set[int]) -> int:\n"
+            "    result = 0\n"
+            "    for value in values:\n"
+            "        result += value\n"
+            "    return result\n",
+            expected=36,
+            filename="nested-set-comprehension.py",
+        )
+
+    def test_global_literal_map_resolves_named_scalar_values(self) -> None:
+        self.assert_native_matches_cpython(
+            "FIRST = 4\n"
+            "SECOND = 7\n"
+            "VALUES = {'one': (FIRST,), 'kept': (FIRST, SECOND)}\n"
+            "def entry() -> int:\n"
+            "    values = VALUES.get('kept', ())\n"
+            "    return len(VALUES.get('one', ())) * 100 + values[0] * 10 + values[1]\n",
+            expected=147,
+            filename="global-named-literal-map.py",
+        )
+
+    def test_set_update_preserves_value_deduplication(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: set[int] = {1}\n"
+            "    values.update((1, 2, 3))\n"
+            "    if len(values) != 3:\n"
+            "        return 1\n"
+            "    return len(values) * 10 + (2 if 2 in values else 0)\n",
+            expected=32,
+            filename="set-update.py",
+        )
+
+    def test_bool_infers_set_intersection_operand_independently(self) -> None:
+        self.assert_native_matches_cpython(
+            "def intersects(left: set[int], right: set[int]) -> bool | None:\n"
+            "    return bool(left & right)\n"
+            "def entry() -> int:\n"
+            "    return 7 if intersects({1, 2}, {2, 3}) else 1\n",
+            expected=7,
+            filename="bool-set-intersection.py",
+        )
+
+    def test_nested_dict_comprehension_builds_cross_product(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    keys: tuple[int, ...] = (1, 2)\n"
+            "    offsets: tuple[int, ...] = (0, 10)\n"
+            "    values = {\n"
+            "        key + offset: key\n"
+            "        for offset in offsets\n"
+            "        for key in keys\n"
+            "    }\n"
+            "    return len(values) * 10 + values[12]\n",
+            expected=42,
+            filename="nested-dict-comprehension.py",
+        )
+
+    def test_exact_type_identity(self) -> None:
+        self.assert_native_matches_cpython(
+            "def identity(value: object) -> object:\n"
+            "    return value\n"
+            "def entry() -> int:\n"
+            "    if type(identity(7)) is not int:\n"
+            "        return 1\n"
+            "    if type(identity(False)) is int:\n"
+            "        return 2\n"
+            "    if type(identity(False)) is not bool:\n"
+            "        return 3\n"
+            "    if type(identity(None)) is not type(None):\n"
+            "        return 4\n"
+            "    if type(identity('x')) is not str:\n"
+            "        return 5\n"
+            "    return 0\n",
+            expected=0,
+            filename="exact-type.py",
+        )
+
+    def test_exact_type_guard_narrows_true_branch(self) -> None:
+        self.assert_native_matches_cpython(
+            "def exact_int(value: object) -> int:\n"
+            "    if type(value) is int:\n"
+            "        return value\n"
+            "    return 0\n"
+            "def entry() -> int:\n"
+            "    return exact_int(7) + exact_int(False)\n",
+            expected=7,
+            filename="exact-type-guard.py",
+        )
+
+    def test_tagged_object_bool_identity(self) -> None:
+        self.assert_native_matches_cpython(
+            "def identity(value: object) -> object:\n"
+            "    return value\n"
+            "def entry() -> int:\n"
+            "    if identity(True) is not True:\n"
+            "        return 1\n"
+            "    if identity(False) is True:\n"
+            "        return 2\n"
+            "    if identity(1) is True:\n"
+            "        return 3\n"
+            "    return 0\n",
+            expected=0,
+            filename="object-bool-identity.py",
+        )
+
+    def test_and_chain_none_narrowing_reaches_true_branch(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Annotation:\n"
+            "    text: str\n"
+            "class Argument:\n"
+            "    annotation: Annotation | None\n"
+            "class Arguments:\n"
+            "    vararg: Argument | None\n"
+            "def annotation_text(args: Arguments) -> str:\n"
+            "    if args.vararg is not None and args.vararg.annotation is not None:\n"
+            "        return args.vararg.annotation.text\n"
+            "    return ''\n"
+            "def entry() -> int:\n"
+            "    annotation = Annotation()\n"
+            "    annotation.text = 'ok'\n"
+            "    argument = Argument()\n"
+            "    argument.annotation = annotation\n"
+            "    args = Arguments()\n"
+            "    args.vararg = argument\n"
+            "    return len(annotation_text(args))\n",
+            expected=2,
+            filename="and-none-branch.py",
+        )
+
+    def test_dict_comprehension_semantics(self) -> None:
+        self.assert_native_matches_cpython(
+            "def increment(values: dict[str, int]) -> dict[str, int]:\n"
+            "    return {name: value + 1 for name, value in values.items() if value > 0}\n"
+            "def entry() -> int:\n"
+            "    result = increment({'skip': 0, 'kept': 4})\n"
+            "    if 'skip' in result:\n"
+            "        return 1\n"
+            "    return result['kept']\n",
+            expected=5,
+            filename="dict-comprehension.py",
+        )
+
+    def test_homogeneous_tuple_assignment(self) -> None:
+        self.assert_native_matches_cpython(
+            "def add_pair(values: tuple[int, ...]) -> int:\n"
+            "    left, right = values\n"
+            "    return left + right\n"
+            "def entry() -> int:\n"
+            "    return add_pair((2, 3))\n",
+            expected=5,
+            filename="homogeneous-tuple-assignment.py",
+        )
+
+    def test_global_literal_dict_lookup(self) -> None:
+        self.assert_native_matches_cpython(
+            "WIDTHS = {'i8': (8, True), 'u16': (16, False)}\n"
+            "def lookup(name: str) -> tuple[int, bool] | None:\n"
+            "    return WIDTHS.get(name)\n"
+            "def entry() -> int:\n"
+            "    value = lookup('u16')\n"
+            "    if value is None:\n"
+            "        return 1\n"
+            "    bits, signed = value\n"
+            "    if signed:\n"
+            "        return 2\n"
+            "    return bits\n",
+            expected=16,
+            filename="global-literal-dict.py",
+        )
+
+    def test_global_literal_dict_merges_empty_nested_tuple(self) -> None:
+        self.assert_native_matches_cpython(
+            "TABLE = {\n"
+            "    'none': ('zero', ()),\n"
+            "    'one': ('single', ('value',)),\n"
+            "}\n"
+            "def entry() -> int:\n"
+            "    return len(TABLE['none'][1]) + len(TABLE['one'][1])\n",
+            expected=1,
+            filename="global-empty-nested-tuple.py",
+        )
+
+    def test_global_container_constructor_and_starred_reference(self) -> None:
+        self.assert_native_matches_cpython(
+            "BASE = frozenset({'alpha', 'beta'})\n"
+            "ALL = {'gamma', *BASE}\n"
+            "def entry() -> int:\n"
+            "    if 'alpha' not in ALL or 'gamma' not in ALL:\n"
+            "        return 1\n"
+            "    return len(ALL)\n",
+            expected=3,
+            filename="global-starred-container.py",
+        )
+
+    def test_equivalent_tuple_list_union_preserves_nested_dict_type(self) -> None:
+        self.assert_native_matches_cpython(
+            "def total(\n"
+            "    values: tuple[tuple[str, dict[str, int]], ...]\n"
+            "    | list[tuple[str, dict[str, int]]],\n"
+            ") -> int:\n"
+            "    result = 0\n"
+            "    for name, mapping in values:\n"
+            "        result += mapping.get(name, 0)\n"
+            "    return result\n"
+            "def entry() -> int:\n"
+            "    return total([('answer', {'answer': 7})])\n",
+            expected=7,
+            filename="tuple-list-union.py",
         )
 
     def test_try_except_cross_call(self) -> None:

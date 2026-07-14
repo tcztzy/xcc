@@ -33,6 +33,9 @@ from xcc.aot.ir import (
     IrWhile,
 )
 
+_NORETURN_CALL_PREFIX = "__noreturn__:"
+_RECORD_INIT_PREFIX = "__record_init__:"
+
 
 def analyze_fallibility(module: IrModule) -> frozenset[str]:
     """Return the transitive set of project functions using the status ABI."""
@@ -165,6 +168,14 @@ def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
     if isinstance(expr, IrConstructRecord):
         return _expr_tuple_call_targets(expr.args)
     if isinstance(expr, IrCall):
+        if expr.target.startswith(_NORETURN_CALL_PREFIX):
+            return (expr.target.removeprefix(_NORETURN_CALL_PREFIX),) + _expr_tuple_call_targets(
+                expr.args
+            )
+        if expr.target.startswith(_RECORD_INIT_PREFIX):
+            return (expr.target.removeprefix(_RECORD_INIT_PREFIX),) + _expr_tuple_call_targets(
+                expr.args
+            )
         return (expr.target,) + _expr_tuple_call_targets(expr.args)
     if isinstance(expr, IrTuple):
         return _expr_tuple_call_targets(expr.elements)

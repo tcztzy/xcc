@@ -3,7 +3,16 @@ from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot.analysis import analyze_source
-from xcc.aot.ir import IrCall, IrConstructRecord, IrName, IrRecordType, IrReturn
+from xcc.aot.ir import (
+    IrAssign,
+    IrCall,
+    IrConstructRecord,
+    IrIntType,
+    IrName,
+    IrRecordType,
+    IrReturn,
+    IrTupleType,
+)
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
 from xcc.aot.slice import lower_core_slice
@@ -15,6 +24,26 @@ AOT_ROOT = ROOT / "src/xcc/aot"
 
 
 class AotReachabilityTests(unittest.TestCase):
+    def test_v376_binder_infers_comprehension_backed_init_fields(self) -> None:
+        analysis = analyze_source(
+            "class Item:\n"
+            "    name: str\n"
+            "class Module:\n"
+            "    items: tuple[Item, ...]\n"
+            "class Index:\n"
+            "    def __init__(self, module: Module) -> None:\n"
+            "        self.by_name = {item.name: item for item in module.items}\n"
+            "        self.ids = {\n"
+            "            name: index + 1\n"
+            "            for index, name in enumerate(sorted(self.by_name))\n"
+            "        }\n",
+            filename="comprehension-fields.py",
+        )
+
+        fields = analysis.types.classes["Index"].fields
+        self.assertEqual(fields["by_name"].name, "dict[str, Item]")
+        self.assertEqual(fields["ids"].name, "dict[str, int]")
+
     def test_v376_binder_infers_homogeneous_init_list_field(self) -> None:
         analysis = analyze_source(
             "class Cursor:\n"
@@ -31,6 +60,19 @@ class AotReachabilityTests(unittest.TestCase):
             "list[int]",
         )
 
+    def test_v376_binder_preserves_value_type_for_optional_dict_or_empty(self) -> None:
+        analysis = analyze_source(
+            "class Registry:\n"
+            "    def __init__(self, values: dict[str, int] | None = None) -> None:\n"
+            "        self.values = values or {}\n",
+            filename="registry.py",
+        )
+
+        self.assertEqual(
+            analysis.types.classes["Registry"].fields["values"].name,
+            "dict[str, int]",
+        )
+
     def test_v376_owned_lexer_root_has_real_method_reachability(self) -> None:
         module = lower_core_slice(
             (
@@ -43,6 +85,7 @@ class AotReachabilityTests(unittest.TestCase):
 
         names = {function.name for function in module.functions}
         self.assertIn("xcc.aot.py_lexer.lex_python", names)
+        self.assertIn("xcc.aot.py_lexer._PythonLexer.__init__", names)
         self.assertIn("xcc.aot.py_lexer._PythonLexer.lex", names)
         self.assertIn("xcc.aot.py_lexer._PythonLexer._finish", names)
 
@@ -105,6 +148,28 @@ class AotReachabilityTests(unittest.TestCase):
         self.assertIsInstance(construct, IrReturn)
         self.assertIsInstance(construct.value, IrConstructRecord)
         self.assertEqual(construct.value.record, "Name")
+
+    def test_v376_isinstance_narrows_qualified_record_union(self) -> None:
+        module = lower_source_to_ir(
+            "from xcc.aot import py_ast as ast\n"
+            "def name_id(node: ast.expr | None) -> str:\n"
+            "    if isinstance(node, ast.Name):\n"
+            "        return node.id\n"
+            "    return ''\n",
+            filename="qualified_union.py",
+            include_functions={"name_id"},
+            extra_classes={
+                "AST": AotClassInfo("AST", {}),
+                "expr": AotClassInfo("expr", {}, ("AST",)),
+                "Name": AotClassInfo("Name", {"id": AotType("str")}, ("expr",)),
+            },
+        )
+
+        branch = module.functions[0].body[0]
+        self.assertEqual(
+            branch.then_branch.statements[0].value.value.type,
+            IrRecordType("Name"),
+        )
 
     def test_v376_global_record_constructor_map_lowers_to_runtime_dispatch(self) -> None:
         module = lower_source_to_ir(
@@ -196,7 +261,9 @@ class AotReachabilityTests(unittest.TestCase):
         )
 
         llvm_text = emit_llvm_text(module)
-        self.assertIn("inttoptr (i64 -1 to ptr)", llvm_text)
+        self.assertIn("@__xcc_aot_object_ellipsis = private global", llvm_text)
+        self.assertIn("ptr @__xcc_aot_object_ellipsis", llvm_text)
+        self.assertNotIn("inttoptr (i64 -1 to ptr)", llvm_text)
 
     def test_v376_builtin_isinstance_markers_narrow_bytes(self) -> None:
         module = lower_source_to_ir(
@@ -318,6 +385,200 @@ class AotReachabilityTests(unittest.TestCase):
         parser_record = next(record for record in module.records if record.name == "_PythonParser")
         self.assertIn("tokens", {field.name for field in parser_record.fields})
         emit_llvm_text(module)
+
+    def test_v376_owned_binder_root_has_real_method_reachability(self) -> None:
+        module = lower_core_slice(
+            (
+                AOT_ROOT / "diag.py",
+                AOT_ROOT / "py_ast.py",
+                AOT_ROOT / "module.py",
+                AOT_ROOT / "subset.py",
+                AOT_ROOT / "types.py",
+                AOT_ROOT / "binder.py",
+            ),
+            root_targets=("xcc.aot.binder.bind_types",),
+        )
+
+        names = {function.name for function in module.functions}
+        self.assertIn("xcc.aot.binder.bind_types", names)
+        self.assertIn("xcc.aot.binder._TypeBinder.bind", names)
+        emit_llvm_text(module)
+
+    def test_v376_owned_lowerer_root_has_real_method_reachability(self) -> None:
+        module = lower_core_slice(
+            (
+                AOT_ROOT / "diag.py",
+                AOT_ROOT / "py_ast.py",
+                AOT_ROOT / "module.py",
+                AOT_ROOT / "subset.py",
+                AOT_ROOT / "types.py",
+                AOT_ROOT / "binder.py",
+                AOT_ROOT / "analysis.py",
+                AOT_ROOT / "ir.py",
+                AOT_ROOT / "lower.py",
+            ),
+            root_targets=("xcc.aot.lower.lower_analysis_to_ir",),
+        )
+
+        names = {function.name for function in module.functions}
+        self.assertIn("xcc.aot.lower.lower_analysis_to_ir", names)
+        self.assertIn("xcc.aot.lower._Lowerer.lower_function", names)
+        self.assertIn("xcc.aot.lower._Lowerer.lower_record", names)
+        emit_llvm_text(module)
+
+    def test_v376_tuple_concat_inference_ignores_function_return_fallback(self) -> None:
+        module = lower_source_to_ir(
+            "class Parts:\n"
+            "    left: tuple[int, ...]\n"
+            "    right: tuple[int, ...]\n"
+            "def merge(parts: Parts) -> tuple[tuple[int, ...], dict[str, int]]:\n"
+            "    values = parts.left + parts.right\n"
+            "    return values, {}\n",
+            filename="tuple-concat-fallback.py",
+        )
+
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        self.assertEqual(
+            assigned.value.type,
+            IrTupleType((IrIntType(64, signed=True),)),
+        )
+
+    def test_v376_continue_guard_propagates_isinstance_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "class Node:\n"
+            "    pass\n"
+            "class Named(Node):\n"
+            "    name: str\n"
+            "def first_name(nodes: list[Node]) -> str:\n"
+            "    for node in nodes:\n"
+            "        if not isinstance(node, Named):\n"
+            "            continue\n"
+            "        return node.name\n"
+            "    return ''\n",
+            filename="continue_guard.py",
+        )
+
+        emit_llvm_text(module)
+
+    def test_v376_string_isidentifier_reaches_native_runtime(self) -> None:
+        module = lower_source_to_ir(
+            "def valid(name: str) -> bool:\n"
+            "    return name.isidentifier()\n",
+            filename="isidentifier.py",
+        )
+
+        self.assertIn("@__xcc_aot_string_predicate", emit_llvm_text(module))
+
+    def test_v376_string_rsplit_reaches_native_runtime(self) -> None:
+        module = lower_source_to_ir(
+            "def leaf(name: str) -> str:\n"
+            "    return name.rsplit('.', 1)[-1]\n",
+            filename="rsplit.py",
+        )
+
+        self.assertIn("@__xcc_aot_string_rsplit_limit", emit_llvm_text(module))
+
+    def test_v376_string_isupper_reaches_native_runtime(self) -> None:
+        module = lower_source_to_ir(
+            "def upper(name: str) -> bool:\n"
+            "    return name.isupper()\n",
+            filename="isupper.py",
+        )
+
+        self.assertIn("@__xcc_aot_string_predicate", emit_llvm_text(module))
+
+    def test_v376_object_repr_reaches_tagged_native_runtime(self) -> None:
+        module = lower_source_to_ir(
+            "def render(value: object) -> str:\n"
+            "    return repr(value)\n",
+            filename="object_repr.py",
+        )
+
+        llvm_text = emit_llvm_text(module)
+        self.assertIn("@__xcc_aot_object_repr", llvm_text)
+        self.assertIn("load i64, ptr %object", llvm_text)
+
+    def test_v376_exact_type_identity_reaches_tagged_native_runtime(self) -> None:
+        module = lower_source_to_ir(
+            "def exact_int(value: object) -> bool:\n"
+            "    return type(value) is int\n",
+            filename="exact_type.py",
+        )
+
+        llvm_text = emit_llvm_text(module)
+        self.assertIn("object.type", llvm_text)
+
+    def test_v376_exact_type_guard_narrows_true_branch(self) -> None:
+        module = lower_source_to_ir(
+            "def collect(value: object) -> dict[str, int]:\n"
+            "    result: dict[str, int] = {}\n"
+            "    if type(value) is int:\n"
+            "        result['value'] = value\n"
+            "    return result\n",
+            filename="exact_type_guard.py",
+        )
+
+        emit_llvm_text(module)
+
+    def test_v376_tagged_object_bool_identity_reaches_native_tag_check(self) -> None:
+        module = lower_source_to_ir(
+            "def is_true(value: object) -> bool:\n"
+            "    return value is True\n",
+            filename="object_bool_identity.py",
+        )
+
+        self.assertIn("object.identity", emit_llvm_text(module))
+
+    def test_v376_and_chain_none_narrowing_reaches_true_branch(self) -> None:
+        module = lower_source_to_ir(
+            "class Annotation:\n"
+            "    text: str\n"
+            "class Argument:\n"
+            "    annotation: Annotation | None\n"
+            "class Arguments:\n"
+            "    vararg: Argument | None\n"
+            "def annotation_text(args: Arguments) -> str:\n"
+            "    if args.vararg is not None and args.vararg.annotation is not None:\n"
+            "        return args.vararg.annotation.text\n"
+            "    return ''\n",
+            filename="and_none_branch.py",
+        )
+
+        emit_llvm_text(module)
+
+    def test_v376_dict_comprehension_reaches_native_loop(self) -> None:
+        module = lower_source_to_ir(
+            "def increment(values: dict[str, int]) -> dict[str, int]:\n"
+            "    return {name: value + 1 for name, value in values.items() if value > 0}\n",
+            filename="dict_comprehension.py",
+        )
+
+        llvm_text = emit_llvm_text(module)
+        self.assertIn("dictcomp.cond", llvm_text)
+        self.assertIn("dictset.cond", llvm_text)
+
+    def test_v376_homogeneous_tuple_assignment_preserves_element_types(self) -> None:
+        module = lower_source_to_ir(
+            "def add_pair(values: tuple[int, ...]) -> int:\n"
+            "    left, right = values\n"
+            "    return left + right\n",
+            filename="homogeneous_tuple_assignment.py",
+        )
+
+        emit_llvm_text(module)
+
+    def test_v376_global_literal_dict_reaches_native_lookup(self) -> None:
+        module = lower_source_to_ir(
+            "WIDTHS = {'i8': (8, True), 'u16': (16, False)}\n"
+            "def lookup(name: str) -> tuple[int, bool] | None:\n"
+            "    return WIDTHS.get(name)\n",
+            filename="global_literal_dict.py",
+        )
+
+        llvm_text = emit_llvm_text(module)
+        self.assertIn("@__xcc_aot_tuple_get", llvm_text)
+        self.assertNotIn("@WIDTHS", llvm_text)
 
     def test_v376_optional_bool_uses_distinct_native_tags(self) -> None:
         module = lower_source_to_ir(

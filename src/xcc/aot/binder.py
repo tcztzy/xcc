@@ -36,9 +36,15 @@ def bind_types(
     summary: AotModuleSummary,
     module: AotModule,
     *,
+    extra_classes: dict[str, AotClassInfo] | None = None,
     extra_functions: dict[str, AotFunctionInfo] | None = None,
 ) -> AotTypeAnalysis:
-    binder = _TypeBinder(summary, module, extra_functions=extra_functions)
+    binder = _TypeBinder(
+        summary,
+        module,
+        extra_classes=extra_classes,
+        extra_functions=extra_functions,
+    )
     return binder.bind()
 
 
@@ -48,10 +54,12 @@ class _TypeBinder:
         summary: AotModuleSummary,
         module: AotModule,
         *,
+        extra_classes: dict[str, AotClassInfo] | None = None,
         extra_functions: dict[str, AotFunctionInfo] | None = None,
     ) -> None:
         self.summary = summary
         self.module = module
+        self.extra_classes = extra_classes or {}
         self.extra_functions = extra_functions or {}
         self.width_aliases: dict[str, AotType] = {}
         self.aliases: dict[str, AotType] = {}
@@ -104,7 +112,7 @@ class _TypeBinder:
             name = statement.targets[0].id
             if name in self.width_aliases:
                 continue
-            if name[:1].isupper() or name.endswith("Params") or name.endswith("Op"):
+            if _is_project_type_reference(name) or name.endswith("Params") or name.endswith("Op"):
                 self.aliases[name] = AotType(annotation_name(statement.value))
 
     def _collect_classes(self) -> None:
@@ -158,8 +166,9 @@ class _TypeBinder:
                 return_types,
             )
             for target, value, annotation in _init_self_assignments(child.body):
-                if isinstance(value, ast.Name):
-                    init_field_parameters[target.attr] = value.id
+                parameter_name = _init_field_parameter(value)
+                if parameter_name is not None:
+                    init_field_parameters[target.attr] = parameter_name
                 if target.attr in fields:
                     continue
                 if annotation is not None:
@@ -260,23 +269,104 @@ class _TypeBinder:
             first = element_types[0]
             if first is not None and all(element == first for element in element_types):
                 return AotType(f"list[{first.name}]")
-        if (
-            isinstance(expr, ast.Attribute)
-            and isinstance(expr.value, ast.Name)
-            and expr.value.id == "self"
-        ):
-            return fields.get(expr.attr)
+        if isinstance(expr, ast.Attribute):
+            if isinstance(expr.value, ast.Name) and expr.value.id == "self":
+                return fields.get(expr.attr)
+            receiver_type = self._infer_expr_type(
+                expr.value,
+                local_types,
+                fields,
+                return_types,
+            )
+            if receiver_type is not None:
+                class_info = self._known_class(receiver_type.name)
+                if class_info is not None:
+                    return class_info.fields.get(expr.attr)
         if isinstance(expr, ast.Call):
             if isinstance(expr.func, ast.Name):
                 if expr.func.id == "len":
                     return AotType("int")
                 if expr.func.id in {"bool", "int", "str"}:
                     return AotType(expr.func.id)
+                if expr.func.id == "sorted" and len(expr.args) == 1:
+                    iterable_type = self._infer_expr_type(
+                        expr.args[0],
+                        local_types,
+                        fields,
+                        return_types,
+                    )
+                    item_type = _iterable_item_type(iterable_type)
+                    if item_type is not None:
+                        return AotType(f"list[{item_type.name}]")
+                if expr.func.id == "enumerate" and expr.args:
+                    iterable_type = self._infer_expr_type(
+                        expr.args[0],
+                        local_types,
+                        fields,
+                        return_types,
+                    )
+                    item_type = _iterable_item_type(iterable_type)
+                    if item_type is not None:
+                        return AotType(f"tuple[tuple[int, {item_type.name}], ...]")
                 return return_types.get(expr.func.id)
+            if isinstance(expr.func, ast.Attribute) and isinstance(expr.func.value, ast.Name):
+                receiver_type = local_types.get(expr.func.value.id)
+                if receiver_type is not None:
+                    method_type = return_types.get(f"{receiver_type.name}.{expr.func.attr}")
+                    if method_type is not None:
+                        return method_type
             call_name = ast.unparse(expr.func)
             return return_types.get(call_name)
-        if isinstance(expr, (ast.Compare, ast.BoolOp)):
+        if isinstance(expr, ast.DictComp):
+            comprehension_types = self._comprehension_types(
+                expr.generators,
+                local_types,
+                fields,
+                return_types,
+            )
+            if comprehension_types is not None:
+                key_type = self._infer_expr_type(
+                    expr.key,
+                    comprehension_types,
+                    fields,
+                    return_types,
+                )
+                value_type = self._infer_expr_type(
+                    expr.value,
+                    comprehension_types,
+                    fields,
+                    return_types,
+                )
+                if key_type is not None and value_type is not None:
+                    return AotType(f"dict[{key_type.name}, {value_type.name}]")
+        if isinstance(expr, ast.ListComp | ast.SetComp | ast.GeneratorExp):
+            comprehension_types = self._comprehension_types(
+                expr.generators,
+                local_types,
+                fields,
+                return_types,
+            )
+            if comprehension_types is not None:
+                element_type = self._infer_expr_type(
+                    expr.elt,
+                    comprehension_types,
+                    fields,
+                    return_types,
+                )
+                if element_type is not None:
+                    if isinstance(expr, ast.ListComp):
+                        return AotType(f"list[{element_type.name}]")
+                    if isinstance(expr, ast.SetComp):
+                        return AotType(f"set[{element_type.name}]")
+                    return AotType(f"tuple[{element_type.name}, ...]")
+        if isinstance(expr, ast.Compare):
             return AotType("bool")
+        if isinstance(expr, ast.BoolOp):
+            operand_types = tuple(
+                self._infer_expr_type(value, local_types, fields, return_types)
+                for value in expr.values
+            )
+            return _value_bool_op_type(tuple(expr.values), operand_types)
         if isinstance(expr, ast.UnaryOp) and isinstance(expr.op, ast.Not):
             return AotType("bool")
         if isinstance(expr, ast.BinOp):
@@ -285,6 +375,34 @@ class _TypeBinder:
             if left_type == right_type:
                 return left_type
         return None
+
+    def _known_class(self, name: str) -> AotClassInfo | None:
+        leaf = name.rsplit(".", 1)[-1]
+        return self.classes.get(leaf) or self.extra_classes.get(leaf)
+
+    def _comprehension_types(
+        self,
+        generators: tuple[ast.comprehension, ...],
+        local_types: dict[str, AotType],
+        fields: dict[str, AotType],
+        return_types: dict[str, AotType],
+    ) -> dict[str, AotType] | None:
+        result = dict(local_types)
+        for generator in generators:
+            iterable_type = self._infer_expr_type(
+                generator.iter,
+                result,
+                fields,
+                return_types,
+            )
+            item_type = _iterable_item_type(iterable_type)
+            if item_type is None or not _bind_comprehension_target(
+                generator.target,
+                item_type,
+                result,
+            ):
+                return None
+        return result
 
     def _collect_functions(self) -> None:
         for statement in self.module.tree.body:
@@ -404,6 +522,118 @@ class _TypeBinder:
 
 def _is_annotation_alias_value(node: ast.expr) -> bool:
     return isinstance(node, (ast.Subscript, ast.BinOp, ast.Name))
+
+
+def _iterable_item_type(type_info: AotType | None) -> AotType | None:
+    if type_info is None:
+        return None
+    name = type_info.name.strip()
+    bracket = name.find("[")
+    if bracket < 0 or not name.endswith("]"):
+        return None
+    base = name[:bracket].rsplit(".", 1)[-1]
+    parts = _split_annotation_parts(name[bracket + 1 : -1], ",")
+    if base == "dict" and len(parts) == 2:
+        return AotType(parts[0].strip())
+    if base not in {"Iterable", "Sequence", "frozenset", "list", "set", "tuple"}:
+        return None
+    if base == "tuple" and len(parts) > 1 and parts[-1].strip() != "...":
+        first = parts[0].strip()
+        if any(part.strip() != first for part in parts[1:]):
+            return None
+    if not parts:
+        return None
+    return AotType(parts[0].strip())
+
+
+def _bind_comprehension_target(
+    target: ast.expr,
+    item_type: AotType,
+    local_types: dict[str, AotType],
+) -> bool:
+    if isinstance(target, ast.Name):
+        local_types[target.id] = item_type
+        return True
+    if not isinstance(target, ast.Tuple):
+        return False
+    name = item_type.name.strip()
+    if not name.startswith("tuple[") or not name.endswith("]"):
+        return False
+    parts = _split_annotation_parts(name[6:-1], ",")
+    if len(parts) != len(target.elts):
+        return False
+    for element, part in zip(target.elts, parts, strict=True):
+        if not _bind_comprehension_target(element, AotType(part.strip()), local_types):
+            return False
+    return True
+
+
+def _value_bool_op_type(
+    values: tuple[ast.expr, ...],
+    types: tuple[AotType | None, ...],
+) -> AotType | None:
+    candidates = tuple(
+        normalized
+        for type_info in types
+        if type_info is not None
+        for normalized in (_without_none_type(type_info),)
+        if normalized.name != "None"
+    )
+    if not candidates or any(candidate != candidates[0] for candidate in candidates[1:]):
+        return None
+    result = candidates[0]
+    for value, type_info in zip(values, types, strict=True):
+        if type_info is not None and _without_none_type(type_info) == result:
+            continue
+        if _empty_literal_matches_type(value, result.name):
+            continue
+        return None
+    return result
+
+
+def _without_none_type(type_info: AotType) -> AotType:
+    parts = _split_annotation_parts(type_info.name, "|")
+    if len(parts) <= 1:
+        return type_info
+    non_none = tuple(part.strip() for part in parts if part.strip() != "None")
+    if len(non_none) == 1:
+        return AotType(non_none[0])
+    return type_info
+
+
+def _empty_literal_matches_type(value: ast.expr, type_name: str) -> bool:
+    if isinstance(value, ast.Dict):
+        return not value.keys and type_name.startswith(("dict[", "Dict["))
+    if isinstance(value, ast.List):
+        return not value.elts and type_name.startswith(("list[", "List["))
+    if isinstance(value, ast.Set):
+        return not value.elts and type_name.startswith(("set[", "Set["))
+    if isinstance(value, ast.Tuple):
+        return not value.elts and type_name.startswith(("tuple[", "Tuple["))
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and not value.args
+        and not value.keywords
+    ):
+        return type_name.startswith(f"{value.func.id}[") and value.func.id in {
+            "dict",
+            "frozenset",
+            "list",
+            "set",
+            "tuple",
+        }
+    return False
+
+
+def _init_field_parameter(value: ast.expr | None) -> str | None:
+    if isinstance(value, ast.Name):
+        return value.id
+    if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or) and value.values:
+        first = value.values[0]
+        if isinstance(first, ast.Name):
+            return first.id
+    return None
 
 
 def _init_self_assignments(

@@ -79,6 +79,8 @@ _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.types.Type.__str__",
 }
 _NATIVE_EMITTED_LEAF_DEPENDENCIES: dict[str, tuple[str, ...]] = {}
+_NORETURN_CALL_PREFIX = "__noreturn__:"
+_RECORD_INIT_PREFIX = "__record_init__:"
 _PROTOCOL_METHOD_TARGETS = {
     "xcc.preprocessor.__init__.preprocess_source": (
         "xcc.preprocessor.__init__.preprocess_source_no_callback"
@@ -521,7 +523,10 @@ def _lower_core_slice_from_roots(
                     global_string_constants,
                     global_string_container_constants,
                 )
-            pending.extend(_function_call_targets(lowered))
+            pending.extend(
+                _rename_call_target(call_target, rename_map)
+                for call_target in _function_call_targets(lowered)
+            )
     return IrModule("<core-slice>", tuple(records_by_name.values()), tuple(functions.values()))
 
 
@@ -550,6 +555,23 @@ def _slice_class_tables(
         for class_name, class_info in analysis.types.classes.items():
             class_types.setdefault(class_name, class_info)
             class_modules.setdefault(class_name, module_input.name)
+    for module_input in module_inputs:
+        rename_map = _module_rename_map(
+            module_input.name,
+            source_cache[module_input.name],
+            module_names,
+        )
+        analysis = analyze_source(
+            source_cache[module_input.name],
+            filename=str(module_input.path),
+            extra_classes=class_types,
+            extra_functions=_function_types_with_module_aliases(
+                function_types,
+                rename_map,
+            ),
+        )
+        for class_name, class_info in analysis.types.classes.items():
+            class_types[class_name] = class_info
     return class_types, class_modules
 
 
@@ -1120,6 +1142,12 @@ def _rename_expr_call(expr: IrExpr, rename_map: dict[str, str]) -> IrExpr:
 
 
 def _rename_call_target(target: str, rename_map: dict[str, str]) -> str:
+    if target.startswith(_NORETURN_CALL_PREFIX):
+        call_target = target.removeprefix(_NORETURN_CALL_PREFIX)
+        return _NORETURN_CALL_PREFIX + _rename_call_target(call_target, rename_map)
+    if target.startswith(_RECORD_INIT_PREFIX):
+        init_target = target.removeprefix(_RECORD_INIT_PREFIX)
+        return _RECORD_INIT_PREFIX + _rename_call_target(init_target, rename_map)
     protocol_target = _PROTOCOL_METHOD_TARGETS.get(target)
     if protocol_target is not None:
         return protocol_target
@@ -1357,8 +1385,16 @@ def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
     if isinstance(expr, IrGetField):
         return _expr_call_targets(expr.value)
     if isinstance(expr, IrConstructRecord):
-        return _expr_tuple_call_targets(expr.args)
+        return (f"{expr.record}.__init__",) + _expr_tuple_call_targets(expr.args)
     if isinstance(expr, IrCall):
+        if expr.target.startswith(_NORETURN_CALL_PREFIX):
+            return (expr.target.removeprefix(_NORETURN_CALL_PREFIX),) + _expr_tuple_call_targets(
+                expr.args
+            )
+        if expr.target.startswith(_RECORD_INIT_PREFIX):
+            return (expr.target.removeprefix(_RECORD_INIT_PREFIX),) + _expr_tuple_call_targets(
+                expr.args
+            )
         return (expr.target,) + _expr_tuple_call_targets(expr.args)
     if isinstance(expr, IrTuple):
         return _expr_tuple_call_targets(expr.elements)
