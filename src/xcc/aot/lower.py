@@ -215,7 +215,11 @@ def lower_source_to_ir(
     extra_global_string_constants: dict[str, str] | None = None,
     extra_global_string_container_constants: dict[str, IrTuple] | None = None,
 ) -> IrModule:
-    analysis = analyze_source(source, filename=filename)
+    analysis = analyze_source(
+        source,
+        filename=filename,
+        extra_functions=extra_functions,
+    )
     return lower_analysis_to_ir(
         analysis,
         entry=entry,
@@ -265,6 +269,10 @@ def lower_analysis_to_ir(
         if name not in local_global_string_container_constants:
             global_string_container_constants.pop(name, None)
     global_string_container_constants.update(local_global_string_container_constants)
+    global_record_constructor_maps = _collect_global_record_constructor_maps(
+        analysis.module.tree,
+        class_types,
+    )
     lowerer = _Lowerer(
         filename,
         class_types,
@@ -274,6 +282,7 @@ def lower_analysis_to_ir(
         global_annotations,
         global_string_constants,
         global_string_container_constants,
+        global_record_constructor_maps,
     )
     records = tuple(
         lowerer.lower_record(node)
@@ -321,6 +330,7 @@ class _Lowerer:
         global_annotations: dict[str, str] | None = None,
         global_string_constants: dict[str, str] | None = None,
         global_string_container_constants: dict[str, IrTuple] | None = None,
+        global_record_constructor_maps: dict[str, IrTuple] | None = None,
     ) -> None:
         self.filename = filename
         self.class_types = class_types
@@ -330,6 +340,7 @@ class _Lowerer:
         self.global_types = self._global_annotation_types(global_annotations or {})
         self.global_string_constants = global_string_constants or {}
         self.global_string_container_constants = global_string_container_constants or {}
+        self.global_record_constructor_maps = global_record_constructor_maps or {}
         self.callable_param_targets: dict[str, str] = {}
 
     def lower_record(self, node: ast.ClassDef) -> IrRecord:
@@ -862,6 +873,9 @@ class _Lowerer:
             string_container = self.global_string_container_constants.get(expr.id)
             if string_container is not None:
                 return string_container
+            constructor_map = self.global_record_constructor_maps.get(expr.id)
+            if constructor_map is not None:
+                return constructor_map
             value_type = names.get(expr.id)
             if value_type is None:
                 global_type = self.global_types.get(expr.id)
@@ -884,6 +898,10 @@ class _Lowerer:
             type_name = self._lower_type_name_attribute(expr, names)
             if type_name is not None:
                 return type_name
+            if isinstance(expr.value, ast.Name) and expr.value.id not in names:
+                record_name = self._project_record_name(ast.unparse(expr))
+                if record_name is not None:
+                    return IrName(record_name, IrRecordType("object"))
             if isinstance(expr.value, ast.Name):
                 class_info = self.class_types.get(expr.value.id)
                 if class_info is not None and _is_enum_class(class_info):
@@ -1087,6 +1105,7 @@ class _Lowerer:
                 expected if isinstance(expected, IrTupleType) else IrTupleType(()),
             )
         if isinstance(expr, ast.Subscript):
+            narrowed_type = names.get(ast.unparse(expr))
             value = self._lower_expr(expr.value, names, expected)
             if isinstance(expr.slice, ast.Slice):
                 if isinstance(value.type, IrStringType | IrBytesType):
@@ -1114,14 +1133,14 @@ class _Lowerer:
                 return IrCall(
                     "__dict_get",
                     (value, self._lower_expr(expr.slice, names, value.type.key)),
-                    value.type.value,
+                    narrowed_type or value.type.value,
                 )
-            result_type = expected
+            result_type = narrowed_type or expected
             if isinstance(value.type, IrStringType):
                 result_type = IrStringType()
             elif isinstance(value.type, IrBytesType):
                 result_type = IrIntType(64, signed=True)
-            elif isinstance(value.type, IrTupleType):
+            elif isinstance(value.type, IrTupleType) and narrowed_type is None:
                 inferred_type = _tuple_subscript_result_type(expr.slice, value.type)
                 if not _is_object_type(inferred_type) or _is_object_type(expected):
                     result_type = inferred_type
@@ -1353,8 +1372,9 @@ class _Lowerer:
             return IrTupleType((IrRecordType("object"), IrBoolType()))
         if name in {"DeclaratorOp", "TypeOp"}:
             return IrTupleType((IrStringType(), IrRecordType("object")))
-        if name in self.class_types:
-            return IrRecordType(name)
+        record_name = self._project_record_name(name)
+        if record_name is not None:
+            return IrRecordType(record_name)
         width_type = _width_alias_to_ir_type(name)
         if width_type is not None:
             return width_type
@@ -1436,6 +1456,20 @@ class _Lowerer:
             args = self._lower_constructor_args(record_name, expr, names)
             return IrConstructRecord(record_name, args, record_type)
         if isinstance(expr.func, ast.Name):
+            callable_type = names.get(expr.func.id)
+            constructor_base = _record_constructor_type_base(callable_type)
+            if constructor_base is not None:
+                if expr.args or expr.keywords:
+                    self._error(
+                        "XCC-AOT-LOWER-0003",
+                        f"Dynamic record constructor requires zero arguments: {expr.func.id}",
+                        expr,
+                    )
+                return IrCall(
+                    "__record_construct0",
+                    (IrName(expr.func.id, callable_type),),
+                    IrRecordType(constructor_base),
+                )
             callable_target = self.callable_param_targets.get(expr.func.id)
             if callable_target is not None:
                 return_type = self._function_return_type(callable_target, expected)
@@ -1464,6 +1498,12 @@ class _Lowerer:
             )
         if isinstance(expr.func, ast.Attribute):
             target = ast.unparse(expr.func)
+            if isinstance(expr.func.value, ast.Name) and expr.func.value.id not in names:
+                record_name = self._project_record_name(target)
+                if record_name is not None:
+                    record_type = IrRecordType(record_name)
+                    args = self._lower_constructor_args(record_name, expr, names)
+                    return IrConstructRecord(record_name, args, record_type)
             if target in self.function_types:
                 return_type = self._function_return_type(target, expected)
                 return IrCall(
@@ -2845,8 +2885,9 @@ class _Lowerer:
             return IrTupleType((IrRecordType("object"), IrBoolType()))
         if type_info.name in {"DeclaratorOp", "TypeOp"}:
             return IrTupleType((IrStringType(), IrRecordType("object")))
-        if type_info.name in self.class_types:
-            return IrRecordType(type_info.name)
+        record_name = self._project_record_name(type_info.name)
+        if record_name is not None:
+            return IrRecordType(record_name)
         if type_info.name.startswith("Literal["):
             return IrStringType()
         if _is_optional_int(type_info.name):
@@ -2866,6 +2907,14 @@ class _Lowerer:
             f"Unsupported lowered type: {type_info.name}",
             ast.Pass(),
         )
+
+    def _project_record_name(self, name: str) -> str | None:
+        if name in self.class_types:
+            return name
+        unqualified = name.rsplit(".", 1)[-1]
+        if unqualified in self.class_types:
+            return unqualified
+        return None
 
     def _bind_assignment_target(
         self,
@@ -3514,6 +3563,8 @@ class _Lowerer:
             return IrBytesType()
         if len(non_none) == 1 and non_none[0] == "str":
             return IrStringType()
+        if len(non_none) == 1 and _record_constructor_type_base_name(non_none[0]) is not None:
+            return IrRecordType(non_none[0])
         if any(part not in self.class_types for part in non_none):
             return None
         return IrRecordType(" | ".join(non_none))
@@ -3559,7 +3610,7 @@ class _Lowerer:
             return None
         value, target_type = test.args
         target_names = _isinstance_target_names(target_type)
-        if not isinstance(value, ast.Name | ast.Attribute) or target_names is None:
+        if not isinstance(value, ast.Name | ast.Attribute | ast.Subscript) or target_names is None:
             return None
         narrowed_name = ast.unparse(value)
         try:
@@ -4161,12 +4212,17 @@ def _can_narrow_to_record(
 def _isinstance_target_names(target: ast.expr) -> tuple[str, ...] | None:
     if isinstance(target, ast.Name):
         return (target.id,)
+    if isinstance(target, ast.Attribute):
+        return (target.attr,)
     if isinstance(target, ast.Tuple):
         names: list[str] = []
         for element in target.elts:
-            if not isinstance(element, ast.Name):
+            if isinstance(element, ast.Name):
+                names.append(element.id)
+            elif isinstance(element, ast.Attribute):
+                names.append(element.attr)
+            else:
                 return None
-            names.append(element.id)
         return tuple(names) if names else None
     return None
 
@@ -4386,6 +4442,82 @@ def _global_literal_element(value: ast.expr) -> IrExpr | None:
             elements.append(literal)
         return IrTuple(tuple(elements), IrTupleType(tuple(element.type for element in elements)))
     return None
+
+
+def _collect_global_record_constructor_maps(
+    tree: ast.Module,
+    class_types: dict[str, AotClassInfo],
+) -> dict[str, IrTuple]:
+    constants: dict[str, IrTuple] = {}
+    for statement in tree.body:
+        if (
+            not isinstance(statement, ast.Assign)
+            or len(statement.targets) != 1
+            or not isinstance(statement.targets[0], ast.Name)
+            or not isinstance(statement.value, ast.Dict)
+        ):
+            continue
+        entries: list[tuple[str, str]] = []
+        for key, value in zip(statement.value.keys, statement.value.values, strict=True):
+            if (
+                not isinstance(key, ast.Constant)
+                or not isinstance(key.value, str)
+                or not isinstance(value, ast.Name | ast.Attribute)
+            ):
+                entries = []
+                break
+            record_name = ast.unparse(value).rsplit(".", 1)[-1]
+            if record_name not in class_types:
+                entries = []
+                break
+            entries.append((key.value, record_name))
+        if not entries:
+            continue
+        base_name = _common_record_base(
+            tuple(record_name for _key, record_name in entries),
+            class_types,
+        )
+        marker_type = IrRecordType(f"type[{base_name}]")
+        pair_type = IrTupleType((IrStringType(), marker_type))
+        pairs = tuple(
+            IrTuple(
+                (IrConstString(key), IrName(record_name, marker_type)),
+                pair_type,
+            )
+            for key, record_name in entries
+        )
+        constants[statement.targets[0].id] = IrTuple(
+            pairs,
+            IrDictType(IrStringType(), marker_type),
+        )
+    return constants
+
+
+def _common_record_base(
+    record_names: tuple[str, ...],
+    class_types: dict[str, AotClassInfo],
+) -> str:
+    first = record_names[0]
+    candidates = (first,) + class_types[first].bases
+    for candidate in candidates:
+        if all(
+            record_name == candidate or _record_extends(record_name, candidate, class_types)
+            for record_name in record_names
+        ):
+            return candidate
+    return "object"
+
+
+def _record_constructor_type_base(type_info: IrType | None) -> str | None:
+    if not isinstance(type_info, IrRecordType):
+        return None
+    return _record_constructor_type_base_name(type_info.name)
+
+
+def _record_constructor_type_base_name(name: str) -> str | None:
+    if not name.startswith("type[") or not name.endswith("]"):
+        return None
+    return name[5:-1]
 
 
 def _collect_global_annotations(tree: ast.Module) -> dict[str, str]:

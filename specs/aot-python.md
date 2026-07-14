@@ -194,3 +194,8 @@ B352|2026-07-12|the bootstrap entry integration test retained a pre-status two-a
 B353|2026-07-12|adjacent bootstrap integration assertions still expected direct bool/pointer returns from three now-fallible source compilation helpers instead of status/result/error calls|V380,V384
 B354|2026-07-12|the V368 `include_next` native probe retained an `expectedFailure` marker after path value semantics made the full compile/object oracle pass|V368,V384
 B355|2026-07-14|binder field inference dropped homogeneous list literals assigned in `__init__`, so the owned lexer lost `self.indents` before native call-graph lowering|V376
+B356|2026-07-14|cross-module function signatures retained imported project type qualifiers such as `ast.Module`, but lowerer record lookup recognized only unqualified class names|V376
+B357|2026-07-14|binder constructor-field inference ignored local assignments and imported function return signatures, so `self.tokens = lex_python(...)` lost its tuple element type before native lowering|V376
+B358|2026-07-14|lowerer treated module-qualified project classes such as `ast.Name` as instance fields, blocking both native `isinstance` checks and owned-AST constructors|V376
+B359|2026-07-14|lowerer had no value representation for zero-argument record constructors stored in global dicts, so the owned parser could not call the operator class selected by token text|V376
+B360|2026-07-14|`isinstance(items[index], Record)` did not narrow the stable subscript slot, so assigning that slot to a local erased the concrete record fields used by the owned parser|V376

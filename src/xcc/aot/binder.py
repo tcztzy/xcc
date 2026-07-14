@@ -32,15 +32,27 @@ _OWNED_AST_TYPE_NAMES = {
 }
 
 
-def bind_types(summary: AotModuleSummary, module: AotModule) -> AotTypeAnalysis:
-    binder = _TypeBinder(summary, module)
+def bind_types(
+    summary: AotModuleSummary,
+    module: AotModule,
+    *,
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
+) -> AotTypeAnalysis:
+    binder = _TypeBinder(summary, module, extra_functions=extra_functions)
     return binder.bind()
 
 
 class _TypeBinder:
-    def __init__(self, summary: AotModuleSummary, module: AotModule) -> None:
+    def __init__(
+        self,
+        summary: AotModuleSummary,
+        module: AotModule,
+        *,
+        extra_functions: dict[str, AotFunctionInfo] | None = None,
+    ) -> None:
         self.summary = summary
         self.module = module
+        self.extra_functions = extra_functions or {}
         self.width_aliases: dict[str, AotType] = {}
         self.aliases: dict[str, AotType] = {}
         self.classes: dict[str, AotClassInfo] = {}
@@ -139,7 +151,11 @@ class _TypeBinder:
         for child in class_node.body:
             if not isinstance(child, ast.FunctionDef) or child.name != "__init__":
                 continue
-            local_types = self._function_local_types(child, class_node.name)
+            local_types = self._function_local_types(
+                child,
+                class_node.name,
+                return_types,
+            )
             for target, value, annotation in _init_self_assignments(child.body):
                 if isinstance(value, ast.Name):
                     init_field_parameters[target.attr] = value.id
@@ -153,7 +169,9 @@ class _TypeBinder:
                     fields[target.attr] = inferred
 
     def _function_return_types(self) -> dict[str, AotType]:
-        return_types: dict[str, AotType] = {}
+        return_types = {
+            name: function.return_type for name, function in self.extra_functions.items()
+        }
         for statement in self.module.tree.body:
             if isinstance(statement, ast.FunctionDef) and statement.returns is not None:
                 return_types[statement.name] = self._annotation_to_known_type(statement.returns)
@@ -170,6 +188,7 @@ class _TypeBinder:
         self,
         statement: ast.FunctionDef,
         owner: str,
+        return_types: dict[str, AotType],
     ) -> dict[str, AotType]:
         local_types: dict[str, AotType] = {}
         positional_args = statement.args.posonlyargs + statement.args.args
@@ -181,6 +200,22 @@ class _TypeBinder:
         for arg in statement.args.kwonlyargs:
             if arg.annotation is not None:
                 local_types[arg.arg] = self._annotation_to_known_type(arg.annotation)
+        for child in statement.body:
+            if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
+                local_types[child.target.id] = self._annotation_to_known_type(child.annotation)
+            elif (
+                isinstance(child, ast.Assign)
+                and len(child.targets) == 1
+                and isinstance(child.targets[0], ast.Name)
+            ):
+                inferred = self._infer_expr_type(
+                    child.value,
+                    local_types,
+                    {},
+                    return_types,
+                )
+                if inferred is not None:
+                    local_types[child.targets[0].id] = inferred
         return local_types
 
     def _annotation_to_known_type(self, node: ast.expr) -> AotType:

@@ -891,6 +891,13 @@ class _Emitter:
         if isinstance(expr, IrName):
             value = names.get(expr.name)
             if value is None:
+                constructor_base = _record_constructor_type_base_name(expr.type)
+                if constructor_base is not None and expr.name in self.records:
+                    type_id = self.record_type_ids[expr.name]
+                    return _EmittedValue(
+                        f"inttoptr (i64 {type_id} to ptr)",
+                        expr.type,
+                    )
                 type_constant = self._emit_type_constant_name(expr, lines)
                 if type_constant is not None:
                     return type_constant
@@ -1889,6 +1896,8 @@ class _Emitter:
             return self._emit_bool_builtin_call(expr, names, lines)
         if expr.target == "isinstance":
             return self._emit_isinstance_call(expr, names, lines)
+        if expr.target == "__record_construct0":
+            return self._emit_record_construct0_call(expr, names, lines)
         if expr.target == "__llvm_FunctionType":
             return self._emit_llvm_function_type_call(expr, names, lines)
         if expr.target == "__llvm_AddCase":
@@ -2236,6 +2245,34 @@ class _Emitter:
             lines.append(f"  {result} = icmp ne ptr {value.value}, null")
             return _EmittedValue(result, expr.type)
         self._error(f"Unsupported isinstance value type: {type(value.type).__name__}")
+
+    def _emit_record_construct0_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1 or not isinstance(expr.type, IrRecordType):
+            self._error("__record_construct0 expects one marker and a record result")
+        marker = self._emit_expr(expr.args[0], names, lines)
+        base_name = expr.type.name
+        candidates = tuple(
+            record
+            for name, record in self.records.items()
+            if name == base_name or self._record_extends(name, base_name)
+        )
+        if not candidates:
+            self._error(f"__record_construct0 has no records for {base_name}")
+        allocation_size = max(_record_allocation_size(record) for record in candidates)
+        self.needs_runtime_prelude = True
+        raw = self._tmp("recordctor.raw")
+        type_id = self._tmp("recordctor.type")
+        result = self._tmp("recordctor")
+        lines.append(f"  {raw} = call ptr @malloc(i64 {allocation_size})")
+        lines.append(f"  {type_id} = ptrtoint ptr {marker.value} to i64")
+        lines.append(f"  store i64 {type_id}, ptr {raw}")
+        lines.append(f"  {result} = getelementptr i8, ptr {raw}, i64 8")
+        return _EmittedValue(result, expr.type)
 
     def _emit_record_isinstance(
         self,
@@ -5487,6 +5524,15 @@ def _record_union_part_is_tuple_runtime(part: str) -> bool:
 
 def _is_type_marker_name(name: str) -> bool:
     return name in _BUILTIN_VALUE_NAMES or (name[:1].isupper() and name.isidentifier())
+
+
+def _record_constructor_type_base_name(type_info: IrType) -> str | None:
+    if not isinstance(type_info, IrRecordType):
+        return None
+    name = type_info.name
+    if not name.startswith("type[") or not name.endswith("]"):
+        return None
+    return name[5:-1]
 
 
 def _record_allocation_size(record: IrRecord) -> int:

@@ -367,8 +367,12 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
     source_cache = {
         module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
     }
-    class_types, _ = _slice_class_tables(module_inputs, source_cache)
     function_types = _slice_method_signature_table(module_inputs, source_cache)
+    class_types, _ = _slice_class_tables(
+        module_inputs,
+        source_cache,
+        function_types,
+    )
     aliases = _slice_type_aliases(module_inputs, source_cache)
     global_annotations = _slice_global_annotations(module_inputs, source_cache)
     global_string_constants = _slice_global_string_constants(module_inputs, source_cache)
@@ -418,8 +422,12 @@ def _lower_core_slice_from_roots(
     source_cache = {
         module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
     }
-    class_types, class_modules = _slice_class_tables(module_inputs, source_cache)
     function_types = _slice_method_signature_table(module_inputs, source_cache)
+    class_types, class_modules = _slice_class_tables(
+        module_inputs,
+        source_cache,
+        function_types,
+    )
     aliases = _slice_type_aliases(module_inputs, source_cache)
     global_annotations = _slice_global_annotations(module_inputs, source_cache)
     global_string_constants = _slice_global_string_constants(module_inputs, source_cache)
@@ -518,6 +526,7 @@ def _lower_core_slice_from_roots(
 def _slice_class_tables(
     module_inputs: tuple[AotSliceInput, ...],
     source_cache: dict[str, str],
+    function_types: dict[str, AotFunctionInfo],
 ) -> tuple[dict[str, AotClassInfo], dict[str, str]]:
     class_types: dict[str, AotClassInfo] = {}
     class_modules: dict[str, str] = {}
@@ -525,6 +534,7 @@ def _slice_class_tables(
         analysis = analyze_source(
             source_cache[module_input.name],
             filename=str(module_input.path),
+            extra_functions=function_types,
         )
         for class_name, class_info in analysis.types.classes.items():
             class_types.setdefault(class_name, class_info)
@@ -1167,6 +1177,8 @@ def _branch_record_names(branch: IrBranch) -> tuple[str, ...]:
 
 def _expr_record_names(expr: IrExpr) -> tuple[str, ...]:
     names = set(_type_record_names(expr.type))
+    if isinstance(expr, IrName) and _record_constructor_type_base_name(expr.type) is not None:
+        names.add(expr.name)
     if isinstance(
         expr,
         IrConstInt
@@ -1222,6 +1234,8 @@ def _type_record_names(
     if isinstance(type_info, IrRecordType):
         if type_info.name in _INTERNAL_RECORD_TYPES:
             return ()
+        if _record_constructor_type_base_name(type_info) is not None:
+            return ()
         return (type_info.name,)
     if isinstance(type_info, IrTupleType):
         names: set[str] = set()
@@ -1233,6 +1247,15 @@ def _type_record_names(
         names.update(_type_record_names(type_info.value))
         return tuple(sorted(names))
     return ()
+
+
+def _record_constructor_type_base_name(type_info: object) -> str | None:
+    if not isinstance(type_info, IrRecordType):
+        return None
+    name = type_info.name
+    if not name.startswith("type[") or not name.endswith("]"):
+        return None
+    return name[5:-1]
 
 
 def _function_call_targets(function: IrFunction) -> tuple[str, ...]:

@@ -4,7 +4,7 @@ from pathlib import Path
 from xcc.aot.binder import bind_types
 from xcc.aot.module import AotModule, parse_path, parse_source
 from xcc.aot.subset import AotModuleSummary, check_subset
-from xcc.aot.types import AotTypeAnalysis
+from xcc.aot.types import AotFunctionInfo, AotTypeAnalysis
 
 
 @dataclass(frozen=True)
@@ -14,17 +14,30 @@ class AotAnalysis:
     types: AotTypeAnalysis
 
 
-def analyze_source(source: str, *, filename: str = "<input>") -> AotAnalysis:
+def analyze_source(
+    source: str,
+    *,
+    filename: str = "<input>",
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
+) -> AotAnalysis:
     module = parse_source(source, filename=filename)
-    return analyze_module(module)
+    return analyze_module(module, extra_functions=extra_functions)
 
 
-def analyze_module(module: AotModule) -> AotAnalysis:
+def analyze_module(
+    module: AotModule,
+    *,
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
+) -> AotAnalysis:
     summary = check_subset(module)
-    type_analysis = bind_types(summary, module)
+    type_analysis = bind_types(summary, module, extra_functions=extra_functions)
     return AotAnalysis(module, summary, type_analysis)
 
 
-def analyze_path(path: str | Path) -> AotAnalysis:
+def analyze_path(
+    path: str | Path,
+    *,
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
+) -> AotAnalysis:
     module = parse_path(path)
-    return analyze_module(module)
+    return analyze_module(module, extra_functions=extra_functions)
