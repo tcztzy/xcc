@@ -98,7 +98,7 @@ T1|x|freeze current hosted Stage 0 and split the large worktree into bisectable 
 T2|x|define strong-bootstrap source contract, project-owned AST, and hosted/native AOT CLI|V369,V374,I.cmd
 T3|x|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
 T4|x|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
-T5|.|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
+T5|~|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
 T6|.|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378
 T7|.|build Stage 2 from `.py` with Stage 1 and no Python process/cache dependency|V369,V370,V371,V372,V373,V378
 T8|.|build Stage 3 with Stage 2 and prove normalized IR/symbol/behavior stability|V369,V377,V384
@@ -193,3 +193,4 @@ B351|2026-07-12|new bytes/status/loop-exit emitter lines passed length checks bu
 B352|2026-07-12|the bootstrap entry integration test retained a pre-status two-argument smoke-compiler definition assertion after fallibility analysis added result/error out-parameters|V380,V384
 B353|2026-07-12|adjacent bootstrap integration assertions still expected direct bool/pointer returns from three now-fallible source compilation helpers instead of status/result/error calls|V380,V384
 B354|2026-07-12|the V368 `include_next` native probe retained an `expectedFailure` marker after path value semantics made the full compile/object oracle pass|V368,V384
+B355|2026-07-14|binder field inference dropped homogeneous list literals assigned in `__init__`, so the owned lexer lost `self.indents` before native call-graph lowering|V376

@@ -213,6 +213,14 @@ class _TypeBinder:
                 return AotType("str")
         if isinstance(expr, ast.Name):
             return local_types.get(expr.id)
+        if isinstance(expr, ast.List) and expr.elts:
+            element_types = tuple(
+                self._infer_expr_type(element, local_types, fields, return_types)
+                for element in expr.elts
+            )
+            first = element_types[0]
+            if first is not None and all(element == first for element in element_types):
+                return AotType(f"list[{first.name}]")
         if (
             isinstance(expr, ast.Attribute)
             and isinstance(expr.value, ast.Name)
