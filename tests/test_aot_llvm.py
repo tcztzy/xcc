@@ -2041,7 +2041,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("ptrtoint ptr %item", llvm_ir)
         self.assertIn("and i64 %narrowint", llvm_ir)
 
-    def test_for_each_over_string_loads_integer_bytes(self) -> None:
+    def test_for_each_over_string_allocates_one_character_strings(self) -> None:
         int64 = IrIntType(64, signed=True)
         module = IrModule(
             "string_for_each.py",
@@ -2054,7 +2054,7 @@ class AotLlvmTextTests(unittest.TestCase):
                     (
                         IrAssign("raw", IrConstInt(0, int64)),
                         IrForEach(
-                            "byte",
+                            "character",
                             IrName("data", IrStringType()),
                             IrBranch(
                                 (
@@ -2065,7 +2065,11 @@ class AotLlvmTextTests(unittest.TestCase):
                                             IrName("raw", int64),
                                             IrBinary(
                                                 "<<",
-                                                IrName("byte", int64),
+                                                IrCall(
+                                                    "__ord",
+                                                    (IrName("character", IrStringType()),),
+                                                    int64,
+                                                ),
                                                 IrConstInt(0, int64),
                                                 int64,
                                             ),
@@ -2086,6 +2090,8 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call i64 @strlen(ptr %data)", llvm_ir)
         self.assertIn("getelementptr i8, ptr %data", llvm_ir)
         self.assertIn("load i8, ptr", llvm_ir)
+        self.assertIn("call ptr @malloc(i64 2)", llvm_ir)
+        self.assertIn("store i8", llvm_ir)
         self.assertIn("zext i8", llvm_ir)
         self.assertIn("shl i64", llvm_ir)
         self.assertNotIn("@__xcc_aot_tuple_get(ptr %data", llvm_ir)

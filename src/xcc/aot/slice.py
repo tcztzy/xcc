@@ -486,6 +486,7 @@ def _lower_core_slice_from_roots(
                 inputs_by_name,
                 source_cache,
                 class_types,
+                function_types,
                 aliases,
                 global_annotations,
                 global_string_constants,
@@ -514,6 +515,7 @@ def _lower_core_slice_from_roots(
                     inputs_by_name,
                     source_cache,
                     class_types,
+                    function_types,
                     aliases,
                     global_annotations,
                     global_string_constants,
@@ -530,11 +532,20 @@ def _slice_class_tables(
 ) -> tuple[dict[str, AotClassInfo], dict[str, str]]:
     class_types: dict[str, AotClassInfo] = {}
     class_modules: dict[str, str] = {}
+    module_names = frozenset(source_cache)
     for module_input in module_inputs:
+        rename_map = _module_rename_map(
+            module_input.name,
+            source_cache[module_input.name],
+            module_names,
+        )
         analysis = analyze_source(
             source_cache[module_input.name],
             filename=str(module_input.path),
-            extra_functions=function_types,
+            extra_functions=_function_types_with_module_aliases(
+                function_types,
+                rename_map,
+            ),
         )
         for class_name, class_info in analysis.types.classes.items():
             class_types.setdefault(class_name, class_info)
@@ -617,6 +628,7 @@ def _add_missing_records(
     inputs_by_name: dict[str, AotSliceInput],
     source_cache: dict[str, str],
     class_types: dict[str, AotClassInfo],
+    function_types: dict[str, AotFunctionInfo],
     aliases: dict[str, AotType] | None = None,
     global_annotations: dict[str, str] | None = None,
     global_string_constants: dict[str, str] | None = None,
@@ -629,12 +641,21 @@ def _add_missing_records(
         if module_name is None:
             continue
         module_input = inputs_by_name[module_name]
+        rename_map = _module_rename_map(
+            module_name,
+            source_cache[module_name],
+            frozenset(source_cache),
+        )
         records_module = lower_source_to_ir(
             source_cache[module_name],
             filename=str(module_input.path),
             include_records={record_name},
             include_functions=frozenset(),
             extra_classes=class_types,
+            extra_functions=_function_types_with_module_aliases(
+                function_types,
+                rename_map,
+            ),
             extra_aliases=aliases,
             extra_global_annotations=global_annotations,
             extra_global_string_constants=global_string_constants,

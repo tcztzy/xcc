@@ -52,7 +52,23 @@ from xcc.aot.ir import (
 )
 from xcc.aot.status import analyze_fallibility
 
-_BUILTIN_VALUE_NAMES = {"bool", "int", "object", "str", "tuple"}
+_BUILTIN_TYPE_MARKER_NAMES = frozenset(
+    {
+        "bool",
+        "bytes",
+        "dict",
+        "float",
+        "frozenset",
+        "int",
+        "list",
+        "object",
+        "set",
+        "str",
+        "tuple",
+        "type",
+    }
+)
+_BUILTIN_VALUE_NAMES = {"Ellipsis", *_BUILTIN_TYPE_MARKER_NAMES}
 _TYPE_CONSTANTS = {
     "INT": "int",
     "UINT": "unsigned int",
@@ -898,6 +914,8 @@ class _Emitter:
                         f"inttoptr (i64 {type_id} to ptr)",
                         expr.type,
                     )
+                if expr.name == "Ellipsis" and isinstance(expr.type, IrRecordType):
+                    return _EmittedValue("inttoptr (i64 -1 to ptr)", expr.type)
                 type_constant = self._emit_type_constant_name(expr, lines)
                 if type_constant is not None:
                     return type_constant
@@ -1138,11 +1156,20 @@ class _Emitter:
                 self._error("string/bytes for-each expects one named target")
             pointer = self._tmp("byteitemptr")
             byte = self._tmp("byteitem")
-            wide = self._tmp("byteitem64")
             lines.append(f"  {pointer} = getelementptr i8, ptr {byte_data}, i64 {index}")
             lines.append(f"  {byte} = load i8, ptr {pointer}")
-            lines.append(f"  {wide} = zext i8 {byte} to i64")
-            body_names[slots[0]] = _EmittedValue(wide, IrIntType(64, signed=True))
+            if string_iterable:
+                character = self._tmp("charitem")
+                terminator = self._tmp("charitemnul")
+                lines.append(f"  {character} = call ptr @malloc(i64 2)")
+                lines.append(f"  store i8 {byte}, ptr {character}")
+                lines.append(f"  {terminator} = getelementptr i8, ptr {character}, i64 1")
+                lines.append(f"  store i8 0, ptr {terminator}")
+                body_names[slots[0]] = _EmittedValue(character, IrStringType())
+            else:
+                wide = self._tmp("byteitem64")
+                lines.append(f"  {wide} = zext i8 {byte} to i64")
+                body_names[slots[0]] = _EmittedValue(wide, IrIntType(64, signed=True))
         else:
             item = self._tmp("item")
             lines.append(
@@ -1390,6 +1417,10 @@ class _Emitter:
         if isinstance(result_type, IrBoolType):
             result = self._tmp("narrowbool")
             lines.append(f"  {result} = icmp ne ptr {raw}, null")
+            return _EmittedValue(result, result_type)
+        if isinstance(result_type, IrFloatType):
+            result = self._tmp("narrowfloat")
+            lines.append(f"  {result} = load double, ptr {raw}")
             return _EmittedValue(result, result_type)
         self._error(f"Unsupported tuple item type: {type(result_type).__name__}")
 
@@ -1767,6 +1798,12 @@ class _Emitter:
                 int_value = narrowed
             lines.append(f"  {boxed} = inttoptr i64 {int_value} to ptr")
             return boxed
+        if isinstance(value.type, IrFloatType):
+            self.needs_runtime_prelude = True
+            boxed = self._tmp("floatbox")
+            lines.append(f"  {boxed} = call ptr @malloc(i64 8)")
+            lines.append(f"  store double {value.value}, ptr {boxed}")
+            return boxed
         self._error(f"Unsupported tuple item type: {type(value.type).__name__}")
 
     def _emit_tuple_slice(
@@ -1989,6 +2026,10 @@ class _Emitter:
             return self._emit_string_endswith_call(expr, names, lines)
         if expr.target == "__str_find":
             return self._emit_string_find_call(expr, names, lines)
+        if expr.target == "__str_rfind":
+            return self._emit_string_rfind_call(expr, names, lines)
+        if expr.target == "__str_count":
+            return self._emit_string_count_call(expr, names, lines)
         if expr.target == "__str_split":
             return self._emit_string_split_call(expr, names, lines)
         if expr.target == "__str_split_limit":
@@ -2032,6 +2073,8 @@ class _Emitter:
             return self._emit_string_predicate_call(expr, predicate_mode, names, lines)
         if expr.target == "__bytes":
             return self._emit_bytes_call(expr, names, lines)
+        if expr.target == "__bytes_from_ints":
+            return self._emit_bytes_from_ints_call(expr, names, lines)
         if expr.target == "__bytes_slice":
             return self._emit_bytes_slice_call(expr, names, lines)
         if expr.target == "__id":
@@ -2060,6 +2103,10 @@ class _Emitter:
             return self._emit_dict_items_call(expr, names, lines)
         if expr.target == "__zip":
             return self._emit_zip_call(expr, names, lines)
+        if expr.target in {"__all_generator", "__any_generator"}:
+            return self._emit_generator_predicate_call(expr, names, lines)
+        if expr.target == "__optional_box":
+            return self._emit_optional_box_call(expr, names, lines)
         if (
             _is_tuple_mutating_method(expr.target)
             and expr.args
@@ -2068,6 +2115,8 @@ class _Emitter:
             return self._emit_tuple_mutating_method_call(expr, names, lines)
         if expr.target == "__float":
             return self._emit_float_call(expr, names, lines)
+        if expr.target == "__complex":
+            return self._emit_complex_call(expr, names, lines)
         if expr.target == "__float_fromhex":
             return self._emit_float_fromhex_call(expr, names, lines)
         if expr.target == "__int_to_bytes":
@@ -2233,10 +2282,10 @@ class _Emitter:
         if not isinstance(expr.type, IrBoolType):
             self._error("isinstance expects a bool result")
         value = self._emit_expr(expr.args[0], names, lines)
-        if isinstance(value.type, IrNoneType):
-            return _EmittedValue("false", expr.type)
-        if isinstance(value.type, (IrIntType, IrBoolType, IrFloatType)):
-            return _EmittedValue("true", expr.type)
+        target_names = self._isinstance_target_names(expr.args[1])
+        static_result = _static_builtin_isinstance_result(value.type, target_names)
+        if static_result is not None:
+            return _EmittedValue("true" if static_result else "false", expr.type)
         target_ids = self._isinstance_target_type_ids(expr.args[1])
         if isinstance(value.type, IrRecordType) and target_ids:
             return self._emit_record_isinstance(value, target_ids, lines, expr.type)
@@ -2246,16 +2295,26 @@ class _Emitter:
             return _EmittedValue(result, expr.type)
         self._error(f"Unsupported isinstance value type: {type(value.type).__name__}")
 
+    def _isinstance_target_names(self, target: IrExpr) -> tuple[str, ...]:
+        if isinstance(target, IrName):
+            return (target.name,)
+        if isinstance(target, IrTuple):
+            return tuple(element.name for element in target.elements if isinstance(element, IrName))
+        return ()
+
     def _emit_record_construct0_call(
         self,
         expr: IrCall,
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue:
-        if len(expr.args) != 1 or not isinstance(expr.type, IrRecordType):
+        if not expr.args or not isinstance(expr.type, IrRecordType):
             self._error("__record_construct0 expects one marker and a record result")
         marker = self._emit_expr(expr.args[0], names, lines)
         base_name = expr.type.name
+        base_record = self.records.get(base_name)
+        if base_record is None or len(expr.args) != len(base_record.fields) + 1:
+            self._error("__record_construct0 default field shape mismatch")
         candidates = tuple(
             record
             for name, record in self.records.items()
@@ -2272,6 +2331,17 @@ class _Emitter:
         lines.append(f"  {type_id} = ptrtoint ptr {marker.value} to i64")
         lines.append(f"  store i64 {type_id}, ptr {raw}")
         lines.append(f"  {result} = getelementptr i8, ptr {raw}, i64 8")
+        for index, (argument, field) in enumerate(
+            zip(expr.args[1:], base_record.fields, strict=True)
+        ):
+            value = self._emit_expr(argument, names, lines)
+            stored = self._value_for_result_type(value, field.type, lines)
+            field_ptr = self._tmp("recordctor.field")
+            lines.append(
+                f"  {field_ptr} = getelementptr inbounds %{base_name}, ptr {result}, "
+                f"i32 0, i32 {index}"
+            )
+            lines.append(f"  store {self._storage_llvm_type(field.type)} {stored}, ptr {field_ptr}")
         return _EmittedValue(result, expr.type)
 
     def _emit_record_isinstance(
@@ -2310,15 +2380,8 @@ class _Emitter:
         return _EmittedValue(result, result_type)
 
     def _isinstance_target_type_ids(self, target: IrExpr) -> tuple[int, ...]:
-        names: list[str] = []
-        if isinstance(target, IrName):
-            names.append(target.name)
-        elif isinstance(target, IrTuple):
-            for element in target.elements:
-                if isinstance(element, IrName):
-                    names.append(element.name)
         ids: set[int] = set()
-        for name in names:
+        for name in self._isinstance_target_names(target):
             ids.update(self._record_descendant_type_ids(name))
         return tuple(sorted(ids))
 
@@ -2392,12 +2455,32 @@ class _Emitter:
         if len(expr.args) != 2:
             self._error("__str_endswith expects two arguments")
         value = self._emit_expr(expr.args[0], names, lines)
-        suffix = self._emit_expr(expr.args[1], names, lines)
-        if not isinstance(value.type, IrStringType) or not isinstance(suffix.type, IrStringType):
+        if not _is_string_like_type(value.type):
             self._error("__str_endswith expects string receiver and suffix")
         if not isinstance(expr.type, IrBoolType):
             self._error("__str_endswith expects a bool result")
         self.needs_runtime_prelude = True
+        if isinstance(expr.args[1], IrTuple):
+            tuple_result: _EmittedValue = _EmittedValue("false", IrBoolType())
+            for suffix_expr in expr.args[1].elements:
+                suffix = self._emit_expr(suffix_expr, names, lines)
+                if not _is_string_like_type(suffix.type):
+                    self._error("__str_endswith expects string receiver and suffix")
+                current = self._tmp("endswith")
+                lines.append(
+                    f"  {current} = call i1 @__xcc_aot_string_endswith("
+                    f"ptr {value.value}, ptr {suffix.value})"
+                )
+                if tuple_result.value == "false":
+                    tuple_result = _EmittedValue(current, IrBoolType())
+                else:
+                    combined = self._tmp("endswith")
+                    lines.append(f"  {combined} = or i1 {tuple_result.value}, {current}")
+                    tuple_result = _EmittedValue(combined, IrBoolType())
+            return tuple_result
+        suffix = self._emit_expr(expr.args[1], names, lines)
+        if not _is_string_like_type(suffix.type):
+            self._error("__str_endswith expects string receiver and suffix")
         result = self._tmp("endswith")
         lines.append(
             f"  {result} = call i1 @__xcc_aot_string_endswith("
@@ -2448,6 +2531,62 @@ class _Emitter:
         lines.append(f"  {base_i64} = ptrtoint ptr {value.value} to i64")
         lines.append(f"  {offset} = sub i64 {found_i64}, {base_i64}")
         lines.append(f"  {result} = select i1 {found_ok}, i64 {offset}, i64 -1")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_string_rfind_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 4:
+            self._error("__str_rfind expects four arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        needle = self._emit_expr(expr.args[1], names, lines)
+        start = self._emit_expr(expr.args[2], names, lines)
+        end = self._emit_expr(expr.args[3], names, lines)
+        if not isinstance(value.type, IrStringType) or not isinstance(needle.type, IrStringType):
+            self._error("__str_rfind expects string receiver and needle")
+        if not all(
+            isinstance(bound.type, IrIntType) and bound.type.bits == 64 for bound in (start, end)
+        ):
+            self._error("__str_rfind expects int64 bounds")
+        if not isinstance(expr.type, IrIntType) or expr.type.bits != 64:
+            self._error("__str_rfind expects an int64 result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("rfind")
+        lines.append(
+            f"  {result} = call i64 @__xcc_aot_string_rfind("
+            f"ptr {value.value}, ptr {needle.value}, i64 {start.value}, i64 {end.value})"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_string_count_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 4:
+            self._error("__str_count expects four arguments")
+        value = self._emit_expr(expr.args[0], names, lines)
+        needle = self._emit_expr(expr.args[1], names, lines)
+        start = self._emit_expr(expr.args[2], names, lines)
+        end = self._emit_expr(expr.args[3], names, lines)
+        if not isinstance(value.type, IrStringType) or not isinstance(needle.type, IrStringType):
+            self._error("__str_count expects string receiver and needle")
+        if not all(
+            isinstance(bound.type, IrIntType) and bound.type.bits == 64 for bound in (start, end)
+        ):
+            self._error("__str_count expects int64 bounds")
+        if not isinstance(expr.type, IrIntType) or expr.type.bits != 64:
+            self._error("__str_count expects an int64 result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("count")
+        lines.append(
+            f"  {result} = call i64 @__xcc_aot_string_count("
+            f"ptr {value.value}, ptr {needle.value}, i64 {start.value}, i64 {end.value})"
+        )
         return _EmittedValue(result, expr.type)
 
     def _emit_string_split_call(
@@ -2762,6 +2901,26 @@ class _Emitter:
         lines.append(f"  {result} = call ptr @__xcc_aot_bytes_new(i64 {size.value})")
         return _EmittedValue(result, expr.type)
 
+    def _emit_bytes_from_ints_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("__bytes_from_ints expects one argument")
+        values = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(values.type, IrTupleType) or not all(
+            isinstance(element, IrIntType) for element in values.type.elements
+        ):
+            self._error("__bytes_from_ints expects a tuple-backed integer iterable")
+        if not isinstance(expr.type, IrBytesType):
+            self._error("__bytes_from_ints expects a bytes result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("bytes")
+        lines.append(f"  {result} = call ptr @__xcc_aot_bytes_from_ints(ptr {values.value})")
+        return _EmittedValue(result, expr.type)
+
     def _emit_id_call(
         self,
         expr: IrCall,
@@ -3014,6 +3173,119 @@ class _Emitter:
         lines.append(f"  {result} = call ptr @__xcc_aot_zip2(ptr {left.value}, ptr {right.value})")
         return _EmittedValue(result, expr.type)
 
+    def _emit_generator_predicate_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 3 or not isinstance(expr.args[1], IrName):
+            self._error(f"{expr.target} expects iterable, target, and predicate")
+        if not isinstance(expr.type, IrBoolType):
+            self._error(f"{expr.target} expects a bool result")
+        mode = "any" if expr.target == "__any_generator" else "all"
+        iterable = self._emit_expr(expr.args[0], names, lines)
+        marker = expr.args[1]
+        self.needs_runtime_prelude = True
+        length = self._tmp(f"{mode}.len")
+        byte_data = iterable.value
+        if isinstance(iterable.type, IrStringType):
+            lines.append(f"  {length} = call i64 @strlen(ptr {iterable.value})")
+        elif isinstance(iterable.type, IrBytesType):
+            byte_data = self._tmp(f"{mode}.bytesdata")
+            lines.append(f"  {byte_data} = call ptr @__xcc_aot_bytes_data(ptr {iterable.value})")
+            lines.append(f"  {length} = call i64 @__xcc_aot_bytes_len(ptr {iterable.value})")
+        elif isinstance(iterable.type, IrTupleType | IrDictType):
+            lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+        else:
+            self._error(f"{expr.target} expects an iterable value")
+
+        cond_label = self._label(f"{mode}.cond")
+        body_label = self._label(f"{mode}.body")
+        next_label = self._label(f"{mode}.next")
+        end_label = self._label(f"{mode}.end")
+        source_label = _current_label(lines)
+        next_index = self._tmp(f"{mode}.next")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        index = self._tmp(f"{mode}.index")
+        lines.append(f"  {index} = phi i64 [ 0, %{source_label} ], [ {next_index}, %{next_label} ]")
+        has_item = self._tmp(f"{mode}.has_item")
+        lines.append(f"  {has_item} = icmp ult i64 {index}, {length}")
+        lines.append(f"  br i1 {has_item}, label %{body_label}, label %{end_label}")
+        exhausted_source = _current_label(lines)
+        lines.append(f"{body_label}:")
+        predicate_names = dict(names)
+        if isinstance(iterable.type, IrStringType | IrBytesType):
+            pointer = self._tmp(f"{mode}.itemptr")
+            byte = self._tmp(f"{mode}.item")
+            lines.append(f"  {pointer} = getelementptr i8, ptr {byte_data}, i64 {index}")
+            lines.append(f"  {byte} = load i8, ptr {pointer}")
+            if isinstance(iterable.type, IrStringType):
+                character = self._tmp(f"{mode}.character")
+                terminator = self._tmp(f"{mode}.char_nul")
+                lines.append(f"  {character} = call ptr @malloc(i64 2)")
+                lines.append(f"  store i8 {byte}, ptr {character}")
+                lines.append(f"  {terminator} = getelementptr i8, ptr {character}, i64 1")
+                lines.append(f"  store i8 0, ptr {terminator}")
+                item = _EmittedValue(character, IrStringType())
+            else:
+                wide = self._tmp(f"{mode}.item64")
+                lines.append(f"  {wide} = zext i8 {byte} to i64")
+                item = _EmittedValue(wide, IrIntType(64, signed=True))
+        else:
+            raw = self._tmp(f"{mode}.item")
+            lines.append(
+                f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})"
+            )
+            if isinstance(iterable.type, IrDictType):
+                item = self._emit_runtime_tuple_get(raw, 0, marker.type, lines)
+            else:
+                item = self._emit_runtime_boxed_value(raw, marker.type, lines)
+        predicate_names[marker.name] = item
+        predicate = self._coerce_to_bool(
+            self._emit_expr(expr.args[2], predicate_names, lines),
+            lines,
+        )
+        predicate_source = _current_label(lines)
+        if mode == "any":
+            lines.append(f"  br i1 {predicate.value}, label %{end_label}, label %{next_label}")
+            stopped_value = "true"
+            exhausted_value = "false"
+        else:
+            lines.append(f"  br i1 {predicate.value}, label %{next_label}, label %{end_label}")
+            stopped_value = "false"
+            exhausted_value = "true"
+        lines.append(f"{next_label}:")
+        lines.append(f"  {next_index} = add i64 {index}, 1")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp(mode)
+        lines.append(
+            f"  {result} = phi i1 [ {exhausted_value}, %{exhausted_source} ], "
+            f"[ {stopped_value}, %{predicate_source} ]"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_optional_box_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1 or not _is_optional_bool_type(expr.type):
+            self._error("__optional_box expects one bool-or-None argument")
+        value = self._emit_expr(expr.args[0], names, lines)
+        if isinstance(value.type, IrNoneType):
+            return _EmittedValue("null", expr.type)
+        if not isinstance(value.type, IrBoolType):
+            self._error("__optional_box expects one bool-or-None argument")
+        tag = self._tmp("optional.bool.tag")
+        result = self._tmp("optional.bool")
+        lines.append(f"  {tag} = select i1 {value.value}, i64 2, i64 1")
+        lines.append(f"  {result} = inttoptr i64 {tag} to ptr")
+        return _EmittedValue(result, expr.type)
+
     def _emit_tuple_mutating_method_call(
         self,
         expr: IrCall,
@@ -3026,6 +3298,14 @@ class _Emitter:
         receiver = self._emit_expr(expr.args[0], names, lines)
         if not isinstance(receiver.type, IrTupleType):
             self._error(f"{method} expects a tuple-backed receiver")
+        if method == "clear":
+            if len(expr.args) != 1:
+                self._error("clear expects only a receiver")
+            result = self._tmp("tuple")
+            self.needs_runtime_prelude = True
+            lines.append(f"  {result} = call ptr @__xcc_aot_tuple_clear(ptr {receiver.value})")
+            result_type = expr.type if isinstance(expr.type, IrTupleType) else receiver.type
+            return _EmittedValue(result, result_type)
         if method == "pop":
             if len(expr.args) != 1:
                 self._error("pop expects only a receiver")
@@ -3097,6 +3377,31 @@ class _Emitter:
         self._error(
             f"__float expects an int, float, or string argument, got {type(value.type).__name__}"
         )
+
+    def _emit_complex_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__complex expects two arguments")
+        real = self._emit_expr(expr.args[0], names, lines)
+        imaginary = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(real.type, IrFloatType) or not isinstance(
+            imaginary.type,
+            IrFloatType,
+        ):
+            self._error("__complex expects float arguments")
+        if not isinstance(expr.type, IrRecordType) or expr.type.name != "complex":
+            self._error("__complex expects an opaque complex result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("complex")
+        lines.append(
+            f"  {result} = call ptr @__xcc_aot_complex_new("
+            f"double {real.value}, double {imaginary.value})"
+        )
+        return _EmittedValue(result, expr.type)
 
     def _emit_float_fromhex_call(
         self,
@@ -3714,6 +4019,12 @@ class _Emitter:
             )
             return _EmittedValue(result, requested_type)
         if isinstance(requested_type, IrBoolType):
+            if _is_optional_bool_type(value.type):
+                tag = self._tmp("optional.bool.tag")
+                result = self._tmp("narrowbool")
+                lines.append(f"  {tag} = ptrtoint ptr {value.value} to i64")
+                lines.append(f"  {result} = icmp eq i64 {tag}, 2")
+                return _EmittedValue(result, requested_type)
             result = self._tmp("narrowbool")
             lines.append(f"  {result} = icmp ne ptr {value.value}, null")
             return _EmittedValue(result, requested_type)
@@ -3747,6 +4058,26 @@ class _Emitter:
             result = self._tmp("truth")
             lines.append(f"  {length} = call i64 @__xcc_aot_bytes_len(ptr {value.value})")
             lines.append(f"  {result} = icmp ne i64 {length}, 0")
+            return _EmittedValue(result, IrBoolType())
+        if _is_optional_bool_type(value.type):
+            tag = self._tmp("optional.bool.tag")
+            result = self._tmp("truth")
+            lines.append(f"  {tag} = ptrtoint ptr {value.value} to i64")
+            lines.append(f"  {result} = icmp eq i64 {tag}, 2")
+            return _EmittedValue(result, IrBoolType())
+        if isinstance(value.type, IrRecordType) and value.type.name == "complex":
+            real = self._tmp("complex.real")
+            imaginary_pointer = self._tmp("complex.imagptr")
+            imaginary = self._tmp("complex.imag")
+            real_nonzero = self._tmp("complex.real_nonzero")
+            imaginary_nonzero = self._tmp("complex.imag_nonzero")
+            result = self._tmp("truth")
+            lines.append(f"  {real} = load double, ptr {value.value}")
+            lines.append(f"  {imaginary_pointer} = getelementptr i8, ptr {value.value}, i64 8")
+            lines.append(f"  {imaginary} = load double, ptr {imaginary_pointer}")
+            lines.append(f"  {real_nonzero} = fcmp une double {real}, 0.0")
+            lines.append(f"  {imaginary_nonzero} = fcmp une double {imaginary}, 0.0")
+            lines.append(f"  {result} = or i1 {real_nonzero}, {imaginary_nonzero}")
             return _EmittedValue(result, IrBoolType())
         if isinstance(value.type, IrRecordType):
             result = self._tmp("truth")
@@ -4186,6 +4517,17 @@ class _Emitter:
     ) -> _EmittedValue:
         predicate = "ne" if negate else "eq"
         result = self._tmp("is")
+        left_optional_tag = self._optional_bool_tag(left, lines)
+        right_optional_tag = self._optional_bool_tag(right, lines)
+        if (
+            (_is_optional_bool_type(left.type) or _is_optional_bool_type(right.type))
+            and left_optional_tag is not None
+            and right_optional_tag is not None
+        ):
+            lines.append(
+                f"  {result} = icmp {predicate} i64 {left_optional_tag}, {right_optional_tag}"
+            )
+            return _EmittedValue(result, IrBoolType())
         if isinstance(left.type, IrIntType) or isinstance(right.type, IrIntType):
             left_value = left.value if isinstance(left.type, IrIntType) else "0"
             right_value = right.value if isinstance(right.type, IrIntType) else "0"
@@ -4210,6 +4552,17 @@ class _Emitter:
     ) -> _EmittedValue:
         predicate = "ne" if negate else "eq"
         result = self._tmp("eq")
+        left_optional_tag = self._optional_bool_tag(left, lines)
+        right_optional_tag = self._optional_bool_tag(right, lines)
+        if (
+            (_is_optional_bool_type(left.type) or _is_optional_bool_type(right.type))
+            and left_optional_tag is not None
+            and right_optional_tag is not None
+        ):
+            lines.append(
+                f"  {result} = icmp {predicate} i64 {left_optional_tag}, {right_optional_tag}"
+            )
+            return _EmittedValue(result, IrBoolType())
         if isinstance(left.type, IrIntType) and isinstance(right.type, IrIntType):
             lines.append(
                 f"  {result} = icmp {predicate} {self._llvm_type(left.type)} "
@@ -4218,6 +4571,10 @@ class _Emitter:
             return _EmittedValue(result, IrBoolType())
         if isinstance(left.type, IrBoolType) and isinstance(right.type, IrBoolType):
             lines.append(f"  {result} = icmp {predicate} i1 {left.value}, {right.value}")
+            return _EmittedValue(result, IrBoolType())
+        if isinstance(left.type, IrFloatType) and isinstance(right.type, IrFloatType):
+            float_predicate = "une" if negate else "oeq"
+            lines.append(f"  {result} = fcmp {float_predicate} double {left.value}, {right.value}")
             return _EmittedValue(result, IrBoolType())
         if isinstance(left.type, IrBytesType) and isinstance(right.type, IrBytesType):
             self.needs_runtime_prelude = True
@@ -4253,6 +4610,25 @@ class _Emitter:
         right_value = self._pointer_compare_value(right)
         lines.append(f"  {result} = icmp {predicate} ptr {left_value}, {right_value}")
         return _EmittedValue(result, IrBoolType())
+
+    def _optional_bool_tag(
+        self,
+        value: _EmittedValue,
+        lines: list[str],
+    ) -> str | None:
+        if isinstance(value.type, IrNoneType):
+            return "0"
+        if isinstance(value.type, IrBoolType):
+            widened = self._tmp("optional.bool")
+            tag = self._tmp("optional.bool.tag")
+            lines.append(f"  {widened} = zext i1 {value.value} to i64")
+            lines.append(f"  {tag} = add i64 {widened}, 1")
+            return tag
+        if _is_optional_bool_type(value.type):
+            tag = self._tmp("optional.bool.tag")
+            lines.append(f"  {tag} = ptrtoint ptr {value.value} to i64")
+            return tag
+        return None
 
     def _emit_string_equality_compare(
         self,
@@ -5443,6 +5819,41 @@ def _is_pointer_type(type_info: IrType) -> bool:
     )
 
 
+def _is_optional_bool_type(type_info: IrType) -> bool:
+    return isinstance(type_info, IrRecordType) and {
+        part.strip() for part in type_info.name.split("|")
+    } == {"None", "bool"}
+
+
+def _static_builtin_isinstance_result(
+    type_info: IrType,
+    target_names: tuple[str, ...],
+) -> bool | None:
+    if not target_names:
+        return None
+    targets = set(target_names)
+    if "object" in targets:
+        return True
+    accepted_targets: set[str] | None = None
+    if isinstance(type_info, IrNoneType):
+        accepted_targets = set()
+    elif isinstance(type_info, IrBoolType):
+        accepted_targets = {"bool", "int"}
+    elif isinstance(type_info, IrIntType):
+        accepted_targets = {"int"}
+    elif isinstance(type_info, IrFloatType):
+        accepted_targets = {"float"}
+    elif isinstance(type_info, IrBytesType):
+        accepted_targets = {"bytes"}
+    elif isinstance(type_info, IrStringType):
+        accepted_targets = {"str"}
+    elif isinstance(type_info, IrDictType):
+        accepted_targets = {"dict"}
+    if accepted_targets is None:
+        return None
+    return bool(accepted_targets & targets)
+
+
 def _homogeneous_tuple_element_type(type_info: IrType) -> IrType | None:
     if not isinstance(type_info, IrTupleType) or not type_info.elements:
         return None
@@ -5454,7 +5865,7 @@ def _homogeneous_tuple_element_type(type_info: IrType) -> IrType | None:
 
 
 def _is_tuple_mutating_method(target: str) -> bool:
-    return target.endswith((".add", ".append", ".extend", ".pop"))
+    return target.endswith((".add", ".append", ".clear", ".extend", ".pop"))
 
 
 def _is_string_like_type(type_info: IrType) -> bool:

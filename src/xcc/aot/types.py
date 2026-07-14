@@ -44,6 +44,7 @@ class AotClassInfo:
     bases: tuple[str, ...] = ()
     int_constants: dict[str, int] = field(default_factory=dict)
     init_field_parameters: dict[str, str] = field(default_factory=dict)
+    kw_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class AotFunctionInfo:
     parameters: tuple[tuple[str, str], ...]
     return_type: AotType
     parameter_defaults: tuple[ast.expr | None, ...] = ()
+    vararg: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)

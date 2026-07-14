@@ -199,3 +199,21 @@ B357|2026-07-14|binder constructor-field inference ignored local assignments and
 B358|2026-07-14|lowerer treated module-qualified project classes such as `ast.Name` as instance fields, blocking both native `isinstance` checks and owned-AST constructors|V376
 B359|2026-07-14|lowerer had no value representation for zero-argument record constructors stored in global dicts, so the owned parser could not call the operator class selected by token text|V376
 B360|2026-07-14|`isinstance(items[index], Record)` did not narrow the stable subscript slot, so assigning that slot to a local erased the concrete record fields used by the owned parser|V376
+B361|2026-07-14|AOT record layouts omitted inherited dataclass fields and constructor keyword-only metadata, so owned AST subclasses could neither store nor read the common `span` prefix|V376
+B362|2026-07-14|binder and lowerer omitted annotated `*args` from function signatures, leaving the owned parser's `_children(*values)` body unbound and its callers ABI-incompatible|V376
+B363|2026-07-14|native object lowering treated the built-in `Ellipsis` singleton as an unknown name, preventing the owned parser from constructing `Constant(...)` for `...` source|V376
+B364|2026-07-14|native `isinstance` accepted only a partial built-in type-marker set and could not narrow bytes-valued unions used by owned string-literal parsing|V376
+B365|2026-07-14|statement lowering applied only the first `isinstance` narrowing in an `and` chain, so later guarded values retained their base record type in the owned parser|V376
+B366|2026-07-14|the native string subset omitted `str.rfind`, blocking source-position calculation in the owned parser despite an existing forward-search path|V376
+B367|2026-07-14|the native string subset omitted `str.count`, blocking line-number calculation from the owned parser's source prefix|V376
+B368|2026-07-14|the owned numeric decoder's ordinary two-argument `complex` construction had no native opaque-value representation, even though complex annotations remain outside the bootstrap subset|V376
+B369|2026-07-14|AOT lowering incorrectly modeled `for ch in str` with bytes semantics and bound `ch` as an integer, blocking ordinary string methods in the owned integer decoder|V376
+B370|2026-07-14|tuple-backed mutable containers omitted `list.clear`, blocking positional-parameter state reset in the owned parser|V376
+B371|2026-07-14|native lowering omitted `any`/`all` over generator predicates, blocking the owned parser's default-parameter ordering check|V376
+B372|2026-07-14|slice class-table preanalysis omitted current-module import aliases, so inferred constructor fields diverged from the later lowered constructor ABI|V376
+B373|2026-07-14|loop and branch phis collapsed `bool | None` to `bool`, making native identity/equality unable to distinguish `None` from `False` in the owned string parser|V376
+B374|2026-07-14|guard fallthrough analysis recognized only syntactic `raise`/`return`, so calls annotated `NoReturn` failed to propagate `isinstance` narrowing in the owned parser|V376
+B375|2026-07-14|native `bytes` construction accepted only an integer size and rejected tuple-backed integer iterables used by the owned bytes-literal decoder|V376
+B376|2026-07-14|the LLVM emitter accepted only a single-string `str.endswith` suffix even though lowering preserved the ordinary tuple-of-strings form used by the owned numeric decoder|V376
+B377|2026-07-14|tuple-backed runtime storage could box integers, booleans, and pointers but not floating-point values, so the owned numeric decoder could not return a float through its opaque result ABI|V368,V376
+B378|2026-07-14|native equality dispatch omitted two floating-point operands and fell through to pointer comparison, preventing typed float containers from preserving CPython-visible equality|V368,V376

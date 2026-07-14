@@ -139,6 +139,7 @@ class _TypeBinder:
                 bases,
                 int_constants,
                 init_field_parameters,
+                kw_only=_class_is_kw_only_dataclass(statement),
             )
 
     def _collect_init_fields(
@@ -200,6 +201,9 @@ class _TypeBinder:
         for arg in statement.args.kwonlyargs:
             if arg.annotation is not None:
                 local_types[arg.arg] = self._annotation_to_known_type(arg.annotation)
+        if statement.args.vararg is not None and statement.args.vararg.annotation is not None:
+            annotation = annotation_name(statement.args.vararg.annotation)
+            local_types[statement.args.vararg.arg] = AotType(f"tuple[{annotation}, ...]")
         for child in statement.body:
             if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
                 local_types[child.target.id] = self._annotation_to_known_type(child.annotation)
@@ -297,6 +301,7 @@ class _TypeBinder:
         function_name = f"{owner}.{statement.name}" if owner is not None else statement.name
         parameters: list[tuple[str, str]] = []
         parameter_defaults: list[ast.expr | None] = []
+        vararg: tuple[str, str] | None = None
         positional_args = statement.args.posonlyargs + statement.args.args
         positional_defaults: tuple[ast.expr | None, ...] = (None,) * (
             len(positional_args) - len(statement.args.defaults)
@@ -324,6 +329,19 @@ class _TypeBinder:
             parameters.append((arg.arg, annotation_name(annotation)))
             parameter_defaults.append(default)
             self._resolve_annotation(annotation, arg)
+        if statement.args.vararg is not None:
+            annotation = statement.args.vararg.annotation
+            if annotation is None:
+                self._add_error(
+                    "XCC-AOT-TYPE-0001",
+                    "Missing annotation for parameter: "
+                    f"{function_name}.{statement.args.vararg.arg}",
+                    statement,
+                )
+            else:
+                annotation_text = annotation_name(annotation)
+                vararg = (statement.args.vararg.arg, annotation_text)
+                self._resolve_annotation(annotation, statement.args.vararg)
         for arg, default in zip(
             statement.args.kwonlyargs,
             statement.args.kw_defaults,
@@ -353,6 +371,7 @@ class _TypeBinder:
             tuple(parameters),
             return_type,
             tuple(parameter_defaults),
+            vararg,
         )
 
     def _resolve_annotation(self, node: ast.expr, owner: ast.AST) -> AotType:
@@ -413,6 +432,23 @@ def _init_self_assignments(
 
 def _is_self_attribute(expr: ast.Attribute) -> bool:
     return isinstance(expr.value, ast.Name) and expr.value.id == "self"
+
+
+def _class_is_kw_only_dataclass(node: ast.ClassDef) -> bool:
+    for decorator in node.decorator_list:
+        if not isinstance(decorator, ast.Call):
+            continue
+        name = ast.unparse(decorator.func)
+        if name.rsplit(".", 1)[-1] != "dataclass":
+            continue
+        for keyword in decorator.keywords:
+            if (
+                keyword.arg == "kw_only"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True
+            ):
+                return True
+    return False
 
 
 def _is_supported_composite_annotation(name: str) -> bool:

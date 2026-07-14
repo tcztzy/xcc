@@ -962,10 +962,17 @@ class AotScalarLoweringTests(unittest.TestCase):
         loop = byte_module.functions[0].body[0]
         self.assertIsInstance(loop, IrForEach)
         assert isinstance(loop, IrForEach)
-        returned_byte = loop.body.statements[0]
-        self.assertIsInstance(returned_byte, IrReturn)
-        assert isinstance(returned_byte, IrReturn)
-        self.assertEqual(returned_byte.value, IrName("ch", IrIntType(64, signed=True)))
+        returned_character = loop.body.statements[0]
+        self.assertIsInstance(returned_character, IrReturn)
+        assert isinstance(returned_character, IrReturn)
+        self.assertEqual(
+            returned_character.value,
+            IrCall(
+                "__ord",
+                (IrName("ch", IrStringType()),),
+                IrIntType(64, signed=True),
+            ),
+        )
 
     def test_lowers_float_builtin_and_fromhex_as_float(self) -> None:
         parsed = lower_source_to_ir(
@@ -1525,29 +1532,24 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(returned.value.target, "len")
         self.assertEqual(returned.value.args[0].type, IrStringType())
 
-    def test_lowers_for_each_over_string_as_integer_byte(self) -> None:
+    def test_lowers_for_each_over_string_as_one_character_string(self) -> None:
         module = lower_source_to_ir(
-            "def fold(data: str) -> int:\n"
-            "    raw = 0\n"
-            "    shift = 0\n"
-            "    for byte in data:\n"
-            "        raw = raw | (byte << shift)\n"
-            "        shift = shift + 8\n"
-            "    return raw\n",
+            "def fold(data: str) -> str:\n"
+            "    result = ''\n"
+            "    for ch in data:\n"
+            "        result += ch.lower()\n"
+            "    return result\n",
             filename="string_for_each.py",
             entry="fold",
         )
 
-        loop = module.functions[0].body[2]
+        loop = module.functions[0].body[1]
 
         self.assertIsInstance(loop, IrForEach)
         assert isinstance(loop, IrForEach)
-        self.assertEqual(loop.target, "byte")
-        self.assertEqual(_for_each_target_type(loop.iterable.type), IrIntType(64, signed=True))
-        self.assertIn(
-            "IrName(name='byte', type=IrIntType(bits=64, signed=True))",
-            repr(loop.body.statements[0]),
-        )
+        self.assertEqual(loop.target, "ch")
+        self.assertEqual(_for_each_target_type(loop.iterable.type), IrStringType())
+        self.assertIn("IrName(name='ch', type=IrStringType())", repr(loop.body.statements[0]))
 
     def test_lowers_enumerate_for_target_from_homogeneous_container_annotation(self) -> None:
         module = lower_source_to_ir(
