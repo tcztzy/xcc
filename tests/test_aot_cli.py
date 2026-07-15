@@ -116,6 +116,7 @@ class AotCliTests(unittest.TestCase):
             llvm_path = base / "artifacts" / "cli.ll"
             normalized_path = base / "artifacts" / "cli.norm.ll"
             manifest_path = base / "artifacts" / "sources.json"
+            tool_log = base / "artifacts" / "tools.log"
             argv = (
                 "xcc-aot",
                 "build",
@@ -127,6 +128,7 @@ class AotCliTests(unittest.TestCase):
                 f"--emit-llvm={llvm_path}",
                 f"--emit-normalized-ir={normalized_path}",
                 f"--source-manifest={manifest_path}",
+                f"--tool-log={tool_log}",
                 "--llc=/configured/llc",
                 "--assembler=/configured/as",
                 "--linker=/configured/cc",
@@ -161,6 +163,7 @@ class AotCliTests(unittest.TestCase):
                 compile_executable.call_args.kwargs["linker"],
                 "/configured/cc",
             )
+            self.assertEqual(compile_executable.call_args.kwargs["tool_log"], tool_log)
 
     def test_hosted_parser_oracle_command_emits_canonical_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -254,6 +257,7 @@ class AotCliTests(unittest.TestCase):
     def test_configured_assembler_and_linker_commands_are_used(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "bin" / "tool"
+            tool_log = Path(tmp) / "artifacts" / "tools.log"
             with patch("xcc.aot.native._run_tool") as run_tool:
                 compile_llvm_executable(
                     "define i32 @main() { ret i32 0 }\n",
@@ -262,12 +266,22 @@ class AotCliTests(unittest.TestCase):
                     llc="/tool/llc",
                     assembler="/tool/as",
                     linker="/tool/ld",
+                    tool_log=tool_log,
                 )
+
+            tool_log_text = tool_log.read_text(encoding="utf-8")
 
         commands = [call.args[0] for call in run_tool.call_args_list]
         self.assertEqual(commands[0][0:2], ("/tool/llc", "-filetype=asm"))
         self.assertEqual(commands[1][0], "/tool/as")
         self.assertEqual(commands[2][0], "/tool/ld")
+        self.assertEqual(
+            tool_log_text,
+            "format=xcc-aot-tool-log-v1\n"
+            f"command=/tool/llc\t-filetype=asm\t{output}.ll\t-o\t{output}.s\n"
+            f"command=/tool/as\t{output}.s\t-o\t{output}.o\n"
+            f"command=/tool/ld\t{output}.o\t-o\t{output}\n",
+        )
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ class AotNativeCliTests(unittest.TestCase):
     build_root: Path
     compiler: Path
     reachability: str
+    stage0_tool_log: str
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -36,6 +37,7 @@ class AotNativeCliTests(unittest.TestCase):
             "--parser=cpython",
             "--no-cache",
             f"--emit-llvm={llvm_path}",
+            f"--tool-log={output_root / 'tools.log'}",
         )
         status = hosted_main(len(argv), argv)
         if status != 0:
@@ -43,6 +45,7 @@ class AotNativeCliTests(unittest.TestCase):
         cls.reachability = cls.compiler.with_suffix(".reachability").read_text(
             encoding="utf-8"
         )
+        cls.stage0_tool_log = (output_root / "tools.log").read_text(encoding="utf-8")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -103,6 +106,11 @@ class AotNativeCliTests(unittest.TestCase):
             self.assertNotIn("Python", libraries)
             self.assertNotIn("libpython", libraries.lower())
 
+    def test_stage0_tool_log_contains_only_allowed_native_tools(self) -> None:
+        tools = _logged_tools(self.stage0_tool_log)
+        self.assertEqual([Path(tool).name for tool in tools], ["llc", "cc"])
+        self.assertFalse(any("python" in tool.lower() for tool in tools))
+
     def test_native_compiler_builds_independent_python_source(self) -> None:
         source_root = self.build_root / "demo"
         output_root = self.build_root / "independent"
@@ -116,6 +124,7 @@ class AotNativeCliTests(unittest.TestCase):
         output = output_root / "program"
         llvm_path = output_root / "program.ll"
         source_manifest = output_root / "sources.json"
+        tool_log = output_root / "tools.log"
         completed = subprocess.run(
             (
                 str(self.compiler),
@@ -127,6 +136,7 @@ class AotNativeCliTests(unittest.TestCase):
                 "--no-cache",
                 f"--emit-llvm={llvm_path}",
                 f"--source-manifest={source_manifest}",
+                f"--tool-log={tool_log}",
             ),
             check=False,
             capture_output=True,
@@ -135,6 +145,9 @@ class AotNativeCliTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertTrue(llvm_path.is_file())
         self.assertTrue(source_manifest.is_file())
+        tools = _logged_tools(tool_log.read_text(encoding="utf-8"))
+        self.assertEqual([Path(tool).name for tool in tools], ["llc", "cc"])
+        self.assertFalse(any("python" in tool.lower() for tool in tools))
         native_program = subprocess.run(
             (str(output),),
             check=False,
@@ -142,6 +155,14 @@ class AotNativeCliTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(native_program.returncode, 7, native_program.stdout + native_program.stderr)
+
+
+def _logged_tools(tool_log: str) -> list[str]:
+    return [
+        line.removeprefix("command=").split("\t", 1)[0]
+        for line in tool_log.splitlines()
+        if line.startswith("command=")
+    ]
 
 
 if __name__ == "__main__":

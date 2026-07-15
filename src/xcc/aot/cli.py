@@ -64,6 +64,7 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
         "--parser",
         "--source-manifest",
         "--source-root",
+        "--tool-log",
     )
     seen_options: tuple[str, ...] = ()
     source_root = ""
@@ -73,6 +74,7 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
     emit_llvm = ""
     emit_normalized_ir = ""
     source_manifest = ""
+    tool_log = ""
     llc = "/opt/homebrew/opt/llvm/bin/llc"
     assembler = ""
     linker = "cc"
@@ -124,6 +126,8 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
             emit_normalized_ir = value
         elif option == "--source-manifest":
             source_manifest = value
+        elif option == "--tool-log":
+            tool_log = value
         elif option == "--llc":
             llc = value
         elif option == "--assembler":
@@ -146,6 +150,7 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
         emit_llvm,
         emit_normalized_ir,
         source_manifest,
+        tool_log,
         llc,
         assembler,
         linker,
@@ -159,6 +164,7 @@ def _run_native_build(
     emit_llvm: str,
     emit_normalized_ir: str,
     source_manifest: str,
+    tool_log: str,
     llc: str,
     assembler: str,
     linker: str,
@@ -198,19 +204,33 @@ def _run_native_build(
             print(f"xcc-aot: cannot write source manifest: {source_manifest}")
             return 1
     object_path = output + ".o"
+    commands: tuple[tuple[str, ...], ...] = ()
+    command: tuple[str, ...]
     if assembler:
         assembly_path = output + ".s"
-        if _run_tool((llc, "-filetype=asm", llvm_path, "-o", assembly_path)) != 0:
+        command = (llc, "-filetype=asm", llvm_path, "-o", assembly_path)
+        commands += (command,)
+        if _run_tool(command) != 0:
             print("xcc-aot: llc failed")
             return 1
-        if _run_tool((assembler, assembly_path, "-o", object_path)) != 0:
+        command = (assembler, assembly_path, "-o", object_path)
+        commands += (command,)
+        if _run_tool(command) != 0:
             print("xcc-aot: assembler failed")
             return 1
-    elif _run_tool((llc, "-filetype=obj", llvm_path, "-o", object_path)) != 0:
-        print("xcc-aot: llc failed")
-        return 1
-    if _run_tool((linker, object_path, "-o", output)) != 0:
+    else:
+        command = (llc, "-filetype=obj", llvm_path, "-o", object_path)
+        commands += (command,)
+        if _run_tool(command) != 0:
+            print("xcc-aot: llc failed")
+            return 1
+    command = (linker, object_path, "-o", output)
+    commands += (command,)
+    if _run_tool(command) != 0:
         print("xcc-aot: linker failed")
+        return 1
+    if tool_log and not _write_text(tool_log, _render_tool_log(commands)):
+        print(f"xcc-aot: cannot write tool log: {tool_log}")
         return 1
     return 0
 
@@ -237,6 +257,13 @@ def _source_manifest(source_root: str, entry: str, source_path: str) -> str:
         + source_path
         + '"}],"version":1}\n'
     )
+
+
+def _render_tool_log(commands: tuple[tuple[str, ...], ...]) -> str:
+    text = "format=xcc-aot-tool-log-v1\n"
+    for command in commands:
+        text += "command=" + "\t".join(command) + "\n"
+    return text
 
 
 def _write_text(path: str, text: str) -> bool:

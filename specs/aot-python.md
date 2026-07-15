@@ -99,7 +99,7 @@ T2|x|define strong-bootstrap source contract, project-owned AST, and hosted/nati
 T3|x|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
 T4|x|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
 T5|x|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
-T6|.|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378
+T6|x|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378
 T7|.|build Stage 2 from `.py` with Stage 1 and no Python process/cache dependency|V369,V370,V371,V372,V373,V378
 T8|.|build Stage 3 with Stage 2 and prove normalized IR/symbol/behavior stability|V369,V377,V384
 T9|.|run CPython compatibility, native C compiler, CPython build, lint, type, and full tests|V379,V381

@@ -349,11 +349,15 @@ uv run python -m xcc.aot build \
   --emit-llvm build/aot/stage1/xcc-aot.ll \
   --emit-normalized-ir build/aot/stage1/xcc-aot.norm.ll \
   --source-manifest build/aot/stage1/sources.json \
+  --tool-log build/aot/stage1/tools.log \
   --output build/aot/stage1/xcc-aot
 build/aot/stage1/xcc-aot --version
 ! build/aot/stage1/xcc-aot build --parser=cpython --help
 otool -L build/aot/stage1/xcc-aot | tee build/aot/stage1/otool.txt
 nm -u build/aot/stage1/xcc-aot | tee build/aot/stage1/undefined.txt
+rg '^command=' build/aot/stage1/tools.log
+! rg -i '(^|/)(python|python3)([0-9.]*)?($|[[:space:]])' \
+  build/aot/stage1/tools.log
 ! rg -i 'libpython|Python\.framework|_Py[A-Za-z_]|Py[A-Z][A-Za-z_]+' \
   build/aot/stage1/otool.txt build/aot/stage1/undefined.txt
 ```

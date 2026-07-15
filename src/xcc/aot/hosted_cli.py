@@ -37,6 +37,7 @@ class BuildOptions:
     emit_llvm: Path | None
     emit_normalized_ir: Path | None
     source_manifest: Path | None
+    tool_log: Path | None
     llc: str | None
     assembler: str | None
     linker: str
@@ -104,6 +105,7 @@ def _parse_build_options(arguments: tuple[str, ...]) -> BuildOptions:
         "--parser",
         "--source-manifest",
         "--source-root",
+        "--tool-log",
     }
     while index < len(arguments):
         argument = arguments[index]
@@ -153,6 +155,7 @@ def _parse_build_options(arguments: tuple[str, ...]) -> BuildOptions:
         Path(values["--emit-llvm"]) if "--emit-llvm" in values else None,
         Path(values["--emit-normalized-ir"]) if "--emit-normalized-ir" in values else None,
         Path(values["--source-manifest"]) if "--source-manifest" in values else None,
+        Path(values["--tool-log"]) if "--tool-log" in values else None,
         values.get("--llc"),
         values.get("--assembler"),
         values.get("--linker", "cc"),
@@ -262,6 +265,7 @@ def _run_hosted_build(options: BuildOptions) -> None:
         llc=options.llc,
         assembler=options.assembler,
         linker=options.linker,
+        tool_log=options.tool_log,
     )
 
 

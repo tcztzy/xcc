@@ -2,6 +2,21 @@
 
 ## Current
 
+- Completed the approved strong-bootstrap Milestone 6. Stage 0 now builds the
+  persisted `build/aot/stage1/xcc-aot` from a clean, no-cache 64-unit source
+  snapshot and emits LLVM, normalized IR, a source manifest, 665-function /
+  167-record / 7241-edge native reachability evidence, a deterministic native
+  tool log, and the executable. Stage 1 reports native mode, rejects the hosted
+  CPython parser, links only `libSystem`, exposes no Python API symbols, and
+  compiles an independent `.py` fixture through the owned subset parser to a
+  program with exit status 7 while invoking only `llc` and `cc`.
+- Added the shared `--tool-log` build option to the hosted and native AOT CLIs
+  so V378 is checked against the commands actually executed rather than inferred
+  from configured option names. Verified Milestone 6 with two independent full
+  Stage 0-to-Stage 1 builds, the persisted Stage 1 dependency/symbol audit,
+  4/4 native CLI integration tests, 31/31 CLI/admission tests, and lint/type/diff
+  gates. This completes T6 only; Stage 1 building Stage 2 remains Milestone 7,
+  and CPython `configure && make` was not run.
 - Completed the approved strong-bootstrap Milestone 5. The hosted build is now
   rooted at `xcc.aot.cli:main` and emits the real source loader, owned
   lexer/parser, binder, lowerer, IR validator, LLVM emitter, runtime, and native

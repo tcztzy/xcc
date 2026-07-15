@@ -1387,3 +1387,7 @@
 - Removing a function-name special emitter also removes its private signature
   contract. Replace name-shaped tests with generic ABI/handler assertions so a
   bodyless fallback or reintroduced bypass cannot masquerade as success.
+- An external-tool allowlist needs evidence from the commands actually executed,
+  not only from accepted CLI option names. Emit one deterministic tool record per
+  invocation and assert both the positive `llc`/assembler/linker set and the
+  negative Python-executable gate on hosted and native builds.

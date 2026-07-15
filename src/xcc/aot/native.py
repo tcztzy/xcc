@@ -103,6 +103,7 @@ def compile_llvm_executable(
     linker: str = "cc",
     extra_link_args: tuple[str, ...] = (),
     diagnostic_code: str = "XCC-AOT-NATIVE-0001",
+    tool_log: Path | None = None,
 ) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     ll_path = output.parent / f"{output.name}.ll"
@@ -110,29 +111,49 @@ def compile_llvm_executable(
     obj_path = output.parent / f"{output.name}.o"
     ll_path.write_text(llvm_ir, encoding="utf-8")
     llc_path = llc or os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
+    commands: list[tuple[str, ...]] = []
+    command: tuple[str, ...]
     if assembler is None:
+        command = (llc_path, "-filetype=obj", str(ll_path), "-o", str(obj_path))
+        commands.append(command)
         _run_tool(
-            (llc_path, "-filetype=obj", str(ll_path), "-o", str(obj_path)),
+            command,
             filename,
             diagnostic_code=diagnostic_code,
         )
     else:
+        command = (llc_path, "-filetype=asm", str(ll_path), "-o", str(assembly_path))
+        commands.append(command)
         _run_tool(
-            (llc_path, "-filetype=asm", str(ll_path), "-o", str(assembly_path)),
+            command,
             filename,
             diagnostic_code=diagnostic_code,
         )
+        command = (assembler, str(assembly_path), "-o", str(obj_path))
+        commands.append(command)
         _run_tool(
-            (assembler, str(assembly_path), "-o", str(obj_path)),
+            command,
             filename,
             diagnostic_code=diagnostic_code,
         )
+    command = (linker, str(obj_path), *extra_link_args, "-o", str(output))
+    commands.append(command)
     _run_tool(
-        (linker, str(obj_path), *extra_link_args, "-o", str(output)),
+        command,
         filename,
         diagnostic_code=diagnostic_code,
     )
+    if tool_log is not None:
+        tool_log.parent.mkdir(parents=True, exist_ok=True)
+        tool_log.write_text(_render_tool_log(tuple(commands)), encoding="utf-8")
     return output
+
+
+def _render_tool_log(commands: tuple[tuple[str, ...], ...]) -> str:
+    text = "format=xcc-aot-tool-log-v1\n"
+    for command in commands:
+        text += "command=" + "\t".join(command) + "\n"
+    return text
 
 
 def _run_python_entry(source: str, entry: str) -> object:
