@@ -524,6 +524,7 @@ class _Lowerer:
         return_type: IrType,
     ) -> IrStmt:
         if isinstance(statement, ast.If):
+            incoming_names = dict(names)
             condition = self._lower_expr(statement.test, names, IrBoolType())
             then_names = dict(names)
             else_names = dict(names)
@@ -574,6 +575,16 @@ class _Lowerer:
                 names.update(then_names)
             if statement.orelse and else_falls_through:
                 names.update(else_names)
+            if then_falls_through and else_falls_through:
+                for name, incoming_type in incoming_names.items():
+                    then_type = then_names.get(name, incoming_type)
+                    else_type = else_names.get(name, incoming_type)
+                    if then_type != else_type and _preserves_nullable_record_join(
+                        incoming_type,
+                        then_type,
+                        else_type,
+                    ):
+                        names[name] = incoming_type
             for name, narrowed_type in self._none_guard_narrowings(
                 statement.test,
                 statement.body,
@@ -1270,6 +1281,16 @@ class _Lowerer:
                 ast.BitXor,
             ),
         ):
+            if not isinstance(expected, IrIntType):
+                inferred_result_type = self._infer_assignment_expr_type(expr, names, expected)
+                if isinstance(
+                    inferred_result_type,
+                    (IrBytesType, IrFloatType, IrIntType, IrStringType),
+                ) or (
+                    isinstance(expr.op, (ast.Sub, ast.BitOr, ast.BitAnd, ast.BitXor))
+                    and isinstance(inferred_result_type, IrTupleType)
+                ):
+                    expected = inferred_result_type
             if isinstance(expr.op, ast.Mult) and isinstance(expected, IrBytesType):
                 int64 = IrIntType(64, signed=True)
                 return IrCall(
@@ -1342,13 +1363,6 @@ class _Lowerer:
                     self._lower_expr(expr.right, names, expected),
                     expected,
                 )
-            if not isinstance(expected, IrIntType):
-                inferred_result_type = self._infer_assignment_expr_type(expr, names, expected)
-                if isinstance(inferred_result_type, IrIntType) or (
-                    isinstance(expr.op, (ast.Sub, ast.BitOr, ast.BitAnd, ast.BitXor))
-                    and isinstance(inferred_result_type, IrTupleType)
-                ):
-                    expected = inferred_result_type
             if isinstance(expr.op, ast.Add):
                 left = self._lower_expr(expr.left, names, expected)
                 right_expected = left.type if isinstance(left.type, IrTupleType) else expected
@@ -1578,6 +1592,8 @@ class _Lowerer:
             return self._lower_complex_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id == "Path":
             return self._lower_path_constructor_call(expr, names)
+        if _is_subprocess_call(expr):
+            return self._lower_subprocess_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id == "str":
             path_string = self._lower_path_str_call(expr, names)
             if path_string is not None:
@@ -1742,6 +1758,14 @@ class _Lowerer:
                 "Path | None",
             }:
                 return self._lower_path_read_text_call(expr, receiver)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == "write_text":
+            receiver = self._lower_expr(expr.func.value, names, IrRecordType("Path"))
+            if isinstance(receiver.type, IrRecordType) and receiver.type.name in {
+                "object",
+                "Path",
+                "Path | None",
+            }:
+                return self._lower_path_write_text_call(expr, receiver, names)
         if isinstance(expr.func, ast.Attribute) and expr.func.attr == "is_file":
             receiver = self._lower_expr(expr.func.value, names, IrRecordType("Path"))
             if isinstance(receiver.type, IrRecordType) and receiver.type.name in {
@@ -2201,6 +2225,45 @@ class _Lowerer:
                     expr,
                 )
         return IrCall("__path_read_text", (receiver,), IrStringType())
+
+    def _lower_path_write_text_call(
+        self,
+        expr: ast.Call,
+        receiver: IrExpr,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if len(expr.args) != 1:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        for keyword in expr.keywords:
+            if keyword.arg not in {"encoding", "errors", "newline"}:
+                self._error(
+                    "XCC-AOT-LOWER-0003",
+                    f"Unsupported call target: {ast.unparse(expr.func)}",
+                    expr,
+                )
+        return IrCall(
+            "__path_write_text",
+            (receiver, self._lower_expr(expr.args[0], names, IrStringType())),
+            IrIntType(64, signed=True),
+        )
+
+    def _lower_subprocess_call(
+        self,
+        expr: ast.Call,
+        names: dict[str, IrType],
+    ) -> IrExpr:
+        if len(expr.args) != 1 or expr.keywords:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        argv = self._lower_expr(expr.args[0], names, IrTupleType((IrStringType(),)))
+        return IrCall("__exec_argv", (argv,), IrIntType(32, signed=True))
 
     def _lower_path_is_file_call(self, expr: ast.Call, receiver: IrExpr) -> IrExpr:
         if expr.args or expr.keywords:
@@ -3095,7 +3158,22 @@ class _Lowerer:
                 "isinstance expects two positional arguments",
                 expr,
             )
-        target_names = _isinstance_target_names(expr.args[1])
+        target_names: tuple[str, ...] | None = None
+        target = expr.args[1]
+        if isinstance(target, ast.Name):
+            marker_container = self.global_string_container_constants.get(target.id)
+            if (
+                marker_container is not None
+                and marker_container.elements
+                and all(isinstance(element, IrName) for element in marker_container.elements)
+            ):
+                target_names = tuple(
+                    element.name
+                    for element in marker_container.elements
+                    if isinstance(element, IrName)
+                )
+        if target_names is None:
+            target_names = _isinstance_target_names(target)
         if target_names is None:
             self._error(
                 "XCC-AOT-LOWER-0003",
@@ -3346,6 +3424,11 @@ class _Lowerer:
         )
         if len(matches) == 1:
             return matches[0]
+        if matches:
+            max_depth = max(name.count(".") for name in matches)
+            deepest = tuple(name for name in matches if name.count(".") == max_depth)
+            if len(deepest) == 1:
+                return deepest[0]
         return None
 
     def _lower_constructor_args(
@@ -3991,6 +4074,8 @@ class _Lowerer:
         fallback: IrType,
     ) -> IrType:
         target_expr = self._lower_expr(target, names, IrRecordType("object"))
+        if isinstance(target_expr.type, IrDictType):
+            return target_expr.type.value
         if isinstance(target_expr.type, IrTupleType) and len(target_expr.type.elements) == 1:
             return target_expr.type.elements[0]
         return fallback
@@ -4016,6 +4101,8 @@ class _Lowerer:
                 return IrStringType()
             if isinstance(expr.value, bytes):
                 return IrBytesType()
+        if isinstance(expr, ast.JoinedStr):
+            return IrStringType()
         if isinstance(expr, ast.Tuple):
             if any(isinstance(element, ast.Starred) for element in expr.elts):
                 item_types: list[IrType] = []
@@ -4146,6 +4233,14 @@ class _Lowerer:
                     return left_type
                 if isinstance(right_type, IrTupleType) and isinstance(left_type, IrIntType):
                     return right_type
+                if isinstance(left_type, (IrBytesType, IrStringType)) and isinstance(
+                    right_type, IrIntType
+                ):
+                    return left_type
+                if isinstance(right_type, (IrBytesType, IrStringType)) and isinstance(
+                    left_type, IrIntType
+                ):
+                    return right_type
             if (
                 isinstance(expr.op, ast.Add)
                 and isinstance(left_type, IrStringType)
@@ -4177,6 +4272,20 @@ class _Lowerer:
             and len(expr.args) == 1
         ):
             return IrIntType(64, signed=True)
+        if (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Name)
+            and expr.func.id in {"id", "ord"}
+            and len(expr.args) == 1
+        ):
+            return IrIntType(64, signed=True)
+        if (
+            isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Name)
+            and expr.func.id == "chr"
+            and len(expr.args) == 1
+        ):
+            return IrStringType()
         if (
             isinstance(expr, ast.Call)
             and isinstance(expr.func, ast.Name)
@@ -5153,6 +5262,8 @@ class _Lowerer:
         if isinstance(op, (ast.Eq, ast.NotEq, ast.Gt, ast.GtE, ast.Lt, ast.LtE)):
             left_type = self._infer_assignment_expr_type(left, names, IrRecordType("object"))
             right_type = self._infer_assignment_expr_type(right, names, IrRecordType("object"))
+            if left_type == right_type and not _is_object_type(left_type):
+                return left_type
             if isinstance(left_type, IrIntType):
                 return left_type
             if isinstance(right_type, IrIntType):
@@ -5356,6 +5467,15 @@ def _is_tuple_backed_container_type(name: str) -> bool:
     )
 
 
+def _is_subprocess_call(expr: ast.Call) -> bool:
+    return (
+        isinstance(expr.func, ast.Attribute)
+        and isinstance(expr.func.value, ast.Name)
+        and expr.func.value.id == "subprocess"
+        and expr.func.attr == "call"
+    )
+
+
 def _tuple_backed_container_element_name(name: str) -> str | None:
     if name.startswith(("dict[", "Dict[")):
         return None
@@ -5478,6 +5598,27 @@ def _compatible_optional_union_type(left: IrType, right: IrType) -> IrRecordType
     if _record_union_contains_type(right.name, left.name):
         return right
     return None
+
+
+def _preserves_nullable_record_join(
+    incoming: IrType,
+    then_type: IrType,
+    else_type: IrType,
+) -> bool:
+    if not isinstance(incoming, IrRecordType):
+        return False
+    parts = _top_level_union_parts(incoming.name)
+    if "None" not in parts:
+        return False
+    for branch_type in (then_type, else_type):
+        if branch_type == incoming or isinstance(branch_type, IrNoneType):
+            continue
+        if not isinstance(branch_type, IrRecordType):
+            return False
+        branch_name = branch_type.name.rsplit(".", 1)[-1]
+        if not any(part.rsplit(".", 1)[-1] == branch_name for part in parts):
+            return False
+    return True
 
 
 def _record_union_contains_type(union_name: str, member_name: str) -> bool:
@@ -5877,6 +6018,8 @@ def _global_literal_dict(
         value_literal = _global_literal_element(item, literal_names)
         if key_literal is None or value_literal is None:
             return None
+        if isinstance(key_literal, IrName) or isinstance(value_literal, IrName):
+            return None
         pairs.append((key_literal, value_literal))
     if not pairs:
         return None
@@ -5955,6 +6098,12 @@ def _global_literal_element(
 ) -> IrExpr | None:
     if isinstance(value, ast.Name):
         return literal_names.get(value.id)
+    if (
+        isinstance(value, ast.Attribute)
+        and isinstance(value.value, ast.Name)
+        and value.value.id == "ast"
+    ):
+        return IrName(value.attr, IrRecordType("object"))
     if isinstance(value, ast.Constant):
         if isinstance(value.value, bool):
             return IrConstBool(value.value)

@@ -390,7 +390,7 @@ class AotLlvmTextTests(unittest.TestCase):
                 if op == "%":
                     self.assertIn("select i1", llvm_ir)
 
-    def test_emits_two_arg_integer_max_as_select(self) -> None:
+    def test_emits_two_arg_integer_max_as_branch_phi(self) -> None:
         module = lower_source_to_ir(
             "int64 = int\n"
             "def choose(left: int64, right: int64) -> int64:\n"
@@ -402,7 +402,9 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
 
         self.assertIn("icmp sge i64 %left, %right", llvm_ir)
-        self.assertIn("select i1", llvm_ir)
+        self.assertIn("br i1 %cmp", llvm_ir)
+        self.assertIn("phi i64 [ %left, %ifexp.true", llvm_ir)
+        self.assertIn("[ %right, %ifexp.false", llvm_ir)
         self.assertNotIn("@max", llvm_ir)
 
     def test_emits_object_name_narrowed_to_int_as_ptr_to_int(self) -> None:
@@ -508,7 +510,9 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("select i1 %flag, ptr %left, ptr %right", llvm_ir)
+        self.assertIn("br i1 %flag, label %ifexp.true", llvm_ir)
+        self.assertIn("phi ptr [ %left, %ifexp.true", llvm_ir)
+        self.assertIn("[ %right, %ifexp.false", llvm_ir)
 
     def test_emits_ifexp_none_arm_as_default_for_integer_result(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -535,7 +539,9 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("select i1 %flag, i64 0, i64 7", llvm_ir)
+        self.assertIn("br i1 %flag, label %ifexp.true", llvm_ir)
+        self.assertIn("phi i64 [ 0, %ifexp.true", llvm_ir)
+        self.assertIn("[ 7, %ifexp.false", llvm_ir)
         self.assertNotIn("i64 null", llvm_ir)
 
     def test_emits_ifexp_boxes_bool_arm_for_pointer_union_result(self) -> None:
@@ -568,7 +574,9 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
 
         self.assertIn("inttoptr i64", llvm_ir)
-        self.assertIn("select i1 %flag, ptr %values, ptr %box", llvm_ir)
+        self.assertIn("br i1 %flag, label %ifexp.true", llvm_ir)
+        self.assertIn("phi ptr [ %values, %ifexp.true", llvm_ir)
+        self.assertIn("[ %box", llvm_ir)
 
     def test_emits_none_ifexp_without_void_select(self) -> None:
         module = IrModule(

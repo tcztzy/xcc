@@ -548,6 +548,47 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="tagged-object.py",
         )
 
+    def test_nullable_record_boxed_as_object_preserves_none(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Node:\n"
+            "    pass\n"
+            "def maybe(flag: bool) -> Node | None:\n"
+            "    if flag:\n"
+            "        return Node()\n"
+            "    return None\n"
+            "def accepts(value: object) -> bool:\n"
+            "    return isinstance(value, Node)\n"
+            "def entry() -> int:\n"
+            "    if accepts(maybe(False)):\n"
+            "        return 1\n"
+            "    if not accepts(maybe(True)):\n"
+            "        return 2\n"
+            "    return 0\n",
+            expected=0,
+            filename="nullable-record-object.py",
+        )
+
+    def test_branch_join_preserves_nullable_record_for_object_boxing(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Node:\n"
+            "    pass\n"
+            "def accepts(value: object) -> bool:\n"
+            "    return isinstance(value, Node)\n"
+            "def choose(flag: bool) -> bool:\n"
+            "    item: Node | None = None\n"
+            "    if flag:\n"
+            "        item = Node()\n"
+            "    return accepts(item)\n"
+            "def entry() -> int:\n"
+            "    if choose(False):\n"
+            "        return 1\n"
+            "    if not choose(True):\n"
+            "        return 2\n"
+            "    return 0\n",
+            expected=0,
+            filename="branch-joined-nullable-record.py",
+        )
+
     def test_isinstance_accepts_pep604_type_union(self) -> None:
         self.assert_native_matches_cpython(
             "class Node:\n"
@@ -779,6 +820,71 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="string-upper.py",
         )
 
+    def test_string_repetition_in_comparison_preserves_string_type(self) -> None:
+        self.assert_native_matches_cpython(
+            "def quoted(text: str, index: int) -> bool:\n"
+            "    quote = text[index]\n"
+            "    return text[index:index + 3] == quote * 3\n"
+            "def entry() -> int:\n"
+            "    return 7 if quoted(\"'''value\", 0) else 1\n",
+            expected=7,
+            filename="string-repeat-compare.py",
+        )
+
+    def test_fstring_list_literal_preserves_string_element_type(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    lines = [f'value={7}']\n"
+            "    return len(lines[0])\n",
+            expected=7,
+            filename="fstring-list.py",
+        )
+
+    def test_ord_arithmetic_in_conditional_expression_stays_integer(self) -> None:
+        self.assert_native_matches_cpython(
+            "def digit(ch: str) -> int:\n"
+            "    return (\n"
+            "        ord(ch) - ord('0')\n"
+            "        if '0' <= ch <= '9'\n"
+            "        else ord(ch.lower()) - ord('a') + 10\n"
+            "    )\n"
+            "def entry() -> int:\n"
+            "    return digit('f')\n",
+            expected=15,
+            filename="ord-ifexp.py",
+        )
+
+    def test_conditional_expression_evaluates_only_selected_string_arm(self) -> None:
+        self.assert_native_matches_cpython(
+            "def qualify(owner: str | None, name: str) -> str:\n"
+            "    return owner + '.' + name if owner is not None else name\n"
+            "def entry() -> int:\n"
+            "    if qualify(None, 'main') != 'main':\n"
+            "        return 1\n"
+            "    return 7 if qualify('demo', 'main') == 'demo.main' else 2\n",
+            expected=7,
+            filename="lazy-string-ifexp.py",
+        )
+
+    def test_narrowed_string_add_overrides_object_field_context(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class Box:\n"
+            "    value: object\n"
+            "def combine(left: object, right: object) -> Box:\n"
+            "    if isinstance(left, str) and isinstance(right, str):\n"
+            "        return Box(left + right)\n"
+            "    return Box('')\n"
+            "def entry() -> int:\n"
+            "    value = combine('a', 'b').value\n"
+            "    if not isinstance(value, str):\n"
+            "        return 1\n"
+            "    return len(value) + 5\n",
+            expected=7,
+            filename="narrowed-string-add.py",
+        )
+
     def test_and_chain_none_narrows_optional_scalar_attributes(self) -> None:
         self.assert_native_matches_cpython(
             "class TypeInfo:\n"
@@ -924,6 +1030,32 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "    return len(values) * 10 + (2 if 2 in values else 0)\n",
             expected=32,
             filename="set-update.py",
+        )
+
+    def test_list_append_mutation_is_visible_across_call(self) -> None:
+        self.assert_native_matches_cpython(
+            "def append_line(lines: list[str]) -> None:\n"
+            "    lines.append('beta')\n"
+            "def entry() -> int:\n"
+            "    lines: list[str] = ['alpha']\n"
+            "    append_line(lines)\n"
+            "    return len(lines)\n",
+            expected=2,
+            filename="cross-call-list-append.py",
+        )
+
+    def test_dict_and_set_mutations_are_visible_across_call(self) -> None:
+        self.assert_native_matches_cpython(
+            "def update(values: dict[str, int], names: set[str]) -> None:\n"
+            "    values['beta'] = 2\n"
+            "    names.add('beta')\n"
+            "def entry() -> int:\n"
+            "    values: dict[str, int] = {'alpha': 1}\n"
+            "    names: set[str] = {'alpha'}\n"
+            "    update(values, names)\n"
+            "    return len(values) * 10 + len(names) * 2 + values['beta']\n",
+            expected=26,
+            filename="cross-call-dict-set.py",
         )
 
     def test_bool_infers_set_intersection_operand_independently(self) -> None:

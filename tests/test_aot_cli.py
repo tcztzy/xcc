@@ -60,6 +60,7 @@ class AotCliTests(unittest.TestCase):
         )
         self.assertEqual((status, stderr), (2, ""))
         self.assertIn("rejects parser: other", stdout)
+
     def test_hosted_usage_rejects_missing_duplicate_and_unknown_options(self) -> None:
         for argv, message in (
             (("xcc-aot", "build"), "missing required option"),
@@ -194,8 +195,10 @@ class AotCliTests(unittest.TestCase):
             (root / "__init__.py").write_text("", encoding="utf-8")
             (root / "cli.py").write_text(
                 "int32 = int\n"
+                "def result() -> int32:\n"
+                "    return 0\n"
                 "def main(argc: int32, argv: tuple[str, ...]) -> int32:\n"
-                "    return 0\n",
+                "    return result()\n",
                 encoding="utf-8",
             )
             output = base / "out" / "xcc-aot"
@@ -228,7 +231,12 @@ class AotCliTests(unittest.TestCase):
         self.assertEqual((status, stdout, stderr), (0, "", ""))
         self.assertEqual(manifest["parser"], "subset")
         self.assertIn("parser=subset", reachability_text)
-        self.assertIn("native_call_graph=false", reachability_text)
+        self.assertIn("native_call_graph=true", reachability_text)
+        self.assertIn("root=pkg.cli.main", reachability_text)
+        self.assertIn(
+            "edge=function:pkg.cli.main->function:pkg.cli.result;reason=call",
+            reachability_text,
+        )
         self.assertNotIn("cpython_ast_adapter", reachability_text)
         compile_executable.assert_called_once()
 

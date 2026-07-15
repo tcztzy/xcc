@@ -1,5 +1,17 @@
 # Lessons
 
+- Parent-package source resolution can legitimately pull two compiler families
+  with the same short class name into one hosted source set. Keep the
+  deterministic class owner and its refined metadata coupled; filtering the
+  manifest or rewriting a field access only hides the flat-table inconsistency.
+- A tuple-backed mutable container cannot implement Python alias semantics by
+  returning a replacement allocation and rebinding only the callee local.
+  Mutations need in-place storage or a runtime forwarding identity that every
+  length/get/set path resolves, with CPython/native cross-call alias oracles.
+- Reachable compiler symbols and valid top-level LLVM do not prove that a native
+  compiler works. Compile an independent `.py` fixture with the produced binary
+  and run the result; this exposed tagged f-string list elements and invisible
+  callee mutations only after the full compiler itself linked successfully.
 - A Python lexer oracle must compare token text and end-exclusive UTF-8 byte
   spans, not only token kinds. Guard an empty EOF sentinel before string
   membership tests: in Python, `"" in "chars"` is true and can silently accept

@@ -11,11 +11,17 @@ from xcc.aot.ir import (
     IrName,
     IrRecordType,
     IrReturn,
+    IrTuple,
     IrTupleType,
 )
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
-from xcc.aot.slice import lower_core_slice
+from xcc.aot.slice import (
+    AotSliceInput,
+    _function_record_names,
+    _slice_class_tables,
+    lower_core_slice,
+)
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
 
 
@@ -24,6 +30,21 @@ AOT_ROOT = ROOT / "src/xcc/aot"
 
 
 class AotReachabilityTests(unittest.TestCase):
+    def test_v376_class_refinement_preserves_deterministic_owner(self) -> None:
+        modules = (
+            AotSliceInput("xcc.aot.py_ast", AOT_ROOT / "py_ast.py"),
+            AotSliceInput("xcc.ast", ROOT / "src/xcc/ast.py"),
+        )
+        source_cache = {
+            module.name: module.path.read_text(encoding="utf-8") for module in modules
+        }
+
+        classes, owners = _slice_class_tables(modules, source_cache, {})
+
+        self.assertEqual(owners["FunctionDef"], "xcc.aot.py_ast")
+        self.assertIn("args", classes["FunctionDef"].fields)
+        self.assertNotIn("is_variadic", classes["FunctionDef"].fields)
+
     def test_v376_binder_infers_comprehension_backed_init_fields(self) -> None:
         analysis = analyze_source(
             "class Item:\n"
@@ -102,6 +123,35 @@ class AotReachabilityTests(unittest.TestCase):
         function = module.functions[0]
         self.assertEqual(function.params[0].type, IrRecordType("Module"))
         self.assertEqual(function.return_type, IrRecordType("Module"))
+
+    def test_v376_isinstance_expands_global_ast_type_marker_tuple(self) -> None:
+        module = lower_source_to_ir(
+            "from xcc.aot import py_ast as ast\n"
+            "_UNSUPPORTED = (ast.AsyncFor, ast.Yield)\n"
+            "def rejected(node: ast.AST) -> bool:\n"
+            "    return isinstance(node, _UNSUPPORTED)\n",
+            filename="type-marker-tuple.py",
+            include_functions={"rejected"},
+            extra_classes={
+                name: AotClassInfo(name, {}) for name in ("AST", "AsyncFor", "Yield")
+            },
+        )
+
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        marker = returned.value.args[1]
+        self.assertIsInstance(marker, IrTuple)
+        assert isinstance(marker, IrTuple)
+        self.assertEqual(
+            tuple(element.name for element in marker.elements if isinstance(element, IrName)),
+            ("AsyncFor", "Yield"),
+        )
+        self.assertTrue(
+            {"AsyncFor", "Yield"}.issubset(_function_record_names(module.functions[0]))
+        )
 
     def test_v376_binder_flows_imported_call_type_through_init_local(self) -> None:
         analysis = analyze_source(
@@ -297,8 +347,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_string_rfind_reaches_native_runtime(self) -> None:
         module = lower_source_to_ir(
-            "def last_newline(prefix: str) -> int:\n"
-            "    return prefix.rfind('\\n')\n",
+            "def last_newline(prefix: str) -> int:\n    return prefix.rfind('\\n')\n",
             filename="rfind.py",
         )
 
@@ -310,8 +359,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_string_count_reaches_native_runtime(self) -> None:
         module = lower_source_to_ir(
-            "def line_count(prefix: str) -> int:\n"
-            "    return prefix.count('\\n')\n",
+            "def line_count(prefix: str) -> int:\n    return prefix.count('\\n')\n",
             filename="count.py",
         )
 
@@ -323,8 +371,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_complex_constructor_reaches_native_runtime(self) -> None:
         module = lower_source_to_ir(
-            "def decode_imaginary(text: str) -> object:\n"
-            "    return complex(0.0, float(text))\n",
+            "def decode_imaginary(text: str) -> object:\n    return complex(0.0, float(text))\n",
             filename="complex_value.py",
         )
 
@@ -347,9 +394,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_tuple_backed_clear_reaches_native_runtime(self) -> None:
         module = lower_source_to_ir(
-            "def reset(values: list[int]) -> int:\n"
-            "    values.clear()\n"
-            "    return len(values)\n",
+            "def reset(values: list[int]) -> int:\n    values.clear()\n    return len(values)\n",
             filename="clear.py",
         )
 
@@ -426,6 +471,26 @@ class AotReachabilityTests(unittest.TestCase):
         self.assertIn("xcc.aot.lower._Lowerer.lower_record", names)
         emit_llvm_text(module)
 
+    def test_v376_cross_module_inherited_property_uses_canonical_target(self) -> None:
+        module = lower_core_slice(
+            (
+                AOT_ROOT / "diag.py",
+                AOT_ROOT / "py_ast.py",
+                AOT_ROOT / "module.py",
+                AOT_ROOT / "subset.py",
+                AOT_ROOT / "types.py",
+                AOT_ROOT / "binder.py",
+                AOT_ROOT / "analysis.py",
+                AOT_ROOT / "ir.py",
+                AOT_ROOT / "lower.py",
+            ),
+            root_targets=("xcc.aot.lower._Lowerer._lower_statement",),
+        )
+
+        llvm_text = emit_llvm_text(module)
+        self.assertIn("@xcc.aot.py_ast.AST.col_offset", llvm_text)
+        self.assertNotIn("call i64 @AST.col_offset", llvm_text)
+
     def test_v376_tuple_concat_inference_ignores_function_return_fallback(self) -> None:
         module = lower_source_to_ir(
             "class Parts:\n"
@@ -463,8 +528,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_string_isidentifier_reaches_native_runtime(self) -> None:
         module = lower_source_to_ir(
-            "def valid(name: str) -> bool:\n"
-            "    return name.isidentifier()\n",
+            "def valid(name: str) -> bool:\n    return name.isidentifier()\n",
             filename="isidentifier.py",
         )
 
@@ -472,8 +536,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_string_rsplit_reaches_native_runtime(self) -> None:
         module = lower_source_to_ir(
-            "def leaf(name: str) -> str:\n"
-            "    return name.rsplit('.', 1)[-1]\n",
+            "def leaf(name: str) -> str:\n    return name.rsplit('.', 1)[-1]\n",
             filename="rsplit.py",
         )
 
@@ -481,8 +544,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_string_isupper_reaches_native_runtime(self) -> None:
         module = lower_source_to_ir(
-            "def upper(name: str) -> bool:\n"
-            "    return name.isupper()\n",
+            "def upper(name: str) -> bool:\n    return name.isupper()\n",
             filename="isupper.py",
         )
 
@@ -490,8 +552,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_object_repr_reaches_tagged_native_runtime(self) -> None:
         module = lower_source_to_ir(
-            "def render(value: object) -> str:\n"
-            "    return repr(value)\n",
+            "def render(value: object) -> str:\n    return repr(value)\n",
             filename="object_repr.py",
         )
 
@@ -501,8 +562,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_exact_type_identity_reaches_tagged_native_runtime(self) -> None:
         module = lower_source_to_ir(
-            "def exact_int(value: object) -> bool:\n"
-            "    return type(value) is int\n",
+            "def exact_int(value: object) -> bool:\n    return type(value) is int\n",
             filename="exact_type.py",
         )
 
@@ -523,8 +583,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_tagged_object_bool_identity_reaches_native_tag_check(self) -> None:
         module = lower_source_to_ir(
-            "def is_true(value: object) -> bool:\n"
-            "    return value is True\n",
+            "def is_true(value: object) -> bool:\n    return value is True\n",
             filename="object_bool_identity.py",
         )
 
@@ -616,8 +675,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_bytes_accepts_tuple_backed_integer_iterable(self) -> None:
         module = lower_source_to_ir(
-            "def build(values: list[int]) -> bytes:\n"
-            "    return bytes(values)\n",
+            "def build(values: list[int]) -> bytes:\n    return bytes(values)\n",
             filename="bytes_iterable.py",
         )
 
@@ -629,8 +687,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_string_endswith_accepts_tuple_suffixes(self) -> None:
         module = lower_source_to_ir(
-            "def is_imaginary(text: str) -> bool:\n"
-            "    return text.endswith(('j', 'J'))\n",
+            "def is_imaginary(text: str) -> bool:\n    return text.endswith(('j', 'J'))\n",
             filename="endswith_tuple.py",
         )
 
@@ -640,8 +697,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_float_can_cross_opaque_pointer_storage(self) -> None:
         module = lower_source_to_ir(
-            "def decode() -> object:\n"
-            "    return 1.5\n",
+            "def decode() -> object:\n    return 1.5\n",
             filename="opaque_float.py",
         )
 
@@ -650,8 +706,7 @@ class AotReachabilityTests(unittest.TestCase):
 
     def test_v376_float_equality_uses_floating_comparison(self) -> None:
         module = lower_source_to_ir(
-            "def same(left: float, right: float) -> bool:\n"
-            "    return left == right\n",
+            "def same(left: float, right: float) -> bool:\n    return left == right\n",
             filename="float_equality.py",
         )
 

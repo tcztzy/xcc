@@ -1,3 +1,12 @@
+import subprocess
+from pathlib import Path
+
+from xcc.aot.analysis import analyze_module
+from xcc.aot.ir import qualify_ir_entry, validate_ir_module
+from xcc.aot.llvm_text import emit_llvm_text
+from xcc.aot.lower import lower_analysis_to_ir
+from xcc.aot.py_parser import parse_subset_source
+
 int32 = int
 
 _USAGE = (
@@ -57,6 +66,16 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
         "--source-root",
     )
     seen_options: tuple[str, ...] = ()
+    source_root = ""
+    entry = ""
+    output = ""
+    parser = ""
+    emit_llvm = ""
+    emit_normalized_ir = ""
+    source_manifest = ""
+    llc = "/opt/homebrew/opt/llvm/bin/llc"
+    assembler = ""
+    linker = "cc"
     index = 2
     while index < argc:
         argument = argv[index]
@@ -91,11 +110,138 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
         if not value:
             print(f"xcc-aot: empty value for {option}")
             return 2
+        if option == "--source-root":
+            source_root = value
+        elif option == "--entry":
+            entry = value
+        elif option == "--output":
+            output = value
+        elif option == "--parser":
+            parser = value
+        elif option == "--emit-llvm":
+            emit_llvm = value
+        elif option == "--emit-normalized-ir":
+            emit_normalized_ir = value
+        elif option == "--source-manifest":
+            source_manifest = value
+        elif option == "--llc":
+            llc = value
+        elif option == "--assembler":
+            assembler = value
+        elif option == "--linker":
+            linker = value
         seen_options += (option,)
         index += 1
     for required in ("--source-root", "--entry", "--output", "--parser"):
         if required not in seen_options:
             print(f"xcc-aot: missing required option: {required}")
             return 2
-    print("xcc-aot: native build pipeline is not reachable before Milestone 5")
-    return 1
+    if parser != "subset":
+        print(f"xcc-aot: native mode rejects parser: {parser}")
+        return 2
+    return _run_native_build(
+        source_root,
+        entry,
+        output,
+        emit_llvm,
+        emit_normalized_ir,
+        source_manifest,
+        llc,
+        assembler,
+        linker,
+    )
+
+
+def _run_native_build(
+    source_root: str,
+    entry: str,
+    output: str,
+    emit_llvm: str,
+    emit_normalized_ir: str,
+    source_manifest: str,
+    llc: str,
+    assembler: str,
+    linker: str,
+) -> int32:
+    if entry.count(":") != 1:
+        print(f"xcc-aot: invalid entry: {entry}")
+        return 2
+    module_name, function_name = entry.split(":", 1)
+    source_path = _module_source_path(source_root, module_name)
+    if not source_path:
+        print(f"xcc-aot: entry module is outside source root: {module_name}")
+        return 2
+    path = Path(source_path)
+    if not path.is_file():
+        print(f"xcc-aot: entry module not found: {source_path}")
+        return 1
+    source = path.read_text(encoding="utf-8", errors="surrogateescape")
+    parsed = parse_subset_source(source, filename=source_path)
+    ir_module = lower_analysis_to_ir(
+        analyze_module(parsed),
+        entry=function_name,
+        include_functions={function_name},
+    )
+    ir_module = qualify_ir_entry(ir_module, module_name + "." + function_name)
+    validate_ir_module(ir_module)
+    llvm_text = emit_llvm_text(ir_module)
+    llvm_path = emit_llvm or output + ".ll"
+    if not _write_text(llvm_path, llvm_text):
+        print(f"xcc-aot: cannot write LLVM: {llvm_path}")
+        return 1
+    if emit_normalized_ir and not _write_text(emit_normalized_ir, llvm_text):
+        print(f"xcc-aot: cannot write normalized LLVM: {emit_normalized_ir}")
+        return 1
+    if source_manifest:
+        manifest = _source_manifest(source_root, entry, source_path)
+        if not _write_text(source_manifest, manifest):
+            print(f"xcc-aot: cannot write source manifest: {source_manifest}")
+            return 1
+    object_path = output + ".o"
+    if assembler:
+        assembly_path = output + ".s"
+        if _run_tool((llc, "-filetype=asm", llvm_path, "-o", assembly_path)) != 0:
+            print("xcc-aot: llc failed")
+            return 1
+        if _run_tool((assembler, assembly_path, "-o", object_path)) != 0:
+            print("xcc-aot: assembler failed")
+            return 1
+    elif _run_tool((llc, "-filetype=obj", llvm_path, "-o", object_path)) != 0:
+        print("xcc-aot: llc failed")
+        return 1
+    if _run_tool((linker, object_path, "-o", output)) != 0:
+        print("xcc-aot: linker failed")
+        return 1
+    return 0
+
+
+def _module_source_path(source_root: str, module_name: str) -> str:
+    root = Path(source_root)
+    package = root.name
+    if module_name == package:
+        return str(root / "__init__.py")
+    prefix = package + "."
+    if not module_name.startswith(prefix):
+        return ""
+    relative = module_name.removeprefix(prefix).replace(".", "/") + ".py"
+    return str(root / relative)
+
+
+def _source_manifest(source_root: str, entry: str, source_path: str) -> str:
+    return (
+        '{"entry":"'
+        + entry
+        + '","parser":"subset","source_root":"'
+        + source_root
+        + '","units":[{"path":"'
+        + source_path
+        + '"}],"version":1}\n'
+    )
+
+
+def _write_text(path: str, text: str) -> bool:
+    return Path(path).write_text(text, encoding="utf-8") >= 0
+
+
+def _run_tool(argv: tuple[str, ...]) -> int32:
+    return subprocess.call(argv)

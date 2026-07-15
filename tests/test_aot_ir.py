@@ -50,6 +50,7 @@ from xcc.aot import (
 )
 from xcc.aot.binder import _TypeBinder
 from xcc.aot.cpython_ast_adapter import parse_cpython_expression, parse_cpython_source
+from xcc.aot.ir import qualify_ir_entry, validate_ir_module
 from xcc.aot.lower import (
     _can_narrow_to_record,
     _collect_global_names,
@@ -118,6 +119,27 @@ class AotIrModelTests(unittest.TestCase):
 
     def test_string_constant_exposes_type(self) -> None:
         self.assertEqual(IrConstString("ok").type, IrStringType())
+
+    def test_qualifies_entry_before_emitting_process_main(self) -> None:
+        int32 = IrIntType(32, signed=True)
+        function = IrFunction("main", (), int32, (IrReturn(IrConstInt(0, int32)),))
+        module = qualify_ir_entry(
+            IrModule("program.py", (), (function,), entry="main"),
+            "demo.program.main",
+        )
+
+        self.assertEqual(module.entry, "demo.program.main")
+        self.assertEqual(module.functions[0].name, "demo.program.main")
+
+    def test_ir_validator_rejects_duplicate_functions(self) -> None:
+        int32 = IrIntType(32, signed=True)
+        function = IrFunction("entry", (), int32, (IrReturn(IrConstInt(0, int32)),))
+        with self.assertRaisesRegex(ValueError, "duplicate IR function: entry"):
+            validate_ir_module(IrModule("duplicate.py", (), (function, function)))
+
+    def test_ir_validator_rejects_missing_entry(self) -> None:
+        with self.assertRaisesRegex(ValueError, "missing IR entry: absent"):
+            validate_ir_module(IrModule("missing.py", (), (), entry="absent"))
 
 
 class AotScalarLoweringTests(unittest.TestCase):

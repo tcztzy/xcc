@@ -2,16 +2,16 @@ import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from xcc.aot.analysis import analyze_module
 from xcc.aot.diag import AotDiagnostic, AotError
+from xcc.aot.ir import validate_ir_module
 from xcc.aot.llvm_text import emit_llvm_text
-from xcc.aot.lower import lower_analysis_to_ir
 from xcc.aot.module import AotModule
 from xcc.aot.native import compile_llvm_executable
+from xcc.aot.slice import AotSliceInput, lower_named_slice, render_native_reachability
 from xcc.aot.source_contract import (
+    HOSTED_ONLY_MODULES,
     CachePolicy,
     ParserBackend,
-    SourceSet,
     render_source_manifest,
     resolve_source_set,
 )
@@ -222,20 +222,18 @@ def _run_hosted_build(options: BuildOptions) -> None:
                 ),
             )
         )
-    ir_module = lower_analysis_to_ir(
-        analyze_module(entry_unit.parsed),
-        entry=function_name,
-        include_functions={function_name},
-    )
     qualified_entry = f"{module_name}.{function_name}"
-    ir_module = replace(
-        ir_module,
-        functions=tuple(
-            replace(function, name=qualified_entry) if function.name == function_name else function
-            for function in ir_module.functions
-        ),
-        entry=qualified_entry,
+    slice_inputs = tuple(
+        AotSliceInput(unit.module, Path(unit.canonical_path))
+        for unit in source_set.units
+        if unit.module not in HOSTED_ONLY_MODULES
     )
+    ir_module = lower_named_slice(
+        slice_inputs,
+        root_targets=(qualified_entry,),
+    )
+    ir_module = replace(ir_module, entry=qualified_entry)
+    validate_ir_module(ir_module)
     llvm_text = emit_llvm_text(ir_module)
     if options.emit_llvm is not None:
         _write_text(options.emit_llvm, llvm_text)
@@ -246,11 +244,17 @@ def _run_hosted_build(options: BuildOptions) -> None:
         )
     if options.source_manifest is not None:
         _write_text(options.source_manifest, render_source_manifest(source_set))
-    if options.parser == "subset" and options.emit_normalized_ir is not None:
-        _write_text(
-            options.emit_normalized_ir.with_suffix(".reachability"),
-            _render_subset_source_closure(source_set),
-        )
+    reachability = render_native_reachability(
+        ir_module,
+        root=qualified_entry,
+        parser=options.parser,
+    )
+    reachability_path = options.output.with_suffix(".reachability")
+    _write_text(reachability_path, reachability)
+    if options.emit_normalized_ir is not None:
+        normalized_reachability_path = options.emit_normalized_ir.with_suffix(".reachability")
+        if normalized_reachability_path != reachability_path:
+            _write_text(normalized_reachability_path, reachability)
     compile_llvm_executable(
         llvm_text,
         options.output,
@@ -293,21 +297,6 @@ def _run_parser_oracle(source_root: Path, entry_module: str) -> int32:
     report = run_parser_oracle(source_root, entry_module)
     print(render_parser_oracle_report(report), end="")
     return 0 if not report.failures else 1
-
-
-def _render_subset_source_closure(source_set: SourceSet) -> str:
-    lines = (
-        "format=xcc-aot-subset-source-closure-v1",
-        "parser=subset",
-        "native_call_graph=false",
-        f"entry={source_set.entry_module}",
-    )
-    result = list(lines)
-    for unit in source_set.units:
-        result.append(f"module={unit.module}")
-        for dependency in unit.dependencies:
-            result.append(f"edge={unit.module}->{dependency}")
-    return "\n".join(result) + "\n"
 
 
 def _write_text(path: Path, text: str) -> None:

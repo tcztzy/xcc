@@ -2,6 +2,29 @@
 
 ## Current
 
+- Completed the approved strong-bootstrap Milestone 5. The hosted build is now
+  rooted at `xcc.aot.cli:main` and emits the real source loader, owned
+  lexer/parser, binder, lowerer, IR validator, LLVM emitter, runtime, and native
+  tool runner. Its deterministic reachability artifact contains call/type
+  reason edges and excludes `ast.parse`, the CPython AST adapter, and the old C
+  smoke root. The resulting native compiler reads an independent ordinary
+  `.py` file, emits LLVM/normalized IR plus a source manifest, invokes `llc` and
+  the system linker, and builds a program with the CPython-matching exit status
+  7 without Python or libpython.
+- Closed the native-root blockers B450-B470 in AOT-owned code: entry
+  qualification and IR validation, lazy conditional-expression CFG, nullable
+  record boxing and branch joins, global AST type-marker reachability, f-string
+  container inference, cross-call tuple-backed list/set/dict mutation, typed
+  dictionary assignment, and deterministic class-owner refinement across the
+  64-unit hosted source closure. No non-`src/xcc/aot` compiler source was
+  rewritten.
+- Verified Milestone 5 with 49/49 reachability/native-CLI tests in 1170.130s,
+  83/83 CPython/native runtime oracles, 19 focused CLI/IR/LLVM regressions, the
+  exact hosted acceptance build, and lint/type/diff gates. The persisted
+  `xcc-aot` contains the required `xcc.aot` symbols, links only `libSystem`, and
+  has no Python dynamic or undefined symbols. This completes T5 only; Stage 1
+  production and audit remain Milestone 6. CPython `configure && make` was not
+  run.
 - Completed the approved strong-bootstrap Milestone 4. Fallible native AOT
   functions now use a compositional status/result/error ABI with typed payloads,
   source spans, cross-call propagation, handler ancestry dispatch, rethrow, and

@@ -355,3 +355,47 @@ class IrModule:
     records: tuple[IrRecord, ...]
     functions: tuple[IrFunction, ...]
     entry: str | None = None
+
+
+def qualify_ir_entry(module: IrModule, qualified_name: str) -> IrModule:
+    if module.entry is None:
+        raise ValueError("cannot qualify an IR module without an entry")
+    functions: list[IrFunction] = []
+    found = False
+    for function in module.functions:
+        if function.name == module.entry:
+            functions.append(
+                IrFunction(
+                    qualified_name,
+                    function.params,
+                    function.return_type,
+                    function.body,
+                )
+            )
+            found = True
+        else:
+            functions.append(function)
+    if not found:
+        raise ValueError(f"missing IR entry: {module.entry}")
+    return IrModule(
+        module.filename,
+        module.records,
+        tuple(functions),
+        entry=qualified_name,
+    )
+
+
+def validate_ir_module(module: IrModule) -> None:
+    """Reject symbol-table inconsistencies before native LLVM emission."""
+    record_names: set[str] = set()
+    for record in module.records:
+        if record.name in record_names:
+            raise ValueError(f"duplicate IR record: {record.name}")
+        record_names.add(record.name)
+    function_names: set[str] = set()
+    for function in module.functions:
+        if function.name in function_names:
+            raise ValueError(f"duplicate IR function: {function.name}")
+        function_names.add(function.name)
+    if module.entry is not None and module.entry not in function_names:
+        raise ValueError(f"missing IR entry: {module.entry}")

@@ -355,6 +355,62 @@ def lower_core_slice(
     return _lower_core_slice_all(paths)
 
 
+def lower_named_slice(
+    modules: tuple[AotSliceInput, ...],
+    *,
+    root_targets: tuple[str, ...],
+    required_records: tuple[str, ...] = (),
+) -> IrModule:
+    ordered = tuple(sorted(modules, key=_slice_input_name))
+    return _lower_named_slice_from_roots(ordered, root_targets, required_records)
+
+
+def render_native_reachability(
+    module: IrModule,
+    *,
+    root: str,
+    parser: str,
+) -> str:
+    functions = {function.name: function for function in module.functions}
+    if root not in functions:
+        raise AotError(
+            (
+                AotDiagnostic(
+                    "XCC-AOT-SLICE-0003",
+                    f"Native reachability root is missing: {root}",
+                    filename=module.filename,
+                ),
+            )
+        )
+    records = {record.name: record for record in module.records}
+    lines = [
+        "format=xcc-aot-native-reachability-v1",
+        f"parser={parser}",
+        "native_call_graph=true",
+        f"root={root}",
+    ]
+    for name in sorted(functions):
+        reason = "root" if name == root else "reachable-call"
+        lines.append(f"function={name};reason={reason}")
+    for caller in sorted(functions):
+        targets = set(_function_call_targets(functions[caller])) & functions.keys()
+        for target in sorted(targets):
+            lines.append(f"edge=function:{caller}->function:{target};reason=call")
+    for name in sorted(records):
+        lines.append(f"record={name};reason=reachable-type")
+    for function_name in sorted(functions):
+        used_records = set(_function_record_names(functions[function_name])) & records.keys()
+        for record_name in sorted(used_records):
+            lines.append(f"edge=function:{function_name}->record:{record_name};reason=type-use")
+    for record_name in sorted(records):
+        related: set[str] = set(records[record_name].bases) & records.keys()
+        for field in records[record_name].fields:
+            related.update(set(_type_record_names(field.type)) & records.keys())
+        for target in sorted(related):
+            lines.append(f"edge=record:{record_name}->record:{target};reason=layout")
+    return "\n".join(lines) + "\n"
+
+
 def lower_core_entry_slice(paths: tuple[Path, ...], wrapper: IrFunction) -> IrModule:
     module = lower_core_slice(
         paths,
@@ -420,6 +476,14 @@ def _lower_core_slice_from_roots(
     required_records: tuple[str, ...],
 ) -> IrModule:
     module_inputs = collect_slice_inputs(paths)
+    return _lower_named_slice_from_roots(module_inputs, root_targets, required_records)
+
+
+def _lower_named_slice_from_roots(
+    module_inputs: tuple[AotSliceInput, ...],
+    root_targets: tuple[str, ...],
+    required_records: tuple[str, ...],
+) -> IrModule:
     inputs_by_name = {module.name: module for module in module_inputs}
     source_cache = {
         module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
@@ -571,7 +635,8 @@ def _slice_class_tables(
             ),
         )
         for class_name, class_info in analysis.types.classes.items():
-            class_types[class_name] = class_info
+            if class_modules.get(class_name) == module_input.name:
+                class_types[class_name] = class_info
     return class_types, class_modules
 
 
@@ -1253,6 +1318,8 @@ def _expr_record_names(expr: IrExpr) -> tuple[str, ...]:
         return tuple(sorted(names))
     if isinstance(expr, IrCall):
         names.update(_expr_tuple_record_names(expr.args))
+        if expr.target == "isinstance" and len(expr.args) == 2:
+            names.update(_isinstance_marker_record_names(expr.args[1]))
         return tuple(sorted(names))
     if isinstance(expr, IrTuple):
         names.update(_expr_tuple_record_names(expr.elements))
@@ -1275,6 +1342,14 @@ def _expr_tuple_record_names(expressions: tuple[IrExpr, ...]) -> tuple[str, ...]
     for expression in expressions:
         names.update(_expr_record_names(expression))
     return tuple(sorted(names))
+
+
+def _isinstance_marker_record_names(marker: IrExpr) -> tuple[str, ...]:
+    if isinstance(marker, IrName):
+        return (marker.name,)
+    if isinstance(marker, IrTuple):
+        return tuple(element.name for element in marker.elements if isinstance(element, IrName))
+    return ()
 
 
 def _type_record_names(

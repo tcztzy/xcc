@@ -419,8 +419,13 @@ class _Emitter:
 
     def _emit_generic_function(self, function: IrFunction, *, fallible: bool) -> str:
         self.index = 0
+        param_values = {
+            param.name: (f"%arg.{param.name}" if param.name == "entry" else f"%{param.name}")
+            for param in function.params
+        }
         params = ", ".join(
-            f"{self._param_llvm_type(param.type)} %{param.name}" for param in function.params
+            f"{self._param_llvm_type(param.type)} {param_values[param.name]}"
+            for param in function.params
         )
         result_out = None if isinstance(function.return_type, IrNoneType) else "%result_out"
         if fallible:
@@ -445,7 +450,8 @@ class _Emitter:
         self.failure_scopes = []
         self.caught_status_stack = []
         names = {
-            param.name: _EmittedValue(f"%{param.name}", param.type) for param in function.params
+            param.name: _EmittedValue(param_values[param.name], param.type)
+            for param in function.params
         }
         try:
             for statement in function.body:
@@ -1831,6 +1837,19 @@ class _Emitter:
             return "null"
         if _is_opaque_object_type(value.type):
             return value.value
+        nullable_source = ""
+        nullable_nonnull_label = ""
+        nullable_end_label = ""
+        if _is_nullable_record_union(value.type, self.records):
+            nullable_source = _current_label(lines)
+            nullable_nonnull_label = self._label("object.box.nonnull")
+            nullable_end_label = self._label("object.box.end")
+            nonnull = self._tmp("object.box.nonnull")
+            lines.append(f"  {nonnull} = icmp ne ptr {value.value}, null")
+            lines.append(
+                f"  br i1 {nonnull}, label %{nullable_nonnull_label}, label %{nullable_end_label}"
+            )
+            lines.append(f"{nullable_nonnull_label}:")
         tag: int
         if isinstance(value.type, IrBoolType):
             tag = _OBJECT_TAG_BOOL
@@ -1880,6 +1899,15 @@ class _Emitter:
             lines.append(f"  store double {value.value}, ptr {payload}")
         else:
             lines.append(f"  store ptr {value.value}, ptr {payload}")
+        if nullable_source:
+            lines.append(f"  br label %{nullable_end_label}")
+            lines.append(f"{nullable_end_label}:")
+            result = self._tmp("object.box")
+            lines.append(
+                f"  {result} = phi ptr [ null, %{nullable_source} ], "
+                f"[ {boxed}, %{nullable_nonnull_label} ]"
+            )
+            return result
         return boxed
 
     def _emit_tuple_slice(
@@ -2215,8 +2243,12 @@ class _Emitter:
             return self._emit_path_join_call(expr, names, lines)
         if expr.target == "__path_read_text":
             return self._emit_path_read_text_call(expr, names, lines)
+        if expr.target == "__path_write_text":
+            return self._emit_path_write_text_call(expr, names, lines)
         if expr.target == "__path_is_file":
             return self._emit_path_is_file_call(expr, names, lines)
+        if expr.target == "__exec_argv":
+            return self._emit_exec_argv_call(expr, names, lines)
         if expr.target == "__dict_get":
             return self._emit_dict_get_call(expr, names, lines)
         if expr.target == "__dict_set":
@@ -2276,26 +2308,13 @@ class _Emitter:
             return self._emit_bool_short_circuit("and", expr.args, names, lines)
         if expr.target == "__bool_or":
             return self._emit_bool_short_circuit("or", expr.args, names, lines)
+        if expr.target == "__ifexp":
+            return self._emit_ifexp_call(expr, names, lines)
         args = [self._emit_expr(arg, names, lines) for arg in expr.args]
         if expr.target == "__not":
             if len(args) != 1:
                 self._error("__not expects one argument")
             return self._emit_bool_not(args[0], lines)
-        if expr.target == "__ifexp":
-            if len(args) != 3:
-                self._error("__ifexp expects three arguments")
-            condition = self._coerce_to_bool(args[0], lines)
-            if isinstance(expr.type, IrNoneType):
-                return _EmittedValue("null", expr.type)
-            result = self._tmp("ifexp")
-            result_type = self._llvm_type(expr.type)
-            true_value = self._value_for_result_type(args[1], expr.type, lines)
-            false_value = self._value_for_result_type(args[2], expr.type, lines)
-            lines.append(
-                f"  {result} = select i1 {condition.value}, "
-                f"{result_type} {true_value}, {result_type} {false_value}"
-            )
-            return _EmittedValue(result, expr.type)
         if expr.target in {"__cmp_Eq", "__cmp_NotEq"}:
             if len(args) != 2:
                 self._error(f"{expr.target} expects two arguments")
@@ -3637,6 +3656,7 @@ class _Emitter:
         lines.append(f"{end_label}:")
         result = self._tmp("dictset")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
+        lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {dict_value.value}, ptr {result})")
         return _EmittedValue(result, expr.type)
 
     def _emit_dict_items_call(
@@ -3720,6 +3740,7 @@ class _Emitter:
         lines.append(f"{end_label}:")
         result = self._tmp("dictupdate")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
+        lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {target.value}, ptr {result})")
         return _EmittedValue(result, target.type)
 
     def _emit_dict_remove_call(
@@ -3787,6 +3808,7 @@ class _Emitter:
         lines.append(f"{end_label}:")
         result = self._tmp("dictremove")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
+        lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {target.value}, ptr {result})")
         return _EmittedValue(result, target.type)
 
     def _emit_dict_comprehension_call(
@@ -4666,6 +4688,9 @@ class _Emitter:
             result = self._tmp("tuple")
             self.needs_runtime_prelude = True
             lines.append(f"  {result} = call ptr @__xcc_aot_tuple_pop(ptr {receiver.value})")
+            lines.append(
+                f"  call void @__xcc_aot_tuple_forward(ptr {receiver.value}, ptr {result})"
+            )
             result_type = expr.type if isinstance(expr.type, IrTupleType) else receiver.type
             if isinstance(expr.type, IrNoneType):
                 return _EmittedValue("null", expr.type)
@@ -4683,6 +4708,9 @@ class _Emitter:
                 f"  {result} = call ptr @__xcc_aot_tuple_concat("
                 f"ptr {receiver.value}, ptr {extension.value})"
             )
+            lines.append(
+                f"  call void @__xcc_aot_tuple_forward(ptr {receiver.value}, ptr {result})"
+            )
             return _EmittedValue(result, result_type)
         item = self._emit_expr(expr.args[1], names, lines)
         singleton = self._runtime_singleton_tuple(item, lines)
@@ -4691,6 +4719,7 @@ class _Emitter:
         lines.append(
             f"  {result} = call ptr @__xcc_aot_tuple_concat(ptr {receiver.value}, ptr {singleton})"
         )
+        lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {receiver.value}, ptr {result})")
         return _EmittedValue(result, result_type)
 
     def _runtime_singleton_tuple(self, item: _EmittedValue, lines: list[str]) -> str:
@@ -4923,6 +4952,49 @@ class _Emitter:
         self.needs_runtime_prelude = True
         result = self._tmp("pathread")
         lines.append(f"  {result} = call ptr @__xcc_aot_read_text_file(ptr {path.value})")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_path_write_text_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__path_write_text expects path and text arguments")
+        path = self._emit_expr(expr.args[0], names, lines)
+        value = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(path.type, IrRecordType) or not isinstance(value.type, IrStringType):
+            self._error("__path_write_text expects path and string values")
+        if not isinstance(expr.type, IrIntType) or expr.type.bits != 64:
+            self._error("__path_write_text expects an int64 result")
+        self.needs_runtime_prelude = True
+        written = self._tmp("pathwritten")
+        length = self._tmp("pathlength")
+        result = self._tmp("pathwriteresult")
+        lines.append(
+            f"  {written} = call i1 @__xcc_aot_write_text_file(ptr {path.value}, ptr {value.value})"
+        )
+        lines.append(f"  {length} = call i64 @strlen(ptr {value.value})")
+        lines.append(f"  {result} = select i1 {written}, i64 {length}, i64 -1")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_exec_argv_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("__exec_argv expects one tuple argument")
+        argv = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(argv.type, IrTupleType):
+            self._error("__exec_argv expects a tuple-backed argv")
+        if not isinstance(expr.type, IrIntType) or expr.type.bits != 32:
+            self._error("__exec_argv expects an int32 result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("execstatus")
+        lines.append(f"  {result} = call i32 @__xcc_aot_execvp_tuple(ptr {argv.value})")
         return _EmittedValue(result, expr.type)
 
     def _emit_path_is_file_call(
@@ -5507,6 +5579,39 @@ class _Emitter:
         parts = ", ".join(f"[ {value}, %{source} ]" for source, value in incoming)
         lines.append(f"  {result} = phi i1 {parts}")
         return _EmittedValue(result, IrBoolType())
+
+    def _emit_ifexp_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 3:
+            self._error("__ifexp expects three arguments")
+        condition = self._coerce_to_bool(self._emit_expr(expr.args[0], names, lines), lines)
+        true_label = self._label("ifexp.true")
+        false_label = self._label("ifexp.false")
+        end_label = self._label("ifexp.end")
+        lines.append(f"  br i1 {condition.value}, label %{true_label}, label %{false_label}")
+        lines.append(f"{true_label}:")
+        true_value = self._emit_expr(expr.args[1], names, lines)
+        true_result = self._value_for_result_type(true_value, expr.type, lines)
+        true_source = _current_label(lines)
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{false_label}:")
+        false_value = self._emit_expr(expr.args[2], names, lines)
+        false_result = self._value_for_result_type(false_value, expr.type, lines)
+        false_source = _current_label(lines)
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        if isinstance(expr.type, IrNoneType):
+            return _EmittedValue("null", expr.type)
+        result = self._tmp("ifexp")
+        lines.append(
+            f"  {result} = phi {self._llvm_type(expr.type)} "
+            f"[ {true_result}, %{true_source} ], [ {false_result}, %{false_source} ]"
+        )
+        return _EmittedValue(result, expr.type)
 
     def _select_arm_value(self, value: _EmittedValue, result_type: IrType) -> str:
         if isinstance(value.type, IrNoneType):
@@ -7446,6 +7551,21 @@ def _is_opaque_object_type(type_info: IrType) -> bool:
     return isinstance(type_info, IrRecordType) and type_info.name == "object"
 
 
+def _is_nullable_record_union(
+    type_info: IrType,
+    records: dict[str, IrRecord],
+) -> bool:
+    if not isinstance(type_info, IrRecordType):
+        return False
+    parts = _record_union_parts(type_info.name)
+    if "None" not in parts:
+        return False
+    record_parts = tuple(part for part in parts if part != "None")
+    return bool(record_parts) and all(
+        _record_union_part_is_known(part, records) for part in record_parts
+    )
+
+
 def _static_builtin_isinstance_result(
     type_info: IrType,
     target_names: tuple[str, ...],
@@ -7513,7 +7633,13 @@ def _is_record_narrowing(bound_type: IrType, requested_type: IrType) -> bool:
 
 def _is_known_record_union_name(record_name: str, records: dict[str, IrRecord]) -> bool:
     parts = _record_union_parts(record_name)
-    return len(parts) > 1 and all(part in records for part in parts)
+    return len(parts) > 1 and all(
+        part == "None" or _record_union_part_is_known(part, records) for part in parts
+    )
+
+
+def _record_union_part_is_known(part: str, records: dict[str, IrRecord]) -> bool:
+    return part in records or part.rsplit(".", 1)[-1] in records
 
 
 def _record_union_parts(record_name: str) -> tuple[str, ...]:
