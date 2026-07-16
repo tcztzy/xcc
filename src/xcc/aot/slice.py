@@ -927,7 +927,7 @@ def _add_missing_records(
     parsed_cache: dict[str, AotModule] | None = None,
     analysis_cache: dict[str, AotAnalysis] | None = None,
 ) -> None:
-    pending = list(sorted(missing_records))
+    pending = sorted(missing_records)
     requested: set[str] = set()
     while pending:
         record_name = pending.pop(0)
@@ -999,7 +999,13 @@ def _module_rename_map(
             frozenset(module_names or ()),
         )
     )
-    rename_map.update(_assigned_project_function_aliases(tree, rename_map, module_names or ()))
+    rename_map.update(
+        _assigned_project_function_aliases(
+            tree,
+            rename_map,
+            frozenset(module_names or ()),
+        )
+    )
     return rename_map
 
 

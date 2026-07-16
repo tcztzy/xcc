@@ -3,19 +3,19 @@ def runtime_prelude() -> str:
         (
             '@__xcc_aot_fmt_i64 = private unnamed_addr constant [5 x i8] c"%lld\\00", align 1',
             (
-                '@__xcc_aot_fmt_hex2_upper = private unnamed_addr constant [7 x i8] '
+                "@__xcc_aot_fmt_hex2_upper = private unnamed_addr constant [7 x i8] "
                 'c"%02llX\\00", align 1'
             ),
             (
-                '@__xcc_aot_fmt_hex2_lower = private unnamed_addr constant [7 x i8] '
+                "@__xcc_aot_fmt_hex2_lower = private unnamed_addr constant [7 x i8] "
                 'c"%02llx\\00", align 1'
             ),
             (
-                '@__xcc_aot_fmt_hex_upper = private unnamed_addr constant [5 x i8] '
+                "@__xcc_aot_fmt_hex_upper = private unnamed_addr constant [5 x i8] "
                 'c"%llX\\00", align 1'
             ),
             (
-                '@__xcc_aot_fmt_hex_lower = private unnamed_addr constant [5 x i8] '
+                "@__xcc_aot_fmt_hex_lower = private unnamed_addr constant [5 x i8] "
                 'c"%llx\\00", align 1'
             ),
             '@__xcc_aot_fmt_float = private unnamed_addr constant [6 x i8] c"%.17g\\00", align 1',
@@ -261,14 +261,8 @@ def runtime_prelude() -> str:
             "resolved:",
             "  br label %compress",
             "compress:",
-            (
-                "  %terminal = phi ptr [ %current, %missing ], "
-                "[ %current, %resolved ]"
-            ),
-            (
-                "  %root_node = phi ptr [ %first_node, %missing ], "
-                "[ %selected_first, %resolved ]"
-            ),
+            ("  %terminal = phi ptr [ %current, %missing ], [ %current, %resolved ]"),
+            ("  %root_node = phi ptr [ %first_node, %missing ], [ %selected_first, %resolved ]"),
             "  %has_root = icmp ne ptr %root_node, null",
             "  br i1 %has_root, label %compress_root, label %return",
             "compress_root:",

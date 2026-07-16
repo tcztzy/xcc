@@ -1053,12 +1053,8 @@ class _Lowerer:
         expected: IrType,
     ) -> IrExpr:
         if (
-            _is_optional_bool_type(expected)
-            and isinstance(value.type, IrBoolType | IrNoneType)
-        ) or (
-            _is_optional_int_type(expected)
-            and isinstance(value.type, IrIntType | IrNoneType)
-        ):
+            _is_optional_bool_type(expected) and isinstance(value.type, IrBoolType | IrNoneType)
+        ) or (_is_optional_int_type(expected) and isinstance(value.type, IrIntType | IrNoneType)):
             return IrCall("__optional_box", (value,), expected)
         return value
 
@@ -1257,26 +1253,26 @@ class _Lowerer:
             if else_narrowed is not None:
                 name, narrowed_type = else_narrowed
                 orelse_names[name] = narrowed_type
-            result_type = expected
+            ifexp_result_type = expected
             inferred_type = self._infer_assignment_expr_type(
                 expr,
                 names,
                 IrRecordType("object"),
             )
             if not isinstance(inferred_type, IrNoneType) and not _is_object_type(inferred_type):
-                result_type = inferred_type
+                ifexp_result_type = inferred_type
             elif _is_object_type(expected):
                 inferred_type = self._infer_assignment_expr_type(expr, body_names, expected)
                 if not _is_object_type(inferred_type):
-                    result_type = inferred_type
+                    ifexp_result_type = inferred_type
             return IrCall(
                 "__ifexp",
                 (
                     self._lower_expr(expr.test, names, IrBoolType()),
-                    self._lower_expr(expr.body, body_names, result_type),
-                    self._lower_expr(expr.orelse, orelse_names, result_type),
+                    self._lower_expr(expr.body, body_names, ifexp_result_type),
+                    self._lower_expr(expr.orelse, orelse_names, ifexp_result_type),
                 ),
-                result_type,
+                ifexp_result_type,
             )
         if isinstance(expr, ast.Tuple):
             if any(isinstance(element, ast.Starred) for element in expr.elts):
@@ -1403,21 +1399,21 @@ class _Lowerer:
                     (value, self._lower_expr(expr.slice, names, value.type.key)),
                     subscript_narrowed_type or value.type.value,
                 )
-            result_type = subscript_narrowed_type or expected
+            subscript_result_type = subscript_narrowed_type or expected
             if isinstance(value.type, IrStringType):
-                result_type = IrStringType()
+                subscript_result_type = IrStringType()
             elif isinstance(value.type, IrBytesType):
-                result_type = (
+                subscript_result_type = (
                     expected if isinstance(expected, IrIntType) else IrIntType(64, signed=True)
                 )
             elif isinstance(value.type, IrTupleType) and subscript_narrowed_type is None:
                 inferred_type = _tuple_subscript_result_type(expr.slice, value.type)
                 if not _is_object_type(inferred_type) or _is_object_type(expected):
-                    result_type = inferred_type
+                    subscript_result_type = inferred_type
             return IrCall(
                 "__getitem",
                 (value, self._lower_expr(expr.slice, names, int64)),
-                result_type,
+                subscript_result_type,
             )
         if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div):
             left = self._lower_expr(expr.left, names, IrRecordType("Path"))
@@ -1529,8 +1525,8 @@ class _Lowerer:
                 right_expected = left.type if isinstance(left.type, IrTupleType) else expected
                 right = self._lower_expr(expr.right, names, right_expected)
                 if isinstance(left.type, IrTupleType) and isinstance(right.type, IrTupleType):
-                    result_type = left.type if left.type.elements else right.type
-                    return IrCall("__tuple_concat", (left, right), result_type)
+                    tuple_result_type = left.type if left.type.elements else right.type
+                    return IrCall("__tuple_concat", (left, right), tuple_result_type)
             if isinstance(expr.op, ast.Add) and not isinstance(expected, IrIntType):
                 return IrCall(
                     "__add",
@@ -1604,7 +1600,7 @@ class _Lowerer:
                 else expected
             )
             right = self._lower_expr(expr.right, names, right_expected)
-            result_type = (
+            binary_result_type = (
                 left.type
                 if isinstance(left.type, IrIntType) and isinstance(right.type, IrIntType)
                 else expected
@@ -1613,7 +1609,7 @@ class _Lowerer:
                 op,
                 left,
                 right,
-                result_type,
+                binary_result_type,
             )
         self._error(
             "XCC-AOT-LOWER-0002",
@@ -2726,10 +2722,10 @@ class _Lowerer:
                 f"Unsupported call target: {ast.unparse(expr.func)}",
                 expr,
             )
-        result_type = (
+        empty_result_type = (
             expected if isinstance(expected, IrTupleType | IrDictType) else IrTupleType(())
         )
-        return IrTuple((), result_type)
+        return IrTuple((), empty_result_type)
 
     def _lower_minmax_call(
         self,
@@ -4658,9 +4654,9 @@ class _Lowerer:
         ):
             return IrIntType(64, signed=True)
         if isinstance(expr, ast.Name):
-            value_type = names.get(expr.id)
-            if value_type is not None:
-                return value_type
+            name_value_type = names.get(expr.id)
+            if name_value_type is not None:
+                return name_value_type
             scalar_constant = self.global_scalar_constants.get(expr.id)
             if scalar_constant is not None:
                 return scalar_constant.type
@@ -5531,9 +5527,11 @@ class _Lowerer:
         comparisons: list[IrExpr] = []
         left = expr.left
         for op, right in zip(expr.ops, expr.comparators, strict=True):
-            set_equality = isinstance(op, (ast.Eq, ast.NotEq)) and _is_set_expression(
-                left
-            ) and _is_set_expression(right)
+            set_equality = (
+                isinstance(op, (ast.Eq, ast.NotEq))
+                and _is_set_expression(left)
+                and _is_set_expression(right)
+            )
             if _is_type_call(left) or _is_type_call(right):
                 if not isinstance(op, (ast.Eq, ast.Is, ast.IsNot, ast.NotEq)):
                     self._error(

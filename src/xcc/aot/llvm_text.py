@@ -5694,9 +5694,7 @@ class _Emitter:
         result = self._tmp("setop")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
         if expr.target == "__set_update":
-            lines.append(
-                f"  call void @__xcc_aot_tuple_forward(ptr {left.value}, ptr {result})"
-            )
+            lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {left.value}, ptr {result})")
         return _EmittedValue(result, expr.type)
 
     def _emit_set_equality_call(
@@ -5769,9 +5767,7 @@ class _Emitter:
             lines,
             negate=False,
         )
-        lines.append(
-            f"  br i1 {member.value}, label %{next_label}, label %{mismatch_label}"
-        )
+        lines.append(f"  br i1 {member.value}, label %{next_label}, label %{mismatch_label}")
         lines.append(f"{mismatch_label}:")
         lines.append(f"  store i1 false, ptr {result_ptr}")
         lines.append(f"  br label %{end_label}")
@@ -6332,12 +6328,13 @@ class _Emitter:
                 if requested_type.bits == 64:
                     return _EmittedValue(integer, requested_type)
                 result = self._tmp("optional.int.cast")
-                opcode = "trunc" if requested_type.bits < 64 else (
-                    "sext" if requested_type.signed else "zext"
+                opcode = (
+                    "trunc"
+                    if requested_type.bits < 64
+                    else ("sext" if requested_type.signed else "zext")
                 )
                 lines.append(
-                    f"  {result} = {opcode} i64 {integer} to "
-                    f"{self._llvm_type(requested_type)}"
+                    f"  {result} = {opcode} i64 {integer} to {self._llvm_type(requested_type)}"
                 )
                 return _EmittedValue(result, requested_type)
             result = self._tmp("narrowint")
@@ -6410,8 +6407,7 @@ class _Emitter:
             lines.append(f"{end_label}:")
             result = self._tmp("truth")
             lines.append(
-                f"  {result} = phi i1 [ false, %{source_label} ], "
-                f"[ {nonzero}, %{present_label} ]"
+                f"  {result} = phi i1 [ false, %{source_label} ], [ {nonzero}, %{present_label} ]"
             )
             return _EmittedValue(result, IrBoolType())
         if isinstance(value.type, IrRecordType) and value.type.name == "complex":
