@@ -1951,6 +1951,22 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="global-starred-container.py",
         )
 
+    def test_global_scalar_literals_format_and_compare_by_value(self) -> None:
+        self.assert_native_matches_cpython(
+            "BASE = 8\n"
+            "TAG = BASE\n"
+            "NEGATIVE: int = -2\n"
+            "ENABLED = True\n"
+            "def entry() -> int:\n"
+            "    if f'{TAG}' != '8':\n"
+            "        return 1\n"
+            "    if NEGATIVE != -2 or not ENABLED:\n"
+            "        return 2\n"
+            "    return TAG\n",
+            expected=8,
+            filename="global-scalar-constants.py",
+        )
+
     def test_equivalent_tuple_list_union_preserves_nested_dict_type(self) -> None:
         self.assert_native_matches_cpython(
             "def total(\n"

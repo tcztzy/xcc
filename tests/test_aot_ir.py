@@ -939,6 +939,50 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_global_scalar_literals_and_aliases_as_constants(self) -> None:
+        module = lower_source_to_ir(
+            "BASE = 8\n"
+            "TAG = BASE\n"
+            "NEGATIVE: int = -2\n"
+            "ENABLED = True\n"
+            "def values() -> tuple[int, int, bool]:\n"
+            "    return TAG, NEGATIVE, ENABLED\n",
+            filename="global_scalar_constants.py",
+            entry="values",
+        )
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrTuple(
+                (
+                    IrConstInt(8, IrIntType(64, signed=True)),
+                    IrConstInt(-2, IrIntType(64, signed=True)),
+                    IrConstBool(True),
+                ),
+                IrTupleType(
+                    (
+                        IrIntType(64, signed=True),
+                        IrIntType(64, signed=True),
+                        IrBoolType(),
+                    )
+                ),
+            ),
+        )
+
+    def test_lowers_extra_global_scalar_constant_as_imported_literal(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = lower_source_to_ir(
+            "def tag() -> int:\n"
+            "    return IMPORTED_TAG\n",
+            filename="imported_global_scalar.py",
+            entry="tag",
+            extra_global_scalar_constants={"IMPORTED_TAG": IrConstInt(8, int64)},
+        )
+        returned = module.functions[0].body[0]
+        self.assertEqual(returned, IrReturn(IrConstInt(8, int64)))
+
     def test_lowers_global_string_set_membership_as_tuple_literal(self) -> None:
         module = lower_source_to_ir(
             "KEYWORDS = {'int', 'return'}\n"

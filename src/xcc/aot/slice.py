@@ -49,6 +49,7 @@ from xcc.aot.ir import (
     IrWhile,
 )
 from xcc.aot.lower import (
+    _collect_global_scalar_constants,
     _collect_global_string_constants,
     _collect_global_string_container_constants,
     lower_analysis_to_ir,
@@ -458,6 +459,11 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
         source_cache,
         parsed_cache=parsed_cache,
     )
+    global_scalar_constants = _slice_global_scalar_constants(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
     global_string_container_constants = _slice_global_string_container_constants(
         module_inputs,
         source_cache,
@@ -494,6 +500,7 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
             extra_aliases=aliases,
             extra_global_annotations=global_annotations,
             extra_global_string_constants=global_string_constants,
+            extra_global_scalar_constants=global_scalar_constants,
             extra_global_string_container_constants=global_string_container_constants,
         )
         records.extend(module.records)
@@ -557,6 +564,11 @@ def _lower_named_slice_from_roots(
         source_cache,
         parsed_cache=parsed_cache,
     )
+    global_scalar_constants = _slice_global_scalar_constants(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
     global_string_container_constants = _slice_global_string_container_constants(
         module_inputs,
         source_cache,
@@ -610,6 +622,7 @@ def _lower_named_slice_from_roots(
             extra_aliases=aliases,
             extra_global_annotations=global_annotations,
             extra_global_string_constants=global_string_constants,
+            extra_global_scalar_constants=global_scalar_constants,
             extra_global_string_container_constants=global_string_container_constants,
         )
         for record in module.records:
@@ -627,6 +640,7 @@ def _lower_named_slice_from_roots(
                 aliases,
                 global_annotations,
                 global_string_constants,
+                global_scalar_constants,
                 global_string_container_constants,
                 parsed_cache=parsed_cache,
                 analysis_cache=analysis_cache,
@@ -658,6 +672,7 @@ def _lower_named_slice_from_roots(
                     aliases,
                     global_annotations,
                     global_string_constants,
+                    global_scalar_constants,
                     global_string_container_constants,
                     parsed_cache=parsed_cache,
                     analysis_cache=analysis_cache,
@@ -853,6 +868,27 @@ def _slice_global_string_constants(
     return constants
 
 
+def _slice_global_scalar_constants(
+    module_inputs: tuple[AotSliceInput, ...],
+    source_cache: dict[str, str],
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
+) -> dict[str, IrExpr]:
+    constants: dict[str, IrExpr] = {}
+    for module_input in module_inputs:
+        tree = (
+            parsed_cache[module_input.name].tree
+            if parsed_cache is not None
+            else parse_source(
+                source_cache[module_input.name],
+                filename=str(module_input.path),
+            ).tree
+        )
+        for name, value in _collect_global_scalar_constants(tree).items():
+            constants.setdefault(name, value)
+    return constants
+
+
 def _slice_global_string_container_constants(
     module_inputs: tuple[AotSliceInput, ...],
     source_cache: dict[str, str],
@@ -885,6 +921,7 @@ def _add_missing_records(
     aliases: dict[str, AotType] | None = None,
     global_annotations: dict[str, str] | None = None,
     global_string_constants: dict[str, str] | None = None,
+    global_scalar_constants: dict[str, IrExpr] | None = None,
     global_string_container_constants: dict[str, IrTuple] | None = None,
     *,
     parsed_cache: dict[str, AotModule] | None = None,
@@ -919,6 +956,7 @@ def _add_missing_records(
                 extra_aliases=aliases,
                 extra_global_annotations=global_annotations,
                 extra_global_string_constants=global_string_constants,
+                extra_global_scalar_constants=global_scalar_constants,
                 extra_global_string_container_constants=global_string_container_constants,
             )
         else:
@@ -931,6 +969,7 @@ def _add_missing_records(
                 extra_aliases=aliases,
                 extra_global_annotations=global_annotations,
                 extra_global_string_constants=global_string_constants,
+                extra_global_scalar_constants=global_scalar_constants,
                 extra_global_string_container_constants=global_string_container_constants,
             )
         for record in records_module.records:

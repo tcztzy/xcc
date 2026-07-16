@@ -247,6 +247,7 @@ def lower_source_to_ir(
     extra_aliases: dict[str, AotType] | None = None,
     extra_global_annotations: dict[str, str] | None = None,
     extra_global_string_constants: dict[str, str] | None = None,
+    extra_global_scalar_constants: dict[str, IrExpr] | None = None,
     extra_global_string_container_constants: dict[str, IrTuple] | None = None,
 ) -> IrModule:
     analysis = analyze_source(
@@ -266,6 +267,7 @@ def lower_source_to_ir(
         extra_aliases=extra_aliases,
         extra_global_annotations=extra_global_annotations,
         extra_global_string_constants=extra_global_string_constants,
+        extra_global_scalar_constants=extra_global_scalar_constants,
         extra_global_string_container_constants=extra_global_string_container_constants,
     )
 
@@ -282,6 +284,7 @@ def lower_analysis_to_ir(
     extra_aliases: dict[str, AotType] | None = None,
     extra_global_annotations: dict[str, str] | None = None,
     extra_global_string_constants: dict[str, str] | None = None,
+    extra_global_scalar_constants: dict[str, IrExpr] | None = None,
     extra_global_string_container_constants: dict[str, IrTuple] | None = None,
 ) -> IrModule:
     filename = analysis.module.filename
@@ -296,6 +299,8 @@ def lower_analysis_to_ir(
     global_annotations.update(local_global_annotations)
     global_string_constants = dict(extra_global_string_constants or {})
     global_string_constants.update(_collect_global_string_constants(analysis.module.tree))
+    global_scalar_constants = dict(extra_global_scalar_constants or {})
+    global_scalar_constants.update(_collect_global_scalar_constants(analysis.module.tree))
     local_global_string_container_constants = _collect_global_string_container_constants(
         analysis.module.tree
     )
@@ -316,6 +321,7 @@ def lower_analysis_to_ir(
         _collect_global_names(analysis.module.tree),
         global_annotations,
         global_string_constants,
+        global_scalar_constants,
         global_string_container_constants,
         global_record_constructor_maps,
     )
@@ -364,6 +370,7 @@ class _Lowerer:
         global_names: set[str] | None = None,
         global_annotations: dict[str, str] | None = None,
         global_string_constants: dict[str, str] | None = None,
+        global_scalar_constants: dict[str, IrExpr] | None = None,
         global_string_container_constants: dict[str, IrTuple] | None = None,
         global_record_constructor_maps: dict[str, IrTuple] | None = None,
     ) -> None:
@@ -374,6 +381,7 @@ class _Lowerer:
         self.global_names = global_names or set()
         self.global_types = self._global_annotation_types(global_annotations or {})
         self.global_string_constants = global_string_constants or {}
+        self.global_scalar_constants = global_scalar_constants or {}
         self.global_string_container_constants = global_string_container_constants or {}
         self.global_record_constructor_maps = global_record_constructor_maps or {}
         self.callable_param_targets: dict[str, str] = {}
@@ -1099,6 +1107,9 @@ class _Lowerer:
             string_constant = self.global_string_constants.get(expr.id)
             if string_constant is not None:
                 return IrConstString(string_constant)
+            scalar_constant = self.global_scalar_constants.get(expr.id)
+            if scalar_constant is not None:
+                return scalar_constant
             string_container = self.global_string_container_constants.get(expr.id)
             if string_container is not None:
                 return string_container
@@ -3547,6 +3558,9 @@ class _Lowerer:
             string_constant = self.global_string_constants.get(default.id)
             if string_constant is not None:
                 return IrConstString(string_constant)
+            scalar_constant = self.global_scalar_constants.get(default.id)
+            if scalar_constant is not None:
+                return scalar_constant
             string_container = self.global_string_container_constants.get(default.id)
             if string_container is not None:
                 return string_container
@@ -4647,6 +4661,9 @@ class _Lowerer:
             value_type = names.get(expr.id)
             if value_type is not None:
                 return value_type
+            scalar_constant = self.global_scalar_constants.get(expr.id)
+            if scalar_constant is not None:
+                return scalar_constant.type
             global_type = self.global_types.get(expr.id)
             if global_type is not None:
                 return global_type
@@ -6318,6 +6335,54 @@ def _collect_global_string_constants(tree: ast.Module) -> dict[str, str]:
         ):
             constants[statement.target.id] = statement.value.value
     return constants
+
+
+def _collect_global_scalar_constants(tree: ast.Module) -> dict[str, IrExpr]:
+    constants: dict[str, IrExpr] = {}
+    for statement in tree.body:
+        value: ast.expr | None = None
+        target_name: str | None = None
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+        ):
+            target_name = statement.targets[0].id
+            value = statement.value
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            target_name = statement.target.id
+            value = statement.value
+        if target_name is None or value is None:
+            continue
+        literal = _global_scalar_literal(value, constants)
+        if literal is not None:
+            constants[target_name] = literal
+    return constants
+
+
+def _global_scalar_literal(
+    value: ast.expr,
+    constants: dict[str, IrExpr],
+) -> IrExpr | None:
+    if isinstance(value, ast.Name):
+        return constants.get(value.id)
+    if isinstance(value, ast.Constant):
+        if isinstance(value.value, bool):
+            return IrConstBool(value.value)
+        if type(value.value) is int:
+            return IrConstInt(value.value, IrIntType(64, signed=True))
+        return None
+    if (
+        isinstance(value, ast.UnaryOp)
+        and isinstance(value.op, (ast.UAdd, ast.USub))
+        and isinstance(value.operand, ast.Constant)
+        and type(value.operand.value) is int
+    ):
+        literal = value.operand.value
+        if isinstance(value.op, ast.USub):
+            literal = -literal
+        return IrConstInt(literal, IrIntType(64, signed=True))
+    return None
 
 
 def _collect_global_string_container_constants(tree: ast.Module) -> dict[str, IrTuple]:
