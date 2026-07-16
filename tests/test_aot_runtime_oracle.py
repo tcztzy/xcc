@@ -1967,6 +1967,30 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="global-scalar-constants.py",
         )
 
+    def test_ifexp_record_union_member_preserves_runtime_value(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Left:\n"
+            "    value: int\n"
+            "@dataclass(frozen=True)\n"
+            "class Right:\n"
+            "    value: int\n"
+            "Value = Left | Right\n"
+            "@dataclass(frozen=True)\n"
+            "class Box:\n"
+            "    items: tuple[Value, ...]\n"
+            "def pick(box: Box, use_item: bool) -> int:\n"
+            "    chosen = box.items[0] if use_item else Left(7)\n"
+            "    if isinstance(chosen, Right):\n"
+            "        return chosen.value + 4\n"
+            "    return chosen.value\n"
+            "def entry() -> int:\n"
+            "    return pick(Box((Right(3),)), True)\n",
+            expected=7,
+            filename="ifexp-record-union-member.py",
+        )
+
     def test_equivalent_tuple_list_union_preserves_nested_dict_type(self) -> None:
         self.assert_native_matches_cpython(
             "def total(\n"

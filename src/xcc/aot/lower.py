@@ -4466,6 +4466,11 @@ class _Lowerer:
                 if isinstance(body_type, (IrBytesType, IrRecordType, IrStringType)):
                     return _merge_literal_types((body_type, orelse_type))
                 return body_type
+            if isinstance(body_type, IrRecordType) and isinstance(orelse_type, IrRecordType):
+                if _record_type_contains_type(body_type.name, orelse_type.name):
+                    return body_type
+                if _record_type_contains_type(orelse_type.name, body_type.name):
+                    return orelse_type
             union_type = _compatible_optional_union_type(body_type, orelse_type)
             if union_type is not None:
                 return union_type
@@ -5991,6 +5996,12 @@ def _compatible_optional_union_type(left: IrType, right: IrType) -> IrRecordType
     if _record_union_contains_type(right.name, left.name):
         return right
     return None
+
+
+def _record_type_contains_type(container_name: str, member_name: str) -> bool:
+    container_parts = _top_level_union_parts(container_name) or (container_name,)
+    member_parts = _top_level_union_parts(member_name) or (member_name,)
+    return all(part in container_parts for part in member_parts)
 
 
 def _preserves_nullable_record_join(

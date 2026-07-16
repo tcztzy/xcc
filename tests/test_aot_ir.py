@@ -2430,6 +2430,32 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrCall("len", (IrName("units", units_type),), int64),
         )
 
+    def test_ifexp_assignment_preserves_record_union_containing_other_arm(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Left:\n"
+            "    value: int\n"
+            "@dataclass(frozen=True)\n"
+            "class Right:\n"
+            "    value: int\n"
+            "Value = Left | Right\n"
+            "@dataclass(frozen=True)\n"
+            "class Box:\n"
+            "    items: tuple[Value, ...]\n"
+            "def pick(box: Box, use_item: bool) -> int:\n"
+            "    chosen = box.items[0] if use_item else Left(7)\n"
+            "    if isinstance(chosen, Right):\n"
+            "        return chosen.value + 4\n"
+            "    return chosen.value\n",
+            filename="ifexp_record_union_member.py",
+            include_functions={"pick"},
+        )
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(assigned.value.type, IrRecordType("Left | Right"))
+
     def test_lowers_object_expected_ifexp_with_matching_integer_arms_as_integer(self) -> None:
         int64 = IrIntType(64, signed=True)
         lowerer = _Lowerer(
