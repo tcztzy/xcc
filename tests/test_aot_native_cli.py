@@ -156,6 +156,49 @@ class AotNativeCliTests(unittest.TestCase):
         )
         self.assertEqual(native_program.returncode, 7, native_program.stdout + native_program.stderr)
 
+    def test_native_compiler_reaches_cross_module_imported_function(self) -> None:
+        source_root = self.build_root / "cross_module"
+        output_root = self.build_root / "cross-module-output"
+        source_root.mkdir()
+        output_root.mkdir()
+        (source_root / "__init__.py").write_text("", encoding="utf-8")
+        (source_root / "helper.py").write_text(
+            "def answer() -> int:\n"
+            "    return 7\n",
+            encoding="utf-8",
+        )
+        (source_root / "program.py").write_text(
+            "from cross_module.helper import answer\n"
+            "def main() -> int:\n"
+            "    return answer()\n",
+            encoding="utf-8",
+        )
+        output = output_root / "program"
+        completed = subprocess.run(
+            (
+                str(self.compiler),
+                "build",
+                f"--source-root={source_root}",
+                "--entry=cross_module.program:main",
+                f"--output={output}",
+                "--parser=subset",
+                "--no-cache",
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        reachability = output.with_suffix(".reachability").read_text(encoding="utf-8")
+        self.assertIn("function=cross_module.helper.answer;", reachability)
+        native_program = subprocess.run(
+            (str(output),),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(native_program.returncode, 7, native_program.stdout + native_program.stderr)
+
 
 def _logged_tools(tool_log: str) -> list[str]:
     return [

@@ -123,7 +123,7 @@ class AotMilestone3SliceTests(unittest.TestCase):
             ),
             IrAssign(
                 "slice",
-                IrTupleSlice(IrTuple((call,), string_tuple), 0, None),
+                IrTupleSlice(IrTuple((call,), string_tuple), IrConstInt(0, int64), None),
             ),
             IrAssign("enum", IrEnumMember("Kind", "EOF")),
             IrAssign(
@@ -176,7 +176,9 @@ class AotMilestone3SliceTests(unittest.TestCase):
             ("local", "local"),
         )
         self.assertEqual(
-            _expr_call_targets(IrTupleSlice(IrTuple((call,), string_tuple), 0, None)),
+            _expr_call_targets(
+                IrTupleSlice(IrTuple((call,), string_tuple), IrConstInt(0, int64), None)
+            ),
             ("local",),
         )
         self.assertEqual(
@@ -225,7 +227,14 @@ class AotMilestone3SliceTests(unittest.TestCase):
                 ),
             ),
             IrAssign("field", IrGetField(IrName("box", box_type), "value", other_type)),
-            IrAssign("slice", IrTupleSlice(IrName("items", tuple_type), 0, None)),
+            IrAssign(
+                "slice",
+                IrTupleSlice(
+                    IrName("items", tuple_type),
+                    IrConstInt(0, IrIntType(64, signed=True)),
+                    None,
+                ),
+            ),
             IrSetItem(
                 IrName("items", tuple_type),
                 IrName("box", box_type),
@@ -298,7 +307,14 @@ class AotMilestone3IrTests(unittest.TestCase):
             IrStringJoin(IrConstString(","), IrName("parts", tuple_type)).type,
             IrStringType(),
         )
-        self.assertEqual(IrTupleSlice(IrName("parts", tuple_type), 1, None).type, tuple_type)
+        self.assertEqual(
+            IrTupleSlice(
+                IrName("parts", tuple_type),
+                IrConstInt(1, IrIntType(64, signed=True)),
+                None,
+            ).type,
+            tuple_type,
+        )
 
     def test_models_core_control_flow_and_status(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -327,6 +343,17 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertIn("define ptr @__xcc_aot_lexer_header_summary_for_source", prelude)
         self.assertIn("define ptr @__xcc_aot_lexer_error_summary_for_source", prelude)
         self.assertIn("@__xcc_aot_fmt_token", prelude)
+
+    def test_tuple_alias_resolver_is_iterative_and_compresses_the_root_path(self) -> None:
+        prelude = runtime_prelude()
+        resolver = prelude.split(
+            "define ptr @__xcc_aot_tuple_resolve(ptr %tuple) {",
+            1,
+        )[1].split("define void @__xcc_aot_tuple_forward", 1)[0]
+
+        self.assertNotIn("call ptr @__xcc_aot_tuple_resolve", resolver)
+        self.assertIn("%current = phi ptr [ %tuple, %start ], [ %new, %follow ]", resolver)
+        self.assertIn("store ptr %terminal, ptr %root_new_slot", resolver)
 
     def test_annotation_name_edge_forms(self) -> None:
         string_annotation = parse_source(

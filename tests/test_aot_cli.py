@@ -100,6 +100,104 @@ class AotCliTests(unittest.TestCase):
                 self.assertEqual(status, 2)
                 self.assertIn(message, stdout)
 
+    def test_native_build_lowers_full_subset_source_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "pkg"
+            root.mkdir()
+            (root / "__init__.py").write_text("", encoding="utf-8")
+            (root / "helper.py").write_text(
+                "int32 = int\n"
+                "def result() -> int32:\n"
+                "    return 7\n",
+                encoding="utf-8",
+            )
+            (root / "cli.py").write_text(
+                "from pkg.helper import result\n"
+                "int32 = int\n"
+                "def main(argc: int32, argv: tuple[str, ...]) -> int32:\n"
+                "    return result()\n",
+                encoding="utf-8",
+            )
+            output = base / "out" / "xcc-aot"
+            llvm_path = base / "artifacts" / "cli.ll"
+            manifest_path = base / "artifacts" / "sources.json"
+            output.parent.mkdir()
+            llvm_path.parent.mkdir()
+            argv = (
+                "xcc-aot",
+                "build",
+                f"--source-root={root}",
+                "--entry=pkg.cli:main",
+                f"--output={output}",
+                "--parser=subset",
+                "--no-cache",
+                f"--emit-llvm={llvm_path}",
+                f"--source-manifest={manifest_path}",
+            )
+            with patch("xcc.aot.cli._run_tool", return_value=0):
+                status, stdout, stderr = _run(native_main, argv)
+
+            llvm_text = llvm_path.read_text(encoding="utf-8")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        self.assertEqual((status, stdout, stderr), (0, "", ""))
+        self.assertIn("define i32 @pkg.cli.main", llvm_text)
+        self.assertIn("define i32 @pkg.helper.result", llvm_text)
+        self.assertEqual(
+            [unit["module"] for unit in manifest["units"]],
+            ["pkg", "pkg.helper", "pkg.cli"],
+        )
+        self.assertEqual(
+            manifest["cache"],
+            {
+                "directory": None,
+                "read_enabled": False,
+                "requested_no_cache": True,
+                "write_enabled": False,
+            },
+        )
+
+    def test_native_build_resolves_function_local_static_import(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "pkg"
+            root.mkdir()
+            (root / "__init__.py").write_text("", encoding="utf-8")
+            (root / "helper.py").write_text(
+                "def result() -> int:\n"
+                "    return 7\n",
+                encoding="utf-8",
+            )
+            (root / "cli.py").write_text(
+                "def main(argc: int, argv: tuple[str, ...]) -> int:\n"
+                "    from pkg.helper import result\n"
+                "    return result()\n",
+                encoding="utf-8",
+            )
+            output = base / "out" / "xcc-aot"
+            llvm_path = base / "artifacts" / "cli.ll"
+            output.parent.mkdir()
+            llvm_path.parent.mkdir()
+            argv = (
+                "xcc-aot",
+                "build",
+                f"--source-root={root}",
+                "--entry=pkg.cli:main",
+                f"--output={output}",
+                "--parser=subset",
+                "--no-cache",
+                f"--emit-llvm={llvm_path}",
+            )
+            with patch("xcc.aot.cli._run_tool", return_value=0):
+                status, stdout, stderr = _run(native_main, argv)
+
+            llvm_text = llvm_path.read_text(encoding="utf-8")
+
+        self.assertEqual((status, stdout, stderr), (0, "", ""))
+        self.assertIn("define i64 @pkg.helper.result", llvm_text)
+        self.assertIn("call i64 @pkg.helper.result()", llvm_text)
+
     def test_hosted_build_emits_contract_artifacts_and_invokes_native_tool(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

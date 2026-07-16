@@ -1,11 +1,14 @@
 import subprocess
 from pathlib import Path
 
-from xcc.aot.analysis import analyze_module
-from xcc.aot.ir import qualify_ir_entry, validate_ir_module
+from xcc.aot.ir import IrModule, validate_ir_module
 from xcc.aot.llvm_text import emit_llvm_text
-from xcc.aot.lower import lower_analysis_to_ir
-from xcc.aot.py_parser import parse_subset_source
+from xcc.aot.slice import AotSliceInput, lower_named_slice, render_native_reachability
+from xcc.aot.source_contract import (
+    CachePolicy,
+    render_source_manifest,
+    resolve_subset_source_set,
+)
 
 int32 = int
 
@@ -154,6 +157,7 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
         llc,
         assembler,
         linker,
+        "--no-cache" in seen_options,
     )
 
 
@@ -168,41 +172,59 @@ def _run_native_build(
     llc: str,
     assembler: str,
     linker: str,
+    no_cache: bool,
 ) -> int32:
     if entry.count(":") != 1:
         print(f"xcc-aot: invalid entry: {entry}")
         return 2
     module_name, function_name = entry.split(":", 1)
-    source_path = _module_source_path(source_root, module_name)
-    if not source_path:
-        print(f"xcc-aot: entry module is outside source root: {module_name}")
-        return 2
-    path = Path(source_path)
-    if not path.is_file():
-        print(f"xcc-aot: entry module not found: {source_path}")
-        return 1
-    source = path.read_text(encoding="utf-8", errors="surrogateescape")
-    parsed = parse_subset_source(source, filename=source_path)
-    ir_module = lower_analysis_to_ir(
-        analyze_module(parsed),
-        entry=function_name,
-        include_functions={function_name},
+    source_set = resolve_subset_source_set(
+        Path(source_root),
+        module_name,
+        CachePolicy(no_cache),
     )
-    ir_module = qualify_ir_entry(ir_module, module_name + "." + function_name)
+    qualified_entry = module_name + "." + function_name
+    slice_inputs: list[AotSliceInput] = []
+    for unit in source_set.units:
+        slice_inputs.append(
+            AotSliceInput(unit.module, Path(unit.canonical_path), unit.source, unit.parsed)
+        )
+    lowered = lower_named_slice(
+        tuple(slice_inputs),
+        root_targets=(qualified_entry,),
+    )
+    ir_module = IrModule(
+        lowered.filename,
+        lowered.records,
+        lowered.functions,
+        qualified_entry,
+    )
     validate_ir_module(ir_module)
     llvm_text = emit_llvm_text(ir_module)
     llvm_path = emit_llvm or output + ".ll"
     if not _write_text(llvm_path, llvm_text):
         print(f"xcc-aot: cannot write LLVM: {llvm_path}")
         return 1
-    if emit_normalized_ir and not _write_text(emit_normalized_ir, llvm_text):
+    if emit_normalized_ir and not _write_text(
+        emit_normalized_ir,
+        _normalize_llvm(llvm_text, source_set.source_root),
+    ):
         print(f"xcc-aot: cannot write normalized LLVM: {emit_normalized_ir}")
         return 1
     if source_manifest:
-        manifest = _source_manifest(source_root, entry, source_path)
+        manifest = render_source_manifest(source_set)
         if not _write_text(source_manifest, manifest):
             print(f"xcc-aot: cannot write source manifest: {source_manifest}")
             return 1
+    reachability_path = output + ".reachability"
+    reachability = render_native_reachability(
+        ir_module,
+        root=qualified_entry,
+        parser="subset",
+    )
+    if not _write_text(reachability_path, reachability):
+        print(f"xcc-aot: cannot write native reachability: {reachability_path}")
+        return 1
     object_path = output + ".o"
     commands: tuple[tuple[str, ...], ...] = ()
     command: tuple[str, ...]
@@ -247,16 +269,14 @@ def _module_source_path(source_root: str, module_name: str) -> str:
     return str(root / relative)
 
 
-def _source_manifest(source_root: str, entry: str, source_path: str) -> str:
-    return (
-        '{"entry":"'
-        + entry
-        + '","parser":"subset","source_root":"'
-        + source_root
-        + '","units":[{"path":"'
-        + source_path
-        + '"}],"version":1}\n'
-    )
+def _normalize_llvm(llvm_text: str, source_root: str) -> str:
+    normalized: list[str] = []
+    for line in llvm_text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("; ModuleID =", "source_filename =", "!DIFile(")):
+            line = line.replace(source_root, "$SOURCE_ROOT")
+        normalized.append(line.rstrip())
+    return "\n".join(normalized) + "\n"
 
 
 def _render_tool_log(commands: tuple[tuple[str, ...], ...]) -> str:

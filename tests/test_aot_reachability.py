@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot.analysis import analyze_source
@@ -16,28 +17,67 @@ from xcc.aot.ir import (
 )
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
+from xcc.aot.module import parse_source
 from xcc.aot.slice import (
     AotSliceInput,
     _function_record_names,
     _slice_class_tables,
     lower_core_slice,
+    lower_named_slice,
+    render_native_reachability,
 )
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
-
 
 ROOT = Path(__file__).resolve().parents[1]
 AOT_ROOT = ROOT / "src/xcc/aot"
 
 
 class AotReachabilityTests(unittest.TestCase):
+    def test_named_slice_reuses_source_contract_parsed_snapshot(self) -> None:
+        source = "def main() -> int:\n    return 0\n"
+        parsed = parse_source(source, filename="pkg/cli.py")
+        modules = (AotSliceInput("pkg.cli", Path("pkg/cli.py"), source, parsed),)
+
+        with patch("xcc.aot.slice.parse_source", side_effect=AssertionError("reparsed")):
+            module = lower_named_slice(modules, root_targets=("pkg.cli.main",))
+
+        self.assertEqual(tuple(function.name for function in module.functions), ("pkg.cli.main",))
+
+    def test_named_slice_closes_reachable_record_layout_over_base_chain(self) -> None:
+        source = (
+            "class Root:\n"
+            "    value: int\n"
+            "class Middle(Root):\n"
+            "    pass\n"
+            "class Leaf(Middle):\n"
+            "    label: str\n"
+            "def main(value: Leaf) -> int:\n"
+            "    return value.value\n"
+        )
+        parsed = parse_source(source, filename="pkg/model.py")
+        module = lower_named_slice(
+            (AotSliceInput("pkg.model", Path("pkg/model.py"), source, parsed),),
+            root_targets=("pkg.model.main",),
+        )
+
+        self.assertEqual(
+            {record.name for record in module.records},
+            {"Leaf", "Middle", "Root"},
+        )
+        reachability = render_native_reachability(
+            module,
+            root="pkg.model.main",
+            parser="subset",
+        )
+        self.assertIn("edge=record:Leaf->record:Middle;reason=layout", reachability)
+        self.assertIn("edge=record:Middle->record:Root;reason=layout", reachability)
+
     def test_v376_class_refinement_preserves_deterministic_owner(self) -> None:
         modules = (
             AotSliceInput("xcc.aot.py_ast", AOT_ROOT / "py_ast.py"),
             AotSliceInput("xcc.ast", ROOT / "src/xcc/ast.py"),
         )
-        source_cache = {
-            module.name: module.path.read_text(encoding="utf-8") for module in modules
-        }
+        source_cache = {module.name: module.path.read_text(encoding="utf-8") for module in modules}
 
         classes, owners = _slice_class_tables(modules, source_cache, {})
 
@@ -132,9 +172,7 @@ class AotReachabilityTests(unittest.TestCase):
             "    return isinstance(node, _UNSUPPORTED)\n",
             filename="type-marker-tuple.py",
             include_functions={"rejected"},
-            extra_classes={
-                name: AotClassInfo(name, {}) for name in ("AST", "AsyncFor", "Yield")
-            },
+            extra_classes={name: AotClassInfo(name, {}) for name in ("AST", "AsyncFor", "Yield")},
         )
 
         returned = module.functions[0].body[0]
@@ -149,9 +187,7 @@ class AotReachabilityTests(unittest.TestCase):
             tuple(element.name for element in marker.elements if isinstance(element, IrName)),
             ("AsyncFor", "Yield"),
         )
-        self.assertTrue(
-            {"AsyncFor", "Yield"}.issubset(_function_record_names(module.functions[0]))
-        )
+        self.assertTrue({"AsyncFor", "Yield"}.issubset(_function_record_names(module.functions[0])))
 
     def test_v376_binder_flows_imported_call_type_through_init_local(self) -> None:
         analysis = analyze_source(

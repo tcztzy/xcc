@@ -1,13 +1,13 @@
-import hashlib
-import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NoReturn
 
 from xcc.aot import py_ast as ast
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.module import AotModule
+from xcc.aot.py_parser import parse_subset_source
+from xcc.aot.sha256 import sha256_hex
 
 ParserKind = Literal["cpython", "subset"]
 ModuleParser = Callable[[str, str], AotModule]
@@ -113,6 +113,8 @@ def resolve_source_set(
     parser: ParserBackend,
     cache_policy: CachePolicy | None = None,
 ) -> SourceSet:
+    if parser.kind == "subset":
+        return resolve_subset_source_set(source_root, entry_module, cache_policy)
     root = source_root.resolve()
     if not root.is_dir():
         _raise_contract_error("XCC-AOT-SOURCE-0001", f"Source root is not a directory: {root}")
@@ -175,9 +177,9 @@ def resolve_source_set(
         units.append(
             SourceUnit(
                 module=module_name,
-                relative_path=path.relative_to(root).as_posix(),
+                relative_path=_module_relative_path(root_package, module_name, path),
                 canonical_path=str(path),
-                sha256=hashlib.sha256(raw).hexdigest(),
+                sha256=sha256_hex(raw),
                 dependencies=dependencies[module_name],
                 external_dependencies=external_dependencies[module_name],
                 order=index,
@@ -189,40 +191,172 @@ def resolve_source_set(
     return SourceSet(str(root), entry_module, parser.kind, policy, tuple(units))
 
 
+def resolve_subset_source_set(
+    source_root: Path,
+    entry_module: str,
+    cache_policy: CachePolicy | None = None,
+) -> SourceSet:
+    root = source_root.resolve()
+    if not (root / "__init__.py").is_file():
+        _raise_contract_error("XCC-AOT-SOURCE-0001", f"Source root is not a package: {root}")
+    if not _valid_module_name(entry_module):
+        _raise_contract_error("XCC-AOT-SOURCE-0002", f"Invalid entry module: {entry_module}")
+    root_package = root.name
+    if entry_module != root_package and not entry_module.startswith(f"{root_package}."):
+        _raise_contract_error(
+            "XCC-AOT-SOURCE-0002",
+            f"Entry module is outside source package {root_package}: {entry_module}",
+        )
+
+    pending = [entry_module]
+    sources: dict[str, tuple[Path, str, bytes, AotModule]] = {}
+    dependencies: dict[str, tuple[str, ...]] = {}
+    external_dependencies: dict[str, tuple[str, ...]] = {}
+    while pending:
+        module_name = min(pending)
+        pending.remove(module_name)
+        if module_name in sources:
+            continue
+        if module_name in HOSTED_ONLY_MODULES:
+            _raise_contract_error(
+                "XCC-AOT-SOURCE-0006",
+                f"Hosted-only module is not available to subset parser: {module_name}",
+            )
+        path = _module_path(root, root_package, module_name)
+        source = path.read_text(encoding="utf-8")
+        raw = source.encode("utf-8")
+        parsed = parse_subset_source(source, filename=str(path))
+        module_dependencies, module_external_dependencies = _module_dependencies(
+            parsed.tree,
+            module_name,
+            root,
+            root_package,
+        )
+        dependencies[module_name] = module_dependencies
+        external_dependencies[module_name] = module_external_dependencies
+        sources[module_name] = (path, source, raw, parsed)
+        for dependency in module_dependencies:
+            if dependency not in sources and dependency not in pending:
+                pending.append(dependency)
+
+    order = _dependency_order(dependencies)
+    units: list[SourceUnit] = []
+    for index, module_name in enumerate(order):
+        path, source, raw, parsed = sources[module_name]
+        units.append(
+            SourceUnit(
+                module=module_name,
+                relative_path=_module_relative_path(root_package, module_name, path),
+                canonical_path=str(path),
+                sha256=sha256_hex(raw),
+                dependencies=dependencies[module_name],
+                external_dependencies=external_dependencies[module_name],
+                order=index,
+                source=source,
+                parsed=parsed,
+            )
+        )
+    policy = cache_policy if cache_policy is not None else CachePolicy(False)
+    return SourceSet(str(root), entry_module, "subset", policy, tuple(units))
+
+
 def render_source_manifest(source_set: SourceSet) -> str:
-    payload = {
-        "cache": {
-            "directory": source_set.cache_policy.directory,
-            "read_enabled": source_set.cache_policy.read_enabled,
-            "requested_no_cache": source_set.cache_policy.requested_no_cache,
-            "write_enabled": source_set.cache_policy.write_enabled,
-        },
-        "entry": source_set.entry_module,
-        "parser": source_set.parser,
-        "source_root": source_set.source_root,
-        "units": [
-            {
-                "canonical_path": unit.canonical_path,
-                "dependencies": list(unit.dependencies),
-                "external_dependencies": list(unit.external_dependencies),
-                "module": unit.module,
-                "order": unit.order,
-                "relative_path": unit.relative_path,
-                "sha256": unit.sha256,
-            }
-            for unit in source_set.units
-        ],
-        "version": 1,
-    }
-    return json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+    policy = source_set.cache_policy
+    directory = "null" if policy.directory is None else _json_string(policy.directory)
+    units = "["
+    first = True
+    for unit in source_set.units:
+        if not first:
+            units += ","
+        units += (
+            '{"canonical_path":'
+            + _json_string(unit.canonical_path)
+            + ',"dependencies":'
+            + _json_string_array(unit.dependencies)
+            + ',"external_dependencies":'
+            + _json_string_array(unit.external_dependencies)
+            + ',"module":'
+            + _json_string(unit.module)
+            + ',"order":'
+            + str(unit.order)
+            + ',"relative_path":'
+            + _json_string(unit.relative_path)
+            + ',"sha256":'
+            + _json_string(unit.sha256)
+            + "}"
+        )
+        first = False
+    units += "]"
+    return (
+        '{"cache":{"directory":'
+        + directory
+        + ',"read_enabled":'
+        + _json_bool(policy.read_enabled)
+        + ',"requested_no_cache":'
+        + _json_bool(policy.requested_no_cache)
+        + ',"write_enabled":'
+        + _json_bool(policy.write_enabled)
+        + '},"entry":'
+        + _json_string(source_set.entry_module)
+        + ',"parser":'
+        + _json_string(source_set.parser)
+        + ',"source_root":'
+        + _json_string(source_set.source_root)
+        + ',"units":'
+        + units
+        + ',"version":1}\n'
+    )
+
+
+def _json_bool(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def _json_string_array(values: tuple[str, ...]) -> str:
+    result = "["
+    first = True
+    for value in values:
+        if not first:
+            result += ","
+        result += _json_string(value)
+        first = False
+    return result + "]"
+
+
+def _json_string(value: str) -> str:
+    result = '"'
+    digits = "0123456789abcdef"
+    for character in value:
+        code = ord(character)
+        if character == '"':
+            result += '\\"'
+        elif character == "\\":
+            result += "\\\\"
+        elif character == "\b":
+            result += "\\b"
+        elif character == "\f":
+            result += "\\f"
+        elif character == "\n":
+            result += "\\n"
+        elif character == "\r":
+            result += "\\r"
+        elif character == "\t":
+            result += "\\t"
+        elif code < 0x20:
+            result += "\\u00" + digits[(code >> 4) & 0xF] + digits[code & 0xF]
+        else:
+            result += character
+    return result + '"'
 
 
 def _module_path(root: Path, root_package: str, module_name: str) -> Path:
     suffix = module_name[len(root_package) :].lstrip(".")
     parts = [] if not suffix else suffix.split(".")
-    module_path = root.joinpath(*parts)
+    module_path = root
+    for part in parts:
+        module_path = module_path / part
     package_path = module_path / "__init__.py"
-    source_path = module_path.with_suffix(".py")
+    source_path = Path(str(module_path) + ".py")
     if package_path.is_file():
         path = package_path
     elif source_path.is_file():
@@ -233,12 +367,21 @@ def _module_path(root: Path, root_package: str, module_name: str) -> Path:
             f"Module not found: {module_name}",
         )
     resolved = path.resolve()
-    if root != resolved and root not in resolved.parents:
+    root_text = str(root)
+    resolved_text = str(resolved)
+    if resolved_text != root_text and not resolved_text.startswith(root_text.rstrip("/") + "/"):
         _raise_contract_error(
             "XCC-AOT-SOURCE-0005",
             f"Module path escapes source root: {module_name}",
         )
     return resolved
+
+
+def _module_relative_path(root_package: str, module_name: str, path: Path) -> str:
+    suffix = module_name[len(root_package) :].lstrip(".").replace(".", "/")
+    if path.name == "__init__.py":
+        return (suffix + "/" if suffix else "") + "__init__.py"
+    return suffix + ".py"
 
 
 def _module_dependencies(
@@ -330,8 +473,10 @@ def _package_ancestors(module_name: str, root_package: str) -> tuple[str, ...]:
 def _module_exists(root: Path, root_package: str, module_name: str) -> bool:
     suffix = module_name[len(root_package) :].lstrip(".")
     parts = [] if not suffix else suffix.split(".")
-    path = root.joinpath(*parts)
-    return (path / "__init__.py").is_file() or path.with_suffix(".py").is_file()
+    path = root
+    for part in parts:
+        path = path / part
+    return (path / "__init__.py").is_file() or Path(str(path) + ".py").is_file()
 
 
 def _resolve_import_from(
@@ -345,7 +490,10 @@ def _resolve_import_from(
     parts = module_name.split(".")
     suffix = module_name[len(root_package) :].lstrip(".")
     relative_parts = [] if not suffix else suffix.split(".")
-    is_package = root.joinpath(*relative_parts, "__init__.py").is_file()
+    package_path = root
+    for part in relative_parts:
+        package_path = package_path / part
+    is_package = (package_path / "__init__.py").is_file()
     package = parts if is_package else parts[:-1]
     parent_count = node.level - 1
     if parent_count > len(package):
@@ -442,5 +590,5 @@ def _valid_module_name(name: str) -> bool:
     return bool(name) and all(part.isidentifier() for part in name.split("."))
 
 
-def _raise_contract_error(code: str, message: str) -> None:
+def _raise_contract_error(code: str, message: str) -> NoReturn:
     raise AotError((AotDiagnostic(code, message, filename="<source-contract>"),))

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import assert_never
 
 from xcc.aot import py_ast as ast
-from xcc.aot.analysis import analyze_source
+from xcc.aot.analysis import AotAnalysis, analyze_module, analyze_source
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.ir import (
     IrAssign,
@@ -51,9 +51,10 @@ from xcc.aot.ir import (
 from xcc.aot.lower import (
     _collect_global_string_constants,
     _collect_global_string_container_constants,
+    lower_analysis_to_ir,
     lower_source_to_ir,
 )
-from xcc.aot.module import parse_source
+from xcc.aot.module import AotModule, parse_source
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
 
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
@@ -311,6 +312,8 @@ _INTERNAL_RECORD_TYPES = frozenset({"LLVMApi"})
 class AotSliceInput:
     name: str
     path: Path
+    source: str | None = None
+    parsed: AotModule | None = None
 
 
 def collect_slice_inputs(paths: tuple[Path, ...]) -> tuple[AotSliceInput, ...]:
@@ -423,30 +426,66 @@ def lower_core_entry_slice(paths: tuple[Path, ...], wrapper: IrFunction) -> IrMo
 def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
     module_inputs = collect_slice_inputs(paths)
     source_cache = {
-        module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
+        module.name: (
+            module.source if module.source is not None else module.path.read_text(encoding="utf-8")
+        )
+        for module in module_inputs
     }
-    function_types = _slice_method_signature_table(module_inputs, source_cache)
+    parsed_cache = _slice_parsed_module_cache(module_inputs, source_cache)
+    function_types = _slice_method_signature_table(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
     class_types, _ = _slice_class_tables(
         module_inputs,
         source_cache,
         function_types,
+        parsed_cache=parsed_cache,
     )
-    aliases = _slice_type_aliases(module_inputs, source_cache)
-    global_annotations = _slice_global_annotations(module_inputs, source_cache)
-    global_string_constants = _slice_global_string_constants(module_inputs, source_cache)
+    aliases = _slice_type_aliases(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
+    global_annotations = _slice_global_annotations(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
+    global_string_constants = _slice_global_string_constants(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
     global_string_container_constants = _slice_global_string_container_constants(
         module_inputs,
         source_cache,
+        parsed_cache=parsed_cache,
     )
     records: list[IrRecord] = []
     functions: list[IrFunction] = []
     module_names = frozenset(source_cache)
+    rename_maps = {
+        module.name: _module_rename_map(
+            module.name,
+            source_cache[module.name],
+            module_names,
+            tree=parsed_cache[module.name].tree,
+        )
+        for module in module_inputs
+    }
+    analysis_cache = _slice_lowering_analysis_cache(
+        module_inputs,
+        parsed_cache,
+        class_types,
+        function_types,
+        rename_maps,
+    )
     for module_input in module_inputs:
-        source = source_cache[module_input.name]
-        rename_map = _module_rename_map(module_input.name, source, module_names)
-        module = lower_source_to_ir(
-            source,
-            filename=str(module_input.path),
+        rename_map = rename_maps[module_input.name]
+        module = lower_analysis_to_ir(
+            analysis_cache[module_input.name],
             extra_classes=class_types,
             extra_functions=_function_types_with_module_aliases(
                 function_types,
@@ -486,26 +525,60 @@ def _lower_named_slice_from_roots(
 ) -> IrModule:
     inputs_by_name = {module.name: module for module in module_inputs}
     source_cache = {
-        module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
+        module.name: (
+            module.source if module.source is not None else module.path.read_text(encoding="utf-8")
+        )
+        for module in module_inputs
     }
-    function_types = _slice_method_signature_table(module_inputs, source_cache)
+    parsed_cache = _slice_parsed_module_cache(module_inputs, source_cache)
+    function_types = _slice_method_signature_table(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
     class_types, class_modules = _slice_class_tables(
         module_inputs,
         source_cache,
         function_types,
+        parsed_cache=parsed_cache,
     )
-    aliases = _slice_type_aliases(module_inputs, source_cache)
-    global_annotations = _slice_global_annotations(module_inputs, source_cache)
-    global_string_constants = _slice_global_string_constants(module_inputs, source_cache)
+    aliases = _slice_type_aliases(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
+    global_annotations = _slice_global_annotations(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
+    global_string_constants = _slice_global_string_constants(
+        module_inputs,
+        source_cache,
+        parsed_cache=parsed_cache,
+    )
     global_string_container_constants = _slice_global_string_container_constants(
         module_inputs,
         source_cache,
+        parsed_cache=parsed_cache,
     )
     module_names = frozenset(source_cache)
     rename_maps = {
-        module.name: _module_rename_map(module.name, source_cache[module.name], module_names)
+        module.name: _module_rename_map(
+            module.name,
+            source_cache[module.name],
+            module_names,
+            tree=parsed_cache[module.name].tree,
+        )
         for module in module_inputs
     }
+    analysis_cache = _slice_lowering_analysis_cache(
+        module_inputs,
+        parsed_cache,
+        class_types,
+        function_types,
+        rename_maps,
+    )
     records_by_name: dict[str, IrRecord] = {}
     functions: dict[str, IrFunction] = {}
     record_names = set(required_records)
@@ -517,7 +590,6 @@ def _lower_named_slice_from_roots(
         module_name, local_name = _split_module_function(target, inputs_by_name)
         if module_name is None or local_name is None:
             continue
-        module_input = inputs_by_name[module_name]
         bodyless = (
             frozenset({local_name}) if target in _NATIVE_EMITTED_LEAF_FUNCTIONS else frozenset()
         )
@@ -525,9 +597,8 @@ def _lower_named_slice_from_roots(
         if "." in local_name:
             include_records.add(local_name.split(".", 1)[0])
         rename_map = rename_maps[module_name]
-        module = lower_source_to_ir(
-            source_cache[module_name],
-            filename=str(module_input.path),
+        module = lower_analysis_to_ir(
+            analysis_cache[module_name],
             include_records=include_records,
             include_functions={local_name},
             bodyless_functions=bodyless,
@@ -557,6 +628,8 @@ def _lower_named_slice_from_roots(
                 global_annotations,
                 global_string_constants,
                 global_string_container_constants,
+                parsed_cache=parsed_cache,
+                analysis_cache=analysis_cache,
             )
         for function in module.functions:
             full_name = rename_map[function.name]
@@ -586,6 +659,8 @@ def _lower_named_slice_from_roots(
                     global_annotations,
                     global_string_constants,
                     global_string_container_constants,
+                    parsed_cache=parsed_cache,
+                    analysis_cache=analysis_cache,
                 )
             pending.extend(
                 _rename_call_target(call_target, rename_map)
@@ -594,10 +669,70 @@ def _lower_named_slice_from_roots(
     return IrModule("<core-slice>", tuple(records_by_name.values()), tuple(functions.values()))
 
 
+def _slice_parsed_module_cache(
+    module_inputs: tuple[AotSliceInput, ...],
+    source_cache: dict[str, str],
+) -> dict[str, AotModule]:
+    parsed_cache: dict[str, AotModule] = {}
+    for module_input in module_inputs:
+        parsed = module_input.parsed
+        if parsed is None:
+            parsed = parse_source(
+                source_cache[module_input.name],
+                filename=str(module_input.path),
+            )
+        parsed_cache[module_input.name] = parsed
+    return parsed_cache
+
+
+def _analyze_slice_module(
+    module_input: AotSliceInput,
+    source_cache: dict[str, str],
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
+    extra_classes: dict[str, AotClassInfo] | None = None,
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
+) -> AotAnalysis:
+    if parsed_cache is None:
+        return analyze_source(
+            source_cache[module_input.name],
+            filename=str(module_input.path),
+            extra_classes=extra_classes,
+            extra_functions=extra_functions,
+        )
+    return analyze_module(
+        parsed_cache[module_input.name],
+        extra_classes=extra_classes,
+        extra_functions=extra_functions,
+    )
+
+
+def _slice_lowering_analysis_cache(
+    module_inputs: tuple[AotSliceInput, ...],
+    parsed_cache: dict[str, AotModule],
+    class_types: dict[str, AotClassInfo],
+    function_types: dict[str, AotFunctionInfo],
+    rename_maps: dict[str, dict[str, str]],
+) -> dict[str, AotAnalysis]:
+    analyses: dict[str, AotAnalysis] = {}
+    for module_input in module_inputs:
+        analyses[module_input.name] = analyze_module(
+            parsed_cache[module_input.name],
+            extra_classes=class_types,
+            extra_functions=_function_types_with_module_aliases(
+                function_types,
+                rename_maps[module_input.name],
+            ),
+        )
+    return analyses
+
+
 def _slice_class_tables(
     module_inputs: tuple[AotSliceInput, ...],
     source_cache: dict[str, str],
     function_types: dict[str, AotFunctionInfo],
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
 ) -> tuple[dict[str, AotClassInfo], dict[str, str]]:
     class_types: dict[str, AotClassInfo] = {}
     class_modules: dict[str, str] = {}
@@ -607,14 +742,13 @@ def _slice_class_tables(
             module_input.name,
             source_cache[module_input.name],
             module_names,
+            tree=(parsed_cache[module_input.name].tree if parsed_cache is not None else None),
         )
-        analysis = analyze_source(
-            source_cache[module_input.name],
-            filename=str(module_input.path),
-            extra_functions=_function_types_with_module_aliases(
-                function_types,
-                rename_map,
-            ),
+        analysis = _analyze_slice_module(
+            module_input,
+            source_cache,
+            parsed_cache=parsed_cache,
+            extra_functions=_function_types_with_module_aliases(function_types, rename_map),
         )
         for class_name, class_info in analysis.types.classes.items():
             class_types.setdefault(class_name, class_info)
@@ -624,15 +758,14 @@ def _slice_class_tables(
             module_input.name,
             source_cache[module_input.name],
             module_names,
+            tree=(parsed_cache[module_input.name].tree if parsed_cache is not None else None),
         )
-        analysis = analyze_source(
-            source_cache[module_input.name],
-            filename=str(module_input.path),
+        analysis = _analyze_slice_module(
+            module_input,
+            source_cache,
+            parsed_cache=parsed_cache,
             extra_classes=class_types,
-            extra_functions=_function_types_with_module_aliases(
-                function_types,
-                rename_map,
-            ),
+            extra_functions=_function_types_with_module_aliases(function_types, rename_map),
         )
         for class_name, class_info in analysis.types.classes.items():
             if class_modules.get(class_name) == module_input.name:
@@ -643,12 +776,15 @@ def _slice_class_tables(
 def _slice_method_signature_table(
     module_inputs: tuple[AotSliceInput, ...],
     source_cache: dict[str, str],
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
 ) -> dict[str, AotFunctionInfo]:
     function_types: dict[str, AotFunctionInfo] = {}
     for module_input in module_inputs:
-        analysis = analyze_source(
-            source_cache[module_input.name],
-            filename=str(module_input.path),
+        analysis = _analyze_slice_module(
+            module_input,
+            source_cache,
+            parsed_cache=parsed_cache,
         )
         for function_name, function_info in analysis.types.functions.items():
             function_types.setdefault(function_name, function_info)
@@ -659,12 +795,15 @@ def _slice_method_signature_table(
 def _slice_type_aliases(
     module_inputs: tuple[AotSliceInput, ...],
     source_cache: dict[str, str],
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
 ) -> dict[str, AotType]:
     aliases: dict[str, AotType] = {}
     for module_input in module_inputs:
-        analysis = analyze_source(
-            source_cache[module_input.name],
-            filename=str(module_input.path),
+        analysis = _analyze_slice_module(
+            module_input,
+            source_cache,
+            parsed_cache=parsed_cache,
         )
         for alias_name, alias_type in analysis.types.aliases.items():
             aliases.setdefault(alias_name, alias_type)
@@ -674,10 +813,19 @@ def _slice_type_aliases(
 def _slice_global_annotations(
     module_inputs: tuple[AotSliceInput, ...],
     source_cache: dict[str, str],
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
 ) -> dict[str, str]:
     annotations: dict[str, str] = {}
     for module_input in module_inputs:
-        tree = parse_source(source_cache[module_input.name], filename=str(module_input.path)).tree
+        tree = (
+            parsed_cache[module_input.name].tree
+            if parsed_cache is not None
+            else parse_source(
+                source_cache[module_input.name],
+                filename=str(module_input.path),
+            ).tree
+        )
         for statement in tree.body:
             if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
                 annotations.setdefault(statement.target.id, ast.unparse(statement.annotation))
@@ -687,10 +835,19 @@ def _slice_global_annotations(
 def _slice_global_string_constants(
     module_inputs: tuple[AotSliceInput, ...],
     source_cache: dict[str, str],
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
 ) -> dict[str, str]:
     constants: dict[str, str] = {}
     for module_input in module_inputs:
-        tree = parse_source(source_cache[module_input.name], filename=str(module_input.path)).tree
+        tree = (
+            parsed_cache[module_input.name].tree
+            if parsed_cache is not None
+            else parse_source(
+                source_cache[module_input.name],
+                filename=str(module_input.path),
+            ).tree
+        )
         for name, value in _collect_global_string_constants(tree).items():
             constants.setdefault(name, value)
     return constants
@@ -699,10 +856,19 @@ def _slice_global_string_constants(
 def _slice_global_string_container_constants(
     module_inputs: tuple[AotSliceInput, ...],
     source_cache: dict[str, str],
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
 ) -> dict[str, IrTuple]:
     constants: dict[str, IrTuple] = {}
     for module_input in module_inputs:
-        tree = parse_source(source_cache[module_input.name], filename=str(module_input.path)).tree
+        tree = (
+            parsed_cache[module_input.name].tree
+            if parsed_cache is not None
+            else parse_source(
+                source_cache[module_input.name],
+                filename=str(module_input.path),
+            ).tree
+        )
         for name, value in _collect_global_string_container_constants(tree).items():
             constants.setdefault(name, value)
     return constants
@@ -720,10 +886,17 @@ def _add_missing_records(
     global_annotations: dict[str, str] | None = None,
     global_string_constants: dict[str, str] | None = None,
     global_string_container_constants: dict[str, IrTuple] | None = None,
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
+    analysis_cache: dict[str, AotAnalysis] | None = None,
 ) -> None:
-    for record_name in sorted(missing_records):
-        if record_name in records_by_name:
+    pending = list(sorted(missing_records))
+    requested: set[str] = set()
+    while pending:
+        record_name = pending.pop(0)
+        if record_name in requested or record_name in records_by_name:
             continue
+        requested.add(record_name)
         module_name = class_modules.get(record_name)
         if module_name is None:
             continue
@@ -732,32 +905,53 @@ def _add_missing_records(
             module_name,
             source_cache[module_name],
             frozenset(source_cache),
+            tree=(parsed_cache[module_name].tree if parsed_cache is not None else None),
         )
-        records_module = lower_source_to_ir(
-            source_cache[module_name],
-            filename=str(module_input.path),
-            include_records={record_name},
-            include_functions=frozenset(),
-            extra_classes=class_types,
-            extra_functions=_function_types_with_module_aliases(
-                function_types,
-                rename_map,
-            ),
-            extra_aliases=aliases,
-            extra_global_annotations=global_annotations,
-            extra_global_string_constants=global_string_constants,
-            extra_global_string_container_constants=global_string_container_constants,
-        )
+        extra_functions = _function_types_with_module_aliases(function_types, rename_map)
+        if analysis_cache is None:
+            records_module = lower_source_to_ir(
+                source_cache[module_name],
+                filename=str(module_input.path),
+                include_records={record_name},
+                include_functions=frozenset(),
+                extra_classes=class_types,
+                extra_functions=extra_functions,
+                extra_aliases=aliases,
+                extra_global_annotations=global_annotations,
+                extra_global_string_constants=global_string_constants,
+                extra_global_string_container_constants=global_string_container_constants,
+            )
+        else:
+            records_module = lower_analysis_to_ir(
+                analysis_cache[module_name],
+                include_records={record_name},
+                include_functions=frozenset(),
+                extra_classes=class_types,
+                extra_functions=extra_functions,
+                extra_aliases=aliases,
+                extra_global_annotations=global_annotations,
+                extra_global_string_constants=global_string_constants,
+                extra_global_string_container_constants=global_string_container_constants,
+            )
         for record in records_module.records:
-            records_by_name.setdefault(record.name, record)
+            if record.name in records_by_name:
+                continue
+            records_by_name[record.name] = record
+            layout_records = set(record.bases)
+            for field in record.fields:
+                layout_records.update(_type_record_names(field.type))
+            pending.extend(sorted(layout_records.difference(records_by_name)))
 
 
 def _module_rename_map(
     module_name: str,
     source: str,
     module_names: frozenset[str] | set[str] | None = None,
+    *,
+    tree: ast.Module | None = None,
 ) -> dict[str, str]:
-    tree = parse_source(source, filename=module_name).tree
+    if tree is None:
+        tree = parse_source(source, filename=module_name).tree
     rename_map = {name: f"{module_name}.{name}" for name in _local_function_names_from_tree(tree)}
     rename_map.update(
         _imported_project_function_names(
@@ -766,7 +960,7 @@ def _module_rename_map(
             frozenset(module_names or ()),
         )
     )
-    rename_map.update(_assigned_project_function_aliases(tree, rename_map))
+    rename_map.update(_assigned_project_function_aliases(tree, rename_map, module_names or ()))
     return rename_map
 
 
@@ -789,11 +983,11 @@ def _imported_project_function_names(
     module_names: frozenset[str],
 ) -> dict[str, str]:
     names: dict[str, str] = {}
-    for node in tree.body:
+    for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom):
             continue
         imported_module = _resolved_import_module(module_name, node)
-        if imported_module is None or not imported_module.startswith("xcc."):
+        if imported_module is None or not _is_project_target(imported_module, module_names):
             continue
         package_module = f"{imported_module}.__init__"
         for alias in node.names:
@@ -828,6 +1022,7 @@ def _resolved_import_module(module_name: str, node: ast.ImportFrom) -> str | Non
 def _assigned_project_function_aliases(
     tree: ast.Module,
     rename_map: dict[str, str],
+    module_names: frozenset[str] | set[str],
 ) -> dict[str, str]:
     aliases: dict[str, str] = {}
     known_names = dict(rename_map)
@@ -838,11 +1033,21 @@ def _assigned_project_function_aliases(
         if not isinstance(target, ast.Name):
             continue
         qualified_name = _qualified_alias_value_name(node.value, known_names)
-        if qualified_name is None or not qualified_name.startswith("xcc."):
+        if qualified_name is None or not _is_project_target(qualified_name, module_names):
             continue
         aliases[target.id] = qualified_name
         known_names[target.id] = qualified_name
     return aliases
+
+
+def _is_project_target(
+    target: str,
+    module_names: frozenset[str] | set[str],
+) -> bool:
+    for module_name in module_names:
+        if target == module_name or target.startswith(module_name + "."):
+            return True
+    return False
 
 
 def _qualified_alias_value_name(
@@ -1195,7 +1400,11 @@ def _rename_expr_call(expr: IrExpr, rename_map: dict[str, str]) -> IrExpr:
             expr.type,
         )
     if isinstance(expr, IrTupleSlice):
-        return IrTupleSlice(_rename_expr_call(expr.value, rename_map), expr.start, expr.stop)
+        return IrTupleSlice(
+            _rename_expr_call(expr.value, rename_map),
+            (_rename_expr_call(expr.start, rename_map) if expr.start is not None else None),
+            _rename_expr_call(expr.stop, rename_map) if expr.stop is not None else None,
+        )
     if isinstance(expr, IrStringConcat):
         return IrStringConcat(tuple(_rename_expr_call(part, rename_map) for part in expr.parts))
     if isinstance(expr, IrStringJoin):
@@ -1326,6 +1535,10 @@ def _expr_record_names(expr: IrExpr) -> tuple[str, ...]:
         return tuple(sorted(names))
     if isinstance(expr, IrTupleSlice):
         names.update(_expr_record_names(expr.value))
+        if expr.start is not None:
+            names.update(_expr_record_names(expr.start))
+        if expr.stop is not None:
+            names.update(_expr_record_names(expr.stop))
         return tuple(sorted(names))
     if isinstance(expr, IrStringConcat):
         names.update(_expr_tuple_record_names(expr.parts))
@@ -1474,7 +1687,11 @@ def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
     if isinstance(expr, IrTuple):
         return _expr_tuple_call_targets(expr.elements)
     if isinstance(expr, IrTupleSlice):
-        return _expr_call_targets(expr.value)
+        return (
+            _expr_call_targets(expr.value)
+            + (_expr_call_targets(expr.start) if expr.start is not None else ())
+            + (_expr_call_targets(expr.stop) if expr.stop is not None else ())
+        )
     if isinstance(expr, IrStringConcat):
         return _expr_tuple_call_targets(expr.parts)
     if isinstance(expr, IrStringJoin):

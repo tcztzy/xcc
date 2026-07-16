@@ -227,7 +227,7 @@ def _run_hosted_build(options: BuildOptions) -> None:
         )
     qualified_entry = f"{module_name}.{function_name}"
     slice_inputs = tuple(
-        AotSliceInput(unit.module, Path(unit.canonical_path))
+        AotSliceInput(unit.module, Path(unit.canonical_path), unit.source, unit.parsed)
         for unit in source_set.units
         if unit.module not in HOSTED_ONLY_MODULES
     )

@@ -180,7 +180,11 @@ def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
     if isinstance(expr, IrTuple):
         return _expr_tuple_call_targets(expr.elements)
     if isinstance(expr, IrTupleSlice):
-        return _expr_call_targets(expr.value)
+        return (
+            _expr_call_targets(expr.value)
+            + (_expr_call_targets(expr.start) if expr.start is not None else ())
+            + (_expr_call_targets(expr.stop) if expr.stop is not None else ())
+        )
     if isinstance(expr, IrStringConcat):
         return _expr_tuple_call_targets(expr.parts)
     if isinstance(expr, IrStringJoin):

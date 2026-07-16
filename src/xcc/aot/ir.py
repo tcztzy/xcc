@@ -192,8 +192,8 @@ class IrTuple:
 @dataclass(frozen=True)
 class IrTupleSlice:
     value: "IrExpr"
-    start: int | None
-    stop: int | None
+    start: "IrExpr | None"
+    stop: "IrExpr | None"
 
     @property
     def type(self) -> IrTupleType:
