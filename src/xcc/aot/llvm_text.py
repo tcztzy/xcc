@@ -470,6 +470,7 @@ class _Emitter:
             self.current_error_out = previous_error_out
             self.failure_scopes = previous_failure_scopes
             self.caught_status_stack = previous_caught_status_stack
+        lines = _hoist_allocas_to_entry(lines)
         lines.append("}")
         return "\n".join(lines)
 
@@ -8636,6 +8637,29 @@ def _block_is_terminated(lines: list[str]) -> bool:
     if not lines:
         return False
     return lines[-1].strip().startswith(("ret ", "br ", "unreachable"))
+
+
+def _hoist_allocas_to_entry(lines: list[str]) -> list[str]:
+    allocas: list[str] = []
+    retained: list[str] = []
+    for line in lines:
+        if line.startswith("  ") and " = alloca " in line:
+            allocas.append(line)
+        else:
+            retained.append(line)
+    if not allocas:
+        return lines
+    result: list[str] = []
+    inserted = False
+    for line in retained:
+        result.append(line)
+        if line == "entry:":
+            for alloca in allocas:
+                result.append(alloca)
+            inserted = True
+    if not inserted:
+        return lines
+    return result
 
 
 def _current_label(lines: list[str]) -> str:

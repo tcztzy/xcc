@@ -151,6 +151,19 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="list-append-capacity.py",
         )
 
+    def test_long_membership_loop_reuses_entry_stack_slots(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    allowed: set[str] = {'x'}\n"
+            "    total = 0\n"
+            "    for _ in range(300000):\n"
+            "        if 'x' in allowed:\n"
+            "            total += 1\n"
+            "    return 7 if total == 300000 else 1\n",
+            expected=7,
+            filename="loop-entry-alloca.py",
+        )
+
     def test_container_alias_lookup_isolated_from_unrelated_growth(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

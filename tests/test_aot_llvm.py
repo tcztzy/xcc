@@ -59,6 +59,30 @@ from xcc.aot.llvm_text import (
 
 
 class AotLlvmTextTests(unittest.TestCase):
+    def test_hoists_loop_expression_allocas_to_function_entry(self) -> None:
+        module = lower_source_to_ir(
+            "def count(items: tuple[str, ...], allowed: set[str]) -> int:\n"
+            "    total = 0\n"
+            "    for item in items:\n"
+            "        if item in allowed:\n"
+            "            total += 1\n"
+            "    return total\n",
+            filename="loop_alloca.py",
+            entry="count",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        function_body = llvm_ir.split("define i64 @count", 1)[1].split("\n}", 1)[0]
+        active_label = ""
+        allocations = 0
+        for line in function_body.splitlines():
+            if line.endswith(":"):
+                active_label = line
+            elif " = alloca " in line:
+                allocations += 1
+                self.assertEqual(active_label, "entry:")
+        self.assertGreater(allocations, 0)
+
     def test_source_to_llvm_wrapper_uses_generic_status_handler_abi(self) -> None:
         unchecked_name = "xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked"
         wrapper_name = "xcc.cc_driver._aot_compile_source_to_llvm_ir"
