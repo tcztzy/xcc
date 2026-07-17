@@ -344,6 +344,19 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertIn("define ptr @__xcc_aot_lexer_error_summary_for_source", prelude)
         self.assertIn("@__xcc_aot_fmt_token", prelude)
 
+    def test_string_join_measures_then_allocates_once(self) -> None:
+        prelude = runtime_prelude()
+        string_join = prelude.split(
+            "define ptr @__xcc_aot_string_join(ptr %separator, ptr %values) {",
+            1,
+        )[1].split("\n}\n", 1)[0]
+
+        self.assertIn("join_measure_cond:", string_join)
+        self.assertIn("join_copy_cond:", string_join)
+        self.assertEqual(string_join.count("call ptr @malloc"), 1)
+        self.assertEqual(string_join.count("call ptr @memcpy"), 2)
+        self.assertNotIn("@__xcc_aot_string_concat2", string_join)
+
     def test_tuple_alias_resolver_is_iterative_and_compresses_the_root_path(self) -> None:
         prelude = runtime_prelude()
         resolver = prelude.split(

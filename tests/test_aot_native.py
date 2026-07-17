@@ -128,6 +128,21 @@ class AotNativeRealSmokeTests(unittest.TestCase):
         self.assertEqual(result.native_returncode, 0)
 
     @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_real_string_join_native_smoke_matches_cpython_stdout(self) -> None:
+        result = run_native_smoke(
+            "def message() -> str:\n"
+            "    empty = '|'.join(())\n"
+            "    single = '|'.join(('one',))\n"
+            "    many = '|'.join(('a', '', 'b'))\n"
+            "    return empty + '/' + single + '/' + many\n",
+            entry="message",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.python_result, "/one/a||b")
+        self.assertEqual(result.native_stdout, "/one/a||b\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
     def test_real_string_padding_native_smoke_matches_cpython_stdout(self) -> None:
         result = run_native_smoke(
             "def message() -> str:\n"
