@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
+from xcc.aot import slice as aot_slice
 from xcc.aot.analysis import analyze_source
 from xcc.aot.ir import (
     IrAssign,
@@ -20,6 +21,7 @@ from xcc.aot.lower import lower_source_to_ir
 from xcc.aot.module import parse_source
 from xcc.aot.slice import (
     AotSliceInput,
+    _add_missing_records,
     _function_record_names,
     _slice_class_tables,
     lower_core_slice,
@@ -33,6 +35,25 @@ AOT_ROOT = ROOT / "src/xcc/aot"
 
 
 class AotReachabilityTests(unittest.TestCase):
+    def test_module_function_alias_table_excludes_shared_base_entries(self) -> None:
+        run = AotFunctionInfo("run", (), AotType("int"))
+        step = AotFunctionInfo("Worker.step", (), AotType("int"))
+        unrelated = AotFunctionInfo("skip", (), AotType("int"))
+
+        aliased = aot_slice._function_types_with_module_aliases(
+            {
+                "pkg.target.run": run,
+                "pkg.target.Worker.step": step,
+                "pkg.unrelated.skip": unrelated,
+            },
+            {"local_run": "pkg.target.run", "target": "pkg.target"},
+        )
+
+        self.assertEqual(
+            aliased,
+            {"local_run": run, "target.run": run, "target.Worker.step": step},
+        )
+
     def test_named_slice_reuses_source_contract_parsed_snapshot(self) -> None:
         source = "def main() -> int:\n    return 0\n"
         parsed = parse_source(source, filename="pkg/cli.py")
@@ -55,11 +76,23 @@ class AotReachabilityTests(unittest.TestCase):
             "    return value.value\n"
         )
         parsed = parse_source(source, filename="pkg/model.py")
-        module = lower_named_slice(
-            (AotSliceInput("pkg.model", Path("pkg/model.py"), source, parsed),),
-            root_targets=("pkg.model.main",),
-        )
+        with (
+            patch(
+                "xcc.aot.slice._function_types_with_module_aliases",
+                wraps=aot_slice._function_types_with_module_aliases,
+            ) as expand_function_types,
+            patch(
+                "xcc.aot.slice._prepare_analysis_lowerer",
+                wraps=aot_slice._prepare_analysis_lowerer,
+            ) as prepare_lowerer,
+        ):
+            module = lower_named_slice(
+                (AotSliceInput("pkg.model", Path("pkg/model.py"), source, parsed),),
+                root_targets=("pkg.model.main",),
+            )
 
+        self.assertEqual(expand_function_types.call_count, 1)
+        self.assertEqual(prepare_lowerer.call_count, 1)
         self.assertEqual(
             {record.name for record in module.records},
             {"Leaf", "Middle", "Root"},
@@ -71,6 +104,32 @@ class AotReachabilityTests(unittest.TestCase):
         )
         self.assertIn("edge=record:Leaf->record:Middle;reason=layout", reachability)
         self.assertIn("edge=record:Middle->record:Root;reason=layout", reachability)
+
+    def test_missing_record_closure_batches_one_module_frontier(self) -> None:
+        source = "class Left:\n    value: int\nclass Right:\n    label: str\n"
+        module_input = AotSliceInput("pkg.model", Path("pkg/model.py"), source)
+        analysis = analyze_source(source, filename="pkg/model.py")
+        records = {}
+
+        with patch(
+            "xcc.aot.slice.lower_analysis_to_ir",
+            wraps=aot_slice.lower_analysis_to_ir,
+        ) as lower_analysis:
+            _add_missing_records(
+                {"Left", "Right"},
+                records,
+                {"Left": "pkg.model", "Right": "pkg.model"},
+                {"pkg.model": module_input},
+                {"pkg.model": source},
+                analysis.types.classes,
+                {},
+                analysis_cache={"pkg.model": analysis},
+                module_function_types={"pkg.model": {}},
+            )
+
+        self.assertEqual(lower_analysis.call_count, 1)
+        self.assertEqual(set(lower_analysis.call_args.kwargs["include_records"]), {"Left", "Right"})
+        self.assertEqual(set(records), {"Left", "Right"})
 
     def test_v376_class_refinement_preserves_deterministic_owner(self) -> None:
         modules = (

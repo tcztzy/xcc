@@ -52,6 +52,8 @@ from xcc.aot.lower import (
     _collect_global_scalar_constants,
     _collect_global_string_constants,
     _collect_global_string_container_constants,
+    _Lowerer,
+    _prepare_analysis_lowerer,
     lower_analysis_to_ir,
     lower_source_to_ir,
 )
@@ -438,11 +440,24 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
         source_cache,
         parsed_cache=parsed_cache,
     )
+    module_names = frozenset(source_cache)
+    rename_maps = {
+        module.name: _module_rename_map(
+            module.name,
+            source_cache[module.name],
+            module_names,
+            tree=parsed_cache[module.name].tree,
+        )
+        for module in module_inputs
+    }
+    module_function_types = _module_function_alias_tables(function_types, rename_maps)
     class_types, _ = _slice_class_tables(
         module_inputs,
         source_cache,
         function_types,
         parsed_cache=parsed_cache,
+        rename_maps=rename_maps,
+        module_function_types=module_function_types,
     )
     aliases = _slice_type_aliases(
         module_inputs,
@@ -471,37 +486,37 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
     )
     records: list[IrRecord] = []
     functions: list[IrFunction] = []
-    module_names = frozenset(source_cache)
-    rename_maps = {
-        module.name: _module_rename_map(
-            module.name,
-            source_cache[module.name],
-            module_names,
-            tree=parsed_cache[module.name].tree,
-        )
-        for module in module_inputs
-    }
     analysis_cache = _slice_lowering_analysis_cache(
         module_inputs,
         parsed_cache,
         class_types,
+        module_function_types,
+    )
+    lowerer_cache = _slice_lowerer_cache(
+        module_inputs,
+        analysis_cache,
+        class_types,
+        module_function_types,
         function_types,
-        rename_maps,
+        aliases,
+        global_annotations,
+        global_string_constants,
+        global_scalar_constants,
+        global_string_container_constants,
     )
     for module_input in module_inputs:
         rename_map = rename_maps[module_input.name]
         module = lower_analysis_to_ir(
             analysis_cache[module_input.name],
             extra_classes=class_types,
-            extra_functions=_function_types_with_module_aliases(
-                function_types,
-                rename_map,
-            ),
+            extra_functions=module_function_types[module_input.name],
+            fallback_function_types=function_types,
             extra_aliases=aliases,
             extra_global_annotations=global_annotations,
             extra_global_string_constants=global_string_constants,
             extra_global_scalar_constants=global_scalar_constants,
             extra_global_string_container_constants=global_string_container_constants,
+            prepared_lowerer=lowerer_cache[module_input.name],
         )
         records.extend(module.records)
         for function in module.functions:
@@ -543,11 +558,24 @@ def _lower_named_slice_from_roots(
         source_cache,
         parsed_cache=parsed_cache,
     )
+    module_names = frozenset(source_cache)
+    rename_maps = {
+        module.name: _module_rename_map(
+            module.name,
+            source_cache[module.name],
+            module_names,
+            tree=parsed_cache[module.name].tree,
+        )
+        for module in module_inputs
+    }
+    module_function_types = _module_function_alias_tables(function_types, rename_maps)
     class_types, class_modules = _slice_class_tables(
         module_inputs,
         source_cache,
         function_types,
         parsed_cache=parsed_cache,
+        rename_maps=rename_maps,
+        module_function_types=module_function_types,
     )
     aliases = _slice_type_aliases(
         module_inputs,
@@ -574,22 +602,23 @@ def _lower_named_slice_from_roots(
         source_cache,
         parsed_cache=parsed_cache,
     )
-    module_names = frozenset(source_cache)
-    rename_maps = {
-        module.name: _module_rename_map(
-            module.name,
-            source_cache[module.name],
-            module_names,
-            tree=parsed_cache[module.name].tree,
-        )
-        for module in module_inputs
-    }
     analysis_cache = _slice_lowering_analysis_cache(
         module_inputs,
         parsed_cache,
         class_types,
+        module_function_types,
+    )
+    lowerer_cache = _slice_lowerer_cache(
+        module_inputs,
+        analysis_cache,
+        class_types,
+        module_function_types,
         function_types,
-        rename_maps,
+        aliases,
+        global_annotations,
+        global_string_constants,
+        global_scalar_constants,
+        global_string_container_constants,
     )
     records_by_name: dict[str, IrRecord] = {}
     functions: dict[str, IrFunction] = {}
@@ -615,15 +644,14 @@ def _lower_named_slice_from_roots(
             include_functions={local_name},
             bodyless_functions=bodyless,
             extra_classes=class_types,
-            extra_functions=_function_types_with_module_aliases(
-                function_types,
-                rename_map,
-            ),
+            extra_functions=module_function_types[module_name],
+            fallback_function_types=function_types,
             extra_aliases=aliases,
             extra_global_annotations=global_annotations,
             extra_global_string_constants=global_string_constants,
             extra_global_scalar_constants=global_scalar_constants,
             extra_global_string_container_constants=global_string_container_constants,
+            prepared_lowerer=lowerer_cache[module_name],
         )
         for record in module.records:
             records_by_name.setdefault(record.name, record)
@@ -644,6 +672,8 @@ def _lower_named_slice_from_roots(
                 global_string_container_constants,
                 parsed_cache=parsed_cache,
                 analysis_cache=analysis_cache,
+                module_function_types=module_function_types,
+                lowerer_cache=lowerer_cache,
             )
         for function in module.functions:
             full_name = rename_map[function.name]
@@ -676,6 +706,8 @@ def _lower_named_slice_from_roots(
                     global_string_container_constants,
                     parsed_cache=parsed_cache,
                     analysis_cache=analysis_cache,
+                    module_function_types=module_function_types,
+                    lowerer_cache=lowerer_cache,
                 )
             pending.extend(
                 _rename_call_target(call_target, rename_map)
@@ -726,20 +758,44 @@ def _slice_lowering_analysis_cache(
     module_inputs: tuple[AotSliceInput, ...],
     parsed_cache: dict[str, AotModule],
     class_types: dict[str, AotClassInfo],
-    function_types: dict[str, AotFunctionInfo],
-    rename_maps: dict[str, dict[str, str]],
+    module_function_types: dict[str, dict[str, AotFunctionInfo]],
 ) -> dict[str, AotAnalysis]:
     analyses: dict[str, AotAnalysis] = {}
     for module_input in module_inputs:
         analyses[module_input.name] = analyze_module(
             parsed_cache[module_input.name],
             extra_classes=class_types,
-            extra_functions=_function_types_with_module_aliases(
-                function_types,
-                rename_maps[module_input.name],
-            ),
+            extra_functions=module_function_types[module_input.name],
         )
     return analyses
+
+
+def _slice_lowerer_cache(
+    module_inputs: tuple[AotSliceInput, ...],
+    analysis_cache: dict[str, AotAnalysis],
+    class_types: dict[str, AotClassInfo],
+    module_function_types: dict[str, dict[str, AotFunctionInfo]],
+    fallback_function_types: dict[str, AotFunctionInfo],
+    aliases: dict[str, AotType],
+    global_annotations: dict[str, str],
+    global_string_constants: dict[str, str],
+    global_scalar_constants: dict[str, IrExpr],
+    global_string_container_constants: dict[str, IrTuple],
+) -> dict[str, _Lowerer]:
+    lowerers: dict[str, _Lowerer] = {}
+    for module_input in module_inputs:
+        lowerers[module_input.name] = _prepare_analysis_lowerer(
+            analysis_cache[module_input.name],
+            extra_classes=class_types,
+            extra_functions=module_function_types[module_input.name],
+            fallback_function_types=fallback_function_types,
+            extra_aliases=aliases,
+            extra_global_annotations=global_annotations,
+            extra_global_string_constants=global_string_constants,
+            extra_global_scalar_constants=global_scalar_constants,
+            extra_global_string_container_constants=global_string_container_constants,
+        )
+    return lowerers
 
 
 def _slice_class_tables(
@@ -748,39 +804,41 @@ def _slice_class_tables(
     function_types: dict[str, AotFunctionInfo],
     *,
     parsed_cache: dict[str, AotModule] | None = None,
+    rename_maps: dict[str, dict[str, str]] | None = None,
+    module_function_types: dict[str, dict[str, AotFunctionInfo]] | None = None,
 ) -> tuple[dict[str, AotClassInfo], dict[str, str]]:
     class_types: dict[str, AotClassInfo] = {}
     class_modules: dict[str, str] = {}
-    module_names = frozenset(source_cache)
+    if rename_maps is None:
+        module_names = frozenset(source_cache)
+        rename_maps = {
+            module.name: _module_rename_map(
+                module.name,
+                source_cache[module.name],
+                module_names,
+                tree=(parsed_cache[module.name].tree if parsed_cache is not None else None),
+            )
+            for module in module_inputs
+        }
+    if module_function_types is None:
+        module_function_types = _module_function_alias_tables(function_types, rename_maps)
     for module_input in module_inputs:
-        rename_map = _module_rename_map(
-            module_input.name,
-            source_cache[module_input.name],
-            module_names,
-            tree=(parsed_cache[module_input.name].tree if parsed_cache is not None else None),
-        )
         analysis = _analyze_slice_module(
             module_input,
             source_cache,
             parsed_cache=parsed_cache,
-            extra_functions=_function_types_with_module_aliases(function_types, rename_map),
+            extra_functions=module_function_types[module_input.name],
         )
         for class_name, class_info in analysis.types.classes.items():
             class_types.setdefault(class_name, class_info)
             class_modules.setdefault(class_name, module_input.name)
     for module_input in module_inputs:
-        rename_map = _module_rename_map(
-            module_input.name,
-            source_cache[module_input.name],
-            module_names,
-            tree=(parsed_cache[module_input.name].tree if parsed_cache is not None else None),
-        )
         analysis = _analyze_slice_module(
             module_input,
             source_cache,
             parsed_cache=parsed_cache,
             extra_classes=class_types,
-            extra_functions=_function_types_with_module_aliases(function_types, rename_map),
+            extra_functions=module_function_types[module_input.name],
         )
         for class_name, class_info in analysis.types.classes.items():
             if class_modules.get(class_name) == module_input.name:
@@ -926,60 +984,79 @@ def _add_missing_records(
     *,
     parsed_cache: dict[str, AotModule] | None = None,
     analysis_cache: dict[str, AotAnalysis] | None = None,
+    module_function_types: dict[str, dict[str, AotFunctionInfo]] | None = None,
+    lowerer_cache: dict[str, _Lowerer] | None = None,
 ) -> None:
     pending = sorted(missing_records)
     requested: set[str] = set()
     while pending:
-        record_name = pending.pop(0)
-        if record_name in requested or record_name in records_by_name:
-            continue
-        requested.add(record_name)
-        module_name = class_modules.get(record_name)
-        if module_name is None:
-            continue
-        module_input = inputs_by_name[module_name]
-        rename_map = _module_rename_map(
-            module_name,
-            source_cache[module_name],
-            frozenset(source_cache),
-            tree=(parsed_cache[module_name].tree if parsed_cache is not None else None),
-        )
-        extra_functions = _function_types_with_module_aliases(function_types, rename_map)
-        if analysis_cache is None:
-            records_module = lower_source_to_ir(
-                source_cache[module_name],
-                filename=str(module_input.path),
-                include_records={record_name},
-                include_functions=frozenset(),
-                extra_classes=class_types,
-                extra_functions=extra_functions,
-                extra_aliases=aliases,
-                extra_global_annotations=global_annotations,
-                extra_global_string_constants=global_string_constants,
-                extra_global_scalar_constants=global_scalar_constants,
-                extra_global_string_container_constants=global_string_container_constants,
-            )
-        else:
-            records_module = lower_analysis_to_ir(
-                analysis_cache[module_name],
-                include_records={record_name},
-                include_functions=frozenset(),
-                extra_classes=class_types,
-                extra_functions=extra_functions,
-                extra_aliases=aliases,
-                extra_global_annotations=global_annotations,
-                extra_global_string_constants=global_string_constants,
-                extra_global_scalar_constants=global_scalar_constants,
-                extra_global_string_container_constants=global_string_container_constants,
-            )
-        for record in records_module.records:
-            if record.name in records_by_name:
+        records_by_module: dict[str, set[str]] = {}
+        current = pending
+        pending = []
+        for record_name in current:
+            if record_name in requested or record_name in records_by_name:
                 continue
-            records_by_name[record.name] = record
-            layout_records = set(record.bases)
-            for field in record.fields:
-                layout_records.update(_type_record_names(field.type))
-            pending.extend(sorted(layout_records.difference(records_by_name)))
+            requested.add(record_name)
+            module_name = class_modules.get(record_name)
+            if module_name is None:
+                continue
+            records_by_module.setdefault(module_name, set()).add(record_name)
+        for module_name in sorted(records_by_module):
+            module_input = inputs_by_name[module_name]
+            include_records = records_by_module[module_name]
+            if module_function_types is None:
+                rename_map = _module_rename_map(
+                    module_name,
+                    source_cache[module_name],
+                    frozenset(source_cache),
+                    tree=(parsed_cache[module_name].tree if parsed_cache is not None else None),
+                )
+                extra_functions = _function_types_with_module_aliases(
+                    function_types,
+                    rename_map,
+                )
+            else:
+                extra_functions = module_function_types[module_name]
+            if analysis_cache is None:
+                records_module = lower_source_to_ir(
+                    source_cache[module_name],
+                    filename=str(module_input.path),
+                    include_records=include_records,
+                    include_functions=frozenset(),
+                    extra_classes=class_types,
+                    extra_functions=extra_functions,
+                    fallback_function_types=function_types,
+                    extra_aliases=aliases,
+                    extra_global_annotations=global_annotations,
+                    extra_global_string_constants=global_string_constants,
+                    extra_global_scalar_constants=global_scalar_constants,
+                    extra_global_string_container_constants=global_string_container_constants,
+                )
+            else:
+                records_module = lower_analysis_to_ir(
+                    analysis_cache[module_name],
+                    include_records=include_records,
+                    include_functions=frozenset(),
+                    extra_classes=class_types,
+                    extra_functions=extra_functions,
+                    fallback_function_types=function_types,
+                    extra_aliases=aliases,
+                    extra_global_annotations=global_annotations,
+                    extra_global_string_constants=global_string_constants,
+                    extra_global_scalar_constants=global_scalar_constants,
+                    extra_global_string_container_constants=global_string_container_constants,
+                    prepared_lowerer=(
+                        lowerer_cache[module_name] if lowerer_cache is not None else None
+                    ),
+                )
+            for record in records_module.records:
+                if record.name in records_by_name:
+                    continue
+                records_by_name[record.name] = record
+                layout_records = set(record.bases)
+                for field in record.fields:
+                    layout_records.update(_type_record_names(field.type))
+                pending.extend(sorted(layout_records.difference(records_by_name)))
 
 
 def _module_rename_map(
@@ -1113,7 +1190,7 @@ def _function_types_with_module_aliases(
     function_types: dict[str, AotFunctionInfo],
     rename_map: dict[str, str],
 ) -> dict[str, AotFunctionInfo]:
-    aliased = dict(function_types)
+    aliased: dict[str, AotFunctionInfo] = {}
     for local_name, target_name in rename_map.items():
         if "." in local_name:
             continue
@@ -1129,6 +1206,16 @@ def _function_types_with_module_aliases(
                     function_info,
                 )
     return aliased
+
+
+def _module_function_alias_tables(
+    function_types: dict[str, AotFunctionInfo],
+    rename_maps: dict[str, dict[str, str]],
+) -> dict[str, dict[str, AotFunctionInfo]]:
+    return {
+        module_name: _function_types_with_module_aliases(function_types, rename_map)
+        for module_name, rename_map in rename_maps.items()
+    }
 
 
 def _split_module_function(

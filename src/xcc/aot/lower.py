@@ -244,6 +244,7 @@ def lower_source_to_ir(
     bodyless_functions: set[str] | frozenset[str] | None = None,
     extra_classes: dict[str, AotClassInfo] | None = None,
     extra_functions: dict[str, AotFunctionInfo] | None = None,
+    fallback_function_types: dict[str, AotFunctionInfo] | None = None,
     extra_aliases: dict[str, AotType] | None = None,
     extra_global_annotations: dict[str, str] | None = None,
     extra_global_string_constants: dict[str, str] | None = None,
@@ -264,6 +265,7 @@ def lower_source_to_ir(
         bodyless_functions=bodyless_functions,
         extra_classes=extra_classes,
         extra_functions=extra_functions,
+        fallback_function_types=fallback_function_types,
         extra_aliases=extra_aliases,
         extra_global_annotations=extra_global_annotations,
         extra_global_string_constants=extra_global_string_constants,
@@ -281,49 +283,25 @@ def lower_analysis_to_ir(
     bodyless_functions: set[str] | frozenset[str] | None = None,
     extra_classes: dict[str, AotClassInfo] | None = None,
     extra_functions: dict[str, AotFunctionInfo] | None = None,
+    fallback_function_types: dict[str, AotFunctionInfo] | None = None,
     extra_aliases: dict[str, AotType] | None = None,
     extra_global_annotations: dict[str, str] | None = None,
     extra_global_string_constants: dict[str, str] | None = None,
     extra_global_scalar_constants: dict[str, IrExpr] | None = None,
     extra_global_string_container_constants: dict[str, IrTuple] | None = None,
+    prepared_lowerer: "_Lowerer | None" = None,
 ) -> IrModule:
     filename = analysis.module.filename
-    class_types = dict(extra_classes or {})
-    class_types.update(analysis.types.classes)
-    function_types = dict(extra_functions or {})
-    function_types.update(analysis.types.functions)
-    aliases = dict(extra_aliases or {})
-    aliases.update(analysis.types.aliases)
-    local_global_annotations = _collect_global_annotations(analysis.module.tree)
-    global_annotations = dict(extra_global_annotations or {})
-    global_annotations.update(local_global_annotations)
-    global_string_constants = dict(extra_global_string_constants or {})
-    global_string_constants.update(_collect_global_string_constants(analysis.module.tree))
-    global_scalar_constants = dict(extra_global_scalar_constants or {})
-    global_scalar_constants.update(_collect_global_scalar_constants(analysis.module.tree))
-    local_global_string_container_constants = _collect_global_string_container_constants(
-        analysis.module.tree
-    )
-    global_string_container_constants = dict(extra_global_string_container_constants or {})
-    for name in local_global_annotations:
-        if name not in local_global_string_container_constants:
-            global_string_container_constants.pop(name, None)
-    global_string_container_constants.update(local_global_string_container_constants)
-    global_record_constructor_maps = _collect_global_record_constructor_maps(
-        analysis.module.tree,
-        class_types,
-    )
-    lowerer = _Lowerer(
-        filename,
-        class_types,
-        function_types,
-        aliases,
-        _collect_global_names(analysis.module.tree),
-        global_annotations,
-        global_string_constants,
-        global_scalar_constants,
-        global_string_container_constants,
-        global_record_constructor_maps,
+    lowerer = prepared_lowerer or _prepare_analysis_lowerer(
+        analysis,
+        extra_classes=extra_classes,
+        extra_functions=extra_functions,
+        fallback_function_types=fallback_function_types,
+        extra_aliases=extra_aliases,
+        extra_global_annotations=extra_global_annotations,
+        extra_global_string_constants=extra_global_string_constants,
+        extra_global_scalar_constants=extra_global_scalar_constants,
+        extra_global_string_container_constants=extra_global_string_container_constants,
     )
     records = tuple(
         lowerer.lower_record(node)
@@ -373,10 +351,12 @@ class _Lowerer:
         global_scalar_constants: dict[str, IrExpr] | None = None,
         global_string_container_constants: dict[str, IrTuple] | None = None,
         global_record_constructor_maps: dict[str, IrTuple] | None = None,
+        fallback_function_types: dict[str, AotFunctionInfo] | None = None,
     ) -> None:
         self.filename = filename
         self.class_types = class_types
         self.function_types = function_types or {}
+        self.fallback_function_types = fallback_function_types or {}
         self.aliases = aliases or {}
         self.global_names = global_names or set()
         self.global_types = self._global_annotation_types(global_annotations or {})
@@ -386,6 +366,12 @@ class _Lowerer:
         self.global_record_constructor_maps = global_record_constructor_maps or {}
         self.callable_param_targets: dict[str, str] = {}
         self.current_owner: str | None = None
+
+    def _function_info(self, target: str) -> AotFunctionInfo | None:
+        function_info = self.function_types.get(target)
+        if function_info is not None:
+            return function_info
+        return self.fallback_function_types.get(target)
 
     def lower_record(self, node: ast.ClassDef) -> IrRecord:
         class_info = self.class_types[node.name]
@@ -408,7 +394,7 @@ class _Lowerer:
     ) -> IrExpr:
         if isinstance(payload, IrConstructRecord):
             str_target = self._record_method_target(payload.type, "__str__")
-            if str_target in self.function_types:
+            if self._function_info(str_target) is not None:
                 return IrCall(str_target, (payload,), IrStringType())
         if argument is None:
             return IrConstString("")
@@ -526,7 +512,7 @@ class _Lowerer:
             or not annotation_name(annotation).startswith("Callable[")
         ):
             return None
-        if default.id in self.function_types or default.id in self.global_names:
+        if self._function_info(default.id) is not None or default.id in self.global_names:
             return default.id
         qualified_target = self._unique_qualified_function_target(default.id)
         if qualified_target is not None:
@@ -1120,7 +1106,7 @@ class _Lowerer:
                 if (
                     isinstance(expected, IrRecordType)
                     and expected.name == "object"
-                    and expr.id in self.function_types
+                    and self._function_info(expr.id) is not None
                 ):
                     return IrConstNone()
                 if expr.id in self.global_names or expr.id in _ALLOWED_BUILTIN_VALUES:
@@ -1800,7 +1786,7 @@ class _Lowerer:
                 )
             if (
                 expr.func.id not in self.global_names
-                and expr.func.id not in self.function_types
+                and self._function_info(expr.func.id) is None
                 and expr.func.id not in _ALLOWED_BUILTIN_CALLS
             ):
                 self._error(
@@ -1824,7 +1810,7 @@ class _Lowerer:
                         expr,
                         names,
                     )
-            if target in self.function_types:
+            if self._function_info(target) is not None:
                 return_type = self._function_return_type(target, expected)
                 return IrCall(
                     self._native_call_target(target),
@@ -1980,7 +1966,7 @@ class _Lowerer:
                 target = self._record_method_target(receiver_type, expr.func.attr)
                 skip_parameters = 1
                 receiver_args: tuple[IrExpr, ...] = (receiver,)
-                function_info = self.function_types.get(target)
+                function_info = self._function_info(target)
                 if function_info is not None and (
                     not function_info.parameters
                     or function_info.parameters[0][0] not in {"self", "cls"}
@@ -2436,7 +2422,7 @@ class _Lowerer:
             return value
         if isinstance(value.type, IrRecordType):
             str_target = self._record_method_target(value.type, "__str__")
-            function_info = self.function_types.get(str_target)
+            function_info = self._function_info(str_target)
             if function_info is not None:
                 return_type = self._function_return_type(str_target, IrRecordType("object"))
                 if isinstance(return_type, IrStringType):
@@ -2674,9 +2660,9 @@ class _Lowerer:
             callable_target = self.callable_param_targets.get(target)
             if callable_target is not None:
                 target = callable_target
-            elif target not in self.function_types:
+            elif self._function_info(target) is None:
                 target = self._unique_qualified_function_target(target)
-            if target is not None and target in self.function_types:
+            if target is not None and self._function_info(target) is not None:
                 return IrCall(target, (marker,), self._function_return_type(target, marker.type))
         self._error(
             "XCC-AOT-LOWER-0003",
@@ -3461,7 +3447,7 @@ class _Lowerer:
         skip_parameters: int,
         fallback: IrType,
     ) -> tuple[IrExpr, ...]:
-        function_info = self.function_types.get(target)
+        function_info = self._function_info(target)
         if function_info is None:
             return self._lower_call_args(expr, names, fallback)
         parameters = function_info.parameters[skip_parameters:]
@@ -3567,13 +3553,13 @@ class _Lowerer:
         target: str,
         fallback: IrType,
     ) -> IrType:
-        function_info = self.function_types.get(target)
+        function_info = self._function_info(target)
         if function_info is None:
             return fallback
         return self._aot_type_to_ir_type(function_info.return_type)
 
     def _native_call_target(self, target: str) -> str:
-        function_info = self.function_types.get(target)
+        function_info = self._function_info(target)
         if function_info is not None and function_info.return_type.name == "NoReturn":
             return _NORETURN_CALL_PREFIX + target
         return target
@@ -3610,7 +3596,7 @@ class _Lowerer:
         qualified_target = self._unique_qualified_function_target(target)
         if qualified_target is not None:
             return qualified_target
-        if target in self.function_types:
+        if self._function_info(target) is not None:
             return target
         class_info = self.class_types.get(concrete_name)
         if class_info is None:
@@ -3629,7 +3615,7 @@ class _Lowerer:
         if not isinstance(receiver.type, IrRecordType):
             return None
         target = self._record_method_target(receiver.type, attr)
-        function_info = self.function_types.get(target)
+        function_info = self._function_info(target)
         if function_info is None or len(function_info.parameters) > 1:
             return None
         return IrCall(
@@ -3661,7 +3647,7 @@ class _Lowerer:
             record_type = IrRecordType(record_name)
             concrete_receiver = IrName(marker_name, record_type)
             target = self._record_method_target(record_type, attr)
-            function_info = self.function_types.get(target)
+            function_info = self._function_info(target)
             if function_info is not None and len(function_info.parameters) <= 1:
                 result_type = self._function_return_type(target, IrRecordType("object"))
                 cases.append(IrCall(target, (concrete_receiver,), result_type))
@@ -3681,8 +3667,11 @@ class _Lowerer:
 
     def _unique_qualified_function_target(self, target: str) -> str | None:
         suffix = f".{target}"
-        matches = tuple(
-            name for name in self.function_types if name != target and name.endswith(suffix)
+        matches = [name for name in self.function_types if name != target and name.endswith(suffix)]
+        matches.extend(
+            name
+            for name in self.fallback_function_types
+            if name not in self.function_types and name != target and name.endswith(suffix)
         )
         if len(matches) == 1:
             return matches[0]
@@ -3760,7 +3749,7 @@ class _Lowerer:
     ) -> IrExpr:
         record_type = IrRecordType(record_name)
         init_target = self._record_method_target(record_type, "__init__")
-        if init_target not in self.function_types:
+        if self._function_info(init_target) is None:
             return IrConstructRecord(
                 record_name,
                 self._lower_constructor_args(record_name, expr, names),
@@ -3865,7 +3854,7 @@ class _Lowerer:
         if not field_items or not mapped_fields:
             return None
         init_target = self._record_method_target(IrRecordType(record_name), "__init__")
-        function_info = self.function_types.get(init_target)
+        function_info = self._function_info(init_target)
         if function_info is None:
             return None
         parameters = function_info.parameters
@@ -3914,7 +3903,7 @@ class _Lowerer:
         )
         translate_target = (
             "translate_source"
-            if "translate_source" in self.function_types
+            if self._function_info("translate_source") is not None
             else "xcc.lexer.translate_source"
         )
         translated = IrCall(translate_target, (source,), IrStringType())
@@ -3999,7 +3988,8 @@ class _Lowerer:
         )
         target = (
             "xcc.preprocessor.__init__._directive_cursor_locations"
-            if "xcc.preprocessor.__init__._directive_cursor_locations" in self.function_types
+            if self._function_info("xcc.preprocessor.__init__._directive_cursor_locations")
+            is not None
             else "_directive_cursor_locations"
         )
         return (IrCall(target, (cursor, count), field_types[0]),)
@@ -4623,12 +4613,12 @@ class _Lowerer:
         if (
             isinstance(expr, ast.Call)
             and isinstance(expr.func, ast.Name)
-            and expr.func.id in self.function_types
+            and self._function_info(expr.func.id) is not None
         ):
             return self._function_return_type(expr.func.id, fallback)
         if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute):
             target = ast.unparse(expr.func)
-            if target in self.function_types:
+            if self._function_info(target) is not None:
                 return self._function_return_type(target, fallback)
         if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute):
             try:
@@ -5253,8 +5243,13 @@ class _Lowerer:
                     candidates.append(self._record_method_target(receiver_type, call.func.attr))
             suffix = f".{call.func.attr}"
             candidates.extend(name for name in self.function_types if name.endswith(suffix))
+            candidates.extend(
+                name
+                for name in self.fallback_function_types
+                if name not in self.function_types and name.endswith(suffix)
+            )
         for candidate in candidates:
-            function_info = self.function_types.get(candidate)
+            function_info = self._function_info(candidate)
             if function_info is not None and function_info.return_type.name == "NoReturn":
                 return True
         return False
@@ -5793,6 +5788,58 @@ class _Lowerer:
                 ),
             )
         )
+
+
+def _prepare_analysis_lowerer(
+    analysis: AotAnalysis,
+    *,
+    extra_classes: dict[str, AotClassInfo] | None = None,
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
+    fallback_function_types: dict[str, AotFunctionInfo] | None = None,
+    extra_aliases: dict[str, AotType] | None = None,
+    extra_global_annotations: dict[str, str] | None = None,
+    extra_global_string_constants: dict[str, str] | None = None,
+    extra_global_scalar_constants: dict[str, IrExpr] | None = None,
+    extra_global_string_container_constants: dict[str, IrTuple] | None = None,
+) -> _Lowerer:
+    class_types = dict(extra_classes or {})
+    class_types.update(analysis.types.classes)
+    function_types = dict(extra_functions or {})
+    function_types.update(analysis.types.functions)
+    aliases = dict(extra_aliases or {})
+    aliases.update(analysis.types.aliases)
+    local_global_annotations = _collect_global_annotations(analysis.module.tree)
+    global_annotations = dict(extra_global_annotations or {})
+    global_annotations.update(local_global_annotations)
+    global_string_constants = dict(extra_global_string_constants or {})
+    global_string_constants.update(_collect_global_string_constants(analysis.module.tree))
+    global_scalar_constants = dict(extra_global_scalar_constants or {})
+    global_scalar_constants.update(_collect_global_scalar_constants(analysis.module.tree))
+    local_global_string_container_constants = _collect_global_string_container_constants(
+        analysis.module.tree
+    )
+    global_string_container_constants = dict(extra_global_string_container_constants or {})
+    for name in local_global_annotations:
+        if name not in local_global_string_container_constants:
+            global_string_container_constants.pop(name, None)
+    global_string_container_constants.update(local_global_string_container_constants)
+    global_record_constructor_maps = _collect_global_record_constructor_maps(
+        analysis.module.tree,
+        class_types,
+    )
+    return _Lowerer(
+        analysis.module.filename,
+        class_types,
+        function_types,
+        aliases,
+        _collect_global_names(analysis.module.tree),
+        global_annotations,
+        global_string_constants,
+        global_scalar_constants,
+        global_string_container_constants,
+        global_record_constructor_maps,
+        fallback_function_types=fallback_function_types,
+    )
 
 
 def _literal_fstring_format_spec(spec: ast.expr) -> str | None:
