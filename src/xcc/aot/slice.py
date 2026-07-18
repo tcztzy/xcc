@@ -73,6 +73,7 @@ _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.llvm_api.ptr_array",
     "xcc.llvm_api.zero_ptr_array",
     "xcc.parser.type_specs.ParserError.__str__",
+    "xcc.preprocessor.__init__._Preprocessor.__init__",
     "xcc.preprocessor.__init__._Preprocessor._expand_line",
     "xcc.preprocessor.__init__._Preprocessor._expand_macro_text",
     "xcc.preprocessor.__init__._Preprocessor._handle_define",

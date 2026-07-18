@@ -349,6 +349,18 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("target='_aot_exec_argv'", body)
         self.assertIn("target='__str_startswith'", body)
 
+    def test_native_preprocessor_constructor_uses_no_callback_initializer(self) -> None:
+        module = lower_bootstrap_entry_smoke(ROOT)
+        functions = {function.name: function for function in module.functions}
+        self.assertEqual(
+            functions["xcc.preprocessor.__init__._Preprocessor.__init__"].body,
+            (),
+        )
+        self.assertNotEqual(
+            functions["xcc.preprocessor.__init__._Preprocessor._init_no_callback"].body,
+            (),
+        )
+
     def test_bootstrap_entry_uses_project_owned_smoke_compiler(self) -> None:
         module = lower_bootstrap_entry_smoke(ROOT)
         functions = {function.name: function for function in module.functions}
@@ -387,6 +399,14 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("xcc.cc_driver._aot_write_text_file", functions)
         self.assertIn("xcc.cc_driver._aot_exec_argv", functions)
         self.assertIn("xcc.preprocessor.__init__.preprocess_source_no_callback", functions)
+        self.assertEqual(
+            functions["xcc.preprocessor.__init__._Preprocessor.__init__"].body,
+            (),
+        )
+        self.assertNotEqual(
+            functions["xcc.preprocessor.__init__._Preprocessor._init_no_callback"].body,
+            (),
+        )
         self.assertIn(
             "xcc.preprocessor.__init__._Preprocessor."
             "_handle_conditional_for_process_no_callback",
