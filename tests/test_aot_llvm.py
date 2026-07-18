@@ -806,6 +806,32 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call void @__xcc_aot_tuple_object_layout_register", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_tuple_get_object", llvm_ir)
 
+    def test_mutated_typed_tuple_forwards_layout_for_union_parameter_reads(self) -> None:
+        module = lower_source_to_ir(
+            "class Node:\n"
+            "    pass\n"
+            "def accepts(\n"
+            "    values: tuple[Node, ...] | tuple[tuple[str, int], ...],\n"
+            ") -> bool:\n"
+            "    for item in values:\n"
+            "        if isinstance(item, Node):\n"
+            "            return True\n"
+            "    return False\n"
+            "def entry() -> int:\n"
+            "    values: list[Node] = []\n"
+            "    values.append(Node())\n"
+            "    return 7 if accepts(tuple(values)) else 1\n",
+            filename="union-typed-tuple-layout.py",
+            entry="entry",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("@__xcc_aot_tuple_object_layout_8", llvm_ir)
+        self.assertIn("call void @__xcc_aot_tuple_object_layout_register", llvm_ir)
+        self.assertIn("call void @__xcc_aot_tuple_object_layout_forward", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get_object", llvm_ir)
+
     def test_emits_tuple_alias_narrowing_from_record_union_getitem(self) -> None:
         int64 = IrIntType(64, signed=True)
         function_declarator = IrTupleType((IrTupleType((IrRecordType("TypeSpec"),)), IrBoolType()))

@@ -1954,6 +1954,7 @@ class _Emitter:
             )
             lines.append(f"  {slot} = getelementptr ptr, ptr {result}, i64 {index}")
             lines.append(f"  store ptr {item}, ptr {slot}")
+        self._register_tuple_object_layout(result, expr.type, lines)
         return _EmittedValue(result, expr.type)
 
     def _box_to_runtime_ptr(self, value: _EmittedValue, lines: list[str]) -> str:
@@ -2034,12 +2035,7 @@ class _Emitter:
             self._error(f"Unsupported object value type: {type(value.type).__name__}")
         self.needs_runtime_prelude = True
         if isinstance(value.type, IrTupleType):
-            layout = self._tuple_object_layout_constant(value.type)
-            if layout is not None:
-                lines.append(
-                    "  call void @__xcc_aot_tuple_object_layout_register("
-                    f"ptr {value.value}, i64 {len(value.type.elements)}, ptr {layout})"
-                )
+            self._register_tuple_object_layout(value.value, value.type, lines)
         boxed = self._tmp("object")
         payload = self._tmp("object.payload")
         lines.append(f"  {boxed} = call ptr @malloc(i64 16)")
@@ -8470,6 +8466,22 @@ class _Emitter:
                 f"{name} = private unnamed_addr constant [{len(tags)} x i64] [{values}], align 8"
             )
         return name
+
+    def _register_tuple_object_layout(
+        self,
+        value: str,
+        type_info: IrType,
+        lines: list[str],
+    ) -> None:
+        if not isinstance(type_info, IrTupleType):
+            return
+        layout = self._tuple_object_layout_constant(type_info)
+        if layout is None:
+            return
+        lines.append(
+            "  call void @__xcc_aot_tuple_object_layout_register("
+            f"ptr {value}, i64 {len(type_info.elements)}, ptr {layout})"
+        )
 
     def _object_storage_layout_tag(self, type_info: IrType) -> int:
         if isinstance(type_info, IrBoolType):

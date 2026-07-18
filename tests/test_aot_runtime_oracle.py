@@ -981,6 +981,25 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="boxed-typed-tuple-layout.py",
         )
 
+    def test_mutated_typed_tuple_preserves_layout_through_union_parameter(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Node:\n"
+            "    pass\n"
+            "def accepts(\n"
+            "    values: tuple[Node, ...] | tuple[tuple[str, int], ...],\n"
+            ") -> bool:\n"
+            "    for item in values:\n"
+            "        if isinstance(item, Node):\n"
+            "            return True\n"
+            "    return False\n"
+            "def entry() -> int:\n"
+            "    values: list[Node] = []\n"
+            "    values.append(Node())\n"
+            "    return 7 if accepts(tuple(values)) else 1\n",
+            expected=7,
+            filename="union-typed-tuple-layout.py",
+        )
+
     def test_branch_join_preserves_nullable_record_for_object_boxing(self) -> None:
         self.assert_native_matches_cpython(
             "class Node:\n"
