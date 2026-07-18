@@ -1700,6 +1700,14 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             {"xcc.frontend", "xcc.parser.__init__"},
         )
         self.assertEqual(package_map["parse"], "xcc.parser.__init__.parse")
+        represented_submodule_map = aot_slice._module_rename_map(
+            "xcc.aot.types",
+            "from xcc.aot import py_ast as ast\n"
+            "def render(node: ast.AST) -> str:\n"
+            "    return ast.unparse(node)\n",
+            {"xcc.aot.types", "xcc.aot.py_ast"},
+        )
+        self.assertEqual(represented_submodule_map["ast"], "xcc.aot.py_ast")
         relative_module_map = aot_slice._module_rename_map(
             "xcc.sema.__init__",
             "from . import type_resolution as _type_resolution\n"

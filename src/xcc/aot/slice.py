@@ -1113,11 +1113,9 @@ def _imported_project_function_names(
         if imported_module is None:
             continue
         package_module = f"{imported_module}.__init__"
-        if (
-            not _is_project_target(imported_module, module_names)
-            and package_module not in module_names
-        ):
-            continue
+        package_is_project = (
+            _is_project_target(imported_module, module_names) or package_module in module_names
+        )
         for alias in node.names:
             if alias.name == "*":
                 continue
@@ -1125,6 +1123,8 @@ def _imported_project_function_names(
             submodule = f"{imported_module}.{alias.name}"
             if submodule in module_names:
                 names[local_name] = submodule
+                continue
+            if not package_is_project:
                 continue
             target_module = package_module if package_module in module_names else imported_module
             names[local_name] = f"{target_module}.{alias.name}"
