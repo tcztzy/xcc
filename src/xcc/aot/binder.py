@@ -122,11 +122,14 @@ class _TypeBinder:
                 continue
             bases = tuple(annotation_name(base) for base in statement.bases)
             fields: dict[str, AotType] = {}
+            field_defaults: dict[str, ast.expr] = {}
             int_constants: dict[str, int] = {}
             init_field_parameters: dict[str, str] = {}
             for child in statement.body:
                 if isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
                     fields[child.target.id] = self._resolve_annotation(child.annotation, child)
+                    if child.value is not None:
+                        field_defaults[child.target.id] = child.value
                 elif (
                     isinstance(child, ast.Assign)
                     and len(child.targets) == 1
@@ -148,6 +151,7 @@ class _TypeBinder:
                 int_constants,
                 init_field_parameters,
                 kw_only=_class_is_kw_only_dataclass(statement),
+                field_defaults=field_defaults,
             )
 
     def _collect_init_fields(

@@ -6294,6 +6294,22 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(module.functions[1].body[0].target, "pair")
         self.assertEqual(module.functions[1].body[1].value.target, "Pair.total")
 
+    def test_lowers_explicit_none_record_field_default(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Box:\n"
+            "    values: tuple[str, ...] | None = None\n"
+            "def make() -> Box:\n"
+            "    return Box()\n"
+        )
+
+        module = lower_source_to_ir(source, filename="record_none_field.py", entry="make")
+        returned = module.functions[0].body[0].value
+
+        self.assertIsInstance(returned, IrConstructRecord)
+        self.assertEqual(returned.args, (IrConstNone(),))
+
     def test_exception_constructor_calls_record_initializer_with_arguments(self) -> None:
         source = (
             "class Problem(ValueError):\n"

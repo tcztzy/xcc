@@ -1293,6 +1293,23 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("define i64 @Pair.total(ptr %self)", llvm_ir)
         self.assertIn("call i64 @Pair.total(ptr %pair2)", llvm_ir)
 
+    def test_emits_explicit_none_record_field_default_as_null(self) -> None:
+        source = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Box:\n"
+            "    values: tuple[str, ...] | None = None\n"
+            "def make() -> Box:\n"
+            "    return Box()\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="record_none_field.py")
+        )
+
+        self.assertIn("%Box = type { ptr }", llvm_ir)
+        self.assertRegex(llvm_ir, r"store ptr null, ptr %fieldptr\d+")
+
     def test_emits_module_without_entry_and_scalar_assignment(self) -> None:
         int64 = IrIntType(64, signed=True)
         module = IrModule(

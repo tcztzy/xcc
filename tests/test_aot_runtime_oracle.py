@@ -40,6 +40,19 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="for-break-continue.py",
         )
 
+    def test_record_constructor_uses_explicit_none_field_default(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Box:\n"
+            "    values: tuple[str, ...] | None = None\n"
+            "def entry() -> int:\n"
+            "    box = Box()\n"
+            "    return 1 if box.values is None else 2\n",
+            expected=1,
+            filename="record-none-field-default.py",
+        )
+
     def test_break_preserves_assignments_from_current_iteration(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

@@ -3833,7 +3833,13 @@ class _Lowerer:
             elif field_name in keyword_values:
                 args.append(self._lower_expr(keyword_values[field_name], names, ir_type))
             else:
-                args.append(self._default_expr(ir_type))
+                field_default = self._record_layout_field_default(record_name, field_name)
+                if field_default is None:
+                    args.append(self._default_expr(ir_type))
+                else:
+                    args.append(
+                        self._default_call_arg_expr(field_type.name, ir_type, field_default)
+                    )
         return tuple(args)
 
     def _lower_record_constructor_call(
@@ -4202,6 +4208,29 @@ class _Lowerer:
         for field_name, field_type, _kw_only in self._record_layout_field_items(record_name):
             if field_name == field:
                 return field_type
+        return None
+
+    def _record_layout_field_default(
+        self,
+        record_name: str,
+        field: str,
+        seen: frozenset[str] = frozenset(),
+    ) -> ast.expr | None:
+        if record_name in seen:
+            return None
+        class_info = self.class_types.get(record_name)
+        if class_info is None:
+            return None
+        default = class_info.field_defaults.get(field)
+        if default is not None:
+            return default
+        if field in class_info.fields:
+            return None
+        nested_seen = seen | {record_name}
+        for base in class_info.bases:
+            default = self._record_layout_field_default(base, field, nested_seen)
+            if default is not None:
+                return default
         return None
 
     def _record_union_field_type(
