@@ -101,7 +101,7 @@ T4|x|implement explicit exception/status ABI and required native runtime semanti
 T5|x|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
 T6|x|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378
 T7|x|build Stage 2 from `.py` with Stage 1 and no Python process/cache dependency|V369,V370,V371,V372,V373,V378
-T8|.|build Stage 3 with Stage 2 and prove normalized IR/symbol/behavior stability|V369,V377,V384
+T8|~|build Stage 3 with Stage 2 and prove normalized IR/symbol/behavior stability|V369,V377,V384
 T9|.|run CPython compatibility, native C compiler, CPython build, lint, type, and full tests|V379,V381
 
 ## §B BUGS
@@ -377,3 +377,5 @@ B535|2026-07-17|tuple-backed native `set.add` unconditionally concatenated a sin
 B536|2026-07-17|the B535 set-add emitter manually split two LLVM instruction f-strings across adjacent literals even though the repository formatter canonicalizes each instruction as one line, so the focused semantic oracles passed while the lint formatting gate failed|V379,V384
 B537|2026-07-17|native string membership compared only the first byte of a string needle instead of searching for the complete substring; `_hoist_allocas_to_entry` therefore treated every indented LLVM instruction as matching `" = alloca "`, moved all instructions ahead of their basic-block labels, and made `llc` reject even a small Stage 1 output after B535 removed the earlier duplicate-declaration blocker|V368,V375,V376,V384
 B538|2026-07-18|boxing a typed tuple as opaque `object` preserved the tuple pointer but discarded its element-storage layout; after `isinstance(value, tuple)` narrowed the box, generic iteration decoded raw record slots as tagged object boxes, so `py_parser._children` rejected a valid `ImportFrom` as not `AST`, `ast.walk` missed function-local project imports, native call renaming left `parse_subset_source` unqualified, and `llc` rejected Stage 2|V368,V375,V376,V384
+B539|2026-07-18|the Milestone 8 plan named `scripts/aot_bootstrap_gate.py` and invoked its `compare-behavior` command, but the file was never implemented; normalized-IR and symbol equality therefore had no executable compiler/runtime fixture gate and could not prove Stage 2/3 behavior equivalence|V377,V384
+B540|2026-07-18|the new bootstrap behavior gate placed `pathlib` after module-form standard-library imports instead of using the repository's canonical import order, so its semantic fixture passed while the focused lint gate failed|V379,V384
