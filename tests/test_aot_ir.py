@@ -6300,6 +6300,27 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_exception_subclass_inherits_builtin_constructor_arguments(self) -> None:
+        module = lower_source_to_ir(
+            "class ParentError(Exception):\n"
+            "    pass\n"
+            "class ChildError(ParentError):\n"
+            "    pass\n"
+            "def fail() -> None:\n"
+            "    raise ChildError('bad')\n",
+            filename="inherited_exception_init.py",
+            entry="fail",
+        )
+
+        raised = next(function for function in module.functions if function.name == "fail").body[0]
+        self.assertIsInstance(raised, IrRaise)
+        assert isinstance(raised, IrRaise)
+        self.assertEqual(raised.message, IrConstString("bad"))
+        self.assertEqual(
+            raised.payload,
+            IrConstructRecord("ChildError", (), IrRecordType("ChildError")),
+        )
+
     def test_raise_factory_uses_returned_exception_record_type(self) -> None:
         module = lower_source_to_ir(
             "class Problem(ValueError):\n"

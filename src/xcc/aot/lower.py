@@ -3772,6 +3772,17 @@ class _Lowerer:
         record_type = IrRecordType(record_name)
         init_target = self._record_method_target(record_type, "__init__")
         if self._function_info(init_target) is None:
+            if _record_extends(record_name, "Exception", self.class_types):
+                return IrConstructRecord(
+                    record_name,
+                    tuple(
+                        self._default_expr(self._aot_type_to_ir_type(field_type))
+                        for _field_name, field_type, _kw_only in (
+                            self._record_layout_field_items(record_name)
+                        )
+                    ),
+                    record_type,
+                )
             return IrConstructRecord(
                 record_name,
                 self._lower_constructor_args(record_name, expr, names),
