@@ -148,6 +148,86 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("int signal = 4 ;", result.source)
         self.assertNotIn("*/", result.source)
 
+    def test_no_callback_evaluates_integer_macro_conditions(self) -> None:
+        options = FrontendOptions()
+        processor = _Preprocessor(options)
+        processor._init_no_callback(options)
+        processor._handle_define_no_callback("LITTLE 1234 /* least-significant first */")
+        processor._handle_define_no_callback("BIG 4321 /* most-significant first */")
+        processor._handle_define_no_callback("ORDER LITTLE")
+        location = _SourceLocation("integer_condition.c", 1)
+
+        self.assertTrue(
+            processor._eval_condition_no_callback(
+                "defined(ORDER) && ORDER == LITTLE",
+                location,
+                None,
+            )
+        )
+        self.assertFalse(
+            processor._eval_condition_no_callback(
+                "UNKNOWN || (LITTLE << 1) != 2468",
+                location,
+                None,
+            )
+        )
+
+        result = preprocess_source_no_callback(
+            "#define LITTLE 1234 /* least-significant first */\n"
+            "#define BIG 4321 /* most-significant first */\n"
+            "#define ORDER LITTLE\n"
+            "#if defined(ORDER) && ORDER == LITTLE\n"
+            "int selected;\n"
+            "#elif ORDER == BIG\n"
+            "int wrong_order;\n"
+            "#else\n"
+            "int missing_order;\n"
+            "#endif\n"
+            "#if UNKNOWN || (LITTLE << 1) != 2468\n"
+            "int wrong_precedence;\n"
+            "#else\n"
+            "int precedence_ok;\n"
+            "#endif\n",
+            filename="integer_condition.c",
+        )
+
+        self.assertIn("int selected ;", result.source)
+        self.assertIn("int precedence_ok ;", result.source)
+        self.assertNotIn("wrong_order", result.source)
+        self.assertNotIn("missing_order", result.source)
+        self.assertNotIn("wrong_precedence", result.source)
+
+    def test_no_callback_evaluates_feature_probe_conditions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "present.h").write_text("int present;\n", encoding="utf-8")
+            options = FrontendOptions(include_dirs=(str(root),))
+            processor = _Preprocessor(options)
+            processor._init_no_callback(options)
+            location = _SourceLocation(str(root / "probe.c"), 1)
+
+            self.assertTrue(
+                processor._eval_condition_no_callback(
+                    '__has_include("present.h")',
+                    location,
+                    root,
+                )
+            )
+            self.assertFalse(
+                processor._eval_condition_no_callback(
+                    '__has_include("missing.h")',
+                    location,
+                    root,
+                )
+            )
+            self.assertFalse(
+                processor._eval_condition_no_callback(
+                    "__has_feature(xcc_missing_feature)",
+                    location,
+                    root,
+                )
+            )
+
     def test_gnu_asm_strip_handles_incomplete_or_non_operand_asm_keywords(self) -> None:
         self.assertEqual(
             preprocessor_text._strip_inline_asm_segments("int asm;\n"),

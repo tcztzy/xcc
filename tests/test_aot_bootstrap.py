@@ -1954,6 +1954,77 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(obj.exists())
 
+    def test_real_native_bootstrap_evaluates_integer_macro_conditions(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b568-integer-condition"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "integer_condition.c"
+            obj = root / "integer_condition.o"
+            source.write_text(
+                "#define LITTLE 1234 /* least-significant first */\n"
+                "#define BIG 4321 /* most-significant first */\n"
+                "#define ORDER LITTLE\n"
+                "#if defined(ORDER) && ORDER == LITTLE\n"
+                "struct Box { int value; };\n"
+                "#elif ORDER == BIG\n"
+                "int broken = ;\n"
+                "#else\n"
+                "int also_broken = ;\n"
+                "#endif\n"
+                "int main(void){struct Box box = {0}; return box.value;}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
+    def test_real_native_bootstrap_evaluates_has_include_conditions(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b571-has-include"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            (root / "present.h").write_text("#define PRESENT 7\n", encoding="utf-8")
+            source = root / "has_include.c"
+            obj = root / "has_include.o"
+            source.write_text(
+                '#if __has_include("present.h")\n'
+                '#include "present.h"\n'
+                "#else\n"
+                "int broken = ;\n"
+                "#endif\n"
+                '#if __has_include("missing.h")\n'
+                "int also_broken = ;\n"
+                "#endif\n"
+                "int main(void){return PRESENT == 7 ? 0 : 1;}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj), "-I", str(root)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
     def test_real_native_bootstrap_links_configure_style_object_when_llc_exists(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():

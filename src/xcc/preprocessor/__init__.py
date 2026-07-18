@@ -329,6 +329,247 @@ def _strip_block_comments_no_callback(text: str) -> str:
     return result
 
 
+def _pp_primary_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    if index >= len(tokens):
+        return 0, index, False
+    token = tokens[index]
+    literal = _parse_pp_integer_literal(token)
+    if literal is not None:
+        return literal, index + 1, True
+    scanned = _guard_scan_identifier(token, 0)
+    if scanned is not None and scanned[1] == len(token):
+        return 0, index + 1, True
+    if token != "(":
+        return 0, index, False
+    value, index, valid = _pp_conditional_no_callback(tokens, index + 1)
+    if index >= len(tokens) or tokens[index] != ")":
+        return 0, index, False
+    return value, index + 1, valid
+
+
+def _pp_unary_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    if index >= len(tokens) or tokens[index] not in ("!", "~", "+", "-"):
+        return _pp_primary_no_callback(tokens, index)
+    operator = tokens[index]
+    value, index, valid = _pp_unary_no_callback(tokens, index + 1)
+    if operator == "!":
+        return (0 if value else 1), index, valid
+    if operator == "~":
+        return ~value, index, valid
+    if operator == "-":
+        return 0 - value, index, valid
+    return value, index, valid
+
+
+def _pp_truncating_division_no_callback(left: int, right: int) -> tuple[int, bool]:
+    if right == 0:
+        return 0, False
+    left_magnitude = abs(left)
+    right_magnitude = abs(right)
+    quotient = left_magnitude // right_magnitude
+    if (left < 0) != (right < 0):
+        quotient = 0 - quotient
+    return quotient, True
+
+
+def _pp_multiplicative_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_unary_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] in ("*", "/", "%"):
+        operator = tokens[index]
+        right, index, right_valid = _pp_unary_no_callback(tokens, index + 1)
+        valid = valid and right_valid
+        if operator == "*":
+            left *= right
+            continue
+        quotient, division_valid = _pp_truncating_division_no_callback(left, right)
+        valid = valid and division_valid
+        if operator == "/":
+            left = quotient
+        else:
+            left -= quotient * right
+    return left, index, valid
+
+
+def _pp_additive_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_multiplicative_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] in ("+", "-"):
+        operator = tokens[index]
+        right, index, right_valid = _pp_multiplicative_no_callback(tokens, index + 1)
+        valid = valid and right_valid
+        if operator == "+":
+            left += right
+        else:
+            left -= right
+    return left, index, valid
+
+
+def _pp_shift_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_additive_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] in ("<<", ">>"):
+        operator = tokens[index]
+        right, index, right_valid = _pp_additive_no_callback(tokens, index + 1)
+        valid = valid and right_valid and 0 <= right < 64
+        if not (0 <= right < 64):
+            left = 0
+        elif operator == "<<":
+            left <<= right
+        else:
+            left >>= right
+    return left, index, valid
+
+
+def _pp_relational_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_shift_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] in ("<", "<=", ">", ">="):
+        operator = tokens[index]
+        right, index, right_valid = _pp_shift_no_callback(tokens, index + 1)
+        valid = valid and right_valid
+        if operator == "<":
+            left = int(left < right)
+        elif operator == "<=":
+            left = int(left <= right)
+        elif operator == ">":
+            left = int(left > right)
+        else:
+            left = int(left >= right)
+    return left, index, valid
+
+
+def _pp_equality_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_relational_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] in ("==", "!="):
+        operator = tokens[index]
+        right, index, right_valid = _pp_relational_no_callback(tokens, index + 1)
+        valid = valid and right_valid
+        left = int(left == right) if operator == "==" else int(left != right)
+    return left, index, valid
+
+
+def _pp_bitwise_and_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_equality_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] == "&":
+        right, index, right_valid = _pp_equality_no_callback(tokens, index + 1)
+        left &= right
+        valid = valid and right_valid
+    return left, index, valid
+
+
+def _pp_bitwise_xor_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_bitwise_and_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] == "^":
+        right, index, right_valid = _pp_bitwise_and_no_callback(tokens, index + 1)
+        left ^= right
+        valid = valid and right_valid
+    return left, index, valid
+
+
+def _pp_bitwise_or_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_bitwise_xor_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] == "|":
+        right, index, right_valid = _pp_bitwise_xor_no_callback(tokens, index + 1)
+        left |= right
+        valid = valid and right_valid
+    return left, index, valid
+
+
+def _pp_logical_and_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_bitwise_or_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] == "&&":
+        right, index, right_valid = _pp_bitwise_or_no_callback(tokens, index + 1)
+        if left:
+            valid = valid and right_valid
+        left = int(bool(left) and bool(right))
+    return left, index, valid
+
+
+def _pp_logical_or_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    left, index, valid = _pp_logical_and_no_callback(tokens, index)
+    while index < len(tokens) and tokens[index] == "||":
+        right, index, right_valid = _pp_logical_and_no_callback(tokens, index + 1)
+        if not left:
+            valid = valid and right_valid
+        left = int(bool(left) or bool(right))
+    return left, index, valid
+
+
+def _pp_conditional_no_callback(
+    tokens: list[str],
+    index: int,
+) -> tuple[int, int, bool]:
+    condition, index, valid = _pp_logical_or_no_callback(tokens, index)
+    if index >= len(tokens) or tokens[index] != "?":
+        return condition, index, valid
+    true_value, index, true_valid = _pp_conditional_no_callback(tokens, index + 1)
+    if index >= len(tokens) or tokens[index] != ":":
+        return 0, index, False
+    false_value, index, false_valid = _pp_conditional_no_callback(tokens, index + 1)
+    if condition:
+        return true_value, index, valid and true_valid
+    return false_value, index, valid and false_valid
+
+
+def _find_probe_close_no_callback(condition: str, open_index: int) -> int:
+    depth = 0
+    quote = ""
+    index = open_index
+    while index < len(condition):
+        ch = condition[index]
+        if quote:
+            if ch == "\\" and index + 1 < len(condition):
+                index += 2
+                continue
+            if ch == quote:
+                quote = ""
+            index += 1
+            continue
+        if ch == "'" or ch == '"':
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return -1
+
+
 _join_macro_arguments = _macros._join_macro_arguments
 _lookup_macro_argument = _macros._lookup_macro_argument
 _parse_cli_define_head = _macros._parse_cli_define_head
@@ -1412,41 +1653,125 @@ class _Preprocessor:
         condition = _strip_condition_comments(body).strip()
         if not condition:
             return False
-        if condition.startswith("!"):
-            return not self._eval_condition_no_callback(condition[1:].strip(), location, base_dir)
-        if "||" in condition:
-            or_parts = condition.split("||")
-            for part in or_parts:
-                if self._eval_condition_no_callback(part.strip(), location, base_dir):
-                    return True
-            return False
-        if "&&" in condition:
-            and_parts = condition.split("&&")
-            for part in and_parts:
-                if not self._eval_condition_no_callback(part.strip(), location, base_dir):
-                    return False
-            return True
-        if condition.startswith("defined"):
-            tail = condition[len("defined") :].lstrip()
-            if tail.startswith("("):
-                tail = tail[1:].lstrip()
-                scanned = _guard_scan_identifier(tail, 0)
-                if scanned is None:
-                    return False
-                macro_name, cursor = scanned
-                tail = tail[cursor:].lstrip()
-                if not tail.startswith(")"):
-                    return False
-                return self._macro_defined_no_callback(macro_name)
-            scanned = _guard_scan_identifier(tail, 0)
+        condition = self._replace_defined_no_callback(condition)
+        condition = self._expand_text_no_callback(condition, ())
+        condition = _strip_condition_comments(condition).strip()
+        condition = self._replace_feature_probes_no_callback(
+            condition,
+            location,
+            base_dir,
+        )
+        tokens = _tokenize_expr(condition)
+        value, index, valid = _pp_conditional_no_callback(tokens, 0)
+        return valid and index == len(tokens) and value != 0
+
+    def _replace_defined_no_callback(self, condition: str) -> str:
+        result = ""
+        index = 0
+        while index < len(condition):
+            ch = condition[index]
+            if ch == "'" or ch == '"':
+                quote = ch
+                start = index
+                index += 1
+                while index < len(condition):
+                    if condition[index] == "\\" and index + 1 < len(condition):
+                        index += 2
+                        continue
+                    if condition[index] == quote:
+                        index += 1
+                        break
+                    index += 1
+                result += condition[start:index]
+                continue
+            scanned = _guard_scan_identifier(condition, index)
             if scanned is None:
-                return False
-            return self._macro_defined_no_callback(scanned[0])
-        if self._macro_defined_no_callback(condition):
-            return True
-        if condition.isdigit():
-            return int(condition) != 0
-        return False
+                result += ch
+                index += 1
+                continue
+            name, index = scanned
+            if name != "defined":
+                result += name
+                continue
+            cursor = index
+            while cursor < len(condition) and condition[cursor].isspace():
+                cursor += 1
+            parenthesized = cursor < len(condition) and condition[cursor] == "("
+            if parenthesized:
+                cursor += 1
+                while cursor < len(condition) and condition[cursor].isspace():
+                    cursor += 1
+            operand = _guard_scan_identifier(condition, cursor)
+            if operand is None:
+                result += "0"
+                continue
+            macro_name, cursor = operand
+            while cursor < len(condition) and condition[cursor].isspace():
+                cursor += 1
+            if parenthesized:
+                if cursor >= len(condition) or condition[cursor] != ")":
+                    result += "0"
+                    continue
+                cursor += 1
+            result += "1" if self._macro_defined_no_callback(macro_name) else "0"
+            index = cursor
+        return result
+
+    def _replace_feature_probes_no_callback(
+        self,
+        condition: str,
+        location: _SourceLocation,
+        base_dir: Path | None,
+    ) -> str:
+        result = ""
+        index = 0
+        while index < len(condition):
+            scanned = _guard_scan_identifier(condition, index)
+            if scanned is None:
+                result += condition[index]
+                index += 1
+                continue
+            name, index = scanned
+            if name not in (
+                "__has_attribute",
+                "__has_builtin",
+                "__has_c_attribute",
+                "__has_embed",
+                "__has_extension",
+                "__has_feature",
+                "__has_include",
+                "__has_include_next",
+                "__has_warning",
+            ):
+                result += name
+                continue
+            cursor = index
+            while cursor < len(condition) and condition[cursor].isspace():
+                cursor += 1
+            if cursor >= len(condition) or condition[cursor] != "(":
+                result += name
+                continue
+            close_index = _find_probe_close_no_callback(condition, cursor)
+            if close_index < 0:
+                result += name
+                continue
+            if name == "__has_include" or name == "__has_include_next":
+                operand = condition[cursor + 1 : close_index].strip()
+                include_name, is_angled = self._parse_header_name_operand_no_macro(
+                    operand,
+                    location,
+                )
+                include_path, _ = self._resolve_include(
+                    include_name,
+                    is_angled=is_angled,
+                    base_dir=base_dir,
+                    include_next_from=base_dir if name == "__has_include_next" else None,
+                )
+                result += "1" if include_path is not None else "0"
+            else:
+                result += "0"
+            index = close_index + 1
+        return result
 
     def _macro_defined_no_callback(self, name: str) -> bool:
         return self._macros.get(name) is not None

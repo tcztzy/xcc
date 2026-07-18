@@ -31,7 +31,7 @@ Rules:
 - `src/xcc/parser/extensions.py`: 66 hunks
 - `src/xcc/parser/statements.py`: 2 hunks
 - `src/xcc/parser/type_specs.py`: 63 hunks
-- `src/xcc/preprocessor/__init__.py`: 35 hunks
+- `src/xcc/preprocessor/__init__.py`: 36 hunks
 - `src/xcc/preprocessor/conditionals.py`: 1 hunks
 - `src/xcc/preprocessor/expressions.py`: 10 hunks
 - `src/xcc/preprocessor/includes.py`: 8 hunks
@@ -53,7 +53,7 @@ Rules:
 - `src/xcc/sema/type_resolution.py`: 45 hunks
 - `src/xcc/types.py`: 18 hunks
 
-Total: 731 hunks across 32 non-AOT source files.
+Total: 732 hunks across 32 non-AOT source files.
 
 ## Hunk Ledger
 
@@ -790,3 +790,4 @@ Total: 731 hunks across 32 non-AOT source files.
 | H729 | `src/xcc/preprocessor/__init__.py` | `_parse_define_no_callback`; retain the replacement text of source-level object-like macros | AOT-driven C preprocessor semantic repair | retain: the native no-callback protocol remains the declared subset boundary, but `#define NAME replacement` must preserve ordinary C object-macro semantics; deleting replacement text is not an admissible source-shape workaround | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_object_macro_preserves_replacement` | rebuilt native bootstrap in `test_real_native_bootstrap_preserves_object_macro_replacement`; compiled a struct-name object macro to an arm64 object | `B564` |
 | H730 | `src/xcc/preprocessor/__init__.py` | `_expand_line_no_callback` / `_expand_text_no_callback`; recursively expand object-macro aliases with active-name suppression | AOT-driven C preprocessor semantic repair | retain: recursive object-like replacement and self-reference termination are ordinary C preprocessing semantics required by SDK headers; the no-callback subset continues to isolate function-like macro work rather than rewriting C inputs | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_object_macro_recursively_expands_alias` | rebuilt native bootstrap in `test_real_native_bootstrap_recursively_expands_object_macro_alias`; compiled a two-level struct-name alias to an arm64 object | `B565` |
 | H731 | `src/xcc/preprocessor/__init__.py` | `_expand_text_no_callback`; preserve comments and quoted literals as macro-inert lexical regions | AOT-driven C preprocessor semantic repair | retain: preprocessing tokens inside comments and string/character literals are not macro invocations under ordinary C semantics; protecting those regions fixes the native frontend without changing source shape | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_does_not_expand_macros_in_comments_or_literals` | rebuilt native bootstrap in `test_real_native_bootstrap_skips_object_macros_in_comments_and_literals`; compiled a macro used in code, comments, and a string literal to an arm64 object | `B567` |
+| H732 | `src/xcc/preprocessor/__init__.py` | `_eval_condition_no_callback` and expression helpers; expand object macros, normalize replacement comments, evaluate C integer precedence, and resolve feature probes | AOT-driven C preprocessor semantic repair | retain: integer macro replacement, comment removal, comparisons, arithmetic, bitwise/logical operators, `defined`, and standard include probes are ordinary `#if` semantics required by SDK headers; preserving them fixes the native frontend rather than weakening sema or rewriting C inputs | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_evaluates_integer_macro_conditions tests.test_preprocessor.PreprocessorTests.test_no_callback_evaluates_feature_probe_conditions` | rebuilt native bootstraps in `test_real_native_bootstrap_evaluates_integer_macro_conditions` and `test_real_native_bootstrap_evaluates_has_include_conditions`; compiled selected numeric/include branches to arm64 objects while invalid alternate branches remained excluded | `B568,B571,B572` |
