@@ -1960,6 +1960,33 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         self.assertRegex(llvm_ir, r"%optional\.int\.payload\d+ = getelementptr i8")
 
+    def test_boxes_optional_integer_on_break_exit_edge(self) -> None:
+        module = lower_source_to_ir(
+            "def find() -> int:\n"
+            "    found = None\n"
+            "    for index in range(5):\n"
+            "        if index == 3:\n"
+            "            found = index\n"
+            "            break\n"
+            "    if found is None:\n"
+            "        return 9\n"
+            "    return found\n",
+            filename="optional-int-break-exit.py",
+            entry="find",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertRegex(
+            llvm_ir,
+            r"%loopexit\d+ = phi ptr \[ %loop\d+, %for\.cond\d+ \], "
+            r"\[ %object\d+, %if\.then\d+ \]",
+        )
+        self.assertRegex(
+            llvm_ir,
+            r"store i64 %[\w.]+, ptr %object\.payload\d+\n  br label %for\.end\d+",
+        )
+
     def test_compares_optional_integer_payload_to_concrete_zero(self) -> None:
         module = lower_source_to_ir(
             "def maybe(value: int, present: bool) -> int | None:\n"

@@ -1670,13 +1670,14 @@ class _Emitter:
         for name, loop_type in loop_types.items():
             condition_value = condition_names[name]
             incoming = [
-                f"[ {self._value_for_result_type(condition_value, loop_type)}, "
+                f"[ {self._if_phi_value(condition_value, loop_type, condition_source, lines)}, "
                 f"%{condition_source} ]"
             ]
             for source_label, source_names in break_sources:
                 source_value = source_names.get(name, condition_value)
                 incoming.append(
-                    f"[ {self._value_for_result_type(source_value, loop_type)}, %{source_label} ]"
+                    f"[ {self._if_phi_value(source_value, loop_type, source_label, lines)}, "
+                    f"%{source_label} ]"
                 )
             result = self._tmp("loopexit")
             lines.append(

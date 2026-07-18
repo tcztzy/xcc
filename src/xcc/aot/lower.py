@@ -636,6 +636,7 @@ class _Lowerer:
                 )
             )
             _merge_loop_fallthrough_names(names, incoming_names, body_names, self.class_types)
+            _merge_loop_assignment_names(names, incoming_names, body, self.class_types)
             return IrWhile(condition, body)
         if isinstance(statement, ast.For):
             iterable = self._lower_expr(statement.iter, names, IrTupleType(()))
@@ -663,6 +664,7 @@ class _Lowerer:
                 )
             )
             _merge_loop_fallthrough_names(names, incoming_names, body_names, self.class_types)
+            _merge_loop_assignment_names(names, incoming_names, body, self.class_types)
             return IrForEach(
                 target_name,
                 iterable,
@@ -6134,6 +6136,79 @@ def _merge_loop_fallthrough_names(
             body_type,
             class_types,
         )
+
+
+def _merge_loop_assignment_names(
+    names: dict[str, IrType],
+    incoming_names: dict[str, IrType],
+    body: IrBranch,
+    class_types: dict[str, AotClassInfo],
+) -> None:
+    for name, assigned_types in _lowered_branch_assignment_types(body).items():
+        incoming_type = incoming_names.get(name)
+        if incoming_type is None:
+            continue
+        merged_type = incoming_type
+        for assigned_type in assigned_types:
+            merged_type = _merge_loop_fallthrough_type(
+                merged_type,
+                assigned_type,
+                class_types,
+            )
+        names[name] = merged_type
+
+
+def _lowered_branch_assignment_types(branch: IrBranch) -> dict[str, tuple[IrType, ...]]:
+    assignments: dict[str, tuple[IrType, ...]] = {}
+    for statement in branch.statements:
+        child_assignments = _lowered_statement_assignment_types(statement)
+        for name, assigned_types in child_assignments.items():
+            assignments[name] = assignments.get(name, ()) + assigned_types
+    return assignments
+
+
+def _lowered_statement_assignment_types(statement: IrStmt) -> dict[str, tuple[IrType, ...]]:
+    if isinstance(statement, IrAssign):
+        if statement.target == "__expr":
+            return {}
+        return {statement.target: (statement.value.type,)}
+    if isinstance(statement, IrIf):
+        assignments = _lowered_branch_assignment_types(statement.then_branch)
+        if statement.else_branch is not None:
+            assignments = _merge_lowered_assignment_types(
+                assignments,
+                _lowered_branch_assignment_types(statement.else_branch),
+            )
+        return assignments
+    if isinstance(statement, IrForEach | IrWhile):
+        return _lowered_branch_assignment_types(statement.body)
+    if isinstance(statement, IrTry):
+        assignments = _lowered_branch_assignment_types(statement.body)
+        assignments = _merge_lowered_assignment_types(
+            assignments,
+            _lowered_branch_assignment_types(statement.orelse),
+        )
+        assignments = _merge_lowered_assignment_types(
+            assignments,
+            _lowered_branch_assignment_types(statement.finalbody),
+        )
+        for handler in statement.handlers:
+            assignments = _merge_lowered_assignment_types(
+                assignments,
+                _lowered_branch_assignment_types(handler.body),
+            )
+        return assignments
+    return {}
+
+
+def _merge_lowered_assignment_types(
+    left: dict[str, tuple[IrType, ...]],
+    right: dict[str, tuple[IrType, ...]],
+) -> dict[str, tuple[IrType, ...]]:
+    merged = dict(left)
+    for name, assigned_types in right.items():
+        merged[name] = merged.get(name, ()) + assigned_types
+    return merged
 
 
 def _merge_loop_fallthrough_type(

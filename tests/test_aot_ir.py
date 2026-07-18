@@ -2148,6 +2148,37 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(returned, IrReturn)
         self.assertEqual(returned.value, IrName("selected", IrIntType(64, signed=True)))
 
+    def test_break_assignment_preserves_optional_integer_after_loop(self) -> None:
+        module = lower_source_to_ir(
+            "def find() -> int:\n"
+            "    found = None\n"
+            "    for index in range(5):\n"
+            "        if index == 3:\n"
+            "            found = index\n"
+            "            break\n"
+            "    if found is None:\n"
+            "        return 9\n"
+            "    return found\n",
+            filename="optional-int-break-exit.py",
+            entry="find",
+        )
+
+        function = module.functions[0]
+        guard = function.body[2]
+        self.assertIsInstance(guard, IrIf)
+        assert isinstance(guard, IrIf)
+        self.assertIsInstance(guard.condition, IrCall)
+        assert isinstance(guard.condition, IrCall)
+        self.assertEqual(
+            guard.condition.args[0],
+            IrName("found", IrRecordType("int | None")),
+        )
+        returned = function.body[3]
+        self.assertEqual(
+            returned,
+            IrReturn(IrName("found", IrIntType(64, signed=True))),
+        )
+
     def test_none_replacement_narrows_optional_integer_after_if(self) -> None:
         module = lower_source_to_ir(
             "def fill(value: int | None) -> int:\n"
