@@ -570,7 +570,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("[ 7, %ifexp.false", llvm_ir)
         self.assertNotIn("i64 null", llvm_ir)
 
-    def test_emits_ifexp_boxes_bool_arm_for_pointer_union_result(self) -> None:
+    def test_emits_ifexp_tags_bool_arm_for_mixed_union_result(self) -> None:
         result_type = IrRecordType("list | bool")
         module = IrModule(
             "ifexp_bool_union.py",
@@ -599,10 +599,10 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("inttoptr i64", llvm_ir)
+        self.assertIn("store i64 1, ptr %object", llvm_ir)
         self.assertIn("br i1 %flag, label %ifexp.true", llvm_ir)
         self.assertIn("phi ptr [ %values, %ifexp.true", llvm_ir)
-        self.assertIn("[ %box", llvm_ir)
+        self.assertIn("[ %object", llvm_ir)
 
     def test_emits_none_ifexp_without_void_select(self) -> None:
         module = IrModule(
@@ -862,7 +862,35 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %value, i64 1)", llvm_ir)
+        self.assertIn("getelementptr i8, ptr %value, i64 8", llvm_ir)
+        self.assertRegex(
+            llvm_ir,
+            r"call ptr @__xcc_aot_tuple_get\(ptr %object\.pointer\d+, i64 1\)",
+        )
+
+    def test_mixed_scalar_record_union_uses_tagged_object_abi(self) -> None:
+        module = lower_source_to_ir(
+            "class Box:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        self.value = value\n"
+            "Value = int | Box | tuple[int, bool]\n"
+            "def wrap(value: Value) -> tuple[str, object]:\n"
+            "    return 'value', value\n"
+            "def entry() -> int:\n"
+            "    packed = wrap(128)\n"
+            "    value = packed[1]\n"
+            "    if isinstance(value, int):\n"
+            "        return value\n"
+            "    return 0\n",
+            filename="mixed-union-object-abi.py",
+            entry="entry",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertRegex(llvm_ir, r"store i64 2, ptr %object\d+")
+        self.assertRegex(llvm_ir, r"call ptr @wrap\(ptr %object\d+\)")
+        self.assertIn("%object.isinstance.builtin", llvm_ir)
         self.assertIn("icmp ne ptr", llvm_ir)
         self.assertNotIn("@__getitem", llvm_ir)
 
@@ -1578,7 +1606,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("ret i64 0", llvm_ir)
         self.assertNotIn("ret i64 null", llvm_ir)
 
-    def test_emits_integer_return_boxed_for_pointer_union_return_type(self) -> None:
+    def test_emits_integer_return_tagged_for_mixed_union_return_type(self) -> None:
         int64 = IrIntType(64, signed=True)
         result_type = IrRecordType("int | Box")
         module = IrModule(
@@ -1596,8 +1624,9 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("inttoptr i64 7 to ptr", llvm_ir)
-        self.assertNotIn("ret ptr 7", llvm_ir)
+        self.assertIn("store i64 2, ptr %object", llvm_ir)
+        self.assertIn("store i64 7, ptr %object.payload", llvm_ir)
+        self.assertNotIn("inttoptr i64 7 to ptr", llvm_ir)
 
     def test_emits_string_repeat_intrinsic(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -3780,7 +3809,11 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %value)", llvm_ir)
+        self.assertIn("getelementptr i8, ptr %value, i64 8", llvm_ir)
+        self.assertRegex(
+            llvm_ir,
+            r"call i64 @__xcc_aot_tuple_len\(ptr %object\.pointer\d+\)",
+        )
         self.assertNotIn("@len", llvm_ir)
 
     def test_emits_range_intrinsic_as_runtime_tuple(self) -> None:

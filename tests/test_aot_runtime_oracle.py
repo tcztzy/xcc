@@ -1000,6 +1000,31 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="union-typed-tuple-layout.py",
         )
 
+    def test_mixed_scalar_record_union_uses_tagged_object_abi(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Box:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        self.value = value\n"
+            "Value = int | Box | tuple[int, bool]\n"
+            "def wrap(value: Value) -> tuple[str, object]:\n"
+            "    return 'value', value\n"
+            "def score(value: object) -> int:\n"
+            "    if isinstance(value, int):\n"
+            "        return value\n"
+            "    if isinstance(value, Box):\n"
+            "        return value.value\n"
+            "    if isinstance(value, tuple):\n"
+            "        return value[0]\n"
+            "    return 0\n"
+            "def entry() -> int:\n"
+            "    integer = wrap(128)\n"
+            "    record = wrap(Box(7))\n"
+            "    pair = wrap((3, True))\n"
+            "    return score(integer[1]) + score(record[1]) + score(pair[1])\n",
+            expected=138,
+            filename="mixed-union-object-abi.py",
+        )
+
     def test_branch_join_preserves_nullable_record_for_object_boxing(self) -> None:
         self.assert_native_matches_cpython(
             "class Node:\n"

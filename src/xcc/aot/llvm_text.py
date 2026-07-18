@@ -8789,7 +8789,20 @@ def _is_optional_int_type(type_info: IrType) -> bool:
 
 
 def _is_opaque_object_type(type_info: IrType) -> bool:
-    return isinstance(type_info, IrRecordType) and type_info.name == "object"
+    if not isinstance(type_info, IrRecordType):
+        return False
+    if type_info.name == "object":
+        return True
+    parts = _record_union_parts(type_info.name)
+    if len(parts) < 2:
+        return False
+    non_none_parts = tuple(part for part in parts if part != "None")
+    if len(non_none_parts) == 1 and len(non_none_parts) != len(parts):
+        return False
+    scalar_parts = {"bool", "bytes", "float", "int", "str"}
+    has_scalar = any(part in scalar_parts for part in non_none_parts)
+    has_pointer = any(part not in scalar_parts for part in non_none_parts)
+    return has_scalar and has_pointer
 
 
 def _is_nullable_record_union(
