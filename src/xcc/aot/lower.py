@@ -1301,7 +1301,10 @@ class _Lowerer:
                     for element in expr.elts
                 )
             tuple_type = IrTupleType(tuple(element.type for element in elements))
-            if isinstance(expected, IrTupleType) and len(expected.elements) == 1:
+            if isinstance(expected, IrTupleType) and len(expected.elements) in {
+                1,
+                len(expr.elts),
+            }:
                 tuple_type = expected
             return IrTuple(elements, tuple_type)
         if isinstance(expr, (ast.List, ast.Set)):

@@ -1044,6 +1044,23 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="mixed-union-object-abi.py",
         )
 
+    def test_fixed_tuple_literal_preserves_tagged_object_slot(self) -> None:
+        self.assert_native_matches_cpython(
+            "FunctionParams = tuple[tuple[str, ...] | None, bool]\n"
+            "TypeOp = tuple[str, int | FunctionParams]\n"
+            "def make_function_op(params: tuple[str, ...]) -> TypeOp:\n"
+            "    return ('fn', (params, False))\n"
+            "def entry() -> int:\n"
+            "    op = make_function_op(('left', 'right'))\n"
+            "    value = op[1]\n"
+            "    assert isinstance(value, tuple) and len(value) == 2\n"
+            "    parameters = value[0]\n"
+            "    assert isinstance(parameters, tuple)\n"
+            "    return len(parameters)\n",
+            expected=2,
+            filename="fixed-tuple-object-slot.py",
+        )
+
     def test_branch_join_preserves_nullable_record_for_object_boxing(self) -> None:
         self.assert_native_matches_cpython(
             "class Node:\n"

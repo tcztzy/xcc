@@ -3869,6 +3869,21 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         self.assertNotIn("@len", llvm_ir)
 
+    def test_fixed_tuple_literal_boxes_nested_tuple_for_object_slot(self) -> None:
+        module = lower_source_to_ir(
+            "FunctionParams = tuple[tuple[str, ...] | None, bool]\n"
+            "TypeOp = tuple[str, int | FunctionParams]\n"
+            "def make_function_op(params: tuple[str, ...]) -> TypeOp:\n"
+            "    return ('fn', (params, False))\n",
+            filename="fixed-tuple-object-slot.py",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertRegex(llvm_ir, r"store i64 9, ptr %object\d+")
+        self.assertRegex(llvm_ir, r"store ptr %tuple\d+, ptr %object\.payload\d+")
+        self.assertRegex(llvm_ir, r"store ptr %object\d+, ptr %tupleslot\d+")
+
     def test_emits_range_intrinsic_as_runtime_tuple(self) -> None:
         int64 = IrIntType(64, signed=True)
         tuple_type = IrTupleType((int64,))

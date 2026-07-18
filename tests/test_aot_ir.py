@@ -3158,6 +3158,29 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_fixed_tuple_literal_preserves_declared_object_slot_type(self) -> None:
+        module = lower_source_to_ir(
+            "FunctionParams = tuple[tuple[str, ...] | None, bool]\n"
+            "TypeOp = tuple[str, int | FunctionParams]\n"
+            "def make_function_op(params: tuple[str, ...]) -> TypeOp:\n"
+            "    return ('fn', (params, False))\n",
+            filename="fixed-tuple-object-slot.py",
+        )
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrTuple)
+        assert isinstance(returned.value, IrTuple)
+        self.assertEqual(returned.value.type, module.functions[0].return_type)
+        self.assertEqual(
+            returned.value.type.elements[1],
+            IrRecordType("int | tuple[tuple[str, ...] | None, bool]"),
+        )
+        self.assertEqual(
+            returned.value.elements[1].type,
+            IrTupleType((IrTupleType((IrStringType(),)), IrBoolType())),
+        )
+
     def test_continue_branch_narrowing_does_not_leak_to_following_if(self) -> None:
         module = lower_source_to_ir(
             "from dataclasses import dataclass\n"
