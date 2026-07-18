@@ -669,6 +669,25 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="any-all-generators.py",
         )
 
+    def test_next_generator_returns_first_match_or_default(self) -> None:
+        self.assert_native_matches_cpython(
+            "def mark(events: list[int], value: int) -> int:\n"
+            "    events.append(value)\n"
+            "    return value\n"
+            "def entry() -> int:\n"
+            "    values: tuple[int, ...] = (1, 2, 3)\n"
+            "    events: list[int] = []\n"
+            "    first = next((mark(events, value) for value in values if value > 1), "
+            "mark(events, 9))\n"
+            "    missing = next((mark(events, value) for value in values if value > 8), "
+            "mark(events, 4))\n"
+            "    if events != [9, 2, 4]:\n"
+            "        return 1\n"
+            "    return first * 10 + missing + len(events)\n",
+            expected=27,
+            filename="next-generator.py",
+        )
+
     def test_nested_any_all_generator_predicates(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

@@ -67,6 +67,7 @@ _ALLOWED_BUILTIN_CALLS = {
     "id",
     "isinstance",
     "len",
+    "next",
     "ord",
     "range",
     "repr",
@@ -1713,6 +1714,8 @@ class _Lowerer:
             return self._lower_sorted_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id in {"all", "any"}:
             return self._lower_any_all_call(expr, names)
+        if isinstance(expr.func, ast.Name) and expr.func.id == "next":
+            return self._lower_next_call(expr, names, expected)
         if isinstance(expr.func, ast.Name) and expr.func.id in {
             "dict",
             "frozenset",
@@ -2854,6 +2857,73 @@ class _Lowerer:
             f"__{expr.func.id}_generator",
             (iterable, IrName(target_name, item_type), predicate),
             IrBoolType(),
+        )
+
+    def _lower_next_call(
+        self,
+        expr: ast.Call,
+        names: dict[str, IrType],
+        expected: IrType,
+    ) -> IrExpr:
+        if (
+            expr.keywords
+            or len(expr.args) != 2
+            or not isinstance(expr.args[0], ast.GeneratorExp)
+            or len(expr.args[0].generators) != 1
+        ):
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                "next expects one generator and an explicit default",
+                expr,
+            )
+        generator_expr = expr.args[0]
+        generator = generator_expr.generators[0]
+        if generator.is_async or not isinstance(generator.target, ast.Name | ast.Tuple):
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                "next expects a synchronous name or tuple generator target",
+                generator_expr,
+            )
+        generator_names = dict(names)
+        iterable = self._lower_expr(generator.iter, generator_names, IrTupleType(()))
+        if not isinstance(iterable.type, IrTupleType | IrDictType):
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                "next expects a tuple-backed generator iterable",
+                generator.iter,
+            )
+        item_type = _for_iterable_item_type(iterable)
+        self._bind_for_target(generator.target, iterable, generator_names)
+        filters: list[IrExpr] = []
+        for condition in generator.ifs:
+            filters.append(self._lower_expr(condition, generator_names, IrBoolType()))
+            for name, narrowed_type in self._positive_guard_narrowings(
+                condition,
+                generator_names,
+            ):
+                generator_names[name] = narrowed_type
+        iterable = _filtered_comprehension_iterable(iterable, filters)
+        result_type = expected
+        if _is_object_type(result_type):
+            result_type = _merge_literal_types(
+                (
+                    self._infer_assignment_expr_type(
+                        generator_expr.elt,
+                        generator_names,
+                        result_type,
+                    ),
+                    self._infer_assignment_expr_type(expr.args[1], names, result_type),
+                )
+            )
+        return IrCall(
+            "__next_generator",
+            (
+                iterable,
+                IrName(ast.unparse(generator.target), item_type),
+                self._lower_expr(generator_expr.elt, generator_names, result_type),
+                self._lower_expr(expr.args[1], names, result_type),
+            ),
+            result_type,
         )
 
     def _lower_dict_comprehension(

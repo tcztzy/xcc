@@ -2466,6 +2466,8 @@ class _Emitter:
             return self._emit_zip_call(expr, names, lines)
         if expr.target in {"__all_generator", "__any_generator"}:
             return self._emit_generator_predicate_call(expr, names, lines)
+        if expr.target == "__next_generator":
+            return self._emit_next_generator_call(expr, names, lines)
         if expr.target == "__optional_box":
             return self._emit_optional_box_call(expr, names, lines)
         if (
@@ -4966,6 +4968,82 @@ class _Emitter:
         lines.append(
             f"  {result} = phi i1 [ {exhausted_value}, %{exhausted_source} ], "
             f"[ {stopped_value}, %{predicate_source} ]"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_next_generator_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 4 or not isinstance(expr.args[1], IrName):
+            self._error("__next_generator expects iterable, target, element, and default")
+        marker = expr.args[1]
+        iterable, enumerate_start, enumerate_type, predicate = self._emit_comprehension_iterable(
+            expr.args[0], names, lines
+        )
+        if enumerate_start is not None or enumerate_type is not None:
+            self._error("__next_generator does not accept enumerate iterables")
+        if not isinstance(iterable.type, IrTupleType | IrDictType):
+            self._error("__next_generator expects a tuple-backed iterable")
+        default = self._emit_expr(expr.args[3], names, lines)
+        default_value = self._value_for_result_type(default, expr.type, lines)
+        self.needs_runtime_prelude = True
+        length = self._tmp("next.len")
+        cond_label = self._label("next.cond")
+        body_label = self._label("next.body")
+        next_label = self._label("next.advance")
+        end_label = self._label("next.end")
+        source_label = _current_label(lines)
+        next_index = self._tmp("next.index")
+        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{cond_label}:")
+        index = self._tmp("next.index")
+        lines.append(f"  {index} = phi i64 [ 0, %{source_label} ], [ {next_index}, %{next_label} ]")
+        has_item = self._tmp("next.has_item")
+        lines.append(f"  {has_item} = icmp ult i64 {index}, {length}")
+        lines.append(f"  br i1 {has_item}, label %{body_label}, label %{end_label}")
+        exhausted_source = _current_label(lines)
+        lines.append(f"{body_label}:")
+        raw = self._tmp("next.item")
+        lines.append(f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})")
+        if isinstance(iterable.type, IrDictType):
+            key = self._tmp("next.key")
+            lines.append(f"  {key} = call ptr @__xcc_aot_tuple_get(ptr {raw}, i64 0)")
+            raw = key
+        item = self._emit_runtime_boxed_value(raw, marker.type, lines)
+        generator_names = dict(names)
+        if "," in marker.name:
+            self._bind_emitted_tuple_target(
+                marker.name,
+                item,
+                generator_names,
+                lines,
+            )
+        else:
+            generator_names[marker.name] = item
+        self._emit_comprehension_filter(
+            predicate,
+            generator_names,
+            next_label,
+            "next",
+            lines,
+        )
+        element = self._emit_expr(expr.args[2], generator_names, lines)
+        element_value = self._value_for_result_type(element, expr.type, lines)
+        matched_source = _current_label(lines)
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{next_label}:")
+        lines.append(f"  {next_index} = add i64 {index}, 1")
+        lines.append(f"  br label %{cond_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp("next")
+        lines.append(
+            f"  {result} = phi {self._storage_llvm_type(expr.type)} "
+            f"[ {default_value}, %{exhausted_source} ], "
+            f"[ {element_value}, %{matched_source} ]"
         )
         return _EmittedValue(result, expr.type)
 
