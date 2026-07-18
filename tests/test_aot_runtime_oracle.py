@@ -1598,6 +1598,21 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="optional-int-branch-local-none.py",
         )
 
+    def test_assert_not_none_narrows_optional_integer_attribute(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Box:\n"
+            "    value: int | None\n"
+            "    def __init__(self, value: int | None) -> None:\n"
+            "        self.value = value\n"
+            "def read(box: Box) -> int:\n"
+            "    assert box.value is not None\n"
+            "    return box.value + 1\n"
+            "def entry() -> int:\n"
+            "    return read(Box(6))\n",
+            expected=7,
+            filename="assert-optional-attribute.py",
+        )
+
     def test_exiting_positive_isinstance_narrows_union_complement(self) -> None:
         self.assert_native_matches_cpython(
             "class Handler:\n"

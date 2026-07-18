@@ -660,6 +660,28 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrName("right", IrIntType(64, signed=True)),
         )
 
+    def test_lowers_assert_not_none_attribute_narrowing(self) -> None:
+        module = lower_source_to_ir(
+            "class Box:\n"
+            "    value: int | None\n"
+            "def read(box: Box) -> int:\n"
+            "    assert box.value is not None\n"
+            "    return box.value\n",
+            filename="assert_optional_attribute.py",
+            entry="read",
+        )
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrGetField(
+                IrName("box", IrRecordType("Box")),
+                "value",
+                IrIntType(64, signed=True),
+            ),
+        )
+
     def test_lowers_exiting_negative_isinstance_builtin_str_narrowing(self) -> None:
         module = lower_source_to_ir(
             "def length(value: str | int) -> int:\n"

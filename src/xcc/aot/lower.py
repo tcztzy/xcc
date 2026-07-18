@@ -751,7 +751,7 @@ class _Lowerer:
             return IrRaise(exception, message, span, payload)
         if isinstance(statement, ast.Assert):
             condition = self._lower_expr(statement.test, names, IrBoolType())
-            for narrowed in self._isinstance_guard_narrowings(statement.test, names):
+            for narrowed in self._positive_guard_narrowings(statement.test, names):
                 name, narrowed_type = narrowed
                 names[name] = narrowed_type
             return IrAssign("__assert", IrCall("__assert", (condition,), IrNoneType()))
