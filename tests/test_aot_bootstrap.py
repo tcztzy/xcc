@@ -260,6 +260,28 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "xcc.parser.__init__.Parser._check_keyword",
         )
 
+    def test_statement_parser_protocol_calls_use_concrete_native_signature(self) -> None:
+        module_inputs = aot_slice.collect_slice_inputs(
+            (
+                ROOT / "src/xcc/parser/__init__.py",
+                ROOT / "src/xcc/parser/statements.py",
+            )
+        )
+        source_cache = {
+            module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
+        }
+
+        function_types = aot_slice._slice_method_signature_table(module_inputs, source_cache)
+        protocol = function_types[
+            "xcc.parser.statements._StatementParser._parse_compound_stmt"
+        ]
+        concrete = function_types["xcc.parser.__init__.Parser._parse_compound_stmt"]
+
+        self.assertEqual(protocol.parameters, concrete.parameters)
+        self.assertEqual(protocol.parameter_defaults, concrete.parameter_defaults)
+        self.assertEqual(protocol.return_type, concrete.return_type)
+        self.assertEqual(protocol.vararg, concrete.vararg)
+
     def test_rewrites_file_scope_analyzer_protocol_calls_to_concrete_analyzer(self) -> None:
         self.assertEqual(
             aot_slice._rename_call_target(
@@ -2044,6 +2066,38 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
                 "int active;\n"
                 "#endif\n"
                 "int main(void){return active;}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
+    def test_real_native_bootstrap_parses_nested_compound_if(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b574-nested-compound"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "nested_compound.c"
+            obj = root / "nested_compound.o"
+            source.write_text(
+                "int choose(int active) {\n"
+                "    if (active) {\n"
+                "        return 2;\n"
+                "    } else {\n"
+                "        return 1;\n"
+                "    }\n"
+                "}\n",
                 encoding="utf-8",
             )
 

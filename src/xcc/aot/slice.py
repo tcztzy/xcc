@@ -863,6 +863,10 @@ def _slice_method_signature_table(
         for function_name, function_info in analysis.types.functions.items():
             function_types.setdefault(function_name, function_info)
             function_types.setdefault(f"{module_input.name}.{function_name}", function_info)
+    for protocol_target, concrete_target in _PROTOCOL_METHOD_TARGETS.items():
+        concrete_info = function_types.get(concrete_target)
+        if concrete_info is not None:
+            function_types[protocol_target] = concrete_info
     return function_types
 
 
