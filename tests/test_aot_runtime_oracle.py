@@ -871,6 +871,23 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="string-rsplit.py",
         )
 
+    def test_string_membership_matches_complete_substrings(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    line = '  ret i64 1'\n"
+            "    if ' = alloca ' in line:\n"
+            "        return 1\n"
+            "    if 'ret i64' not in line:\n"
+            "        return 2\n"
+            "    if '' not in line:\n"
+            "        return 3\n"
+            "    if 'ret i32' in line:\n"
+            "        return 4\n"
+            "    return 7\n",
+            expected=7,
+            filename="string-membership.py",
+        )
+
     def test_string_isupper_semantics(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

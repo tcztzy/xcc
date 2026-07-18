@@ -6055,6 +6055,16 @@ class _Emitter:
             self._error("string membership expects a string haystack")
         if not isinstance(needle.type, (IrIntType, IrStringType)):
             self._error("string membership expects a string or int needle")
+        if isinstance(needle.type, IrStringType):
+            self.extra_declarations.add("declare ptr @strstr(ptr, ptr)")
+            found = self._tmp("contains.substring")
+            result = self._tmp("contains")
+            lines.append(f"  {found} = call ptr @strstr(ptr {haystack.value}, ptr {needle.value})")
+            lines.append(f"  {result} = icmp ne ptr {found}, null")
+            membership = _EmittedValue(result, IrBoolType())
+            if negate:
+                return self._emit_bool_not(membership, lines)
+            return membership
         self.needs_runtime_prelude = True
         result_ptr = self._tmp("contains.ptr")
         index_ptr = self._tmp("contains.index")
@@ -6068,14 +6078,8 @@ class _Emitter:
         lines.append(f"  {index_ptr} = alloca i64")
         lines.append(f"  store i1 false, ptr {result_ptr}")
         lines.append(f"  store i64 0, ptr {index_ptr}")
-        if isinstance(needle.type, IrStringType):
-            needle_empty = self._tmp("contains.empty")
-            lines.append(f"  {needle_byte} = load i8, ptr {needle.value}")
-            lines.append(f"  {needle_empty} = icmp eq i8 {needle_byte}, 0")
-            lines.append(f"  br i1 {needle_empty}, label %{found_label}, label %{cond_label}")
-        else:
-            lines.append(f"  {needle_byte} = trunc i64 {needle.value} to i8")
-            lines.append(f"  br label %{cond_label}")
+        lines.append(f"  {needle_byte} = trunc i64 {needle.value} to i8")
+        lines.append(f"  br label %{cond_label}")
         lines.append(f"{cond_label}:")
         index = self._tmp("contains.index")
         length = self._tmp("contains.len")

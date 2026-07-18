@@ -3380,7 +3380,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertRegex(llvm_ir, r"call i32 @strcmp\(ptr %needle, ptr %contains\.item\d+\)")
         self.assertNotIn("@__cmp_In", llvm_ir)
 
-    def test_emits_string_membership_as_byte_scan(self) -> None:
+    def test_emits_string_membership_as_substring_search(self) -> None:
         bool_type = IrBoolType()
         module = IrModule(
             "string_membership.py",
@@ -3408,8 +3408,8 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call i64 @strlen(ptr %haystack)", llvm_ir)
-        self.assertIn("load i8, ptr %needle", llvm_ir)
+        self.assertIn("declare ptr @strstr(ptr, ptr)", llvm_ir)
+        self.assertIn("call ptr @strstr(ptr %haystack, ptr %needle)", llvm_ir)
         self.assertNotIn("@__cmp_In", llvm_ir)
 
     def test_emits_string_membership_with_integer_byte_needle(self) -> None:
