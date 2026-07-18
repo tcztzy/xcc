@@ -627,6 +627,7 @@ class _Lowerer:
                     statement,
                 )
             condition = self._lower_expr(statement.test, names, IrBoolType())
+            incoming_names = dict(names)
             body_names = dict(names)
             body = IrBranch(
                 tuple(
@@ -634,10 +635,11 @@ class _Lowerer:
                     for child in statement.body
                 )
             )
-            names.update(body_names)
+            _merge_loop_fallthrough_names(names, incoming_names, body_names, self.class_types)
             return IrWhile(condition, body)
         if isinstance(statement, ast.For):
             iterable = self._lower_expr(statement.iter, names, IrTupleType(()))
+            incoming_names = dict(names)
             body_names = dict(names)
             target_name = ast.unparse(statement.target)
             unpack_statements: tuple[IrStmt, ...] = ()
@@ -660,7 +662,7 @@ class _Lowerer:
                     for child in statement.body
                 )
             )
-            names.update(body_names)
+            _merge_loop_fallthrough_names(names, incoming_names, body_names, self.class_types)
             return IrForEach(
                 target_name,
                 iterable,
@@ -6114,6 +6116,47 @@ def _merge_fallthrough_branch_type(
     if isinstance(then_type, IrRecordType) and isinstance(else_type, IrRecordType):
         return _merge_literal_types((then_type, else_type))
     return None
+
+
+def _merge_loop_fallthrough_names(
+    names: dict[str, IrType],
+    incoming_names: dict[str, IrType],
+    body_names: dict[str, IrType],
+    class_types: dict[str, AotClassInfo],
+) -> None:
+    for name, body_type in body_names.items():
+        incoming_type = incoming_names.get(name)
+        if incoming_type is None:
+            names[name] = body_type
+            continue
+        names[name] = _merge_loop_fallthrough_type(
+            incoming_type,
+            body_type,
+            class_types,
+        )
+
+
+def _merge_loop_fallthrough_type(
+    incoming_type: IrType,
+    body_type: IrType,
+    class_types: dict[str, AotClassInfo],
+) -> IrType:
+    if incoming_type == body_type:
+        return body_type
+    if isinstance(incoming_type, IrNoneType):
+        if isinstance(body_type, IrBoolType):
+            return IrRecordType("bool | None")
+        if isinstance(body_type, IrIntType):
+            return IrRecordType("int | None")
+        if isinstance(body_type, (IrBytesType, IrRecordType, IrStringType)):
+            return _merge_literal_types((incoming_type, body_type))
+    merged_type = _merge_fallthrough_branch_type(
+        incoming_type,
+        body_type,
+        incoming_type,
+        class_types,
+    )
+    return body_type if merged_type is None else merged_type
 
 
 def _record_union_contains_type(union_name: str, member_name: str) -> bool:

@@ -1690,10 +1690,16 @@ class _Emitter:
         assigned_types: tuple[IrType, ...],
     ) -> IrType | None:
         all_types = (initial_type,) + assigned_types
-        if any(isinstance(type_info, IrNoneType) for type_info in all_types) and any(
-            isinstance(type_info, IrBoolType | IrFloatType | IrIntType) for type_info in all_types
-        ):
-            return IrRecordType("object")
+        if any(isinstance(type_info, IrNoneType) for type_info in all_types):
+            if all(isinstance(type_info, IrNoneType | IrBoolType) for type_info in all_types):
+                return IrRecordType("bool | None")
+            if all(isinstance(type_info, IrNoneType | IrIntType) for type_info in all_types):
+                return IrRecordType("int | None")
+            if any(
+                isinstance(type_info, IrBoolType | IrFloatType | IrIntType)
+                for type_info in all_types
+            ):
+                return IrRecordType("object")
         values = (_EmittedValue("", initial_type),) + tuple(
             _EmittedValue("", assigned_type) for assigned_type in assigned_types
         )

@@ -2091,6 +2091,34 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(returned, IrReturn)
         self.assertEqual(returned.value.elements[0].type, IrRecordType("int | None"))
 
+    def test_for_loop_preserves_none_initialized_optional_integer(self) -> None:
+        module = lower_source_to_ir(
+            "def last(values: tuple[int, ...]) -> int:\n"
+            "    selected = None\n"
+            "    for value in values:\n"
+            "        selected = value\n"
+            "    if selected is None:\n"
+            "        return 9\n"
+            "    return selected\n",
+            filename="optional-int-for-loop.py",
+            entry="last",
+        )
+
+        function = module.functions[0]
+        branch = function.body[2]
+        self.assertIsInstance(branch, IrIf)
+        assert isinstance(branch, IrIf)
+        self.assertIsInstance(branch.condition, IrCall)
+        assert isinstance(branch.condition, IrCall)
+        self.assertEqual(
+            branch.condition.args[0],
+            IrName("selected", IrRecordType("int | None")),
+        )
+        returned = function.body[3]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(returned.value, IrName("selected", IrIntType(64, signed=True)))
+
     def test_none_replacement_narrows_optional_integer_after_if(self) -> None:
         module = lower_source_to_ir(
             "def fill(value: int | None) -> int:\n"

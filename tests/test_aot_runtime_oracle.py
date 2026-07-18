@@ -1538,6 +1538,21 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="optional-int-call-or.py",
         )
 
+    def test_for_loop_preserves_optional_integer_on_zero_iterations(self) -> None:
+        self.assert_native_matches_cpython(
+            "def last(values: tuple[int, ...]) -> int:\n"
+            "    selected = None\n"
+            "    for value in values:\n"
+            "        selected = value\n"
+            "    if selected is None:\n"
+            "        return 9\n"
+            "    return selected\n"
+            "def entry() -> int:\n"
+            "    return last(()) + last((4,))\n",
+            expected=13,
+            filename="optional-int-for-loop.py",
+        )
+
     def test_optional_integer_assignment_narrows_then_merges(self) -> None:
         self.assert_native_matches_cpython(
             "def use(value: int) -> int:\n"

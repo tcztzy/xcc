@@ -1884,6 +1884,27 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         self.assertRegex(llvm_ir, r"call i64 @__xcc_aot_tuple_len\(ptr %loop\d+\)")
 
+    def test_emits_optional_integer_for_loop_phi_for_zero_iterations(self) -> None:
+        module = lower_source_to_ir(
+            "def last(values: tuple[int, ...]) -> int:\n"
+            "    selected = None\n"
+            "    for value in values:\n"
+            "        selected = value\n"
+            "    if selected is None:\n"
+            "        return 9\n"
+            "    return selected\n",
+            filename="optional-int-for-loop.py",
+            entry="last",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertRegex(
+            llvm_ir,
+            r"%loop\d+ = phi ptr \[ null, %entry \], \[ %object\d+, %for\.next\d+ \]",
+        )
+        self.assertRegex(llvm_ir, r"%optional\.int\.payload\d+ = getelementptr i8")
+
     def test_for_each_binds_homogeneous_tuple_element_type(self) -> None:
         int64 = IrIntType(64, signed=True)
         function_def = IrRecord("FunctionDef", (IrField("body", int64),))
