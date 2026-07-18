@@ -101,7 +101,7 @@ T4|x|implement explicit exception/status ABI and required native runtime semanti
 T5|x|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
 T6|x|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378
 T7|x|build Stage 2 from `.py` with Stage 1 and no Python process/cache dependency|V369,V370,V371,V372,V373,V378
-T8|~|build Stage 3 with Stage 2 and prove normalized IR/symbol/behavior stability|V369,V377,V384
+T8|x|build Stage 3 with Stage 2 and prove normalized IR/symbol/behavior stability|V369,V377,V384
 T9|.|run CPython compatibility, native C compiler, CPython build, lint, type, and full tests|V379,V381
 
 ## §B BUGS

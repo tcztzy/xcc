@@ -2,6 +2,19 @@
 
 ## Current
 
+- Completed the approved strong-bootstrap Milestone 8. Native Stage 2 built
+  independent cache-free Stage 3-A and Stage 3-B compilers from the same 65-unit
+  repository `.py` snapshot under the execution audit boundary. Both builds
+  recorded all 3,118 source opens, invoked only `llc` plus the allowlisted system
+  linker, linked only `libSystem`, and exposed no Python API symbols.
+- Verified Stage 2, Stage 3-A, and Stage 3-B have byte-identical source manifests,
+  reachability artifacts, normalized LLVM, exported symbols, and executables.
+  Their manifest SHA-256 is `aef31a6b1e1c2fdcd3fe74f775e3ab20a448e3a0db4abfbd5cceed5f9bff131c`,
+  normalized-IR SHA-256 is `a9bbae4256ef144fe8a75c889a660511610cc146d293b06bc2cb7217b2085068`,
+  and executable SHA-256 is `d574525e0acdfaba0bd4e6312bd6f841eec84dd2b43495ce9b3f0405cee2fae8`.
+  Independent compiler/runtime behavior gates also match. This completes T8
+  only; the full regression and CPython compatibility gates remain Milestone 9,
+  and CPython `configure && make` was not resumed.
 - Completed the approved strong-bootstrap Milestone 7. Native Stage 1 built
   `build/aot/stage2-m7-b538/xcc-aot` from a cache-free 65-unit repository
   `.py` snapshot through the project-owned parser. The audited build recorded
