@@ -228,6 +228,17 @@ class PreprocessorTests(unittest.TestCase):
                 )
             )
 
+    def test_no_callback_undef_removes_macro(self) -> None:
+        options = FrontendOptions()
+        processor = _Preprocessor(options)
+        processor._init_no_callback(options)
+        processor._handle_define_no_callback("STALE 1")
+        location = _SourceLocation("undef.c", 2)
+
+        processor._handle_undef_no_callback("STALE", location)
+
+        self.assertFalse(processor._macro_defined_no_callback("STALE"))
+
     def test_gnu_asm_strip_handles_incomplete_or_non_operand_asm_keywords(self) -> None:
         self.assertEqual(
             preprocessor_text._strip_inline_asm_segments("int asm;\n"),

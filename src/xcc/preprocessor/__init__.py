@@ -1988,7 +1988,8 @@ class _Preprocessor:
         self._macros.pop(macro_name, None)
 
     def _handle_undef_no_callback(self, body: str, location: _SourceLocation) -> None:
-        self._require_macro_name_no_regex(body, location)
+        macro_name = self._require_macro_name_no_regex(body, location)
+        self._macros.pop(macro_name, None)
 
     def _skip_guarded_include(self, include_path: Path, include_path_text: str) -> bool:
         """Check if a circular include should be skipped because the file's
