@@ -2,6 +2,20 @@
 
 ## Current
 
+- Completed the approved strong-bootstrap Milestone 7. Native Stage 1 built
+  `build/aot/stage2-m7-b538/xcc-aot` from a cache-free 65-unit repository
+  `.py` snapshot through the project-owned parser. The audited build recorded
+  3,118 source opens, 773 functions / 173 records / 8,157 reachability edges,
+  and only `llc` plus the allowlisted system linker in its process boundary.
+  Stage 2 links only `libSystem`, exposes no Python API symbols, and its LLVM
+  contains only qualified owned-parser calls.
+- Verified the resulting Stage 2 by having it compile the independent owned
+  parser walk fixture from `.py` under the same audit boundary. The fixture
+  exits with status 7, its normalized LLVM is byte-identical whether built by
+  Stage 1 or Stage 2, and neither build launched or linked Python/libpython.
+  This completes T7 only; Stage 2-to-Stage 3 stability remains Milestone 8,
+  the full regression suite was not run, and CPython `configure && make` was
+  not resumed.
 - Completed the approved strong-bootstrap Milestone 6. Stage 0 now builds the
   persisted `build/aot/stage1/xcc-aot` from a clean, no-cache 64-unit source
   snapshot and emits LLVM, normalized IR, a source manifest, 665-function /
