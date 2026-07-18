@@ -116,6 +116,7 @@ class AotNativeCliTests(unittest.TestCase):
         output_root = self.build_root / "independent"
         source_root.mkdir()
         output_root.mkdir()
+        (source_root / "__init__.py").write_text("", encoding="utf-8")
         (source_root / "program.py").write_text(
             "def main() -> int:\n"
             "    return 7\n",
