@@ -902,7 +902,7 @@ class _Emitter:
                 continue
             result = self._tmp(prefix)
             parts = ", ".join(
-                f"[ {self._if_phi_value(value, merged_type)}, %{source} ]"
+                f"[ {self._if_phi_value(value, merged_type, source, lines)}, %{source} ]"
                 for source, value in values
             )
             lines.append(f"  {result} = phi {self._storage_llvm_type(merged_type)} {parts}")
@@ -1094,13 +1094,37 @@ class _Emitter:
             result = self._tmp("ifphi")
             parts = []
             for source, value in incoming:
-                parts.append(f"[ {self._if_phi_value(value, merged_type)}, %{source} ]")
+                parts.append(
+                    f"[ {self._if_phi_value(value, merged_type, source, lines)}, %{source} ]"
+                )
             lines.append(
                 f"  {result} = phi {self._storage_llvm_type(merged_type)} " + ", ".join(parts)
             )
             names[name] = _EmittedValue(result, merged_type)
 
     def _if_phi_type(self, values: tuple[_EmittedValue, ...]) -> IrType | None:
+        optional_scalar = next(
+            (
+                value.type
+                for value in values
+                if _is_optional_bool_type(value.type) or _is_optional_int_type(value.type)
+            ),
+            None,
+        )
+        if optional_scalar is not None:
+            for value in values:
+                if isinstance(value.type, IrNoneType):
+                    continue
+                if _is_optional_bool_type(optional_scalar) and (
+                    _is_optional_bool_type(value.type) or isinstance(value.type, IrBoolType)
+                ):
+                    continue
+                if _is_optional_int_type(optional_scalar) and (
+                    _is_optional_int_type(value.type) or isinstance(value.type, IrIntType)
+                ):
+                    continue
+                return None
+            return optional_scalar
         non_none_types = tuple(
             value.type for value in values if not isinstance(value.type, IrNoneType)
         )
@@ -1113,14 +1137,53 @@ class _Emitter:
                 return None
         return result_type
 
-    def _if_phi_value(self, value: _EmittedValue, result_type: IrType) -> str:
+    def _if_phi_value(
+        self,
+        value: _EmittedValue,
+        result_type: IrType,
+        source: str,
+        lines: list[str],
+    ) -> str:
         if isinstance(value.type, IrNoneType):
             return self._default_value(result_type)
         if value.type == result_type:
             return value.value
+        conversion_lines: list[str] = []
+        converted: str | None = None
+        if _is_optional_bool_type(result_type) and isinstance(value.type, IrBoolType):
+            tag = self._tmp("optional.bool.tag")
+            converted = self._tmp("optional.bool")
+            conversion_lines.append(f"  {tag} = select i1 {value.value}, i64 2, i64 1")
+            conversion_lines.append(f"  {converted} = inttoptr i64 {tag} to ptr")
+        elif _is_optional_int_type(result_type) and isinstance(value.type, IrIntType):
+            converted = self._box_object_value(value, conversion_lines)
+        if converted is not None:
+            self._insert_if_phi_conversion(lines, source, conversion_lines)
+            return converted
         if self._storage_llvm_type(value.type) == self._storage_llvm_type(result_type):
             return value.value
         self._error(f"Cannot merge {type(value.type).__name__} as {type(result_type).__name__}")
+
+    def _insert_if_phi_conversion(
+        self,
+        lines: list[str],
+        source: str,
+        conversion_lines: list[str],
+    ) -> None:
+        source_line = f"{source}:"
+        source_index = -1
+        for index, line in enumerate(lines):
+            if line == source_line:
+                source_index = index
+        if source_index < 0:
+            self._error(f"Unknown if phi source: {source}")
+        insertion_index = source_index + 1
+        while insertion_index < len(lines) and not lines[insertion_index].endswith(":"):
+            if lines[insertion_index].startswith("  br "):
+                lines[insertion_index:insertion_index] = conversion_lines
+                return
+            insertion_index += 1
+        self._error(f"If phi source has no branch terminator: {source}")
 
     def _emit_for_each(
         self,
@@ -1334,10 +1397,10 @@ class _Emitter:
             if not incoming_edges:
                 next_phi_values[name] = phi_values[name]
             elif len(incoming_edges) == 1:
-                _source_label, source_names = incoming_edges[0]
+                source_label, source_names = incoming_edges[0]
                 source_value = source_names.get(name, phi_values[name])
                 next_phi_values[name] = _EmittedValue(
-                    self._if_phi_value(source_value, loop_type),
+                    self._if_phi_value(source_value, loop_type, source_label, lines),
                     loop_type,
                 )
             else:
@@ -1346,7 +1409,8 @@ class _Emitter:
                 for source_label, source_names in incoming_edges:
                     source_value = source_names.get(name, phi_values[name])
                     parts.append(
-                        f"[ {self._if_phi_value(source_value, loop_type)}, %{source_label} ]"
+                        f"[ {self._if_phi_value(source_value, loop_type, source_label, lines)}, "
+                        f"%{source_label} ]"
                     )
                 lines.append(
                     f"  {result} = phi {self._storage_llvm_type(loop_type)} " + ", ".join(parts)

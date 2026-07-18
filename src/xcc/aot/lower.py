@@ -6103,6 +6103,14 @@ def _merge_fallthrough_branch_type(
 ) -> IrType | None:
     if then_type == else_type:
         return then_type
+    if _is_optional_bool_type(then_type) and isinstance(else_type, IrBoolType):
+        return then_type
+    if _is_optional_bool_type(else_type) and isinstance(then_type, IrBoolType):
+        return else_type
+    if _is_optional_int_type(then_type) and isinstance(else_type, IrIntType):
+        return then_type
+    if _is_optional_int_type(else_type) and isinstance(then_type, IrIntType):
+        return else_type
     if incoming is not None and _preserves_nullable_record_join(
         incoming,
         then_type,

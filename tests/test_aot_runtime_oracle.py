@@ -1559,6 +1559,45 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="optional-int-replacement.py",
         )
 
+    def test_branch_local_optional_replacement_merges_with_concrete_integer(self) -> None:
+        self.assert_native_matches_cpython(
+            "def choose(flag: bool, base: int | None) -> int:\n"
+            "    if flag:\n"
+            "        value = base\n"
+            "        if value is None:\n"
+            "            value = 7\n"
+            "    else:\n"
+            "        value = 5\n"
+            "    return value\n"
+            "def entry() -> int:\n"
+            "    return choose(True, None) + choose(False, None)\n",
+            expected=12,
+            filename="optional-int-branch-local.py",
+        )
+
+    def test_branch_local_optional_integer_merge_preserves_none(self) -> None:
+        self.assert_native_matches_cpython(
+            "def maybe(flag: bool) -> int | None:\n"
+            "    if flag:\n"
+            "        return 7\n"
+            "    return None\n"
+            "def choose(flag: bool) -> int | None:\n"
+            "    if flag:\n"
+            "        value = maybe(False)\n"
+            "    else:\n"
+            "        value = 5\n"
+            "    return value\n"
+            "def entry() -> int:\n"
+            "    if choose(True) is not None:\n"
+            "        return 1\n"
+            "    result = choose(False)\n"
+            "    if result is None:\n"
+            "        return 2\n"
+            "    return result + 2\n",
+            expected=7,
+            filename="optional-int-branch-local-none.py",
+        )
+
     def test_exiting_positive_isinstance_narrows_union_complement(self) -> None:
         self.assert_native_matches_cpython(
             "class Handler:\n"
