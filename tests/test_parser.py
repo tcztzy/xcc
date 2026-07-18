@@ -2205,6 +2205,13 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int test __attribute__((overloadable))(int);")))
         self.assertTrue(unit.functions[0].is_overloadable)
 
+    def test_function_declaration_marks_overloadable_attribute_after_return_pointer(
+        self,
+    ) -> None:
+        unit = parse(list(lex("char * __attribute__((overloadable)) test(double);")))
+        self.assertEqual(unit.functions[0].name, "test")
+        self.assertTrue(unit.functions[0].is_overloadable)
+
     def test_gnu_attribute_unused_after_parameter_list(self) -> None:
         source = (
             "static int helper(int x) __attribute__((unused));static int helper(int x){return x;}"

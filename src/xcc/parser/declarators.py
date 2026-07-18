@@ -212,16 +212,38 @@ def parse_declarator(
     allow_parameter_arrays: bool = False,
     allow_flexible_array: bool = False,
 ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
+    name, ops, _has_overloadable = parse_declarator_details(
+        parser,
+        allow_abstract,
+        allow_vla=allow_vla,
+        allow_parameter_arrays=allow_parameter_arrays,
+        allow_flexible_array=allow_flexible_array,
+    )
+    return name, ops
+
+
+def parse_declarator_details(
+    parser: "Parser",
+    allow_abstract: bool,
+    *,
+    allow_vla: bool = False,
+    allow_parameter_arrays: bool = False,
+    allow_flexible_array: bool = False,
+) -> tuple[str | None, tuple[DeclaratorOp, ...], bool]:
     p = cast(Any, parser)
     p._skip_type_qualifiers()
     p._skip_calling_convention_identifiers_before_pointer()
+    has_overloadable = p._consume_overloadable_decl_attributes()
     pointer_count = 0
     while _check_star(p):
         p._advance()
         p._skip_type_qualifiers()
         p._skip_calling_convention_identifiers_after_pointer()
+        if p._consume_overloadable_decl_attributes():
+            has_overloadable = True
         pointer_count += 1
-    name, ops = p._parse_direct_declarator(
+    name, ops, direct_has_overloadable = parse_direct_declarator_details(
+        parser,
         allow_abstract,
         allow_vla=allow_vla,
         allow_parameter_arrays=allow_parameter_arrays,
@@ -229,7 +251,7 @@ def parse_declarator(
     )
     if pointer_count:
         ops = _append_pointer_ops(ops, pointer_count)
-    return name, ops
+    return name, ops, has_overloadable or direct_has_overloadable
 
 
 def parse_direct_declarator(
@@ -240,18 +262,38 @@ def parse_direct_declarator(
     allow_parameter_arrays: bool = False,
     allow_flexible_array: bool = False,
 ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
+    name, ops, _has_overloadable = parse_direct_declarator_details(
+        parser,
+        allow_abstract,
+        allow_vla=allow_vla,
+        allow_parameter_arrays=allow_parameter_arrays,
+        allow_flexible_array=allow_flexible_array,
+    )
+    return name, ops
+
+
+def parse_direct_declarator_details(
+    parser: "Parser",
+    allow_abstract: bool,
+    *,
+    allow_vla: bool = False,
+    allow_parameter_arrays: bool = False,
+    allow_flexible_array: bool = False,
+) -> tuple[str | None, tuple[DeclaratorOp, ...], bool]:
     p = cast(Any, parser)
     name: str | None
     ops: tuple[DeclaratorOp, ...]
+    has_overloadable = False
     if p._current().kind == TokenKind.IDENT:
         token = p._advance()
         assert isinstance(token.lexeme, str)
         name = token.lexeme
-        p._skip_decl_attributes()
+        has_overloadable = p._consume_overloadable_decl_attributes()
         ops = ()
     elif p._check_punct("("):
         p._advance()
-        name, ops = p._parse_declarator(
+        name, ops, has_overloadable = parse_declarator_details(
+            parser,
             allow_abstract=True,
             allow_vla=allow_vla,
             allow_parameter_arrays=allow_parameter_arrays,
@@ -296,7 +338,7 @@ def parse_direct_declarator(
                 ops = ops + (("fn", function_declarator),)
             continue
         break
-    return name, ops
+    return name, ops, has_overloadable
 
 
 def parse_array_declarator(

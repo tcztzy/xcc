@@ -404,7 +404,11 @@ class Parser:
             self._function_def_params = []
             self._function_def_has_prototype = False
             self._function_def_is_variadic = False
-            decl_name, declarator_ops = self._parse_declarator(allow_abstract=False)
+            decl_name, declarator_ops, declarator_has_overloadable = (
+                _declarators.parse_declarator_details(self, allow_abstract=False)
+            )
+            if declarator_has_overloadable:
+                is_overloadable = True
             assert decl_name is not None
             function_name = str(decl_name)
             assert self._has_function_def_info

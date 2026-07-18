@@ -24,9 +24,9 @@ Rules:
 - `src/xcc/cc_driver.py`: 12 hunks
 - `src/xcc/codegen.py`: 81 hunks
 - `src/xcc/lexer.py`: 3 hunks
-- `src/xcc/parser/__init__.py`: 32 hunks
+- `src/xcc/parser/__init__.py`: 33 hunks
 - `src/xcc/parser/array_sizes.py`: 30 hunks
-- `src/xcc/parser/declarators.py`: 25 hunks
+- `src/xcc/parser/declarators.py`: 26 hunks
 - `src/xcc/parser/expressions.py`: 117 hunks
 - `src/xcc/parser/extensions.py`: 66 hunks
 - `src/xcc/parser/statements.py`: 2 hunks
@@ -53,7 +53,7 @@ Rules:
 - `src/xcc/sema/type_resolution.py`: 45 hunks
 - `src/xcc/types.py`: 18 hunks
 
-Total: 726 hunks across 32 non-AOT source files.
+Total: 728 hunks across 32 non-AOT source files.
 
 ## Hunk Ledger
 
@@ -785,3 +785,5 @@ Total: 726 hunks across 32 non-AOT source files.
 | H724 | `src/xcc/types.py` | old 119+1 / new 137+1; class Type: | mixed | accepted fixed records/tuple metadata; representation fixes split | `uv run python -m unittest tests.test_codegen tests.test_parser -v` | missing focused native type-model oracle | `6cf3711` |
 | H725 | `src/xcc/types.py` | old 122+1 / new 140+1; class Type: | mixed | accepted fixed records/tuple metadata; representation fixes split | `uv run python -m unittest tests.test_codegen tests.test_parser -v` | missing focused native type-model oracle | `6cf3711` |
 | H726 | `src/xcc/types.py` | old 128+22 / new 146+23; class Type: | mixed | accepted fixed records/tuple metadata; representation fixes split | `uv run python -m unittest tests.test_codegen tests.test_parser -v` | missing focused native type-model oracle | `6cf3711` |
+| H727 | `src/xcc/parser/__init__.py` | `_parse_function`; propagate complex-declarator `overloadable` state | independent C grammar fix | retain: valid GNU C overloadable function declarations are C frontend semantics, not an AOT source-shape workaround | `uv run python -m unittest -q tests.test_parser tests.test_sema` (1342 passed) | rebuilt `build/aot/xcc-smoke`; compiled `build/aot/m9-b561-native/overloadable.c` to arm64 Mach-O object with `_main`/`_test` symbols | `B561` |
+| H728 | `src/xcc/parser/declarators.py` | `parse_declarator_details` / `parse_direct_declarator_details`; consume and return GNU attribute state | independent C grammar fix | retain: parser must preserve pointer declarator structure while recognizing attributes before/after the direct name; no Python subset avoidance introduced | `uv run python -m unittest -q tests.test_parser tests.test_sema` (1342 passed) | rebuilt `build/aot/xcc-smoke`; compiled `build/aot/m9-b561-native/overloadable.c` to arm64 Mach-O object with `_main`/`_test` symbols | `B561` |
