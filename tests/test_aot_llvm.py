@@ -2005,6 +2005,32 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertRegex(llvm_ir, r"%optional\.int\.eq\.left\d+ = load i64")
         self.assertNotRegex(llvm_ir, r"ptrtoint ptr %value to i64")
 
+    def test_compares_flow_narrowed_bool_identity_to_none_by_tag(self) -> None:
+        module = lower_source_to_ir(
+            "def classify(flag: bool) -> int:\n"
+            "    value: bool | None = None\n"
+            "    while flag:\n"
+            "        if value is None:\n"
+            "            value = False\n"
+            "        if value is None:\n"
+            "            return 1\n"
+            "        return 7\n"
+            "    return 0\n",
+            filename="optional-bool-identity.py",
+            entry="classify",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertRegex(
+            llvm_ir,
+            r"%optional\.bool\.tag\d+ = add i64 %optional\.bool\d+, 1",
+        )
+        self.assertRegex(
+            llvm_ir,
+            r"%is\d+ = icmp eq i64 %optional\.bool\.tag\d+, 0",
+        )
+
     def test_for_each_binds_homogeneous_tuple_element_type(self) -> None:
         int64 = IrIntType(64, signed=True)
         function_def = IrRecord("FunctionDef", (IrField("body", int64),))

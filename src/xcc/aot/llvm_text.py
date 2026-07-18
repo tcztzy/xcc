@@ -7048,11 +7048,7 @@ class _Emitter:
         result = self._tmp("is")
         left_optional_tag = self._optional_bool_tag(left, lines)
         right_optional_tag = self._optional_bool_tag(right, lines)
-        if (
-            (_is_optional_bool_type(left.type) or _is_optional_bool_type(right.type))
-            and left_optional_tag is not None
-            and right_optional_tag is not None
-        ):
+        if left_optional_tag is not None and right_optional_tag is not None:
             lines.append(
                 f"  {result} = icmp {predicate} i64 {left_optional_tag}, {right_optional_tag}"
             )
