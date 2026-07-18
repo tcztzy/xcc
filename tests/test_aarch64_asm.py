@@ -3732,7 +3732,7 @@ int f(void) { enum { LOCAL_ENUM = 5 }; return LOCAL_ENUM; }
         with self.assertRaisesRegex(CodegenError, "cannot align type struct Missing"):
             gen._emit_alignof(align_missing, 0)
         with self.assertRaisesRegex(CodegenError, "resolve sizeof operand"):
-            gen._sizeof_operand_type(SizeofExpr(Identifier("FILE_ENUM"), None))
+            gen._sizeof_operand_type(SizeofExpr(Identifier("missing_sizeof"), None))
         mixed_obj = typed(Identifier("mixed_obj"), Type("struct Mixed"))
         mixed_missing_member = MemberExpr(mixed_obj, "missing", False)
         with self.assertRaisesRegex(CodegenError, "resolve sizeof operand"):

@@ -5369,7 +5369,7 @@ int caller(int x) {
                     TypeSpec("int"),
                     "main",
                     [],
-                    CompoundStmt([ExprStmt(UnaryExpr("?", IntLiteral(1)))]),
+                    CompoundStmt([ExprStmt(UnaryExpr("?", IntLiteral("1")))]),
                 )
             ]
         )

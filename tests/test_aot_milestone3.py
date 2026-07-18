@@ -284,12 +284,12 @@ class AotMilestone3AnnotationTests(unittest.TestCase):
             "tuple[tuple['Type', ...] | None, bool]",
         )
 
-    def test_lowers_optional_int_parameter_annotation_to_int64(self) -> None:
+    def test_preserves_optional_int_parameter_annotation(self) -> None:
         module = lower_source_to_ir(
             "def f(value: int | None) -> int:\n    return value\n",
             filename="optional.py",
         )
-        self.assertEqual(module.functions[0].params[0].type, IrIntType(64, signed=True))
+        self.assertEqual(module.functions[0].params[0].type, IrRecordType("int | None"))
 
 
 class AotMilestone3IrTests(unittest.TestCase):

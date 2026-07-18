@@ -107,7 +107,7 @@ class AotMilestone5SliceTests(unittest.TestCase):
 
     def test_missing_record_adder_skips_records_already_present(self) -> None:
         records = {"Known": IrRecord("Known", ())}
-        _add_missing_records({"Known"}, records, {}, {}, {}, {})
+        _add_missing_records({"Known"}, records, {}, {}, {}, {}, {})
         self.assertEqual(records, {"Known": IrRecord("Known", ())})
 
 
