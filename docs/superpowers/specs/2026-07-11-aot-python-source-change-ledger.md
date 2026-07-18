@@ -53,7 +53,7 @@ Rules:
 - `src/xcc/sema/type_resolution.py`: 45 hunks
 - `src/xcc/types.py`: 18 hunks
 
-Total: 729 hunks across 32 non-AOT source files.
+Total: 730 hunks across 32 non-AOT source files.
 
 ## Hunk Ledger
 
@@ -788,3 +788,4 @@ Total: 729 hunks across 32 non-AOT source files.
 | H727 | `src/xcc/parser/__init__.py` | `_parse_function`; propagate complex-declarator `overloadable` state | independent C grammar fix | retain: valid GNU C overloadable function declarations are C frontend semantics, not an AOT source-shape workaround | `uv run python -m unittest -q tests.test_parser tests.test_sema` (1342 passed) | rebuilt `build/aot/xcc-smoke`; compiled `build/aot/m9-b561-native/overloadable.c` to arm64 Mach-O object with `_main`/`_test` symbols | `B561` |
 | H728 | `src/xcc/parser/declarators.py` | `parse_declarator_details` / `parse_direct_declarator_details`; consume and return GNU attribute state | independent C grammar fix | retain: parser must preserve pointer declarator structure while recognizing attributes before/after the direct name; no Python subset avoidance introduced | `uv run python -m unittest -q tests.test_parser tests.test_sema` (1342 passed) | rebuilt `build/aot/xcc-smoke`; compiled `build/aot/m9-b561-native/overloadable.c` to arm64 Mach-O object with `_main`/`_test` symbols | `B561` |
 | H729 | `src/xcc/preprocessor/__init__.py` | `_parse_define_no_callback`; retain the replacement text of source-level object-like macros | AOT-driven C preprocessor semantic repair | retain: the native no-callback protocol remains the declared subset boundary, but `#define NAME replacement` must preserve ordinary C object-macro semantics; deleting replacement text is not an admissible source-shape workaround | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_object_macro_preserves_replacement` | rebuilt native bootstrap in `test_real_native_bootstrap_preserves_object_macro_replacement`; compiled a struct-name object macro to an arm64 object | `B564` |
+| H730 | `src/xcc/preprocessor/__init__.py` | `_expand_line_no_callback` / `_expand_text_no_callback`; recursively expand object-macro aliases with active-name suppression | AOT-driven C preprocessor semantic repair | retain: recursive object-like replacement and self-reference termination are ordinary C preprocessing semantics required by SDK headers; the no-callback subset continues to isolate function-like macro work rather than rewriting C inputs | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_object_macro_recursively_expands_alias` | rebuilt native bootstrap in `test_real_native_bootstrap_recursively_expands_object_macro_alias`; compiled a two-level struct-name alias to an arm64 object | `B565` |

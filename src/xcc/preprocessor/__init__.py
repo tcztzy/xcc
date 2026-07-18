@@ -1533,6 +1533,9 @@ class _Preprocessor:
     def _expand_line_no_callback(self, line: str, location: _SourceLocation) -> str:
         trailing_newline = "\n" if line.endswith("\n") else ""
         text = line[0 : len(line) - 1] if trailing_newline else line
+        return self._expand_text_no_callback(text, ()) + trailing_newline
+
+    def _expand_text_no_callback(self, text: str, blocked: tuple[str, ...]) -> str:
         result = ""
         index = 0
         while index < len(text):
@@ -1550,14 +1553,17 @@ class _Preprocessor:
             if macro is None:
                 result += name
                 continue
+            if name in blocked:
+                result += name
+                continue
             replacement = _render_macro_replacement_no_callback(macro)
-            if not replacement:
+            if macro.parameters is not None:
                 skipped = _skip_macro_invocation_no_callback(text, index)
                 if skipped != index:
                     index = skipped
                 continue
-            result += replacement
-        return result + trailing_newline
+            result += self._expand_text_no_callback(replacement, blocked + (name,))
+        return result
 
     def _handle_pragma_operator(self, text: str) -> str:
         return re.sub(r'_Pragma\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)', "\n", text)

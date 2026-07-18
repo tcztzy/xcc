@@ -120,6 +120,21 @@ class PreprocessorTests(unittest.TestCase):
 
         self.assertEqual(result.source, "\nstruct native_record { int value ; } ;\n")
 
+    def test_no_callback_object_macro_recursively_expands_alias(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define NATIVE_RECORD struct native_record\n"
+            "#define NATIVE_RECORD_ALIAS NATIVE_RECORD\n"
+            "NATIVE_RECORD_ALIAS { int value; };\n"
+            "#define SELF SELF\n"
+            "SELF marker;\n",
+            filename="object_macro_alias.c",
+        )
+
+        self.assertEqual(
+            result.source,
+            "\n\nstruct native_record { int value ; } ;\n\nSELF marker ;\n",
+        )
+
     def test_gnu_asm_strip_handles_incomplete_or_non_operand_asm_keywords(self) -> None:
         self.assertEqual(
             preprocessor_text._strip_inline_asm_segments("int asm;\n"),
