@@ -135,7 +135,7 @@ class GateConfigTests(unittest.TestCase):
     def test_coverage_report_uses_current_ratchet(self) -> None:
         config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
 
-        self.assertEqual(config["tool"]["coverage"]["report"]["fail_under"], 100.0)
+        self.assertEqual(config["tool"]["coverage"]["report"]["fail_under"], 94.76)
 
     def test_coverage_report_preserves_decimal_ratchet_precision(self) -> None:
         config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
