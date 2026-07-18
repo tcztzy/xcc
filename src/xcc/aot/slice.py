@@ -1109,9 +1109,14 @@ def _imported_project_function_names(
         if not isinstance(node, ast.ImportFrom):
             continue
         imported_module = _resolved_import_module(module_name, node)
-        if imported_module is None or not _is_project_target(imported_module, module_names):
+        if imported_module is None:
             continue
         package_module = f"{imported_module}.__init__"
+        if (
+            not _is_project_target(imported_module, module_names)
+            and package_module not in module_names
+        ):
+            continue
         for alias in node.names:
             if alias.name == "*":
                 continue
@@ -1166,6 +1171,8 @@ def _is_project_target(
     target: str,
     module_names: frozenset[str] | set[str],
 ) -> bool:
+    if not module_names:
+        return target == "xcc" or target.startswith("xcc.")
     for module_name in module_names:
         if target == module_name or target.startswith(module_name + "."):
             return True
