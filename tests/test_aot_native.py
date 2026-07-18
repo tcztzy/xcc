@@ -107,6 +107,17 @@ def _real_llc() -> str | None:
 
 class AotNativeRealSmokeTests(unittest.TestCase):
     @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_real_integer_abs_native_smoke_matches_cpython(self) -> None:
+        result = run_native_smoke(
+            "def magnitude_sum() -> int:\n"
+            "    return abs(-7) + abs(0) + abs(5)\n",
+            entry="magnitude_sum",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.python_result, 12)
+        self.assertEqual(result.native_returncode, 12)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
     def test_real_scalar_native_smoke_matches_cpython_exit_code(self) -> None:
         result = run_native_smoke(
             "int64 = int\ndef answer() -> int64:\n    return 42\n",

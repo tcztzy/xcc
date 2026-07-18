@@ -2238,6 +2238,8 @@ class _Emitter:
             return _EmittedValue("null", IrNoneType())
         if expr.target == "bool":
             return self._emit_bool_builtin_call(expr, names, lines)
+        if expr.target == "__abs":
+            return self._emit_abs_call(expr, names, lines)
         if expr.target == "isinstance":
             return self._emit_isinstance_call(expr, names, lines)
         if expr.target == "__type_tag":
@@ -2566,6 +2568,28 @@ class _Emitter:
             lines.append(f"  {result} = call i64 @strlen(ptr {value.value})")
             return _EmittedValue(result, expr.type)
         self._error(f"Unsupported len argument type: {type(value.type).__name__}")
+
+    def _emit_abs_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1 or not isinstance(expr.type, IrIntType):
+            self._error("abs expects one integer argument")
+        value = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(value.type, IrIntType):
+            self._error("abs expects one integer argument")
+        llvm_type = self._llvm_type(expr.type)
+        negative = self._tmp("absneg")
+        magnitude = self._tmp("absmagnitude")
+        result = self._tmp("abs")
+        lines.append(f"  {negative} = icmp slt {llvm_type} {value.value}, 0")
+        lines.append(f"  {magnitude} = sub {llvm_type} 0, {value.value}")
+        lines.append(
+            f"  {result} = select i1 {negative}, {llvm_type} {magnitude}, {llvm_type} {value.value}"
+        )
+        return _EmittedValue(result, expr.type)
 
     def _emit_bool_builtin_call(
         self,

@@ -4220,6 +4220,25 @@ class AotScalarLoweringTests(unittest.TestCase):
             ["//", "%", "<<", ">>", "&", "|", "^"],
         )
 
+    def test_lowers_integer_abs_builtin(self) -> None:
+        module = lower_source_to_ir(
+            "def magnitude(value: int) -> int:\n"
+            "    return abs(value)\n",
+            filename="abs_builtin.py",
+        )
+
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__abs",
+                (IrName("value", IrIntType(64, signed=True)),),
+                IrIntType(64, signed=True),
+            ),
+        )
+
     def test_lowers_augmented_assignment_to_instance_field(self) -> None:
         module = lower_source_to_ir(
             "class Counter:\n"

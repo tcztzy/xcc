@@ -1761,6 +1761,19 @@ class _Lowerer:
                 (self._lower_expr(expr.args[0], names, IrTupleType(())),),
                 IrIntType(64, signed=True),
             )
+        if isinstance(expr.func, ast.Name) and expr.func.id == "abs":
+            if expr.keywords or len(expr.args) != 1:
+                self._error(
+                    "XCC-AOT-LOWER-0003",
+                    f"Unsupported call target: {ast.unparse(expr.func)}",
+                    expr,
+                )
+            int64 = IrIntType(64, signed=True)
+            return IrCall(
+                "__abs",
+                (self._lower_expr(expr.args[0], names, int64),),
+                int64,
+            )
         if isinstance(expr.func, ast.Name) and expr.func.id == "bool":
             return self._lower_bool_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id == "int":
