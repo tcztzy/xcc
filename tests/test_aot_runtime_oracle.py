@@ -1547,6 +1547,18 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="optional-int-flow.py",
         )
 
+    def test_none_replacement_narrows_optional_integer_after_if(self) -> None:
+        self.assert_native_matches_cpython(
+            "def fill(value: int | None) -> int:\n"
+            "    if value is None:\n"
+            "        value = 7\n"
+            "    return value\n"
+            "def entry() -> int:\n"
+            "    return fill(None) + fill(0)\n",
+            expected=7,
+            filename="optional-int-replacement.py",
+        )
+
     def test_exiting_positive_isinstance_narrows_union_complement(self) -> None:
         self.assert_native_matches_cpython(
             "class Handler:\n"

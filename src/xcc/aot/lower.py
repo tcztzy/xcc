@@ -572,10 +572,18 @@ class _Lowerer:
                 names,
             )
             if then_falls_through and else_falls_through:
-                self._restore_branch_narrowings(then_names, narrowed_types, names)
+                then_restorations: dict[str, IrType] = {}
+                for narrowed_name, narrowed_type in narrowed_types.items():
+                    if else_names.get(narrowed_name) != narrowed_type:
+                        then_restorations[narrowed_name] = narrowed_type
+                else_restorations: dict[str, IrType] = {}
+                for narrowed_name, narrowed_type in else_narrowed_types.items():
+                    if then_names.get(narrowed_name) != narrowed_type:
+                        else_restorations[narrowed_name] = narrowed_type
+                self._restore_branch_narrowings(then_names, then_restorations, names)
                 self._restore_branch_narrowings(
                     else_names,
-                    else_narrowed_types,
+                    else_restorations,
                     names,
                 )
             if then_falls_through:

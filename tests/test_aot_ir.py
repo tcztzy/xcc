@@ -2040,6 +2040,21 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(returned, IrReturn)
         self.assertEqual(returned.value.elements[0].type, IrRecordType("int | None"))
 
+    def test_none_replacement_narrows_optional_integer_after_if(self) -> None:
+        module = lower_source_to_ir(
+            "def fill(value: int | None) -> int:\n"
+            "    if value is None:\n"
+            "        value = 7\n"
+            "    return value\n",
+            filename="optional-int-replacement.py",
+            entry="fill",
+        )
+
+        returned = module.functions[0].body[1]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(returned.value, IrName("value", IrIntType(64, signed=True)))
+
     def test_qualified_union_is_not_misclassified_as_suffix_record(self) -> None:
         lowerer = _Lowerer(
             "qualified-union.py",
