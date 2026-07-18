@@ -781,6 +781,29 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("icmp ne ptr", llvm_ir)
         self.assertNotIn("@__getitem", llvm_ir)
 
+    def test_boxed_typed_tuple_registers_layout_for_generic_object_reads(self) -> None:
+        module = lower_source_to_ir(
+            "class Node:\n"
+            "    pass\n"
+            "def accepts(values: object) -> bool:\n"
+            "    if isinstance(values, tuple):\n"
+            "        for item in values:\n"
+            "            if isinstance(item, Node):\n"
+            "                return True\n"
+            "    return False\n"
+            "def entry() -> int:\n"
+            "    values: tuple[Node, ...] = (Node(),)\n"
+            "    return 7 if accepts(values) else 1\n",
+            filename="boxed-typed-tuple-layout.py",
+            entry="entry",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("@__xcc_aot_tuple_object_layout_8", llvm_ir)
+        self.assertIn("call void @__xcc_aot_tuple_object_layout_register", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get_object", llvm_ir)
+
     def test_emits_tuple_alias_narrowing_from_record_union_getitem(self) -> None:
         int64 = IrIntType(64, signed=True)
         function_declarator = IrTupleType((IrTupleType((IrRecordType("TypeSpec"),)), IrBoolType()))

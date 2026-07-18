@@ -1254,10 +1254,18 @@ class _Emitter:
                     self._error("string/bytes for-each expects one named target")
                 body_names[slots[0]] = item_value
         else:
-            item = self._tmp("item")
-            lines.append(
-                f"  {item} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})"
+            item_type: IrType = _homogeneous_tuple_element_type(iterable.type) or IrRecordType(
+                "object"
             )
+            if isinstance(iterable.type, IrDictType):
+                item_type = iterable.type.key
+            item = self._tmp("item")
+            item_getter = (
+                "__xcc_aot_tuple_get_object"
+                if _is_opaque_object_type(item_type)
+                else "__xcc_aot_tuple_get"
+            )
+            lines.append(f"  {item} = call ptr @{item_getter}(ptr {iterable.value}, i64 {index})")
             if enumerate_call is not None:
                 if enumerate_start is None:
                     self._error("Malformed __enumerate loop")
@@ -1282,11 +1290,7 @@ class _Emitter:
                         lines,
                     )
             else:
-                item_type: IrType = _homogeneous_tuple_element_type(iterable.type) or IrRecordType(
-                    "object"
-                )
                 if isinstance(iterable.type, IrDictType):
-                    item_type = iterable.type.key
                     item_value = self._emit_runtime_tuple_get(item, 0, item_type, lines)
                 else:
                     item_value = self._emit_runtime_boxed_value(item, item_type, lines)
@@ -1452,7 +1456,12 @@ class _Emitter:
         lines: list[str],
     ) -> _EmittedValue:
         raw = self._tmp("itemslot")
-        lines.append(f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {tuple_value}, i64 {index})")
+        getter = (
+            "__xcc_aot_tuple_get_object"
+            if _is_opaque_object_type(result_type)
+            else "__xcc_aot_tuple_get"
+        )
+        lines.append(f"  {raw} = call ptr @{getter}(ptr {tuple_value}, i64 {index})")
         return self._emit_runtime_boxed_value(raw, result_type, lines)
 
     def _emit_runtime_boxed_value(
@@ -1954,6 +1963,13 @@ class _Emitter:
         else:
             self._error(f"Unsupported object value type: {type(value.type).__name__}")
         self.needs_runtime_prelude = True
+        if isinstance(value.type, IrTupleType):
+            layout = self._tuple_object_layout_constant(value.type)
+            if layout is not None:
+                lines.append(
+                    "  call void @__xcc_aot_tuple_object_layout_register("
+                    f"ptr {value.value}, i64 {len(value.type.elements)}, ptr {layout})"
+                )
         boxed = self._tmp("object")
         payload = self._tmp("object.payload")
         lines.append(f"  {boxed} = call ptr @malloc(i64 16)")
@@ -8334,6 +8350,45 @@ class _Emitter:
         if lines is not None and _is_pointer_type(result_type):
             return self._box_to_runtime_ptr(value, lines)
         self._error(f"Cannot store {type(value.type).__name__} as {type(result_type).__name__}")
+
+    def _tuple_object_layout_constant(self, type_info: IrTupleType) -> str | None:
+        if not type_info.elements:
+            return None
+        tags = tuple(self._object_storage_layout_tag(element) for element in type_info.elements)
+        name = "@__xcc_aot_tuple_object_layout_" + "_".join(str(tag) for tag in tags)
+        if name not in self.global_constants:
+            values = ", ".join(f"i64 {tag}" for tag in tags)
+            self.global_constants[name] = (
+                f"{name} = private unnamed_addr constant [{len(tags)} x i64] [{values}], align 8"
+            )
+        return name
+
+    def _object_storage_layout_tag(self, type_info: IrType) -> int:
+        if isinstance(type_info, IrBoolType):
+            return _OBJECT_TAG_BOOL
+        if isinstance(type_info, IrIntType):
+            return _OBJECT_TAG_INT
+        if isinstance(type_info, IrFloatType):
+            return _OBJECT_TAG_FLOAT
+        if isinstance(type_info, IrStringType):
+            return _OBJECT_TAG_STRING
+        if isinstance(type_info, IrBytesType):
+            return _OBJECT_TAG_BYTES
+        if isinstance(type_info, IrDictType):
+            return _OBJECT_TAG_DICT
+        if isinstance(type_info, IrTupleType):
+            return _OBJECT_TAG_TUPLE
+        if isinstance(type_info, IrRecordType):
+            if type_info.name == "object" or _is_optional_int_type(type_info):
+                return 0
+            if type_info.name == "complex":
+                return _OBJECT_TAG_COMPLEX
+            if type_info.name in self.records or _is_known_record_union_name(
+                type_info.name,
+                self.records,
+            ):
+                return _OBJECT_TAG_RECORD
+        return 0
 
     def _string_constant(self, value: str) -> str:
         escaped = _escape_c_string(value)

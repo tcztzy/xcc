@@ -956,6 +956,31 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="nullable-record-object.py",
         )
 
+    def test_typed_tuple_boxed_as_object_preserves_element_layout(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Node:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        self.value = value\n"
+            "def score(values: object) -> int:\n"
+            "    total = 0\n"
+            "    if isinstance(values, tuple):\n"
+            "        for item in values:\n"
+            "            if isinstance(item, Node):\n"
+            "                total += item.value\n"
+            "            elif isinstance(item, str):\n"
+            "                total += len(item)\n"
+            "            elif isinstance(item, int):\n"
+            "                total += item\n"
+            "    return total\n"
+            "def entry() -> int:\n"
+            "    nodes: tuple[Node, ...] = (Node(2), Node(3))\n"
+            "    words: tuple[str, ...] = ('a', 'bc')\n"
+            "    numbers: tuple[int, ...] = (4, 5)\n"
+            "    return score(nodes) + score(words) + score(numbers)\n",
+            expected=17,
+            filename="boxed-typed-tuple-layout.py",
+        )
+
     def test_branch_join_preserves_nullable_record_for_object_boxing(self) -> None:
         self.assert_native_matches_cpython(
             "class Node:\n"
