@@ -2112,6 +2112,34 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(obj.exists())
 
+    def test_real_native_bootstrap_accepts_compatible_pointer_typedefs(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b575-compatible-typedef"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "compatible_typedef.c"
+            obj = root / "compatible_typedef.o"
+            source.write_text(
+                "typedef void *Pointer;\n"
+                "typedef void *Pointer;\n"
+                "int main(void) { return 0; }\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
     def test_real_native_bootstrap_links_configure_style_object_when_llc_exists(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():

@@ -2082,6 +2082,28 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="frozen-dataclass-equality.py",
         )
 
+    def test_record_equality_compares_tagged_integer_tuple_fields_by_value(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "FunctionParams = tuple[tuple[int, ...] | None, bool]\n"
+            "TypeOp = tuple[str, int | FunctionParams]\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "    declarator_ops: tuple[TypeOp, ...]\n"
+            "def entry() -> int:\n"
+            "    left = Type('void', (('ptr', 0),))\n"
+            "    equal = Type('void', (('ptr', 0),))\n"
+            "    different = Type('void', (('ptr', 1),))\n"
+            "    if left != equal:\n"
+            "        return 1\n"
+            "    if left == different:\n"
+            "        return 2\n"
+            "    return 7\n",
+            expected=7,
+            filename="tagged-integer-record-equality.py",
+        )
+
     def test_record_union_equality_dispatches_and_compares_nested_fields(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

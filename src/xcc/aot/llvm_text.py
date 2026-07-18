@@ -7288,6 +7288,151 @@ class _Emitter:
         lines.append(f"  {result} = xor i1 {raw_result}, true")
         return _EmittedValue(result, IrBoolType())
 
+    def _emit_tagged_object_equality_compare(
+        self,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        *,
+        negate: bool,
+        lines: list[str],
+    ) -> _EmittedValue:
+        self.needs_runtime_prelude = True
+        source_label = _current_label(lines)
+        null_label = self._label("object.eq.null")
+        tag_label = self._label("object.eq.tag")
+        numeric_label = self._label("object.eq.numeric")
+        same_tag_label = self._label("object.eq.same_tag")
+        dispatch_label = self._label("object.eq.dispatch")
+        float_label = self._label("object.eq.float")
+        string_label = self._label("object.eq.string")
+        bytes_label = self._label("object.eq.bytes")
+        ellipsis_label = self._label("object.eq.ellipsis")
+        pointer_label = self._label("object.eq.pointer")
+        end_label = self._label("object.eq.end")
+        same = self._tmp("object.eq.same")
+        lines.append(f"  {same} = icmp eq ptr {left.value}, {right.value}")
+        lines.append(f"  br i1 {same}, label %{end_label}, label %{null_label}")
+        lines.append(f"{null_label}:")
+        left_nonnull = self._tmp("object.eq.left.nonnull")
+        right_nonnull = self._tmp("object.eq.right.nonnull")
+        both_nonnull = self._tmp("object.eq.both.nonnull")
+        lines.append(f"  {left_nonnull} = icmp ne ptr {left.value}, null")
+        lines.append(f"  {right_nonnull} = icmp ne ptr {right.value}, null")
+        lines.append(f"  {both_nonnull} = and i1 {left_nonnull}, {right_nonnull}")
+        lines.append(f"  br i1 {both_nonnull}, label %{tag_label}, label %{end_label}")
+        lines.append(f"{tag_label}:")
+        left_tag = self._tmp("object.eq.left.tag")
+        right_tag = self._tmp("object.eq.right.tag")
+        left_bool = self._tmp("object.eq.left.bool")
+        left_int = self._tmp("object.eq.left.int")
+        left_numeric = self._tmp("object.eq.left.numeric")
+        right_bool = self._tmp("object.eq.right.bool")
+        right_int = self._tmp("object.eq.right.int")
+        right_numeric = self._tmp("object.eq.right.numeric")
+        both_numeric = self._tmp("object.eq.both.numeric")
+        lines.append(f"  {left_tag} = load i64, ptr {left.value}")
+        lines.append(f"  {right_tag} = load i64, ptr {right.value}")
+        lines.append(f"  {left_bool} = icmp eq i64 {left_tag}, {_OBJECT_TAG_BOOL}")
+        lines.append(f"  {left_int} = icmp eq i64 {left_tag}, {_OBJECT_TAG_INT}")
+        lines.append(f"  {left_numeric} = or i1 {left_bool}, {left_int}")
+        lines.append(f"  {right_bool} = icmp eq i64 {right_tag}, {_OBJECT_TAG_BOOL}")
+        lines.append(f"  {right_int} = icmp eq i64 {right_tag}, {_OBJECT_TAG_INT}")
+        lines.append(f"  {right_numeric} = or i1 {right_bool}, {right_int}")
+        lines.append(f"  {both_numeric} = and i1 {left_numeric}, {right_numeric}")
+        lines.append(f"  br i1 {both_numeric}, label %{numeric_label}, label %{same_tag_label}")
+        lines.append(f"{numeric_label}:")
+        left_numeric_ptr = self._tmp("object.eq.left.numericptr")
+        right_numeric_ptr = self._tmp("object.eq.right.numericptr")
+        left_numeric_value = self._tmp("object.eq.left.numericvalue")
+        right_numeric_value = self._tmp("object.eq.right.numericvalue")
+        numeric_equal = self._tmp("object.eq.numeric")
+        lines.append(f"  {left_numeric_ptr} = getelementptr i8, ptr {left.value}, i64 8")
+        lines.append(f"  {right_numeric_ptr} = getelementptr i8, ptr {right.value}, i64 8")
+        lines.append(f"  {left_numeric_value} = load i64, ptr {left_numeric_ptr}")
+        lines.append(f"  {right_numeric_value} = load i64, ptr {right_numeric_ptr}")
+        lines.append(f"  {numeric_equal} = icmp eq i64 {left_numeric_value}, {right_numeric_value}")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{same_tag_label}:")
+        same_tag = self._tmp("object.eq.same_tag")
+        lines.append(f"  {same_tag} = icmp eq i64 {left_tag}, {right_tag}")
+        lines.append(f"  br i1 {same_tag}, label %{dispatch_label}, label %{end_label}")
+        lines.append(f"{dispatch_label}:")
+        lines.append(f"  switch i64 {left_tag}, label %{pointer_label} [")
+        lines.append(f"    i64 {_OBJECT_TAG_FLOAT}, label %{float_label}")
+        lines.append(f"    i64 {_OBJECT_TAG_STRING}, label %{string_label}")
+        lines.append(f"    i64 {_OBJECT_TAG_BYTES}, label %{bytes_label}")
+        lines.append(f"    i64 {_OBJECT_TAG_ELLIPSIS}, label %{ellipsis_label}")
+        lines.append("  ]")
+        lines.append(f"{float_label}:")
+        left_float_ptr = self._tmp("object.eq.left.floatptr")
+        right_float_ptr = self._tmp("object.eq.right.floatptr")
+        left_float = self._tmp("object.eq.left.float")
+        right_float = self._tmp("object.eq.right.float")
+        float_equal = self._tmp("object.eq.float")
+        lines.append(f"  {left_float_ptr} = getelementptr i8, ptr {left.value}, i64 8")
+        lines.append(f"  {right_float_ptr} = getelementptr i8, ptr {right.value}, i64 8")
+        lines.append(f"  {left_float} = load double, ptr {left_float_ptr}")
+        lines.append(f"  {right_float} = load double, ptr {right_float_ptr}")
+        lines.append(f"  {float_equal} = fcmp oeq double {left_float}, {right_float}")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{string_label}:")
+        left_string_ptr = self._tmp("object.eq.left.stringptr")
+        right_string_ptr = self._tmp("object.eq.right.stringptr")
+        left_string = self._tmp("object.eq.left.string")
+        right_string = self._tmp("object.eq.right.string")
+        string_compared = self._tmp("object.eq.strcmp")
+        string_equal = self._tmp("object.eq.string")
+        lines.append(f"  {left_string_ptr} = getelementptr i8, ptr {left.value}, i64 8")
+        lines.append(f"  {right_string_ptr} = getelementptr i8, ptr {right.value}, i64 8")
+        lines.append(f"  {left_string} = load ptr, ptr {left_string_ptr}")
+        lines.append(f"  {right_string} = load ptr, ptr {right_string_ptr}")
+        lines.append(
+            f"  {string_compared} = call i32 @strcmp(ptr {left_string}, ptr {right_string})"
+        )
+        lines.append(f"  {string_equal} = icmp eq i32 {string_compared}, 0")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{bytes_label}:")
+        left_bytes_ptr = self._tmp("object.eq.left.bytesptr")
+        right_bytes_ptr = self._tmp("object.eq.right.bytesptr")
+        left_bytes = self._tmp("object.eq.left.bytes")
+        right_bytes = self._tmp("object.eq.right.bytes")
+        bytes_equal = self._tmp("object.eq.bytes")
+        lines.append(f"  {left_bytes_ptr} = getelementptr i8, ptr {left.value}, i64 8")
+        lines.append(f"  {right_bytes_ptr} = getelementptr i8, ptr {right.value}, i64 8")
+        lines.append(f"  {left_bytes} = load ptr, ptr {left_bytes_ptr}")
+        lines.append(f"  {right_bytes} = load ptr, ptr {right_bytes_ptr}")
+        lines.append(
+            f"  {bytes_equal} = call i1 @__xcc_aot_bytes_equal(ptr {left_bytes}, ptr {right_bytes})"
+        )
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{ellipsis_label}:")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{pointer_label}:")
+        left_pointer_ptr = self._tmp("object.eq.left.pointerptr")
+        right_pointer_ptr = self._tmp("object.eq.right.pointerptr")
+        left_pointer = self._tmp("object.eq.left.pointer")
+        right_pointer = self._tmp("object.eq.right.pointer")
+        pointer_equal = self._tmp("object.eq.pointer")
+        lines.append(f"  {left_pointer_ptr} = getelementptr i8, ptr {left.value}, i64 8")
+        lines.append(f"  {right_pointer_ptr} = getelementptr i8, ptr {right.value}, i64 8")
+        lines.append(f"  {left_pointer} = load ptr, ptr {left_pointer_ptr}")
+        lines.append(f"  {right_pointer} = load ptr, ptr {right_pointer_ptr}")
+        lines.append(f"  {pointer_equal} = icmp eq ptr {left_pointer}, {right_pointer}")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        equal = self._tmp("object.eq")
+        lines.append(
+            f"  {equal} = phi i1 [ true, %{source_label} ], "
+            f"[ false, %{null_label} ], [ {numeric_equal}, %{numeric_label} ], "
+            f"[ false, %{same_tag_label} ], [ {float_equal}, %{float_label} ], "
+            f"[ {string_equal}, %{string_label} ], [ {bytes_equal}, %{bytes_label} ], "
+            f"[ true, %{ellipsis_label} ], [ {pointer_equal}, %{pointer_label} ]"
+        )
+        value = _EmittedValue(equal, IrBoolType())
+        if negate:
+            return self._emit_bool_not(value, lines)
+        return value
+
     def _emit_equality_compare(
         self,
         left: _EmittedValue,
@@ -7315,6 +7460,13 @@ class _Emitter:
             or (_is_optional_int_type(left.type) and _is_optional_int_type(right.type))
         ):
             return self._emit_optional_int_equality_compare(
+                left,
+                right,
+                negate=negate,
+                lines=lines,
+            )
+        if _is_opaque_object_type(left.type) and _is_opaque_object_type(right.type):
+            return self._emit_tagged_object_equality_compare(
                 left,
                 right,
                 negate=negate,
