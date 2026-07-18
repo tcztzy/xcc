@@ -59,6 +59,26 @@ from xcc.aot.llvm_text import (
 
 
 class AotLlvmTextTests(unittest.TestCase):
+    def test_emits_integer_augmented_assignment_operators(self) -> None:
+        module = lower_source_to_ir(
+            "def update(value: int) -> int:\n"
+            "    value //= 2\n"
+            "    value %= 3\n"
+            "    value <<= 4\n"
+            "    value >>= 1\n"
+            "    value &= 15\n"
+            "    value |= 16\n"
+            "    value ^= 7\n"
+            "    return value\n",
+            filename="integer_augassign.py",
+            entry="update",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        for opcode in ("sdiv", "srem", "shl", "ashr", "and", "or", "xor"):
+            self.assertIn(f" = {opcode} i64 ", llvm_ir)
+
     def test_hoists_loop_expression_allocas_to_function_entry(self) -> None:
         module = lower_source_to_ir(
             "def count(items: tuple[str, ...], allowed: set[str]) -> int:\n"

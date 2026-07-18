@@ -4200,6 +4200,26 @@ class AotScalarLoweringTests(unittest.TestCase):
                 ),
             )
 
+    def test_lowers_integer_augmented_assignment_operators(self) -> None:
+        module = lower_source_to_ir(
+            "def update(value: int) -> int:\n"
+            "    value //= 2\n"
+            "    value %= 3\n"
+            "    value <<= 4\n"
+            "    value >>= 1\n"
+            "    value &= 15\n"
+            "    value |= 16\n"
+            "    value ^= 7\n"
+            "    return value\n",
+            filename="integer_augassign.py",
+        )
+
+        assignments = module.functions[0].body[:-1]
+        self.assertEqual(
+            [statement.value.op for statement in assignments if isinstance(statement, IrAssign)],
+            ["//", "%", "<<", ">>", "&", "|", "^"],
+        )
+
     def test_lowers_augmented_assignment_to_instance_field(self) -> None:
         module = lower_source_to_ir(
             "class Counter:\n"

@@ -866,7 +866,21 @@ class _Lowerer:
         if (
             isinstance(statement, ast.AugAssign)
             and isinstance(statement.target, (ast.Name, ast.Attribute))
-            and isinstance(statement.op, (ast.Add, ast.Sub, ast.Mult))
+            and isinstance(
+                statement.op,
+                (
+                    ast.Add,
+                    ast.Sub,
+                    ast.Mult,
+                    ast.FloorDiv,
+                    ast.Mod,
+                    ast.LShift,
+                    ast.RShift,
+                    ast.BitOr,
+                    ast.BitAnd,
+                    ast.BitXor,
+                ),
+            )
         ):
             current = self._lower_expr(statement.target, names, return_type)
             value_type: IrType = current.type
@@ -875,13 +889,27 @@ class _Lowerer:
             ):
                 value_type = IrIntType(64, signed=True)
             value = self._lower_expr(statement.value, names, value_type)
-            op: Literal["+", "-", "*"]
+            op: Literal["+", "-", "*", "//", "%", "<<", ">>", "|", "&", "^"]
             if isinstance(statement.op, ast.Add):
                 op = "+"
             elif isinstance(statement.op, ast.Sub):
                 op = "-"
-            else:
+            elif isinstance(statement.op, ast.Mult):
                 op = "*"
+            elif isinstance(statement.op, ast.FloorDiv):
+                op = "//"
+            elif isinstance(statement.op, ast.Mod):
+                op = "%"
+            elif isinstance(statement.op, ast.LShift):
+                op = "<<"
+            elif isinstance(statement.op, ast.RShift):
+                op = ">>"
+            elif isinstance(statement.op, ast.BitOr):
+                op = "|"
+            elif isinstance(statement.op, ast.BitAnd):
+                op = "&"
+            else:
+                op = "^"
             if op == "+" and isinstance(current.type, IrStringType):
                 result: IrExpr = IrStringConcat((current, value))
             elif op == "+" and isinstance(current.type, IrBytesType):
