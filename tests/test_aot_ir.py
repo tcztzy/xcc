@@ -2020,11 +2020,40 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(returned, IrReturn)
         self.assertIsInstance(returned.value, IrCall)
         assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__value_or")
         self.assertEqual(returned.value.type, IrIntType(64, signed=True))
         self.assertEqual(
-            returned.value.args[1],
-            IrName("value", IrIntType(64, signed=True)),
+            returned.value.args[0],
+            IrName("value", IrRecordType("int | None")),
         )
+        self.assertEqual(
+            returned.value.args[1], IrConstInt(0, IrIntType(64, signed=True))
+        )
+
+    def test_value_or_preserves_single_optional_call_operand(self) -> None:
+        module = lower_source_to_ir(
+            "def maybe() -> int | None:\n"
+            "    return 3\n"
+            "def choose() -> int:\n"
+            "    return maybe() or 9\n",
+            filename="optional-int-call-or.py",
+            entry="choose",
+        )
+
+        function = next(function for function in module.functions if function.name == "choose")
+        returned = function.body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__value_or")
+        self.assertEqual(returned.value.type, IrIntType(64, signed=True))
+        self.assertEqual(len(returned.value.args), 2)
+        first = returned.value.args[0]
+        self.assertIsInstance(first, IrCall)
+        assert isinstance(first, IrCall)
+        self.assertEqual(first.target, "maybe")
+        self.assertEqual(first.type, IrRecordType("int | None"))
 
     def test_optional_integer_assignment_is_narrow_until_branch_merge(self) -> None:
         module = lower_source_to_ir(
@@ -4316,9 +4345,8 @@ class AotScalarLoweringTests(unittest.TestCase):
                 "__int_parse",
                 (
                     IrCall(
-                        "__ifexp",
+                        "__value_or",
                         (
-                            IrName("text", IrStringType()),
                             IrName("text", IrStringType()),
                             IrConstString("0"),
                         ),
@@ -4509,7 +4537,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(assigned, IrAssign)
         self.assertIsInstance(assigned.value, IrCall)
         assert isinstance(assigned.value, IrCall)
-        self.assertEqual(assigned.value.target, "__ifexp")
+        self.assertEqual(assigned.value.target, "__value_or")
         self.assertEqual(assigned.value.type, IrRecordType("Type | None"))
 
     def test_value_or_empty_tuple_keeps_tuple_type_when_function_returns_int(self) -> None:
@@ -4529,7 +4557,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(assigned, IrAssign)
         self.assertIsInstance(assigned.value, IrCall)
         assert isinstance(assigned.value, IrCall)
-        self.assertEqual(assigned.value.target, "__ifexp")
+        self.assertEqual(assigned.value.target, "__value_or")
         self.assertEqual(assigned.value.type, values_type)
 
     def test_value_or_empty_dict_keeps_dict_type_when_function_returns_int(self) -> None:
@@ -4548,7 +4576,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(assigned, IrAssign)
         self.assertIsInstance(assigned.value, IrCall)
         assert isinstance(assigned.value, IrCall)
-        self.assertEqual(assigned.value.target, "__ifexp")
+        self.assertEqual(assigned.value.target, "__value_or")
         self.assertEqual(assigned.value.type, values_type)
 
     def test_uses_extra_global_annotation_for_imported_record_constant(self) -> None:
@@ -4567,10 +4595,9 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(
             returned.value,
             IrCall(
-                "__ifexp",
+                "__value_or",
                 (
                     IrName("value", IrRecordType("Type | None")),
-                    IrName("value", IrRecordType("Type")),
                     IrName("INT", IrRecordType("Type")),
                 ),
                 IrRecordType("Type"),
@@ -4595,7 +4622,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(assigned, IrAssign)
         self.assertIsInstance(assigned.value, IrCall)
         assert isinstance(assigned.value, IrCall)
-        self.assertEqual(assigned.value.target, "__ifexp")
+        self.assertEqual(assigned.value.target, "__value_or")
         self.assertEqual(assigned.value.type, IrRecordType("Type"))
 
     def test_infers_optional_record_ifexp_assignment_when_function_returns_optional_int(
@@ -4715,9 +4742,9 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(returned, IrReturn)
         self.assertIsInstance(returned.value, IrCall)
         assert isinstance(returned.value, IrCall)
-        self.assertEqual(returned.value.target, "__ifexp")
+        self.assertEqual(returned.value.target, "__value_or")
         self.assertEqual(
-            returned.value.args[2],
+            returned.value.args[1],
             IrGetField(IrName("value", IrRecordType("Type")), "name", IrStringType()),
         )
 

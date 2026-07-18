@@ -2498,6 +2498,7 @@ class _Emitter:
             "__cmp_NotEq",
             "__ifexp",
             "__not",
+            "__value_or",
         }:
             return None
         if expr.target == "__bool_and":
@@ -2506,6 +2507,8 @@ class _Emitter:
             return self._emit_bool_short_circuit("or", expr.args, names, lines)
         if expr.target == "__ifexp":
             return self._emit_ifexp_call(expr, names, lines)
+        if expr.target == "__value_or":
+            return self._emit_value_or_call(expr, names, lines)
         args = [self._emit_expr(arg, names, lines) for arg in expr.args]
         if expr.target == "__not":
             if len(args) != 1:
@@ -6386,6 +6389,41 @@ class _Emitter:
         if isinstance(expr.type, IrNoneType):
             return _EmittedValue("null", expr.type)
         result = self._tmp("ifexp")
+        lines.append(
+            f"  {result} = phi {self._llvm_type(expr.type)} "
+            f"[ {true_result}, %{true_source} ], [ {false_result}, %{false_source} ]"
+        )
+        return _EmittedValue(result, expr.type)
+
+    def _emit_value_or_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__value_or expects two arguments")
+        left = self._emit_expr(expr.args[0], names, lines)
+        condition = self._coerce_to_bool(left, lines)
+        true_label = self._label("value.or.true")
+        false_label = self._label("value.or.false")
+        end_label = self._label("value.or.end")
+        lines.append(f"  br i1 {condition.value}, label %{true_label}, label %{false_label}")
+        lines.append(f"{true_label}:")
+        narrowed = self._emit_runtime_object_narrowing(left, expr.type, lines)
+        true_value = left if narrowed is None else narrowed
+        true_result = self._value_for_result_type(true_value, expr.type, lines)
+        true_source = _current_label(lines)
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{false_label}:")
+        false_value = self._emit_expr(expr.args[1], names, lines)
+        false_result = self._value_for_result_type(false_value, expr.type, lines)
+        false_source = _current_label(lines)
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        if isinstance(expr.type, IrNoneType):
+            return _EmittedValue("null", expr.type)
+        result = self._tmp("value.or")
         lines.append(
             f"  {result} = phi {self._llvm_type(expr.type)} "
             f"[ {true_result}, %{true_source} ], [ {false_result}, %{false_source} ]"

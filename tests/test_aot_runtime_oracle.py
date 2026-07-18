@@ -1525,6 +1525,19 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="optional-int-or.py",
         )
 
+    def test_value_or_evaluates_optional_call_once(self) -> None:
+        self.assert_native_matches_cpython(
+            "def read(values: list[int]) -> int | None:\n"
+            "    values.append(1)\n"
+            "    return 3\n"
+            "def entry() -> int:\n"
+            "    values: list[int] = []\n"
+            "    result = read(values) or 9\n"
+            "    return result + len(values)\n",
+            expected=4,
+            filename="optional-int-call-or.py",
+        )
+
     def test_optional_integer_assignment_narrows_then_merges(self) -> None:
         self.assert_native_matches_cpython(
             "def use(value: int) -> int:\n"

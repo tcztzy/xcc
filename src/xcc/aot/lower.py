@@ -5743,14 +5743,7 @@ class _Lowerer:
             rest_names[name] = narrowed_type
         rest = self._lower_value_bool_op(op, values[1:], rest_names, expected)
         result_type = _value_bool_op_result_type(op, first.type, rest.type, expected)
-        truthy_names = dict(names)
-        truthy_narrowing = self._truthy_optional_record_narrowing(first_node, truthy_names)
-        truthy_value = first
-        if truthy_narrowing is not None:
-            name, narrowed_type = truthy_narrowing
-            truthy_names[name] = narrowed_type
-            truthy_value = self._lower_expr(first_node, truthy_names, result_type)
-        return IrCall("__ifexp", (first, truthy_value, rest), result_type)
+        return IrCall("__value_or", (first, rest), result_type)
 
     def _lower_joined_str(self, expr: ast.JoinedStr, names: dict[str, IrType]) -> IrExpr:
         parts: list[IrExpr] = []
