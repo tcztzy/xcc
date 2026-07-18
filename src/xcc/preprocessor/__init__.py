@@ -1493,10 +1493,13 @@ class _Preprocessor:
         if scanned is None:
             return None
         name, cursor = scanned
-        replacement: tuple[_MacroToken, ...] = ()
         tail = define_body[cursor:]
         if tail.startswith("("):
-            return _Macro(name, replacement, parameters=("__xcc_arg",))
+            return _Macro(name, (), parameters=("__xcc_arg",))
+        replacement: tuple[_MacroToken, ...] = ()
+        replacement_text = tail.strip()
+        if replacement_text:
+            replacement = (_MacroToken(TokenKind.IDENT, replacement_text),)
         return _Macro(name, replacement)
 
     def _parse_function_like_define(self, name: str, tail: str) -> _Macro | None:

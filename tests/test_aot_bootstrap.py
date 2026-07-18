@@ -1867,6 +1867,34 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             run_result = subprocess.run((str(exe),), check=False)
             self.assertEqual(run_result.returncode, 0)
 
+    def test_real_native_bootstrap_preserves_object_macro_replacement(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b564-object-macro"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "object_macro.c"
+            obj = root / "object_macro.o"
+            source.write_text(
+                "#define NATIVE_RECORD struct native_record\n"
+                "NATIVE_RECORD { int value; };\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
     def test_real_native_bootstrap_links_configure_style_object_when_llc_exists(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():

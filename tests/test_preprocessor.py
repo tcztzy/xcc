@@ -53,6 +53,7 @@ from xcc.preprocessor import (
     _validate_gcc_visibility_pragma,
     _validate_stdc_pragma,
     preprocess_source,
+    preprocess_source_no_callback,
 )
 
 
@@ -109,6 +110,15 @@ class PreprocessorTests(unittest.TestCase):
     def test_preprocess_empty_source(self) -> None:
         result = preprocess_source("", filename="empty.c")
         self.assertEqual(result.source, "")
+
+    def test_no_callback_object_macro_preserves_replacement(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define NATIVE_RECORD struct native_record\n"
+            "NATIVE_RECORD { int value; };\n",
+            filename="object_macro.c",
+        )
+
+        self.assertEqual(result.source, "\nstruct native_record { int value ; } ;\n")
 
     def test_gnu_asm_strip_handles_incomplete_or_non_operand_asm_keywords(self) -> None:
         self.assertEqual(
