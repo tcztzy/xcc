@@ -1931,6 +1931,24 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         self.assertRegex(llvm_ir, r"%optional\.int\.payload\d+ = getelementptr i8")
 
+    def test_compares_optional_integer_payload_to_concrete_zero(self) -> None:
+        module = lower_source_to_ir(
+            "def maybe(value: int, present: bool) -> int | None:\n"
+            "    if present:\n"
+            "        return value\n"
+            "    return None\n"
+            "def is_zero(value: int | None) -> bool:\n"
+            "    return value == 0\n",
+            filename="optional-int-equality.py",
+            entry="is_zero",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertRegex(llvm_ir, r"%optional\.int\.eq\.left\.present\d+ = icmp ne ptr")
+        self.assertRegex(llvm_ir, r"%optional\.int\.eq\.left\d+ = load i64")
+        self.assertNotRegex(llvm_ir, r"ptrtoint ptr %value to i64")
+
     def test_for_each_binds_homogeneous_tuple_element_type(self) -> None:
         int64 = IrIntType(64, signed=True)
         function_def = IrRecord("FunctionDef", (IrField("body", int64),))

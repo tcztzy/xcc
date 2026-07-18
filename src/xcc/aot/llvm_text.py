@@ -7070,6 +7070,83 @@ class _Emitter:
         lines.append(f"  {result} = icmp {predicate} ptr {left_value}, {right_value}")
         return _EmittedValue(result, IrBoolType())
 
+    def _emit_optional_int_equality_compare(
+        self,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        *,
+        negate: bool,
+        lines: list[str],
+    ) -> _EmittedValue:
+        if isinstance(left.type, IrIntType):
+            left, right = right, left
+        if not _is_optional_int_type(left.type):
+            self._error("optional integer equality expects an optional integer operand")
+        source_label = _current_label(lines)
+        compare_label = self._label("optional.int.eq.compare")
+        end_label = self._label("optional.int.eq.end")
+        left_present = self._tmp("optional.int.eq.left.present")
+        lines.append(f"  {left_present} = icmp ne ptr {left.value}, null")
+        if isinstance(right.type, IrIntType):
+            right_value = self._adapt_integer_width(
+                right,
+                IrIntType(64, signed=True),
+                lines,
+            )
+            lines.append(f"  br i1 {left_present}, label %{compare_label}, label %{end_label}")
+            lines.append(f"{compare_label}:")
+            left_payload = self._tmp("optional.int.eq.left.payload")
+            left_integer = self._tmp("optional.int.eq.left")
+            compared = self._tmp("optional.int.eq")
+            predicate = "ne" if negate else "eq"
+            lines.append(f"  {left_payload} = getelementptr i8, ptr {left.value}, i64 8")
+            lines.append(f"  {left_integer} = load i64, ptr {left_payload}")
+            lines.append(f"  {compared} = icmp {predicate} i64 {left_integer}, {right_value.value}")
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{end_label}:")
+            result = self._tmp("optional.int.eq")
+            absent_result = "true" if negate else "false"
+            lines.append(
+                f"  {result} = phi i1 [ {absent_result}, %{source_label} ], "
+                f"[ {compared}, %{compare_label} ]"
+            )
+            return _EmittedValue(result, IrBoolType())
+        if not _is_optional_int_type(right.type):
+            self._error("optional integer equality expects int or optional int operands")
+        right_present = self._tmp("optional.int.eq.right.present")
+        both_present = self._tmp("optional.int.eq.both.present")
+        either_present = self._tmp("optional.int.eq.either.present")
+        absent_equal = self._tmp("optional.int.eq.absent")
+        lines.append(f"  {right_present} = icmp ne ptr {right.value}, null")
+        lines.append(f"  {both_present} = and i1 {left_present}, {right_present}")
+        lines.append(f"  {either_present} = or i1 {left_present}, {right_present}")
+        lines.append(f"  {absent_equal} = xor i1 {either_present}, true")
+        absent_result = absent_equal
+        if negate:
+            absent_result = self._tmp("optional.int.eq.absent.not")
+            lines.append(f"  {absent_result} = xor i1 {absent_equal}, true")
+        lines.append(f"  br i1 {both_present}, label %{compare_label}, label %{end_label}")
+        lines.append(f"{compare_label}:")
+        left_payload = self._tmp("optional.int.eq.left.payload")
+        left_integer = self._tmp("optional.int.eq.left")
+        right_payload = self._tmp("optional.int.eq.right.payload")
+        right_integer = self._tmp("optional.int.eq.right")
+        compared = self._tmp("optional.int.eq")
+        predicate = "ne" if negate else "eq"
+        lines.append(f"  {left_payload} = getelementptr i8, ptr {left.value}, i64 8")
+        lines.append(f"  {left_integer} = load i64, ptr {left_payload}")
+        lines.append(f"  {right_payload} = getelementptr i8, ptr {right.value}, i64 8")
+        lines.append(f"  {right_integer} = load i64, ptr {right_payload}")
+        lines.append(f"  {compared} = icmp {predicate} i64 {left_integer}, {right_integer}")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp("optional.int.eq")
+        lines.append(
+            f"  {result} = phi i1 [ {absent_result}, %{source_label} ], "
+            f"[ {compared}, %{compare_label} ]"
+        )
+        return _EmittedValue(result, IrBoolType())
+
     def _emit_tagged_object_bool_identity(
         self,
         object_value: _EmittedValue,
@@ -7133,6 +7210,17 @@ class _Emitter:
                 f"  {result} = icmp {predicate} i64 {left_optional_tag}, {right_optional_tag}"
             )
             return _EmittedValue(result, IrBoolType())
+        if (
+            (_is_optional_int_type(left.type) and isinstance(right.type, IrIntType))
+            or (isinstance(left.type, IrIntType) and _is_optional_int_type(right.type))
+            or (_is_optional_int_type(left.type) and _is_optional_int_type(right.type))
+        ):
+            return self._emit_optional_int_equality_compare(
+                left,
+                right,
+                negate=negate,
+                lines=lines,
+            )
         if isinstance(left.type, IrIntType) and isinstance(right.type, IrIntType):
             lines.append(
                 f"  {result} = icmp {predicate} {self._llvm_type(left.type)} "

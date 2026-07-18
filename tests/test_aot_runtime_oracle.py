@@ -1572,6 +1572,30 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="optional-int-for-loop.py",
         )
 
+    def test_optional_integer_equality_compares_payload_and_presence(self) -> None:
+        self.assert_native_matches_cpython(
+            "def maybe(value: int, present: bool) -> int | None:\n"
+            "    if present:\n"
+            "        return value\n"
+            "    return None\n"
+            "def entry() -> int:\n"
+            "    zero = maybe(0, True)\n"
+            "    other_zero = maybe(0, True)\n"
+            "    seven = maybe(7, True)\n"
+            "    missing = maybe(0, False)\n"
+            "    if zero != 0 or zero != other_zero:\n"
+            "        return 1\n"
+            "    if seven == 0 or seven == zero:\n"
+            "        return 2\n"
+            "    if missing == 0 or missing == zero:\n"
+            "        return 3\n"
+            "    if missing != maybe(0, False):\n"
+            "        return 4\n"
+            "    return 0\n",
+            expected=0,
+            filename="optional-int-equality.py",
+        )
+
     def test_optional_integer_assignment_narrows_then_merges(self) -> None:
         self.assert_native_matches_cpython(
             "def use(value: int) -> int:\n"
