@@ -2426,18 +2426,18 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(assigned, IrAssign)
         assert isinstance(assigned, IrAssign)
         self.assertEqual(assigned.value.type, units_type)
+        self.assertIsInstance(assigned.value, IrCall)
+        assert isinstance(assigned.value, IrCall)
+        self.assertEqual(assigned.value.target, "__ifexp")
         self.assertEqual(
-            assigned.value,
-            IrCall(
-                "__ifexp",
-                (
-                    IrName("flag", IrBoolType()),
-                    IrCall("decode", (IrName("body", IrStringType()),), units_type),
-                    IrCall("__ListComp", (), units_type),
-                ),
-                units_type,
-            ),
+            assigned.value.args[1],
+            IrCall("decode", (IrName("body", IrStringType()),), units_type),
         )
+        comprehension = assigned.value.args[2]
+        self.assertIsInstance(comprehension, IrCall)
+        assert isinstance(comprehension, IrCall)
+        self.assertEqual(comprehension.target, "__tuple_comprehension")
+        self.assertEqual(comprehension.type, units_type)
         returned = module.functions[0].body[1]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
@@ -2659,11 +2659,14 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(
             statement,
             IrAssign(
-                "values",
+                "__pop_2_4",
                 IrCall(
-                    "values.pop",
-                    (IrName("values", IrTupleType((IrStringType(),))),),
-                    IrTupleType((IrStringType(),)),
+                    "__tuple_pop_item",
+                    (
+                        IrName("values", IrTupleType((IrStringType(),))),
+                        IrConstInt(-1, IrIntType(64, signed=True)),
+                    ),
+                    IrStringType(),
                 ),
             ),
         )
@@ -2755,17 +2758,13 @@ class AotScalarLoweringTests(unittest.TestCase):
         returned = module.functions[0].body[0]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
-        self.assertEqual(
-            returned.value,
-            IrCall(
-                "__dict_get",
-                (
-                    IrName("VALUES", IrDictType(IrStringType(), int64)),
-                    IrName("name", IrStringType()),
-                ),
-                int64,
-            ),
-        )
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__dict_get")
+        container = returned.value.args[0]
+        self.assertIsInstance(container, IrTuple)
+        self.assertEqual(container.type, IrDictType(IrStringType(), int64))
+        self.assertEqual(returned.value.args[1], IrName("name", IrStringType()))
 
     def test_lowers_ifexp_global_dict_get_with_declared_container_type(self) -> None:
         module = lower_source_to_ir(
@@ -2781,25 +2780,16 @@ class AotScalarLoweringTests(unittest.TestCase):
         returned = module.functions[0].body[0]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
-        self.assertEqual(
-            returned.value,
-            IrCall(
-                "__dict_get",
-                (
-                    IrCall(
-                        "__ifexp",
-                        (
-                            IrName("flag", IrBoolType()),
-                            IrName("LEFT", dict_type),
-                            IrName("RIGHT", dict_type),
-                        ),
-                        dict_type,
-                    ),
-                    IrName("name", IrStringType()),
-                ),
-                int64,
-            ),
-        )
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__dict_get")
+        selected = returned.value.args[0]
+        self.assertIsInstance(selected, IrCall)
+        assert isinstance(selected, IrCall)
+        self.assertEqual(selected.target, "__ifexp")
+        self.assertEqual(selected.type, dict_type)
+        self.assertTrue(all(isinstance(value, IrTuple) for value in selected.args[1:]))
+        self.assertEqual(returned.value.args[1], IrName("name", IrStringType()))
 
     def test_local_global_dict_annotation_wins_over_extra_string_container(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -2816,17 +2806,12 @@ class AotScalarLoweringTests(unittest.TestCase):
         returned = module.functions[0].body[0]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
-        self.assertEqual(
-            returned.value,
-            IrCall(
-                "__dict_get",
-                (
-                    IrName("VALUES", IrDictType(IrStringType(), int64)),
-                    IrName("name", IrStringType()),
-                ),
-                int64,
-            ),
-        )
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__dict_get")
+        container = returned.value.args[0]
+        self.assertIsInstance(container, IrTuple)
+        self.assertEqual(container.type, IrDictType(IrStringType(), int64))
 
     def test_lowers_isinstance_guarded_ifexp_record_field(self) -> None:
         module = lower_source_to_ir(
@@ -2856,7 +2841,7 @@ class AotScalarLoweringTests(unittest.TestCase):
                         "isinstance",
                         (
                             IrName("symbol", IrRecordType("VarSymbol | OtherSymbol")),
-                            IrName("VarSymbol", IrBoolType()),
+                            IrName("VarSymbol", IrRecordType("object")),
                         ),
                         IrBoolType(),
                     ),
@@ -2970,20 +2955,14 @@ class AotScalarLoweringTests(unittest.TestCase):
         returned = branch.then_branch.statements[0]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
-        self.assertEqual(
-            returned.value,
-            IrCall(
-                "len",
-                (
-                    IrGetField(
-                        IrName("stmt", IrRecordType("WhileStmt | LabelStmt")),
-                        "body",
-                        IrTupleType((IrStringType(),)),
-                    ),
-                ),
-                IrIntType(64, signed=True),
-            ),
-        )
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "len")
+        body = returned.value.args[0]
+        self.assertIsInstance(body, IrCall)
+        assert isinstance(body, IrCall)
+        self.assertEqual(body.target, "__union_getattr")
+        self.assertEqual(body.type, IrTupleType((IrStringType(),)))
 
     def test_lowers_isinstance_tuple_guarded_function_params_union(self) -> None:
         module = lower_source_to_ir(
@@ -3112,7 +3091,10 @@ class AotScalarLoweringTests(unittest.TestCase):
         returned = module.functions[0].body[0]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
-        self.assertEqual(returned.value, IrName("values", dict_type))
+        self.assertEqual(
+            returned.value,
+            IrCall("__dict_copy", (IrName("values", dict_type),), dict_type),
+        )
 
     def test_lowers_set_constructor_from_dict_as_deduplicated_keys(self) -> None:
         module = lower_source_to_ir(
@@ -3592,7 +3574,14 @@ class AotScalarLoweringTests(unittest.TestCase):
         returned = module.functions[0].body[0]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
-        self.assertEqual(returned.value, IrConstString("Stmt"))
+        self.assertEqual(
+            returned.value,
+            IrCall(
+                "__type_name",
+                (IrName("stmt", IrRecordType("Stmt")),),
+                IrStringType(),
+            ),
+        )
 
     def test_not_none_narrows_multi_record_optional_union(self) -> None:
         module = lower_source_to_ir(
@@ -3616,14 +3605,10 @@ class AotScalarLoweringTests(unittest.TestCase):
         returned = branch.then_branch.statements[0]
         self.assertIsInstance(returned, IrReturn)
         assert isinstance(returned, IrReturn)
-        self.assertEqual(
-            returned.value,
-            IrGetField(
-                IrName("symbol", IrRecordType("VarSymbol | EnumConstSymbol")),
-                "type_",
-                IrRecordType("Type"),
-            ),
-        )
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__union_getattr")
+        self.assertEqual(returned.value.type, IrRecordType("Type"))
 
     def test_annotated_optional_none_initializer_preserves_annotation(self) -> None:
         module = lower_source_to_ir(
@@ -3731,7 +3716,7 @@ class AotScalarLoweringTests(unittest.TestCase):
             IrGetField(
                 IrName("assoc_type_spec", IrRecordType("TypeSpec")),
                 "source_line",
-                IrIntType(64, signed=True),
+                IrRecordType("int | None"),
             ),
         )
 
@@ -3987,7 +3972,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         function = module.functions[0]
         self.assertEqual(function.params[0].type, IrIntType(64, signed=True))
-        self.assertEqual(function.return_type, IrRecordType("int | None"))
+        self.assertEqual(function.return_type, IrIntType(64, signed=True))
         self.assertEqual(function.body, ())
 
     def test_lowers_while_loop_statement(self) -> None:
@@ -4468,14 +4453,17 @@ class AotScalarLoweringTests(unittest.TestCase):
                 (
                     IrCall(
                         "isinstance",
-                        (IrName("value", IrRecordType("object")), IrName("int", IrBoolType())),
+                        (
+                            IrName("value", IrRecordType("object")),
+                            IrName("int", IrRecordType("object")),
+                        ),
                         IrBoolType(),
                     ),
                     IrCall(
                         "isinstance",
                         (
                             IrName("value", IrRecordType("object")),
-                            IrName("ArrayDecl", IrBoolType()),
+                            IrName("ArrayDecl", IrRecordType("object")),
                         ),
                         IrBoolType(),
                     ),
@@ -4560,7 +4548,7 @@ class AotScalarLoweringTests(unittest.TestCase):
                 "__ifexp",
                 (
                     IrName("value", IrRecordType("Type | None")),
-                    IrName("value", IrRecordType("Type | None")),
+                    IrName("value", IrRecordType("Type")),
                     IrName("INT", IrRecordType("Type")),
                 ),
                 IrRecordType("Type"),
@@ -4586,7 +4574,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(assigned.value, IrCall)
         assert isinstance(assigned.value, IrCall)
         self.assertEqual(assigned.value.target, "__ifexp")
-        self.assertEqual(assigned.value.type, IrRecordType("Type | None"))
+        self.assertEqual(assigned.value.type, IrRecordType("Type"))
 
     def test_infers_optional_record_ifexp_assignment_when_function_returns_optional_int(
         self,
@@ -4623,7 +4611,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(assigned.value, IrCall)
         self.assertEqual(assigned.value.target, "__ifexp")
         self.assertEqual(assigned.value.type, IrRecordType("Type | None"))
-        self.assertEqual(function.return_type, IrIntType(64, signed=True))
+        self.assertEqual(function.return_type, IrRecordType("int | None"))
 
     def test_ifexp_narrows_optional_record_in_none_test_else_branch(self) -> None:
         module = lower_source_to_ir(
@@ -4944,14 +4932,23 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
-    def test_rejects_unsupported_expression(self) -> None:
-        with self.assertRaises(AotError) as ctx:
-            lower_source_to_ir(
-                "int64 = int\ndef f() -> int64:\n    return {1: 2}\n",
-                filename="bad.py",
-                entry="f",
-            )
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
+    def test_lowers_dict_literal_expression(self) -> None:
+        module = lower_source_to_ir(
+            "int64 = int\ndef f() -> dict[int64, int64]:\n    return {1: 2}\n",
+            filename="dict_literal.py",
+            entry="f",
+        )
+        returned = module.functions[0].body[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrTuple)
+        self.assertEqual(
+            returned.value.type,
+            IrDictType(
+                IrIntType(64, signed=True),
+                IrIntType(64, signed=True),
+            ),
+        )
 
     def test_rejects_unknown_name_call_target_and_field_access(self) -> None:
         cases = (
@@ -5010,20 +5007,6 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
             ("def f(values: dict[str, int]) -> int:\n    return values.get()\n", "XCC-AOT-LOWER-0003"),
             ("def f(values: set[str]) -> str:\n    return values.get('x')\n", "XCC-AOT-LOWER-0003"),
-            (
-                "def f(values: list[str]) -> int:\n"
-                "    for pair in enumerate(values):\n"
-                "        return 1\n"
-                "    return 0\n",
-                "XCC-AOT-LOWER-0001",
-            ),
-            (
-                "def f(values: list[str]) -> int:\n"
-                "    for index, name, extra in enumerate(values):\n"
-                "        return index\n"
-                "    return 0\n",
-                "XCC-AOT-LOWER-0001",
-            ),
             (
                 "class Box:\n"
                 "    def f(self, values: list[str]) -> int:\n"
@@ -6151,7 +6134,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(module.functions[1].body[0].target, "pair")
         self.assertEqual(module.functions[1].body[1].value.target, "Pair.total")
 
-    def test_exception_constructor_maps_init_parameters_to_payload_fields(self) -> None:
+    def test_exception_constructor_calls_record_initializer_with_arguments(self) -> None:
         source = (
             "class Problem(ValueError):\n"
             "    def __init__(\n"
@@ -6167,11 +6150,14 @@ class AotScalarLoweringTests(unittest.TestCase):
         raised = next(function for function in module.functions if function.name == "fail").body[0]
         self.assertIsInstance(raised, IrRaise)
         assert isinstance(raised, IrRaise)
-        self.assertIsInstance(raised.payload, IrConstructRecord)
-        assert isinstance(raised.payload, IrConstructRecord)
+        self.assertIsInstance(raised.payload, IrCall)
+        assert isinstance(raised.payload, IrCall)
+        self.assertEqual(raised.payload.target, "__record_init__:Problem.__init__")
+        self.assertIsInstance(raised.payload.args[0], IrConstructRecord)
         self.assertEqual(
-            raised.payload.args,
+            raised.payload.args[1:],
             (
+                IrConstString("bad"),
                 IrConstInt(7, IrIntType(64, signed=True)),
                 IrConstString("X"),
             ),

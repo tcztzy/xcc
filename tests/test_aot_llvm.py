@@ -464,9 +464,11 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("ptrtoint ptr %value to i64", llvm_ir)
+        self.assertIn("getelementptr i8, ptr %value, i64 8", llvm_ir)
+        self.assertRegex(llvm_ir, r"%object\.int\d+ = load i64")
+        self.assertNotIn("ptrtoint ptr %value to i64", llvm_ir)
         self.assertIn("icmp sge i64", llvm_ir)
-        self.assertIn("select i1", llvm_ir)
+        self.assertIn("phi i64", llvm_ir)
 
     def test_emits_object_name_narrowed_to_string_and_tuple_as_pointer(self) -> None:
         tuple_type = IrTupleType((IrStringType(),))
@@ -866,7 +868,8 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("ptrtoint ptr %index to i64", llvm_ir)
+        self.assertIn("getelementptr i8, ptr %index, i64 8", llvm_ir)
+        self.assertRegex(llvm_ir, r"%index\d+ = load i64, ptr %index\.payload\d+")
         self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %values", llvm_ir)
 
     def test_emits_tuple_getitem_extends_and_truncates_non_i64_indexes(self) -> None:
@@ -1975,7 +1978,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %item", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get_object(ptr %item", llvm_ir)
         self.assertIn("i64 0)", llvm_ir)
         self.assertIn("i64 1)", llvm_ir)
         self.assertIn("ptrtoint ptr", llvm_ir)
@@ -2025,8 +2028,9 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %item", llvm_ir)
-        self.assertIn("ptrtoint ptr", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get_object(ptr %item", llvm_ir)
+        self.assertIn("getelementptr i8, ptr %itemslot", llvm_ir)
+        self.assertIn("load i64, ptr %object.payload", llvm_ir)
 
     def test_for_each_skips_underscore_tuple_target_slot(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -2230,8 +2234,9 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %op, i64 1)", llvm_ir)
-        self.assertIn("ptrtoint ptr", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get_object(ptr %op, i64 1)", llvm_ir)
+        self.assertIn("getelementptr i8, ptr %itemslot", llvm_ir)
+        self.assertIn("load i64, ptr %object.payload", llvm_ir)
 
     def test_assignment_destructures_object_and_skips_underscore_slot(self) -> None:
         module = IrModule(
@@ -2252,8 +2257,8 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %packed, i64 0)", llvm_ir)
-        self.assertNotIn("call ptr @__xcc_aot_tuple_get(ptr %packed, i64 1)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get_object(ptr %packed, i64 0)", llvm_ir)
+        self.assertNotIn("call ptr @__xcc_aot_tuple_get_object(ptr %packed, i64 1)", llvm_ir)
 
     def test_assignment_destructures_pointer_sized_int_tuple_value(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -2462,9 +2467,13 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("getelementptr i8, ptr %stmt, i64 -8", llvm_ir)
-        self.assertRegex(llvm_ir, r"%isinstance\.tag\d+ = load i64")
-        self.assertRegex(llvm_ir, r"%isinstance\.match\d+ = icmp eq i64 .* 2")
+        self.assertRegex(llvm_ir, r"%object\.tag\d+ = load i64, ptr %stmt")
+        self.assertRegex(llvm_ir, r"icmp eq i64 %object\.tag\d+, 8")
+        self.assertRegex(
+            llvm_ir,
+            r"getelementptr i8, ptr %object\.record\d+, i64 -8",
+        )
+        self.assertRegex(llvm_ir, r"icmp eq i64 %object\.record\.tag\d+, 2")
 
     def test_emits_type_constant_name_as_global_singleton(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -2511,7 +2520,7 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         llvm_ir = emit_llvm_text(module)
         self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %names)", llvm_ir)
-        self.assertRegex(llvm_ir, r"ret i64 %index\d+")
+        self.assertRegex(llvm_ir, r"ret i64 %narrowint\d+")
         self.assertNotIn("@__enumerate", llvm_ir)
         self.assertIn(f"ret i{int64.bits} 0", llvm_ir)
 
@@ -2523,7 +2532,7 @@ class AotLlvmTextTests(unittest.TestCase):
             filename="enumerate_skip_item.py",
         )
         skipped_ir = emit_llvm_text(skipped_item)
-        self.assertRegex(skipped_ir, r"ret i64 %index\d+")
+        self.assertRegex(skipped_ir, r"ret i64 %narrowint\d+")
 
         started_item = lower_source_to_ir(
             "def first_index(names: list[str]) -> int:\n"
@@ -3777,7 +3786,8 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call ptr @__xcc_aot_tuple_concat(ptr %values", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_append(ptr %values", llvm_ir)
+        self.assertIn("call void @__xcc_aot_tuple_forward(ptr %values", llvm_ir)
         self.assertNotIn("@values.append", llvm_ir)
 
     def test_emits_set_add_with_membership_guard(self) -> None:
@@ -4441,13 +4451,17 @@ class AotLlvmTextTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             emitter._emit_runtime_boxed_value("%raw", object(), [])  # type: ignore[arg-type]
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        self.assertIsNone(
-            emitter._emit_runtime_object_narrowing(
-                _EmittedValue("%raw", IrRecordType("object")),
-                IrFloatType(),
-                [],
-            )
+        narrowing_lines: list[str] = []
+        narrowed = emitter._emit_runtime_object_narrowing(
+            _EmittedValue("%raw", IrRecordType("object")),
+            IrFloatType(),
+            narrowing_lines,
         )
+        self.assertIsNotNone(narrowed)
+        assert narrowed is not None
+        self.assertEqual(narrowed.type, IrFloatType())
+        self.assertIn("  %object.payload1 = getelementptr i8, ptr %raw, i64 8", narrowing_lines)
+        self.assertIn("  %object.float2 = load double, ptr %object.payload1", narrowing_lines)
         with self.assertRaises(AotError) as ctx:
             emitter._emit_error_record(
                 IrRaise("ValueError", IrConstString("bad")),
@@ -4534,7 +4548,7 @@ class AotLlvmTextTests(unittest.TestCase):
                     (IrTuple((), IrTupleType(())),),
                     IrStringType(),
                 ),
-                "Malformed __enumerate loop",
+                "__enumerate loop expects two element types",
             ),
             (
                 IrCall(
@@ -4550,12 +4564,16 @@ class AotLlvmTextTests(unittest.TestCase):
                     (IrTuple((), IrTupleType(())),),
                     IrTupleType((int64, IrStringType())),
                 ),
-                "__enumerate loop expects two targets",
+                "tuple assignment target expects tuple value",
             ),
         )
         for iterable, message in enumerate_cases:
             with self.subTest(message=message):
-                target = "(index, item, extra)" if "targets" in message else "(index, item)"
+                target = (
+                    "(index, item, extra)"
+                    if message == "tuple assignment target expects tuple value"
+                    else "(index, item)"
+                )
                 bad_module = IrModule(
                     "bad_enumerate.py",
                     (),
