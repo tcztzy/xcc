@@ -1540,6 +1540,33 @@ class _Preprocessor:
         index = 0
         while index < len(text):
             ch = text[index]
+            if ch == '"' or ch == "'":
+                quote = ch
+                start = index
+                index += 1
+                while index < len(text):
+                    if text[index] == "\\" and index + 1 < len(text):
+                        index += 2
+                        continue
+                    if text[index] == quote:
+                        index += 1
+                        break
+                    index += 1
+                result += text[start:index]
+                continue
+            if ch == "/" and index + 1 < len(text):
+                next_ch = text[index + 1]
+                if next_ch == "/":
+                    result += text[index:]
+                    break
+                if next_ch == "*":
+                    end = text.find("*/", index + 2)
+                    if end == -1:
+                        result += text[index:]
+                        break
+                    result += text[index : end + 2]
+                    index = end + 2
+                    continue
             if not _guard_is_ident_start(ch):
                 result += ch
                 index += 1

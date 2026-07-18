@@ -135,6 +135,19 @@ class PreprocessorTests(unittest.TestCase):
             "\n\nstruct native_record { int value ; } ;\n\nSELF marker ;\n",
         )
 
+    def test_no_callback_does_not_expand_macros_in_comments_or_literals(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define SIGNAL 4 /* signal value */\n"
+            "/* Codes for SIGNAL */\n"
+            "const char *name = \"SIGNAL\"; // SIGNAL\n"
+            "int signal = SIGNAL;\n",
+            filename="macro_regions.c",
+        )
+
+        self.assertIn('const char * name = "SIGNAL" ;', result.source)
+        self.assertIn("int signal = 4 ;", result.source)
+        self.assertNotIn("*/", result.source)
+
     def test_gnu_asm_strip_handles_incomplete_or_non_operand_asm_keywords(self) -> None:
         self.assertEqual(
             preprocessor_text._strip_inline_asm_segments("int asm;\n"),
