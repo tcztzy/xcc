@@ -2047,6 +2047,16 @@ class _Lowerer:
                         expr,
                     )
                 return IrCall("__set_update", (receiver, value), receiver_type)
+            if isinstance(receiver_type, IrTupleType) and expr.func.attr == "add":
+                if expr.keywords or len(expr.args) != 1:
+                    self._error(
+                        "XCC-AOT-LOWER-0003",
+                        f"Unsupported call target: {ast.unparse(expr.func)}",
+                        expr,
+                    )
+                item_type = _for_each_target_type(receiver_type)
+                item = self._lower_expr(expr.args[0], names, item_type)
+                return IrCall("__set_add", (receiver, item), receiver_type)
             if isinstance(receiver_type, IrTupleType) and expr.func.attr in {
                 "difference",
                 "intersection",
@@ -2079,7 +2089,7 @@ class _Lowerer:
                 and expr.func.attr in _ALLOWED_MUTATING_TUPLE_CALLS
             ):
                 arg_expected = expected
-                if expr.func.attr in {"add", "append"}:
+                if expr.func.attr == "append":
                     arg_expected = _literal_element_expected_type(receiver_type)
                 elif expr.func.attr == "extend":
                     arg_expected = receiver_type

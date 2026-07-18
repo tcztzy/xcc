@@ -1618,6 +1618,23 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="set-update.py",
         )
 
+    def test_set_add_preserves_uniqueness_and_alias_mutation(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: set[str] = {'alpha'}\n"
+            "    alias = values\n"
+            "    values.add('alpha')\n"
+            "    values.add('beta')\n"
+            "    values.add('beta')\n"
+            "    if len(values) != 2 or len(alias) != 2:\n"
+            "        return 1\n"
+            "    if 'alpha' not in alias or 'beta' not in alias:\n"
+            "        return 2\n"
+            "    return 7\n",
+            expected=7,
+            filename="set-add.py",
+        )
+
     def test_list_append_mutation_is_visible_across_call(self) -> None:
         self.assert_native_matches_cpython(
             "def append_line(lines: list[str]) -> None:\n"

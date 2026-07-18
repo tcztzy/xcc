@@ -1521,6 +1521,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         add = module.functions[0].body[1].value
         self.assertIsInstance(add, IrCall)
         assert isinstance(add, IrCall)
+        self.assertEqual(add.target, "__set_add")
         self.assertEqual(add.args[1], IrName("name", IrStringType()))
 
     def test_lowers_tuple_constructor_as_tuple_backed_identity(self) -> None:

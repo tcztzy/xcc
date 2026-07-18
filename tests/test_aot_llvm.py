@@ -3757,6 +3757,24 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call ptr @__xcc_aot_tuple_concat(ptr %values", llvm_ir)
         self.assertNotIn("@values.append", llvm_ir)
 
+    def test_emits_set_add_with_membership_guard(self) -> None:
+        module = lower_source_to_ir(
+            "def add_name(values: set[str], name: str) -> int:\n"
+            "    values.add(name)\n"
+            "    return len(values)\n",
+            filename="set_add.py",
+            entry="add_name",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %values)", llvm_ir)
+        self.assertIn("setadd.keep", llvm_ir)
+        self.assertIn("setadd.append", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_concat(ptr %values", llvm_ir)
+        self.assertIn("call void @__xcc_aot_tuple_forward(ptr %values", llvm_ir)
+        self.assertNotIn("@__set_add", llvm_ir)
+
     def test_emits_record_append_method_as_direct_call(self) -> None:
         output_type = IrRecordType("Output")
         module = IrModule(

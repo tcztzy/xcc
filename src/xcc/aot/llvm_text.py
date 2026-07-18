@@ -2310,6 +2310,8 @@ class _Emitter:
             return self._emit_tuple_set_slice_call(expr, names, lines)
         if expr.target == "__tuple_remove_item":
             return self._emit_tuple_remove_item_call(expr, names, lines)
+        if expr.target == "__set_add":
+            return self._emit_set_add_call(expr, names, lines)
         if expr.target in {
             "__set_difference",
             "__set_intersection",
@@ -5695,6 +5697,53 @@ class _Emitter:
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
         if expr.target == "__set_update":
             lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {left.value}, ptr {result})")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_set_add_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 2:
+            self._error("__set_add expects a receiver and one item")
+        receiver = self._emit_expr(expr.args[0], names, lines)
+        item = self._emit_expr(expr.args[1], names, lines)
+        if not isinstance(receiver.type, IrTupleType):
+            self._error("__set_add expects a tuple-backed set")
+        if not isinstance(expr.type, IrTupleType):
+            self._error("__set_add expects a tuple-backed set result")
+        item_name = f"__setadd_item_{self.index}"
+        receiver_name = f"__setadd_receiver_{self.index}"
+        membership_names = dict(names)
+        membership_names[item_name] = item
+        membership_names[receiver_name] = receiver
+        member = self._emit_tuple_membership(
+            IrName(item_name, item.type),
+            IrName(receiver_name, receiver.type),
+            membership_names,
+            lines,
+            negate=False,
+        )
+        keep_label = self._label("setadd.keep")
+        append_label = self._label("setadd.append")
+        end_label = self._label("setadd.end")
+        lines.append(f"  br i1 {member.value}, label %{keep_label}, label %{append_label}")
+        lines.append(f"{keep_label}:")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{append_label}:")
+        singleton = self._runtime_singleton_tuple(item, lines)
+        updated = self._tmp("setadd.updated")
+        lines.append(
+            f"  {updated} = call ptr @__xcc_aot_tuple_concat(ptr {receiver.value}, ptr {singleton})"
+        )
+        lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {receiver.value}, ptr {updated})")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp("setadd")
+        lines.append(
+            f"  {result} = phi ptr [{receiver.value}, %{keep_label}], [{updated}, %{append_label}]"
+        )
         return _EmittedValue(result, expr.type)
 
     def _emit_set_equality_call(
