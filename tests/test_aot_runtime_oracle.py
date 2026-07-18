@@ -2188,6 +2188,21 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="global-scalar-constants.py",
         )
 
+    def test_global_integer_constant_expressions_match_cpython(self) -> None:
+        self.assert_native_matches_cpython(
+            "BITS = 31\n"
+            "MAXIMUM = (1 << BITS) - 1\n"
+            "MASK = (~0 & 255) ^ 3\n"
+            "def entry() -> int:\n"
+            "    if MAXIMUM != 2147483647:\n"
+            "        return 1\n"
+            "    if MASK != 252:\n"
+            "        return 2\n"
+            "    return 0\n",
+            expected=0,
+            filename="global-integer-constant-expressions.py",
+        )
+
     def test_ifexp_record_union_member_preserves_runtime_value(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

@@ -6490,16 +6490,61 @@ def _global_scalar_literal(
         if type(value.value) is int:
             return IrConstInt(value.value, IrIntType(64, signed=True))
         return None
-    if (
-        isinstance(value, ast.UnaryOp)
-        and isinstance(value.op, (ast.UAdd, ast.USub))
-        and isinstance(value.operand, ast.Constant)
-        and type(value.operand.value) is int
-    ):
-        literal = value.operand.value
+    integer = _global_scalar_integer(value, constants)
+    if integer is not None:
+        return IrConstInt(integer, IrIntType(64, signed=True))
+    return None
+
+
+def _global_scalar_integer(
+    value: ast.expr,
+    constants: dict[str, IrExpr],
+) -> int | None:
+    if isinstance(value, ast.Constant) and type(value.value) is int:
+        return value.value
+    if isinstance(value, ast.Name):
+        constant = constants.get(value.id)
+        return constant.value if isinstance(constant, IrConstInt) else None
+    if isinstance(value, ast.UnaryOp):
+        operand = _global_scalar_integer(value.operand, constants)
+        if operand is None:
+            return None
+        if isinstance(value.op, ast.UAdd):
+            return operand
         if isinstance(value.op, ast.USub):
-            literal = -literal
-        return IrConstInt(literal, IrIntType(64, signed=True))
+            return -operand
+        if isinstance(value.op, ast.Invert):
+            return ~operand
+        return None
+    if not isinstance(value, ast.BinOp):
+        return None
+    left = _global_scalar_integer(value.left, constants)
+    right = _global_scalar_integer(value.right, constants)
+    if left is None or right is None:
+        return None
+    try:
+        if isinstance(value.op, ast.Add):
+            return left + right
+        if isinstance(value.op, ast.Sub):
+            return left - right
+        if isinstance(value.op, ast.Mult):
+            return left * right
+        if isinstance(value.op, ast.FloorDiv):
+            return left // right
+        if isinstance(value.op, ast.Mod):
+            return left % right
+        if isinstance(value.op, ast.LShift):
+            return left << right
+        if isinstance(value.op, ast.RShift):
+            return left >> right
+        if isinstance(value.op, ast.BitOr):
+            return left | right
+        if isinstance(value.op, ast.BitAnd):
+            return left & right
+        if isinstance(value.op, ast.BitXor):
+            return left ^ right
+    except (ArithmeticError, ValueError):
+        return None
     return None
 
 

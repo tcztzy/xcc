@@ -993,6 +993,35 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_global_integer_constant_expressions(self) -> None:
+        module = lower_source_to_ir(
+            "BITS = 31\n"
+            "MAXIMUM = (1 << BITS) - 1\n"
+            "MASK = (~0 & 255) ^ 3\n"
+            "def values() -> tuple[int, int]:\n"
+            "    return MAXIMUM, MASK\n",
+            filename="global_integer_constant_expressions.py",
+            entry="values",
+        )
+        returned = module.functions[0].body[0]
+        self.assertEqual(
+            returned,
+            IrReturn(
+                IrTuple(
+                    (
+                        IrConstInt(2_147_483_647, IrIntType(64, signed=True)),
+                        IrConstInt(252, IrIntType(64, signed=True)),
+                    ),
+                    IrTupleType(
+                        (
+                            IrIntType(64, signed=True),
+                            IrIntType(64, signed=True),
+                        )
+                    ),
+                )
+            ),
+        )
+
     def test_lowers_extra_global_scalar_constant_as_imported_literal(self) -> None:
         int64 = IrIntType(64, signed=True)
         module = lower_source_to_ir(
