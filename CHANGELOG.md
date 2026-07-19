@@ -2,6 +2,11 @@
 
 ## Current
 
+- Added conservative ownership/liveness analysis for homogeneous tuple
+  rebinding. A fresh, non-escaping tuple updated as `value = (*value, item)` now
+  grows its stable backing buffer geometrically; aliased values retain immutable
+  concat semantics. The two former 512 MiB bootstrap failures now pass without
+  raising the limit, with measured maximum RSS around 182 MiB and 219 MiB.
 - Replaced tuple-backed inline payload pointers and three million-slot global
   metadata tables with stable runtime handles. Tuple/list/dict/set growth now
   resizes only the owned element buffer through the allocation boundary,

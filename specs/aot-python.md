@@ -97,6 +97,11 @@ before exhausting host memory or starving the OS watchdog.
 V386: Tuple-backed runtime identity ! one stable handle owns length, capacity,
 element storage, and object-layout metadata; growth may replace only the owned
 element buffer, and process-global forwarding/capacity/layout tables ⊥.
+V387: Unique tuple rebinding ! native lowering may mutate a stable tuple handle
+only when intraprocedural ownership analysis proves that the value was freshly
+allocated, remains single-owned across every branch/loop backedge, and has not
+escaped through an alias, call, store, or return; otherwise concat must allocate
+a distinct tuple preserving CPython-visible value and identity semantics.
 
 ## §T TASKS
 id|status|task|cites
@@ -436,3 +441,4 @@ B588|2026-07-19|record-constructor default lowering recognized scalar and contai
 B589|2026-07-19|the native AOT runtime retained allocations for the lifetime of each compiler process while the Milestone 9 plan and CPython build helper allowed eight native compilers concurrently; two runs reached 6.5-19.5 GiB resident memory per process, saturated the macOS compressor, and ended in watchdog kernel panics; native-backed integration must remain serial until stable container handles, bounded phase lifetimes, and a controlled OOM path satisfy the resource-safety invariant|V379,V381,V382,V385
 B590|2026-07-19|every generated heap allocation called libc `malloc`/`calloc` directly, so an ownership leak or malformed dynamic size had no process-local containment and could consume host memory until the OS watchdog panicked; all generated allocations must route through one overflow-checked runtime boundary with a conservative cumulative hard limit and deterministic emergency diagnostic while the stronger Arena/drop ABI remains incomplete|V368,V376,V380,V384,V385
 B591|2026-07-19|tuple-backed mutable containers represented identity with replaceable inline payload pointers, so alias preservation required permanent process-global forwarding, capacity, and object-layout tables while each growth retained obsolete payloads and metadata; every tuple/list/dict/set value now uses one fixed-size stable handle with an overflow-checked resizable element buffer and in-handle layout metadata, and mutating operations return the original handle|V368,V375,V376,V384,V385,V386
+B592|2026-07-20|native lowering compiled `_split_lines_keepends` rebinding `lines = (*lines, item)` as immutable full-tuple copy on every iteration, while the no-GC runtime retained every obsolete version; the real `<math.h>` probe therefore created 1,705,370 tuples totaling 520,135,680 bytes, with one concat site responsible for 419,553,168 bytes, and hit the 512 MiB guard; conservative intraprocedural ownership/liveness analysis now lowers only fresh, single-owner homogeneous tuple rebinding to stable-handle append with geometric backing growth, while any alias or escape keeps copy semantics|V368,V375,V376,V384,V385,V386,V387

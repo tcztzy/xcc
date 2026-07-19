@@ -1,5 +1,11 @@
 # Lessons
 
+- A stable handle is the prerequisite for Rust-style uniqueness optimization,
+  not proof that mutation is safe. Reuse immutable storage only after control-
+  flow ownership analysis proves a fresh local remains single-owned across loop
+  backedges; invalidate the proof on aliases, calls, stores, and returns. This
+  turns repeated tuple rebuilding from quadratic retained allocation into
+  geometric growth without changing ordinary Python source or alias semantics.
 - Give mutable runtime values a stable identity before optimizing lookup tables.
   If growth changes the externally visible payload pointer, alias correctness
   forces permanent forwarding metadata and makes memory usage depend on mutation

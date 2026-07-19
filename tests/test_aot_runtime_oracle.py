@@ -105,6 +105,23 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="tuple-values.py",
         )
 
+    def test_v387_unique_tuple_growth_and_aliased_rebind_match_cpython(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: tuple[int, ...] = ()\n"
+            "    for value in range(4096):\n"
+            "        values = (*values, value)\n"
+            "    alias = values\n"
+            "    values = (*values, 4096)\n"
+            "    if len(alias) != 4096 or alias[-1] != 4095:\n"
+            "        return 1\n"
+            "    if len(values) != 4097 or values[-1] != 4096:\n"
+            "        return 2\n"
+            "    return 0\n",
+            expected=0,
+            filename="v387-owned-tuple-growth.py",
+        )
+
     def test_tuple_ordering_is_lexicographic_and_uses_prefix_length(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

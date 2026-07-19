@@ -291,6 +291,229 @@ class _FinallyScope:
 
 _FailureScope = _HandlerScope | _FinallyScope
 
+_TUPLE_BORROWING_CALLS = frozenset(
+    {
+        "__contains",
+        "__getitem",
+        "__len",
+        "__tuple_concat",
+        "__tuple_repeat",
+        "len",
+    }
+)
+
+
+def _tuple_names_in_expr(expr: IrExpr) -> set[str]:
+    if isinstance(expr, IrName):
+        if isinstance(expr.type, IrTupleType):
+            return {expr.name}
+        return set()
+    if isinstance(expr, IrBinary):
+        return _tuple_names_in_expr(expr.left) | _tuple_names_in_expr(expr.right)
+    if isinstance(expr, IrGetField):
+        return _tuple_names_in_expr(expr.value)
+    if isinstance(expr, IrConstructRecord | IrCall):
+        names: set[str] = set()
+        for arg in expr.args:
+            names.update(_tuple_names_in_expr(arg))
+        return names
+    if isinstance(expr, IrTuple):
+        names = set()
+        for element in expr.elements:
+            names.update(_tuple_names_in_expr(element))
+        return names
+    if isinstance(expr, IrTupleSlice):
+        names = _tuple_names_in_expr(expr.value)
+        if expr.start is not None:
+            names.update(_tuple_names_in_expr(expr.start))
+        if expr.stop is not None:
+            names.update(_tuple_names_in_expr(expr.stop))
+        return names
+    if isinstance(expr, IrStringConcat):
+        names = set()
+        for part in expr.parts:
+            names.update(_tuple_names_in_expr(part))
+        return names
+    if isinstance(expr, IrStringJoin):
+        return _tuple_names_in_expr(expr.separator) | _tuple_names_in_expr(expr.values)
+    return set()
+
+
+def _escaped_tuple_names(expr: IrExpr) -> set[str]:
+    if isinstance(expr, IrBinary):
+        return _escaped_tuple_names(expr.left) | _escaped_tuple_names(expr.right)
+    if isinstance(expr, IrGetField):
+        return _escaped_tuple_names(expr.value)
+    if isinstance(expr, IrConstructRecord):
+        return _tuple_names_in_expr(expr)
+    if isinstance(expr, IrCall):
+        escaped: set[str] = set()
+        for arg in expr.args:
+            escaped.update(_escaped_tuple_names(arg))
+        if expr.target not in _TUPLE_BORROWING_CALLS:
+            for arg in expr.args:
+                escaped.update(_tuple_names_in_expr(arg))
+        return escaped
+    if isinstance(expr, IrTuple):
+        return _tuple_names_in_expr(expr)
+    if isinstance(expr, IrTupleSlice):
+        escaped = _escaped_tuple_names(expr.value)
+        if expr.start is not None:
+            escaped.update(_escaped_tuple_names(expr.start))
+        if expr.stop is not None:
+            escaped.update(_escaped_tuple_names(expr.stop))
+        return escaped
+    if isinstance(expr, IrStringConcat):
+        escaped = set()
+        for part in expr.parts:
+            escaped.update(_escaped_tuple_names(part))
+        return escaped
+    if isinstance(expr, IrStringJoin):
+        return _escaped_tuple_names(expr.separator) | _escaped_tuple_names(expr.values)
+    return set()
+
+
+def _plain_assignment_target(target: str) -> bool:
+    return "," not in target and "." not in target and "[" not in target
+
+
+def _assignment_target_names(target: str) -> set[str]:
+    if _plain_assignment_target(target):
+        return {target}
+    return {part.strip() for part in target.split(",") if part.strip()}
+
+
+def _owned_tuple_rebind(statement: IrAssign, unique: set[str]) -> bool:
+    if not _plain_assignment_target(statement.target) or statement.target not in unique:
+        return False
+    value = statement.value
+    if not isinstance(value, IrCall) or value.target != "__tuple_concat":
+        return False
+    if len(value.args) != 2 or not isinstance(value.type, IrTupleType):
+        return False
+    if len(value.type.elements) != 1:
+        return False
+    left, right = value.args
+    if not isinstance(left, IrName) or left.name != statement.target:
+        return False
+    return isinstance(right, IrTuple) and statement.target not in _tuple_names_in_expr(right)
+
+
+def _analyze_owned_tuple_loop(
+    body: IrBranch,
+    incoming: set[str],
+    target_names: set[str],
+    owned_rebinds: set[int],
+    *,
+    record: bool,
+) -> set[str]:
+    entry = incoming - target_names
+    invariant = set(entry)
+    while True:
+        body_out = _analyze_owned_tuple_block(body.statements, invariant, set(), record=False)
+        narrowed = entry & body_out
+        if narrowed == invariant:
+            break
+        invariant = narrowed
+    body_out = _analyze_owned_tuple_block(
+        body.statements,
+        invariant,
+        owned_rebinds,
+        record=record,
+    )
+    return entry & body_out
+
+
+def _analyze_owned_tuple_block(
+    statements: tuple[IrStmt, ...],
+    incoming: set[str],
+    owned_rebinds: set[int],
+    *,
+    record: bool,
+) -> set[str]:
+    unique = set(incoming)
+    for statement in statements:
+        if isinstance(statement, IrAssign):
+            if _owned_tuple_rebind(statement, unique):
+                value = statement.value
+                if isinstance(value, IrCall):
+                    unique.difference_update(_tuple_names_in_expr(value.args[1]))
+                if record:
+                    owned_rebinds.add(id(statement))
+                continue
+            unique.difference_update(_escaped_tuple_names(statement.value))
+            if isinstance(statement.value, IrName) and isinstance(
+                statement.value.type,
+                IrTupleType,
+            ):
+                unique.discard(statement.value.name)
+            unique.difference_update(_assignment_target_names(statement.target))
+            if (
+                _plain_assignment_target(statement.target)
+                and isinstance(statement.value, IrTuple)
+                and isinstance(statement.value.type, IrTupleType)
+            ):
+                unique.add(statement.target)
+            continue
+        if isinstance(statement, IrIf):
+            unique.difference_update(_escaped_tuple_names(statement.condition))
+            then_unique = _analyze_owned_tuple_block(
+                statement.then_branch.statements,
+                unique,
+                owned_rebinds,
+                record=record,
+            )
+            else_unique = set(unique)
+            if statement.else_branch is not None:
+                else_unique = _analyze_owned_tuple_block(
+                    statement.else_branch.statements,
+                    unique,
+                    owned_rebinds,
+                    record=record,
+                )
+            unique = then_unique & else_unique
+            continue
+        if isinstance(statement, IrForEach):
+            unique.difference_update(_escaped_tuple_names(statement.iterable))
+            unique = _analyze_owned_tuple_loop(
+                statement.body,
+                unique,
+                _assignment_target_names(statement.target),
+                owned_rebinds,
+                record=record,
+            )
+            continue
+        if isinstance(statement, IrWhile):
+            unique.difference_update(_escaped_tuple_names(statement.condition))
+            unique = _analyze_owned_tuple_loop(
+                statement.body,
+                unique,
+                set(),
+                owned_rebinds,
+                record=record,
+            )
+            continue
+        if isinstance(statement, IrSetItem):
+            unique.difference_update(_tuple_names_in_expr(statement.value))
+            unique.difference_update(_escaped_tuple_names(statement.target))
+            unique.difference_update(_escaped_tuple_names(statement.index))
+            continue
+        if isinstance(statement, IrReturn):
+            unique.difference_update(_tuple_names_in_expr(statement.value))
+            continue
+        if isinstance(statement, IrTry | IrRaise | IrReraise):
+            unique.clear()
+            continue
+        if isinstance(statement, IrPrint):
+            unique.difference_update(_escaped_tuple_names(statement.value))
+    return unique
+
+
+def _owned_tuple_rebinds(function: IrFunction) -> set[int]:
+    rebinds: set[int] = set()
+    _analyze_owned_tuple_block(function.body, set(), rebinds, record=True)
+    return rebinds
+
 
 def emit_llvm_text(module: IrModule) -> str:
     emitter = _Emitter(module)
@@ -317,6 +540,7 @@ class _Emitter:
         self.current_function_is_fallible = False
         self.current_result_out: str | None = None
         self.current_error_out: str | None = None
+        self.current_owned_tuple_rebinds: set[int] = set()
         self.failure_scopes: list[_FailureScope] = []
         self.caught_status_stack: list[str] = []
         self.record_equality_records: set[str] = set()
@@ -456,12 +680,14 @@ class _Emitter:
         previous_fallible = self.current_function_is_fallible
         previous_result_out = self.current_result_out
         previous_error_out = self.current_error_out
+        previous_owned_tuple_rebinds = self.current_owned_tuple_rebinds
         previous_failure_scopes = self.failure_scopes
         previous_caught_status_stack = self.caught_status_stack
         self.current_function = function
         self.current_function_is_fallible = fallible
         self.current_result_out = result_out if fallible else None
         self.current_error_out = "%error_out" if fallible else None
+        self.current_owned_tuple_rebinds = _owned_tuple_rebinds(function)
         self.failure_scopes = []
         self.caught_status_stack = []
         names = {
@@ -480,6 +706,7 @@ class _Emitter:
             self.current_function_is_fallible = previous_fallible
             self.current_result_out = previous_result_out
             self.current_error_out = previous_error_out
+            self.current_owned_tuple_rebinds = previous_owned_tuple_rebinds
             self.failure_scopes = previous_failure_scopes
             self.caught_status_stack = previous_caught_status_stack
         lines = _hoist_allocas_to_entry(lines)
@@ -502,7 +729,9 @@ class _Emitter:
             ):
                 self._emit_assert(statement.value.args[0], names, lines)
                 return
-            if isinstance(statement.value, IrConstructRecord):
+            if id(statement) in self.current_owned_tuple_rebinds:
+                value = self._emit_owned_tuple_rebind(statement, names, lines)
+            elif isinstance(statement.value, IrConstructRecord):
                 value = self._emit_construct_record(statement.value, names, lines, statement.target)
             else:
                 value = self._emit_expr(statement.value, names, lines)
@@ -575,6 +804,32 @@ class _Emitter:
             )
             return
         self._error(f"Unsupported LLVM statement: {type(statement).__name__}")
+
+    def _emit_owned_tuple_rebind(
+        self,
+        statement: IrAssign,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        value = statement.value
+        if not isinstance(value, IrCall) or value.target != "__tuple_concat":
+            self._error("Owned tuple rebind expects __tuple_concat")
+        if len(value.args) != 2 or not isinstance(value.args[1], IrTuple):
+            self._error("Owned tuple rebind expects a fresh tuple tail")
+        current = self._emit_expr(value.args[0], names, lines)
+        if not isinstance(current.type, IrTupleType):
+            self._error("Owned tuple rebind expects a tuple receiver")
+        items = tuple(self._emit_expr(item, names, lines) for item in value.args[1].elements)
+        self.needs_runtime_prelude = True
+        for item in items:
+            boxed_item = self._box_to_runtime_ptr(item, lines)
+            appended = self._tmp("tupleappend")
+            lines.append(
+                f"  {appended} = call ptr @__xcc_aot_tuple_append("
+                f"ptr {current.value}, ptr {boxed_item})"
+            )
+            current = _EmittedValue(appended, value.type)
+        return _EmittedValue(current.value, value.type)
 
     def _emit_return(
         self,

@@ -1767,6 +1767,39 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call ptr @__xcc_aot_tuple_repeat", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_tuple_concat", llvm_ir)
 
+    def test_v387_unique_tuple_rebind_uses_owned_append(self) -> None:
+        module = lower_source_to_ir(
+            "def grow(count: int) -> int:\n"
+            "    values: tuple[int, ...] = ()\n"
+            "    for value in range(count):\n"
+            "        values = (*values, value)\n"
+            "    return len(values)\n",
+            filename="v387_unique_tuple_rebind.py",
+            entry="grow",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        grow_ir = llvm_ir.split("define i64 @grow", 1)[1].split("\ndefine ", 1)[0]
+
+        self.assertIn("call ptr @__xcc_aot_tuple_append(ptr %", grow_ir)
+        self.assertNotIn("call ptr @__xcc_aot_tuple_concat(", grow_ir)
+
+    def test_v387_aliased_tuple_rebind_preserves_copy_semantics(self) -> None:
+        module = lower_source_to_ir(
+            "def grow(value: int) -> int:\n"
+            "    values: tuple[int, ...] = ()\n"
+            "    alias = values\n"
+            "    values = (*values, value)\n"
+            "    return len(alias) * 10 + len(values)\n",
+            filename="v387_aliased_tuple_rebind.py",
+            entry="grow",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        grow_ir = llvm_ir.split("define i64 @grow", 1)[1].split("\ndefine ", 1)[0]
+
+        self.assertIn("call ptr @__xcc_aot_tuple_concat(", grow_ir)
+
     def test_emits_if_assignment_phi_for_existing_local(self) -> None:
         int64 = IrIntType(64, signed=True)
         module = IrModule(
