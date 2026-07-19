@@ -1495,6 +1495,12 @@ class _Preprocessor:
         self._define_object_macro_no_callback("__INT_MAX__", "2147483647")
         self._define_object_macro_no_callback("__LONG_MAX__", "9223372036854775807L")
         self._define_object_macro_no_callback("__LONG_LONG_MAX__", "9223372036854775807LL")
+        self._define_object_macro_no_callback("__FLT_MIN__", "1.17549435e-38F")
+        self._define_object_macro_no_callback("__DBL_MIN__", "2.2250738585072014e-308")
+        self._define_object_macro_no_callback(
+            "__LDBL_MIN__",
+            "3.36210314311209350626e-4932L",
+        )
         self._define_object_macro_no_callback("__PTRDIFF_WIDTH__", "64")
         self._define_object_macro_no_callback("__INTPTR_WIDTH__", "64")
         self._define_object_macro_no_callback("__UINTPTR_WIDTH__", "64")

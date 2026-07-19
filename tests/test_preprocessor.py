@@ -286,6 +286,18 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("acq_rel = 4", result.source)
         self.assertIn("seq_cst = 5", result.source)
 
+    def test_no_callback_defines_floating_minima(self) -> None:
+        result = preprocess_source_no_callback(
+            "float minimum_float = __FLT_MIN__;\n"
+            "double minimum_double = __DBL_MIN__;\n"
+            "long double minimum_long_double = __LDBL_MIN__;\n",
+            filename="floating_minima.c",
+        )
+
+        self.assertIn("minimum_float = 1.17549435e-38F", result.source)
+        self.assertIn("minimum_double = 2.2250738585072014e-308", result.source)
+        self.assertIn("minimum_long_double = 3.36210314311209350626e-4932L", result.source)
+
     def test_no_callback_evaluates_feature_probe_conditions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
