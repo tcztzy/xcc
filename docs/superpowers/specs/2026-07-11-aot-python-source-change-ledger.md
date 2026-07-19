@@ -31,7 +31,7 @@ Rules:
 - `src/xcc/parser/extensions.py`: 66 hunks
 - `src/xcc/parser/statements.py`: 2 hunks
 - `src/xcc/parser/type_specs.py`: 63 hunks
-- `src/xcc/preprocessor/__init__.py`: 38 hunks
+- `src/xcc/preprocessor/__init__.py`: 39 hunks
 - `src/xcc/preprocessor/conditionals.py`: 1 hunks
 - `src/xcc/preprocessor/expressions.py`: 10 hunks
 - `src/xcc/preprocessor/includes.py`: 8 hunks
@@ -53,7 +53,7 @@ Rules:
 - `src/xcc/sema/type_resolution.py`: 45 hunks
 - `src/xcc/types.py`: 18 hunks
 
-Total: 734 hunks across 32 non-AOT source files.
+Total: 735 hunks across 32 non-AOT source files.
 
 ## Hunk Ledger
 
@@ -793,3 +793,4 @@ Total: 734 hunks across 32 non-AOT source files.
 | H732 | `src/xcc/preprocessor/__init__.py` | `_eval_condition_no_callback` and expression helpers; expand object macros, normalize replacement comments, evaluate C integer precedence, and resolve feature probes | AOT-driven C preprocessor semantic repair | retain: integer macro replacement, comment removal, comparisons, arithmetic, bitwise/logical operators, `defined`, and standard include probes are ordinary `#if` semantics required by SDK headers; preserving them fixes the native frontend rather than weakening sema or rewriting C inputs | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_evaluates_integer_macro_conditions tests.test_preprocessor.PreprocessorTests.test_no_callback_evaluates_feature_probe_conditions` | rebuilt native bootstraps in `test_real_native_bootstrap_evaluates_integer_macro_conditions` and `test_real_native_bootstrap_evaluates_has_include_conditions`; compiled selected numeric/include branches to arm64 objects while invalid alternate branches remained excluded | `B568,B571,B572` |
 | H733 | `src/xcc/preprocessor/__init__.py` | `_handle_undef_no_callback`; remove the validated macro from the native table | AOT-driven C preprocessor semantic repair | retain: `#undef` removal is ordinary preprocessing state semantics required by SDK control macros; retaining stale definitions changes later declarations and is not an admissible native subset | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_undef_removes_macro` | rebuilt native bootstrap in `test_real_native_bootstrap_removes_undefined_macro`; compiled the post-undef branch while an invalid stale-macro branch remained excluded | `B573` |
 | H734 | `src/xcc/preprocessor/__init__.py` | no-callback function-macro definition, invocation parsing, argument substitution, stringize/token-paste, recursive rescan, and continuation signaling | AOT-driven C preprocessor semantic repair | retain: named/variadic arguments, `#`, `##`, nested invocations, and multi-line invocation collection are ordinary C preprocessing semantics required by SDK headers; implementing them in the declared no-callback subset fixes the native frontend without rewriting header source | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_variadic_function_macro_expands_and_pastes tests.test_preprocessor.PreprocessorTests.test_no_callback_token_paste_does_not_stringize_rhs` | rebuilt native bootstrap in `test_real_native_bootstrap_expands_variadic_function_macro`; compiled a multi-line variadic enum/typedef macro and Darwin-style pasted deprecation macro to arm64 object, then compiled the full `pthread_probe.c` header probe | `B576` |
+| H735 | `src/xcc/preprocessor/__init__.py` | `_expand_line_no_callback` / `_handle_pragma_operator_no_callback`; consume macro-generated `_Pragma` operators with a no-regex lexical scan | AOT-driven C preprocessor semantic repair | retain: `_Pragma(string-literal)` is ordinary C preprocessing semantics required by Darwin availability headers; consuming it after native macro expansion fixes the frontend while preserving comment/literal lexical regions and without rewriting SDK source | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_consumes_pragma_operator_after_macro_expansion` | rebuilt native bootstrap in `test_real_native_bootstrap_consumes_pragma_operator`; compiled a macro-generated escaped pragma followed by a valid declaration to an arm64 object, and the real `sys/event.h` probe advanced beyond `_Pragma` to the next independent `__signed` gap | `B578` |

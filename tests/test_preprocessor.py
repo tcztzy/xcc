@@ -173,6 +173,19 @@ class PreprocessorTests(unittest.TestCase):
 
         self.assertIn("___POSIX_C_DEPRECATED_STARTING_200112L", result)
 
+    def test_no_callback_consumes_pragma_operator_after_macro_expansion(self) -> None:
+        options = FrontendOptions()
+        processor = _Preprocessor(options)
+        processor._init_no_callback(options)
+        processor._handle_define_no_callback("DO_PRAGMA(value) _Pragma(#value)")
+
+        result = processor._expand_line_no_callback(
+            'DO_PRAGMA(clang diagnostic ignored "-Wdeprecated") int value;\n',
+            _SourceLocation("pragma_operator.c", 2),
+        )
+
+        self.assertEqual(result, "\n int value;\n")
+
     def test_no_callback_does_not_expand_macros_in_comments_or_literals(self) -> None:
         result = preprocess_source_no_callback(
             "#define SIGNAL 4 /* signal value */\n"

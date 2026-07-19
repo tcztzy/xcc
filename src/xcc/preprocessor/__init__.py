@@ -2063,7 +2063,8 @@ class _Preprocessor:
     def _expand_line_no_callback(self, line: str, location: _SourceLocation) -> str:
         trailing_newline = "\n" if line.endswith("\n") else ""
         text = line[0 : len(line) - 1] if trailing_newline else line
-        return self._expand_text_no_callback(text, (), location) + trailing_newline
+        expanded = self._expand_text_no_callback(text, (), location)
+        return self._handle_pragma_operator_no_callback(expanded) + trailing_newline
 
     def _expand_text_no_callback(
         self,
@@ -2162,6 +2163,85 @@ class _Preprocessor:
 
     def _handle_pragma_operator(self, text: str) -> str:
         return re.sub(r'_Pragma\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)', "\n", text)
+
+    def _handle_pragma_operator_no_callback(self, text: str) -> str:
+        result = ""
+        index = 0
+        while index < len(text):
+            ch = text[index]
+            if ch == '"' or ch == "'":
+                quote = ch
+                start = index
+                index += 1
+                while index < len(text):
+                    if text[index] == "\\" and index + 1 < len(text):
+                        index += 2
+                        continue
+                    if text[index] == quote:
+                        index += 1
+                        break
+                    index += 1
+                result += text[start:index]
+                continue
+            if ch == "/" and index + 1 < len(text):
+                next_ch = text[index + 1]
+                if next_ch == "/":
+                    result += text[index:]
+                    break
+                if next_ch == "*":
+                    end = text.find("*/", index + 2)
+                    if end == -1:
+                        result += text[index:]
+                        break
+                    result += text[index : end + 2]
+                    index = end + 2
+                    continue
+            if not _guard_is_ident_start(ch):
+                result += ch
+                index += 1
+                continue
+            start = index
+            index += 1
+            while index < len(text) and _guard_is_ident_continue(text[index]):
+                index += 1
+            name = text[start:index]
+            if name != "_Pragma":
+                result += name
+                continue
+            cursor = index
+            while cursor < len(text) and text[cursor].isspace():
+                cursor += 1
+            if cursor >= len(text) or text[cursor] != "(":
+                result += name
+                continue
+            cursor += 1
+            while cursor < len(text) and text[cursor].isspace():
+                cursor += 1
+            if cursor >= len(text) or text[cursor] != '"':
+                result += name
+                continue
+            cursor += 1
+            closed = False
+            while cursor < len(text):
+                if text[cursor] == "\\" and cursor + 1 < len(text):
+                    cursor += 2
+                    continue
+                if text[cursor] == '"':
+                    cursor += 1
+                    closed = True
+                    break
+                cursor += 1
+            if not closed:
+                result += name
+                continue
+            while cursor < len(text) and text[cursor].isspace():
+                cursor += 1
+            if cursor >= len(text) or text[cursor] != ")":
+                result += name
+                continue
+            result += "\n"
+            index = cursor + 1
+        return result
 
     def _line_needs_macro_expansion(self, text: str) -> bool:
         has_identifier = False
