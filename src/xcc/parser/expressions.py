@@ -71,6 +71,8 @@ PAREN_TYPE_NAME_KEYWORDS = {
     "long",
     "short",
     "signed",
+    "__signed",
+    "__signed__",
     "struct",
     "typeof",
     "typeof_unqual",

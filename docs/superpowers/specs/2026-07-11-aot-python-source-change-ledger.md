@@ -23,14 +23,14 @@ Rules:
 - `src/xcc/ast.py`: 3 hunks
 - `src/xcc/cc_driver.py`: 12 hunks
 - `src/xcc/codegen.py`: 81 hunks
-- `src/xcc/lexer.py`: 3 hunks
-- `src/xcc/parser/__init__.py`: 33 hunks
+- `src/xcc/lexer.py`: 4 hunks
+- `src/xcc/parser/__init__.py`: 34 hunks
 - `src/xcc/parser/array_sizes.py`: 30 hunks
 - `src/xcc/parser/declarators.py`: 26 hunks
-- `src/xcc/parser/expressions.py`: 117 hunks
+- `src/xcc/parser/expressions.py`: 118 hunks
 - `src/xcc/parser/extensions.py`: 66 hunks
-- `src/xcc/parser/statements.py`: 2 hunks
-- `src/xcc/parser/type_specs.py`: 63 hunks
+- `src/xcc/parser/statements.py`: 3 hunks
+- `src/xcc/parser/type_specs.py`: 64 hunks
 - `src/xcc/preprocessor/__init__.py`: 39 hunks
 - `src/xcc/preprocessor/conditionals.py`: 1 hunks
 - `src/xcc/preprocessor/expressions.py`: 10 hunks
@@ -53,7 +53,7 @@ Rules:
 - `src/xcc/sema/type_resolution.py`: 45 hunks
 - `src/xcc/types.py`: 18 hunks
 
-Total: 735 hunks across 32 non-AOT source files.
+Total: 740 hunks across 32 non-AOT source files.
 
 ## Hunk Ledger
 
@@ -794,3 +794,8 @@ Total: 735 hunks across 32 non-AOT source files.
 | H733 | `src/xcc/preprocessor/__init__.py` | `_handle_undef_no_callback`; remove the validated macro from the native table | AOT-driven C preprocessor semantic repair | retain: `#undef` removal is ordinary preprocessing state semantics required by SDK control macros; retaining stale definitions changes later declarations and is not an admissible native subset | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_undef_removes_macro` | rebuilt native bootstrap in `test_real_native_bootstrap_removes_undefined_macro`; compiled the post-undef branch while an invalid stale-macro branch remained excluded | `B573` |
 | H734 | `src/xcc/preprocessor/__init__.py` | no-callback function-macro definition, invocation parsing, argument substitution, stringize/token-paste, recursive rescan, and continuation signaling | AOT-driven C preprocessor semantic repair | retain: named/variadic arguments, `#`, `##`, nested invocations, and multi-line invocation collection are ordinary C preprocessing semantics required by SDK headers; implementing them in the declared no-callback subset fixes the native frontend without rewriting header source | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_variadic_function_macro_expands_and_pastes tests.test_preprocessor.PreprocessorTests.test_no_callback_token_paste_does_not_stringize_rhs` | rebuilt native bootstrap in `test_real_native_bootstrap_expands_variadic_function_macro`; compiled a multi-line variadic enum/typedef macro and Darwin-style pasted deprecation macro to arm64 object, then compiled the full `pthread_probe.c` header probe | `B576` |
 | H735 | `src/xcc/preprocessor/__init__.py` | `_expand_line_no_callback` / `_handle_pragma_operator_no_callback`; consume macro-generated `_Pragma` operators with a no-regex lexical scan | AOT-driven C preprocessor semantic repair | retain: `_Pragma(string-literal)` is ordinary C preprocessing semantics required by Darwin availability headers; consuming it after native macro expansion fixes the frontend while preserving comment/literal lexical regions and without rewriting SDK source | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_consumes_pragma_operator_after_macro_expansion` | rebuilt native bootstrap in `test_real_native_bootstrap_consumes_pragma_operator`; compiled a macro-generated escaped pragma followed by a valid declaration to an arm64 object, and the real `sys/event.h` probe advanced beyond `_Pragma` to the next independent `__signed` gap | `B578` |
+| H736 | `src/xcc/lexer.py` | `KEYWORDS`; classify `__signed` and `__signed__` as GNU keyword aliases | independent C lexical fix | retain: both spellings are compiler-reserved aliases accepted by GCC/Clang and must enter the keyword grammar without source rewriting | `uv run python -m unittest -q tests.test_lexer.LexerTokenTests.test_gnu_signed_keyword_aliases` | rebuilt native bootstrap in `test_real_native_bootstrap_accepts_gnu_signed_keyword_aliases`; system `cc -std=c11 -pedantic-errors` and native xcc compiled both spellings to arm64 objects | `B579` |
+| H737 | `src/xcc/parser/__init__.py` | exported integer/simple type keyword vocabularies; mirror the GNU signed aliases | independent C grammar fix | retain: parser-wide type-start metadata must agree with lexer/type-spec ownership so aliases remain valid at every declared entry point | `uv run python -m unittest -q tests.test_parser.ParserTests.test_gnu_signed_keyword_aliases_are_canonicalized` | rebuilt B579 native bootstrap compiled typedef, local declaration, and cast aliases; full native `sys/event.h` probe produced an arm64 object | `B579` |
+| H738 | `src/xcc/parser/expressions.py` | `PAREN_TYPE_NAME_KEYWORDS`; recognize GNU signed aliases in cast lookahead | independent C grammar fix | retain: a parenthesized GNU signed alias is an ordinary compiler-extension type name, not an expression identifier or AOT source-shape exception | `uv run python -m unittest -q tests.test_parser.ParserTests.test_gnu_signed_keyword_aliases_are_canonicalized` | rebuilt B579 native bootstrap compiled `(__signed)sizeof(...)`; full native `sys/event.h` probe produced an arm64 object | `B579` |
+| H739 | `src/xcc/parser/statements.py` | declaration-start keyword scan; recognize GNU signed aliases in block scope | independent C grammar fix | retain: block declarations using compiler-reserved signed aliases share the same semantics as file-scope declarations and cannot be repaired by rewriting C input | `uv run python -m unittest -q tests.test_parser.ParserTests.test_gnu_signed_keyword_aliases_are_canonicalized` | rebuilt B579 native bootstrap compiled a `__signed__ int` local; full native `sys/event.h` probe produced an arm64 object | `B579` |
+| H740 | `src/xcc/parser/type_specs.py` | integer/simple type vocabularies and `_consume_integer_type_keyword`; canonicalize both GNU signed aliases | independent C type-spec fix | retain: GCC/Clang aliases denote the existing `signed` specifier in typedefs, locals, parameters, and casts; canonicalization preserves one downstream type model | `uv run python -m unittest -q tests.test_parser.ParserTests.test_gnu_signed_keyword_aliases_are_canonicalized`; hosted xcc compiled the real `sys/event.h` probe | rebuilt B579 native bootstrap compiled both aliases and the full real `sys/event.h` probe to arm64 objects | `B579` |

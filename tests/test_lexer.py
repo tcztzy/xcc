@@ -81,6 +81,11 @@ class LexerTokenTests(unittest.TestCase):
         self.assertEqual(tokens[0].kind, TokenKind.KEYWORD)
         self.assertEqual(tokens[1].kind, TokenKind.IDENT)
 
+    def test_gnu_signed_keyword_aliases(self) -> None:
+        tokens = list(lex("__signed __signed__"))
+        self.assertEqual(tokens[0].kind, TokenKind.KEYWORD)
+        self.assertEqual(tokens[1].kind, TokenKind.KEYWORD)
+
     def test_extension_marker_keyword(self) -> None:
         tokens = list(lex("__extension__ ext"))
         self.assertEqual(tokens[0].kind, TokenKind.KEYWORD)

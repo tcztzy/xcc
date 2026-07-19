@@ -7,7 +7,16 @@ from xcc.lexer import Token, TokenKind
 if TYPE_CHECKING:
     from . import Parser
 
-INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
+INTEGER_TYPE_KEYWORDS = {
+    "int",
+    "char",
+    "short",
+    "long",
+    "signed",
+    "__signed",
+    "__signed__",
+    "unsigned",
+}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
 SIMPLE_TYPE_SPEC_KEYWORDS = {
     "int",
@@ -15,6 +24,8 @@ SIMPLE_TYPE_SPEC_KEYWORDS = {
     "short",
     "long",
     "signed",
+    "__signed",
+    "__signed__",
     "unsigned",
     "float",
     "double",
@@ -613,6 +624,8 @@ def _consume_integer_type_keyword(
     current_signedness: str | None,
     current_base: str | None,
 ) -> tuple[str | None, str | None]:
+    if keyword == "__signed" or keyword == "__signed__":
+        keyword = "signed"
     if keyword in {"signed", "unsigned"}:
         if current_signedness is not None:
             raise ParserError(

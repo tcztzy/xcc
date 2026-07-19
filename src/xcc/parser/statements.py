@@ -203,6 +203,8 @@ def is_declaration_start(parser: _StatementParser) -> bool:
         "short",
         "long",
         "signed",
+        "__signed",
+        "__signed__",
         "unsigned",
         "_Bool",
         "_Atomic",

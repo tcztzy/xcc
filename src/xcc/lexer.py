@@ -41,6 +41,8 @@ KEYWORDS = {
     "return",
     "short",
     "signed",
+    "__signed",
+    "__signed__",
     "sizeof",
     "static",
     "struct",

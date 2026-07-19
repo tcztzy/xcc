@@ -371,6 +371,21 @@ class ParserTests(unittest.TestCase):
         func = unit.functions[0]
         self.assertEqual(func.params, [Param(TypeSpec("long long"), "value")])
 
+    def test_gnu_signed_keyword_aliases_are_canonicalized(self) -> None:
+        unit = parse(
+            list(
+                lex(
+                    "typedef __signed char signed_char;"
+                    "int f(void){__signed__ int value=(__signed)1;return value;}"
+                )
+            )
+        )
+
+        self.assertEqual(unit.declarations[0].type_spec, TypeSpec("char"))
+        statements = _body(unit.functions[0]).statements
+        self.assertIsInstance(statements[0], DeclStmt)
+        self.assertEqual(statements[0].type_spec, TypeSpec("int"))
+
     def test_leading_type_qualifiers_are_recorded_in_declarations(self) -> None:
         unit = parse(list(lex("int main(void){const int x=0; return x;}")))
         statements = _body(unit.functions[0]).statements

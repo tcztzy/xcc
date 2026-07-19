@@ -53,7 +53,16 @@ FunctionDeclarator = tuple[tuple[TypeSpec, ...] | None, bool]
 DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
 ASSIGNMENT_OPERATORS = ("=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|=")
-INTEGER_TYPE_KEYWORDS = {"int", "char", "short", "long", "signed", "unsigned"}
+INTEGER_TYPE_KEYWORDS = {
+    "int",
+    "char",
+    "short",
+    "long",
+    "signed",
+    "__signed",
+    "__signed__",
+    "unsigned",
+}
 FLOATING_TYPE_KEYWORDS = {"float", "double"}
 SIMPLE_TYPE_SPEC_KEYWORDS = {
     "int",
@@ -61,6 +70,8 @@ SIMPLE_TYPE_SPEC_KEYWORDS = {
     "short",
     "long",
     "signed",
+    "__signed",
+    "__signed__",
     "unsigned",
     "float",
     "double",

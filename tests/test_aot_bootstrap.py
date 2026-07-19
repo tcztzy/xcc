@@ -2206,6 +2206,36 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(obj.exists())
 
+    def test_real_native_bootstrap_accepts_gnu_signed_keyword_aliases(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b579-signed-alias"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "signed_alias.c"
+            obj = root / "signed_alias.o"
+            source.write_text(
+                "typedef __signed char signed_char;\n"
+                "int value(void) {\n"
+                "    __signed__ int number = (__signed)sizeof(signed_char);\n"
+                "    return number;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
     def test_real_native_bootstrap_accepts_function_pointer_argument(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():
