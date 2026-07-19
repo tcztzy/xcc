@@ -2178,6 +2178,38 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(obj.exists())
 
+    def test_real_native_bootstrap_accepts_function_pointer_argument(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b577-function-pointer"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "function_pointer.c"
+            obj = root / "function_pointer.o"
+            source.write_text(
+                "typedef unsigned long thread_t;\n"
+                "int create(thread_t *, const void *, void *(*)(void *), void *);\n"
+                "void *routine(void *arg) { return arg; }\n"
+                "int start(void) {\n"
+                "    thread_t thread;\n"
+                "    return create(&thread, 0, routine, 0);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
     def test_real_native_bootstrap_links_configure_style_object_when_llc_exists(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():

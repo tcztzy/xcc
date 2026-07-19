@@ -2104,6 +2104,32 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="tagged-integer-record-equality.py",
         )
 
+    def test_record_equality_compares_tagged_function_params_by_value(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "FunctionParams = tuple[tuple['Type', ...] | None, bool]\n"
+            "TypeOp = tuple[str, int | FunctionParams]\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "    declarator_ops: tuple[TypeOp, ...]\n"
+            "def function_pointer(variadic: bool) -> Type:\n"
+            "    parameter = Type('void', (('ptr', 0),))\n"
+            "    params: FunctionParams = ((parameter,), variadic)\n"
+            "    return Type('void', (('ptr', 0), ('fn', params)))\n"
+            "def entry() -> int:\n"
+            "    left = function_pointer(False)\n"
+            "    equal = function_pointer(False)\n"
+            "    different = function_pointer(True)\n"
+            "    if left != equal:\n"
+            "        return 1\n"
+            "    if left == different:\n"
+            "        return 2\n"
+            "    return 7\n",
+            expected=7,
+            filename="tagged-function-params-record-equality.py",
+        )
+
     def test_record_union_equality_dispatches_and_compares_nested_fields(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

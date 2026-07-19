@@ -320,12 +320,15 @@ class _Emitter:
         self.failure_scopes: list[_FailureScope] = []
         self.caught_status_stack: list[str] = []
         self.record_equality_records: set[str] = set()
+        self.tuple_object_equality_records: set[str] = set()
+        self.needs_tagged_object_equality_helpers = False
 
     def emit(self) -> str:
         declarations = [self._emit_record(record) for record in self.module.records]
         functions = [self._emit_function(function) for function in self.module.functions]
         main = self._emit_main()
         record_equality_helpers = self._emit_record_equality_helpers()
+        tagged_object_equality_helpers = self._emit_tagged_object_equality_helpers()
         lines: list[str] = []
         if self.fallible_functions:
             lines.append(_ERROR_LLVM_DECLARATION)
@@ -350,6 +353,7 @@ class _Emitter:
             lines.append("")
         lines.extend(functions)
         lines.extend(record_equality_helpers)
+        lines.extend(tagged_object_equality_helpers)
         if main is not None:
             lines.append(main)
         return "\n".join(lines).rstrip() + "\n"
@@ -7297,6 +7301,7 @@ class _Emitter:
         lines: list[str],
     ) -> _EmittedValue:
         self.needs_runtime_prelude = True
+        self.needs_tagged_object_equality_helpers = True
         source_label = _current_label(lines)
         null_label = self._label("object.eq.null")
         tag_label = self._label("object.eq.tag")
@@ -7307,6 +7312,7 @@ class _Emitter:
         string_label = self._label("object.eq.string")
         bytes_label = self._label("object.eq.bytes")
         ellipsis_label = self._label("object.eq.ellipsis")
+        tuple_label = self._label("object.eq.tuple")
         pointer_label = self._label("object.eq.pointer")
         end_label = self._label("object.eq.end")
         same = self._tmp("object.eq.same")
@@ -7362,6 +7368,7 @@ class _Emitter:
         lines.append(f"    i64 {_OBJECT_TAG_STRING}, label %{string_label}")
         lines.append(f"    i64 {_OBJECT_TAG_BYTES}, label %{bytes_label}")
         lines.append(f"    i64 {_OBJECT_TAG_ELLIPSIS}, label %{ellipsis_label}")
+        lines.append(f"    i64 {_OBJECT_TAG_TUPLE}, label %{tuple_label}")
         lines.append("  ]")
         lines.append(f"{float_label}:")
         left_float_ptr = self._tmp("object.eq.left.floatptr")
@@ -7407,6 +7414,21 @@ class _Emitter:
         lines.append(f"  br label %{end_label}")
         lines.append(f"{ellipsis_label}:")
         lines.append(f"  br label %{end_label}")
+        lines.append(f"{tuple_label}:")
+        left_tuple_ptr = self._tmp("object.eq.left.tupleptr")
+        right_tuple_ptr = self._tmp("object.eq.right.tupleptr")
+        left_tuple = self._tmp("object.eq.left.tuple")
+        right_tuple = self._tmp("object.eq.right.tuple")
+        tuple_equal = self._tmp("object.eq.tuple")
+        lines.append(f"  {left_tuple_ptr} = getelementptr i8, ptr {left.value}, i64 8")
+        lines.append(f"  {right_tuple_ptr} = getelementptr i8, ptr {right.value}, i64 8")
+        lines.append(f"  {left_tuple} = load ptr, ptr {left_tuple_ptr}")
+        lines.append(f"  {right_tuple} = load ptr, ptr {right_tuple_ptr}")
+        lines.append(
+            f"  {tuple_equal} = call i1 @__xcc_aot_object_tuple_equal("
+            f"ptr {left_tuple}, ptr {right_tuple})"
+        )
+        lines.append(f"  br label %{end_label}")
         lines.append(f"{pointer_label}:")
         left_pointer_ptr = self._tmp("object.eq.left.pointerptr")
         right_pointer_ptr = self._tmp("object.eq.right.pointerptr")
@@ -7426,7 +7448,8 @@ class _Emitter:
             f"[ false, %{null_label} ], [ {numeric_equal}, %{numeric_label} ], "
             f"[ false, %{same_tag_label} ], [ {float_equal}, %{float_label} ], "
             f"[ {string_equal}, %{string_label} ], [ {bytes_equal}, %{bytes_label} ], "
-            f"[ true, %{ellipsis_label} ], [ {pointer_equal}, %{pointer_label} ]"
+            f"[ true, %{ellipsis_label} ], [ {tuple_equal}, %{tuple_label} ], "
+            f"[ {pointer_equal}, %{pointer_label} ]"
         )
         value = _EmittedValue(equal, IrBoolType())
         if negate:
@@ -7553,6 +7576,8 @@ class _Emitter:
         return tuple(names)
 
     def _emit_record_equality_helpers(self) -> list[str]:
+        if self.needs_tagged_object_equality_helpers:
+            self.record_equality_records.update(self.tuple_object_equality_records)
         helpers: dict[str, str] = {}
         while True:
             pending = tuple(
@@ -7562,10 +7587,153 @@ class _Emitter:
                 break
             for name in pending:
                 helpers[name] = self._emit_record_equality_helper(name)
-        if not helpers:
+        if not helpers and not self.needs_tagged_object_equality_helpers:
             return []
         dispatcher = self._emit_record_equality_dispatcher(tuple(sorted(helpers)))
         return [dispatcher, *(helpers[name] for name in sorted(helpers))]
+
+    def _emit_tagged_object_equality_helpers(self) -> list[str]:
+        if not self.needs_tagged_object_equality_helpers:
+            return []
+        object_equal = "\n".join(
+            (
+                "define i1 @__xcc_aot_object_equal(ptr %left, ptr %right) {",
+                "entry:",
+                "  %same = icmp eq ptr %left, %right",
+                "  br i1 %same, label %equal, label %check_null",
+                "check_null:",
+                "  %left_null = icmp eq ptr %left, null",
+                "  %right_null = icmp eq ptr %right, null",
+                "  %either_null = or i1 %left_null, %right_null",
+                "  br i1 %either_null, label %unequal, label %check_tags",
+                "check_tags:",
+                "  %left_tag = load i64, ptr %left",
+                "  %right_tag = load i64, ptr %right",
+                f"  %left_bool = icmp eq i64 %left_tag, {_OBJECT_TAG_BOOL}",
+                f"  %left_int = icmp eq i64 %left_tag, {_OBJECT_TAG_INT}",
+                "  %left_numeric = or i1 %left_bool, %left_int",
+                f"  %right_bool = icmp eq i64 %right_tag, {_OBJECT_TAG_BOOL}",
+                f"  %right_int = icmp eq i64 %right_tag, {_OBJECT_TAG_INT}",
+                "  %right_numeric = or i1 %right_bool, %right_int",
+                "  %both_numeric = and i1 %left_numeric, %right_numeric",
+                "  br i1 %both_numeric, label %numeric, label %same_tag",
+                "numeric:",
+                "  %left_numeric_ptr = getelementptr i8, ptr %left, i64 8",
+                "  %right_numeric_ptr = getelementptr i8, ptr %right, i64 8",
+                "  %left_numeric_value = load i64, ptr %left_numeric_ptr",
+                "  %right_numeric_value = load i64, ptr %right_numeric_ptr",
+                "  %numeric_equal = icmp eq i64 %left_numeric_value, %right_numeric_value",
+                "  ret i1 %numeric_equal",
+                "same_tag:",
+                "  %tags_equal = icmp eq i64 %left_tag, %right_tag",
+                "  br i1 %tags_equal, label %dispatch, label %unequal",
+                "dispatch:",
+                "  switch i64 %left_tag, label %pointer [",
+                f"    i64 {_OBJECT_TAG_FLOAT}, label %float",
+                f"    i64 {_OBJECT_TAG_STRING}, label %string",
+                f"    i64 {_OBJECT_TAG_BYTES}, label %bytes",
+                f"    i64 {_OBJECT_TAG_ELLIPSIS}, label %equal",
+                f"    i64 {_OBJECT_TAG_RECORD}, label %record",
+                f"    i64 {_OBJECT_TAG_TUPLE}, label %tuple",
+                "  ]",
+                "float:",
+                "  %left_float_ptr = getelementptr i8, ptr %left, i64 8",
+                "  %right_float_ptr = getelementptr i8, ptr %right, i64 8",
+                "  %left_float = load double, ptr %left_float_ptr",
+                "  %right_float = load double, ptr %right_float_ptr",
+                "  %float_equal = fcmp oeq double %left_float, %right_float",
+                "  ret i1 %float_equal",
+                "string:",
+                "  %left_string_ptr = getelementptr i8, ptr %left, i64 8",
+                "  %right_string_ptr = getelementptr i8, ptr %right, i64 8",
+                "  %left_string = load ptr, ptr %left_string_ptr",
+                "  %right_string = load ptr, ptr %right_string_ptr",
+                "  %string_compared = call i32 @strcmp(ptr %left_string, ptr %right_string)",
+                "  %string_equal = icmp eq i32 %string_compared, 0",
+                "  ret i1 %string_equal",
+                "bytes:",
+                "  %left_bytes_ptr = getelementptr i8, ptr %left, i64 8",
+                "  %right_bytes_ptr = getelementptr i8, ptr %right, i64 8",
+                "  %left_bytes = load ptr, ptr %left_bytes_ptr",
+                "  %right_bytes = load ptr, ptr %right_bytes_ptr",
+                (
+                    "  %bytes_equal = call i1 @__xcc_aot_bytes_equal("
+                    "ptr %left_bytes, ptr %right_bytes)"
+                ),
+                "  ret i1 %bytes_equal",
+                "record:",
+                "  %left_record_ptr = getelementptr i8, ptr %left, i64 8",
+                "  %right_record_ptr = getelementptr i8, ptr %right, i64 8",
+                "  %left_record = load ptr, ptr %left_record_ptr",
+                "  %right_record = load ptr, ptr %right_record_ptr",
+                (
+                    "  %record_equal = call i1 @__xcc_aot_record_equal("
+                    "ptr %left_record, ptr %right_record)"
+                ),
+                "  ret i1 %record_equal",
+                "tuple:",
+                "  %left_tuple_ptr = getelementptr i8, ptr %left, i64 8",
+                "  %right_tuple_ptr = getelementptr i8, ptr %right, i64 8",
+                "  %left_tuple = load ptr, ptr %left_tuple_ptr",
+                "  %right_tuple = load ptr, ptr %right_tuple_ptr",
+                (
+                    "  %tuple_equal = call i1 @__xcc_aot_object_tuple_equal("
+                    "ptr %left_tuple, ptr %right_tuple)"
+                ),
+                "  ret i1 %tuple_equal",
+                "pointer:",
+                "  %left_pointer_ptr = getelementptr i8, ptr %left, i64 8",
+                "  %right_pointer_ptr = getelementptr i8, ptr %right, i64 8",
+                "  %left_pointer = load ptr, ptr %left_pointer_ptr",
+                "  %right_pointer = load ptr, ptr %right_pointer_ptr",
+                "  %pointer_equal = icmp eq ptr %left_pointer, %right_pointer",
+                "  ret i1 %pointer_equal",
+                "equal:",
+                "  ret i1 true",
+                "unequal:",
+                "  ret i1 false",
+                "}",
+            )
+        )
+        tuple_equal = "\n".join(
+            (
+                "define i1 @__xcc_aot_object_tuple_equal(ptr %left, ptr %right) {",
+                "entry:",
+                "  %same = icmp eq ptr %left, %right",
+                "  br i1 %same, label %equal, label %check_null",
+                "check_null:",
+                "  %left_null = icmp eq ptr %left, null",
+                "  %right_null = icmp eq ptr %right, null",
+                "  %either_null = or i1 %left_null, %right_null",
+                "  br i1 %either_null, label %unequal, label %lengths",
+                "lengths:",
+                "  %left_length = call i64 @__xcc_aot_tuple_len(ptr %left)",
+                "  %right_length = call i64 @__xcc_aot_tuple_len(ptr %right)",
+                "  %same_length = icmp eq i64 %left_length, %right_length",
+                "  br i1 %same_length, label %loop, label %unequal",
+                "loop:",
+                "  %index = phi i64 [ 0, %lengths ], [ %next_index, %next ]",
+                "  %done = icmp uge i64 %index, %left_length",
+                "  br i1 %done, label %equal, label %body",
+                "body:",
+                "  %left_item = call ptr @__xcc_aot_tuple_get_object(ptr %left, i64 %index)",
+                ("  %right_item = call ptr @__xcc_aot_tuple_get_object(ptr %right, i64 %index)"),
+                (
+                    "  %item_equal = call i1 @__xcc_aot_object_equal("
+                    "ptr %left_item, ptr %right_item)"
+                ),
+                "  br i1 %item_equal, label %next, label %unequal",
+                "next:",
+                "  %next_index = add i64 %index, 1",
+                "  br label %loop",
+                "equal:",
+                "  ret i1 true",
+                "unequal:",
+                "  ret i1 false",
+                "}",
+            )
+        )
+        return [object_equal, tuple_equal]
 
     def _emit_record_equality_dispatcher(self, record_names: tuple[str, ...]) -> str:
         lines = [
@@ -8806,6 +8974,13 @@ class _Emitter:
             )
         return name
 
+    def _collect_tuple_object_equality_records(self, type_info: IrType) -> None:
+        if isinstance(type_info, IrTupleType):
+            for element in type_info.elements:
+                self._collect_tuple_object_equality_records(element)
+            return
+        self.tuple_object_equality_records.update(self._known_record_type_names(type_info))
+
     def _register_tuple_object_layout(
         self,
         value: str,
@@ -8814,6 +8989,7 @@ class _Emitter:
     ) -> None:
         if not isinstance(type_info, IrTupleType):
             return
+        self._collect_tuple_object_equality_records(type_info)
         layout = self._tuple_object_layout_constant(type_info)
         if layout is None:
             return
