@@ -3673,6 +3673,9 @@ class _Lowerer:
         ):
             return IrTuple((), type_info)
         if isinstance(default, ast.Name):
+            global_type = self.global_types.get(default.id)
+            if global_type is not None and global_type == type_info:
+                return IrName(default.id, global_type)
             string_constant = self.global_string_constants.get(default.id)
             if string_constant is not None:
                 return IrConstString(string_constant)

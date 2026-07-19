@@ -53,6 +53,27 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="record-none-field-default.py",
         )
 
+    def test_record_constructor_uses_annotated_global_default(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "    pointer_depth: int = 0\n"
+            "    array_lengths: tuple[int, ...] = ()\n"
+            "    declarator_ops: tuple[tuple[str, int], ...] = ()\n"
+            "    qualifiers: tuple[str, ...] = ()\n"
+            "INT: Type = Type('int')\n"
+            "@dataclass(frozen=True)\n"
+            "class Symbol:\n"
+            "    name: str\n"
+            "    type_: Type = INT\n"
+            "def entry() -> int:\n"
+            "    return len(Symbol('ONE').type_.name)\n",
+            expected=3,
+            filename="record-global-field-default.py",
+        )
+
     def test_break_preserves_assignments_from_current_iteration(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
