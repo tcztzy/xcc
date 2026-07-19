@@ -1922,6 +1922,7 @@ class _Preprocessor:
                 continue
             name, index = scanned
             if name not in (
+                "__building_module",
                 "__has_attribute",
                 "__has_builtin",
                 "__has_c_attribute",

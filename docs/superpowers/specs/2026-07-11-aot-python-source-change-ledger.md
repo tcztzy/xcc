@@ -31,7 +31,7 @@ Rules:
 - `src/xcc/parser/extensions.py`: 66 hunks
 - `src/xcc/parser/statements.py`: 3 hunks
 - `src/xcc/parser/type_specs.py`: 64 hunks
-- `src/xcc/preprocessor/__init__.py`: 39 hunks
+- `src/xcc/preprocessor/__init__.py`: 40 hunks
 - `src/xcc/preprocessor/conditionals.py`: 1 hunks
 - `src/xcc/preprocessor/expressions.py`: 10 hunks
 - `src/xcc/preprocessor/includes.py`: 8 hunks
@@ -53,7 +53,7 @@ Rules:
 - `src/xcc/sema/type_resolution.py`: 45 hunks
 - `src/xcc/types.py`: 18 hunks
 
-Total: 740 hunks across 32 non-AOT source files.
+Total: 741 hunks across 32 non-AOT source files.
 
 ## Hunk Ledger
 
@@ -799,3 +799,4 @@ Total: 740 hunks across 32 non-AOT source files.
 | H738 | `src/xcc/parser/expressions.py` | `PAREN_TYPE_NAME_KEYWORDS`; recognize GNU signed aliases in cast lookahead | independent C grammar fix | retain: a parenthesized GNU signed alias is an ordinary compiler-extension type name, not an expression identifier or AOT source-shape exception | `uv run python -m unittest -q tests.test_parser.ParserTests.test_gnu_signed_keyword_aliases_are_canonicalized` | rebuilt B579 native bootstrap compiled `(__signed)sizeof(...)`; full native `sys/event.h` probe produced an arm64 object | `B579` |
 | H739 | `src/xcc/parser/statements.py` | declaration-start keyword scan; recognize GNU signed aliases in block scope | independent C grammar fix | retain: block declarations using compiler-reserved signed aliases share the same semantics as file-scope declarations and cannot be repaired by rewriting C input | `uv run python -m unittest -q tests.test_parser.ParserTests.test_gnu_signed_keyword_aliases_are_canonicalized` | rebuilt B579 native bootstrap compiled a `__signed__ int` local; full native `sys/event.h` probe produced an arm64 object | `B579` |
 | H740 | `src/xcc/parser/type_specs.py` | integer/simple type vocabularies and `_consume_integer_type_keyword`; canonicalize both GNU signed aliases | independent C type-spec fix | retain: GCC/Clang aliases denote the existing `signed` specifier in typedefs, locals, parameters, and casts; canonicalization preserves one downstream type model | `uv run python -m unittest -q tests.test_parser.ParserTests.test_gnu_signed_keyword_aliases_are_canonicalized`; hosted xcc compiled the real `sys/event.h` probe | rebuilt B579 native bootstrap compiled both aliases and the full real `sys/event.h` probe to arm64 objects | `B579` |
+| H741 | `src/xcc/preprocessor/__init__.py` | `_replace_feature_probes_no_callback`; normalize Clang `__building_module(...)` in conditional expressions | AOT-driven C preprocessor semantic repair | retain: compiler feature operators are ordinary header-facing conditional semantics; the native non-module build must conservatively return false rather than reject the surrounding expression or rewrite Clang headers | `uv run python -m unittest -q tests.test_preprocessor.PreprocessorTests.test_no_callback_evaluates_clang_building_module_probe`; hosted xcc compiled and ran the real `<stddef.h>` `offsetof` fixture | rebuilt native bootstrap in `test_real_native_bootstrap_expands_stddef_offsetof`; expanded real Clang `<stddef.h>`, linked the offset probe, and ran with the expected value 8 | `B580` |

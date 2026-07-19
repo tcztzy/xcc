@@ -279,6 +279,20 @@ class PreprocessorTests(unittest.TestCase):
                 )
             )
 
+    def test_no_callback_evaluates_clang_building_module_probe(self) -> None:
+        options = FrontendOptions()
+        processor = _Preprocessor(options)
+        processor._init_no_callback(options)
+
+        self.assertTrue(
+            processor._eval_condition_no_callback(
+                "!defined(offsetof) || "
+                "(__has_feature(modules) && !__building_module(_Builtin_stddef))",
+                _SourceLocation("building_module.c", 1),
+                None,
+            )
+        )
+
     def test_no_callback_undef_removes_macro(self) -> None:
         options = FrontendOptions()
         processor = _Preprocessor(options)

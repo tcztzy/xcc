@@ -2236,6 +2236,46 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(obj.exists())
 
+    def test_real_native_bootstrap_expands_stddef_offsetof(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b580-stddef-offsetof"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "stddef_offsetof.c"
+            program = root / "stddef_offsetof"
+            source.write_text(
+                "#include <stddef.h>\n"
+                "typedef struct { char x; long y; } aligned_long;\n"
+                "int main(void) {\n"
+                "    return offsetof(aligned_long, y) == 8 ? 0 : 1;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            compile_result = subprocess.run(
+                (str(executable), str(source), "-o", str(program)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                compile_result.stdout + compile_result.stderr,
+            )
+            run_result = subprocess.run(
+                (str(program),),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run_result.returncode, 0, run_result.stdout + run_result.stderr)
+
     def test_real_native_bootstrap_accepts_function_pointer_argument(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():
