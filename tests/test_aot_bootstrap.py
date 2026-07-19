@@ -1646,7 +1646,9 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("define ptr @xcc.llvm_api.ptr_array(ptr %values)", llvm_ir)
         self.assertIn("define ptr @xcc.llvm_api.zero_ptr_array(i64 %size)", llvm_ir)
         self.assertIn("define ptr @xcc.llvm_api.optional_zero_ptr_array(i64 %size)", llvm_ir)
-        self.assertIn("declare ptr @calloc(i64, i64)", llvm_ir)
+        self.assertNotIn("declare ptr @calloc(i64, i64)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_calloc(i64 %len, i64 8)", llvm_ir)
+        self.assertNotIn("call ptr @calloc(", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %values, i64 %index)", llvm_ir)
         self.assertNotIn("define ptr @xcc.llvm_api.ptr_array(ptr %values) {\nentry:\n  ret ptr null", llvm_ir)
 

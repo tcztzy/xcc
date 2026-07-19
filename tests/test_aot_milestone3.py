@@ -1,5 +1,6 @@
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -43,6 +44,7 @@ from xcc.aot import (
     IrWhile,
     analyze_path,
     collect_slice_inputs,
+    compile_llvm_executable,
     core_entry_wrapper,
     core_slice_entry_module,
     emit_llvm_text,
@@ -336,7 +338,7 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertIn("declare i32 @puts(ptr)", prelude)
         self.assertIn("define ptr @__xcc_aot_string_concat2", prelude)
         self.assertIn("call i64 @strlen", prelude)
-        self.assertIn("call ptr @malloc", prelude)
+        self.assertIn("call ptr @__xcc_aot_alloc", prelude)
         self.assertIn("call ptr @memcpy", prelude)
         self.assertIn("store i8 0", prelude)
         self.assertIn("define ptr @__xcc_aot_lexer_token_summary_for_source", prelude)
@@ -353,9 +355,35 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertIn("join_measure_cond:", string_join)
         self.assertIn("join_copy_cond:", string_join)
-        self.assertEqual(string_join.count("call ptr @malloc"), 1)
+        self.assertEqual(string_join.count("call ptr @__xcc_aot_alloc"), 1)
         self.assertEqual(string_join.count("call ptr @memcpy"), 2)
         self.assertNotIn("@__xcc_aot_string_concat2", string_join)
+
+    def test_allocation_limit_fails_before_requesting_memory(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %out = call ptr @__xcc_aot_alloc(i64 536870913)\n"
+            + "  ret i32 0\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "allocation-limit",
+                filename="allocation-limit.ll",
+            )
+            completed = subprocess.run(
+                (str(executable),),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(completed.returncode, 70)
+        self.assertEqual(completed.stdout, "")
+        self.assertEqual(completed.stderr, "xcc-aot: allocation limit exceeded\n")
 
     def test_tuple_alias_resolver_is_iterative_and_compresses_the_root_path(self) -> None:
         prelude = runtime_prelude()

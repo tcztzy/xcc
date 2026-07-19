@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import NoReturn
 
-from xcc.aot.core_runtime import runtime_prelude
+from xcc.aot.core_runtime import guard_allocation_calls, runtime_prelude
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.ir import (
     IrAssign,
@@ -325,10 +325,18 @@ class _Emitter:
 
     def emit(self) -> str:
         declarations = [self._emit_record(record) for record in self.module.records]
-        functions = [self._emit_function(function) for function in self.module.functions]
-        main = self._emit_main()
-        record_equality_helpers = self._emit_record_equality_helpers()
-        tagged_object_equality_helpers = self._emit_tagged_object_equality_helpers()
+        functions = [
+            guard_allocation_calls(self._emit_function(function))
+            for function in self.module.functions
+        ]
+        raw_main = self._emit_main()
+        main = None if raw_main is None else guard_allocation_calls(raw_main)
+        record_equality_helpers = [
+            guard_allocation_calls(helper) for helper in self._emit_record_equality_helpers()
+        ]
+        tagged_object_equality_helpers = [
+            guard_allocation_calls(helper) for helper in self._emit_tagged_object_equality_helpers()
+        ]
         lines: list[str] = []
         if self.fallible_functions:
             lines.append(_ERROR_LLVM_DECLARATION)
@@ -8322,7 +8330,6 @@ class _Emitter:
     def _emit_llvm_ptr_array_function(self, function: IrFunction) -> str:
         self.index = 0
         self.needs_runtime_prelude = True
-        self.extra_declarations.add("declare ptr @calloc(i64, i64)")
         if len(function.params) != 1:
             self._error("LLVM ptr_array helper expects one tuple-backed parameter")
         param = function.params[0]
@@ -8356,7 +8363,7 @@ class _Emitter:
 
     def _emit_llvm_zero_ptr_array_function(self, function: IrFunction) -> str:
         self.index = 0
-        self.extra_declarations.add("declare ptr @calloc(i64, i64)")
+        self.needs_runtime_prelude = True
         if len(function.params) != 1 or not isinstance(function.params[0].type, IrIntType):
             self._error("LLVM zero_ptr_array helper expects int -> pointer array")
         param = function.params[0]
@@ -8377,7 +8384,7 @@ class _Emitter:
 
     def _emit_llvm_optional_zero_ptr_array_function(self, function: IrFunction) -> str:
         self.index = 0
-        self.extra_declarations.add("declare ptr @calloc(i64, i64)")
+        self.needs_runtime_prelude = True
         if len(function.params) != 1 or not isinstance(function.params[0].type, IrIntType):
             self._error("LLVM optional_zero_ptr_array helper expects int -> optional pointer array")
         param = function.params[0]

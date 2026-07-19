@@ -1,5 +1,15 @@
+def guard_allocation_calls(text: str) -> str:
+    return text.replace(
+        "call ptr @malloc(",
+        "call ptr @__xcc_aot_alloc(",
+    ).replace(
+        "call ptr @calloc(",
+        "call ptr @__xcc_aot_calloc(",
+    )
+
+
 def runtime_prelude() -> str:
-    return "\n".join(
+    prelude = "\n".join(
         (
             '@__xcc_aot_fmt_i64 = private unnamed_addr constant [5 x i8] c"%lld\\00", align 1',
             (
@@ -72,6 +82,12 @@ def runtime_prelude() -> str:
                 "@__xcc_aot_error_unterminated_string = private unnamed_addr constant [35 x i8] "
                 'c"Unterminated string literal at 1:2\\00", align 1'
             ),
+            (
+                "@__xcc_aot_allocation_limit_message = private unnamed_addr constant "
+                '[35 x i8] c"xcc-aot: allocation limit exceeded\\0A", align 1'
+            ),
+            "@__xcc_aot_allocated_bytes = internal global i64 0",
+            "@__xcc_aot_allocation_limit = internal constant i64 536870912",
             "@__xcc_aot_tuple_aliases = internal global [1048576 x ptr] zeroinitializer",
             "@__xcc_aot_tuple_capacities = internal global [1048576 x ptr] zeroinitializer",
             "@__xcc_aot_tuple_object_layouts = internal global [1048576 x ptr] zeroinitializer",
@@ -79,7 +95,8 @@ def runtime_prelude() -> str:
             "@__xcc_aot_startswith_text_len = internal global i64 0",
             "",
             "declare i32 @puts(ptr)",
-            "declare ptr @malloc(i64)",
+            "declare ptr @realloc(ptr, i64)",
+            "declare i64 @write(i32, ptr, i64)",
             "declare i64 @strlen(ptr)",
             "declare i64 @strtoll(ptr, ptr, i32)",
             "declare ptr @memcpy(ptr, ptr, i64)",
@@ -98,6 +115,57 @@ def runtime_prelude() -> str:
             "declare i32 @fclose(ptr)",
             "declare i32 @fseek(ptr, i64, i32)",
             "declare i64 @ftell(ptr)",
+            "",
+            "define internal void @__xcc_aot_allocation_fail() {",
+            "entry:",
+            (
+                "  %written = call i64 @write(i32 2, "
+                "ptr @__xcc_aot_allocation_limit_message, i64 35)"
+            ),
+            "  call void @_exit(i32 70)",
+            "  unreachable",
+            "}",
+            "",
+            "define internal ptr @__xcc_aot_alloc(i64 %requested) {",
+            "entry:",
+            "  %is_zero = icmp eq i64 %requested, 0",
+            "  %size = select i1 %is_zero, i64 1, i64 %requested",
+            "  %used = load i64, ptr @__xcc_aot_allocated_bytes",
+            "  %limit = load i64, ptr @__xcc_aot_allocation_limit",
+            "  %remaining = sub i64 %limit, %used",
+            "  %over_limit = icmp ugt i64 %size, %remaining",
+            "  br i1 %over_limit, label %fail, label %allocate",
+            "allocate:",
+            "  %out = call ptr @realloc(ptr null, i64 %size)",
+            "  %allocation_failed = icmp eq ptr %out, null",
+            "  br i1 %allocation_failed, label %fail, label %commit",
+            "commit:",
+            "  %next = add i64 %used, %size",
+            "  store i64 %next, ptr @__xcc_aot_allocated_bytes",
+            "  ret ptr %out",
+            "fail:",
+            "  call void @__xcc_aot_allocation_fail()",
+            "  unreachable",
+            "}",
+            "",
+            "define internal ptr @__xcc_aot_calloc(i64 %count, i64 %item_size) {",
+            "entry:",
+            "  %count_is_zero = icmp eq i64 %count, 0",
+            "  %safe_count = select i1 %count_is_zero, i64 1, i64 %count",
+            "  %total = mul i64 %count, %item_size",
+            "  %roundtrip = udiv i64 %total, %safe_count",
+            "  %product_mismatch = icmp ne i64 %roundtrip, %item_size",
+            "  %count_nonzero = xor i1 %count_is_zero, true",
+            "  %overflow = and i1 %product_mismatch, %count_nonzero",
+            "  br i1 %overflow, label %fail, label %allocate",
+            "allocate:",
+            "  %out = call ptr @__xcc_aot_alloc(i64 %total)",
+            "  %cleared = call ptr @memset(ptr %out, i32 0, i64 %total)",
+            "  ret ptr %out",
+            "fail:",
+            "  call void @__xcc_aot_allocation_fail()",
+            "  unreachable",
+            "}",
             "",
             "define ptr @__xcc_aot_object_repr(ptr %object) {",
             "entry:",
@@ -3628,3 +3696,4 @@ def runtime_prelude() -> str:
             "}",
         )
     )
+    return guard_allocation_calls(prelude)

@@ -1,5 +1,9 @@
 # Lessons
 
+- Centralize generated allocations before adding reclamation. A conservative
+  emergency budget provides one auditable containment point for leaks and size
+  overflows, while ownership/drop work can replace the temporary process exit
+  without hunting independent libc calls across the emitter.
 - Treat native compiler peak memory as an acceptance property, not an operator
   concern. A no-GC runtime multiplied by build parallelism can starve the OS
   before a normal process-level failure is observable; keep native integration

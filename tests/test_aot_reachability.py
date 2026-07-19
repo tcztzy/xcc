@@ -339,7 +339,7 @@ class AotReachabilityTests(unittest.TestCase):
         self.assertEqual(final_return.value.target, "__record_construct0")
         llvm_text = emit_llvm_text(module)
         self.assertNotIn("@__record_construct0", llvm_text)
-        self.assertIn("call ptr @malloc", llvm_text)
+        self.assertIn("call ptr @__xcc_aot_alloc", llvm_text)
 
     def test_v376_isinstance_narrows_stable_subscript_assignment(self) -> None:
         module = lower_source_to_ir(

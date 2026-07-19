@@ -59,6 +59,39 @@ from xcc.aot.llvm_text import (
 
 
 class AotLlvmTextTests(unittest.TestCase):
+    def test_routes_heap_allocations_through_bounded_runtime(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        record_type = IrRecordType("Box")
+        module = IrModule(
+            "bounded_alloc.py",
+            (IrRecord("Box", (IrField("value", int64),)),),
+            (
+                IrFunction(
+                    "box",
+                    (),
+                    record_type,
+                    (IrReturn(IrConstructRecord("Box", (IrConstInt(1, int64),), record_type)),),
+                ),
+                IrFunction(
+                    "literal",
+                    (),
+                    IrStringType(),
+                    (IrReturn(IrConstString("call ptr @malloc(i64 9)")),),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("@__xcc_aot_allocation_limit = internal constant i64 536870912", llvm_ir)
+        self.assertIn("define internal ptr @__xcc_aot_alloc(i64 %requested)", llvm_ir)
+        self.assertIn("define internal ptr @__xcc_aot_calloc(i64 %count, i64 %item_size)", llvm_ir)
+        self.assertIn("call void @_exit(i32 70)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_alloc(i64 16)", llvm_ir)
+        self.assertNotRegex(llvm_ir, r"(?m)^\s+%.* = call ptr @malloc\(")
+        self.assertNotRegex(llvm_ir, r"(?m)^\s+%.* = call ptr @calloc\(")
+        self.assertIn('c"call ptr @malloc(i64 9)\\00"', llvm_ir)
+
     def test_emits_integer_augmented_assignment_operators(self) -> None:
         module = lower_source_to_ir(
             "def update(value: int) -> int:\n"
@@ -700,7 +733,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call ptr @malloc(i64 2)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_alloc(i64 2)", llvm_ir)
         self.assertIn("trunc i64 65 to i8", llvm_ir)
         self.assertIn("store i8 0", llvm_ir)
         self.assertNotIn("@__chr", llvm_ir)
@@ -731,7 +764,7 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
 
         self.assertIn("getelementptr i8, ptr %text, i64 %index", llvm_ir)
-        self.assertIn("call ptr @malloc(i64 2)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_alloc(i64 2)", llvm_ir)
         self.assertNotIn("@__getitem", llvm_ir)
 
     def test_emits_tuple_getitem_intrinsic(self) -> None:
@@ -1392,7 +1425,7 @@ class AotLlvmTextTests(unittest.TestCase):
             ),
         )
         llvm_ir = emit_llvm_text(module)
-        self.assertIn("%box.raw1 = call ptr @malloc(i64 16)", llvm_ir)
+        self.assertIn("%box.raw1 = call ptr @__xcc_aot_alloc(i64 16)", llvm_ir)
         self.assertIn("store i64 1, ptr %box.raw1", llvm_ir)
         self.assertIn("%box2 = getelementptr i8, ptr %box.raw1, i64 8", llvm_ir)
         self.assertIn("\\22\\5C\\0A\\00", llvm_ir)
@@ -1425,9 +1458,9 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("%box.raw1 = call ptr @malloc(i64 16)", llvm_ir)
-        self.assertIn("%box.raw4 = call ptr @malloc(i64 16)", llvm_ir)
-        self.assertNotIn("\n  %box = call ptr @malloc", llvm_ir)
+        self.assertIn("%box.raw1 = call ptr @__xcc_aot_alloc(i64 16)", llvm_ir)
+        self.assertIn("%box.raw4 = call ptr @__xcc_aot_alloc(i64 16)", llvm_ir)
+        self.assertNotIn("\n  %box = call ptr @__xcc_aot_alloc", llvm_ir)
 
     def test_emits_record_field_assignment_store(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -2347,7 +2380,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call i64 @strlen(ptr %data)", llvm_ir)
         self.assertIn("getelementptr i8, ptr %data", llvm_ir)
         self.assertIn("load i8, ptr", llvm_ir)
-        self.assertIn("call ptr @malloc(i64 2)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_alloc(i64 2)", llvm_ir)
         self.assertIn("store i8", llvm_ir)
         self.assertIn("zext i8", llvm_ir)
         self.assertIn("shl i64", llvm_ir)
@@ -2756,7 +2789,7 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         llvm_ir = emit_llvm_text(module)
         self.assertIn("; build enumerate pair", llvm_ir)
-        self.assertRegex(llvm_ir, r"%enumpair\d+ = call ptr @malloc\(i64 24\)")
+        self.assertRegex(llvm_ir, r"%enumpair\d+ = call ptr @__xcc_aot_alloc\(i64 24\)")
         self.assertRegex(llvm_ir, r"%enumindex\d+ = add i64 %index\d+, 1")
 
     def test_emits_subscript_assignment_via_tuple_set(self) -> None:

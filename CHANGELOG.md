@@ -2,6 +2,10 @@
 
 ## Current
 
+- Routed generated `malloc` and `calloc` operations through an overflow-checked
+  AOT allocation boundary with a 512 MiB cumulative emergency limit and a
+  deterministic exit-70 diagnostic. This is crash containment, not completion
+  of the required stable-handle and phase-lifetime runtime model.
 - Made CPython integration serial by default and rejected parallel
   `--native-aot-cc` validation after two parallel native builds exhausted host
   memory and triggered watchdog kernel panics. Native compiler execution remains
