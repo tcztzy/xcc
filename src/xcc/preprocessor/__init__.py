@@ -296,25 +296,214 @@ def _render_macro_replacement_no_callback(macro: _Macro) -> str:
     return result
 
 
-def _skip_macro_invocation_no_callback(text: str, index: int) -> int:
+def _parse_macro_parameters_no_callback(
+    text: str,
+) -> tuple[tuple[str, ...], bool] | None:
+    parameters: tuple[str, ...] = ()
+    cursor = 0
+    while True:
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor >= len(text):
+            return parameters, False
+        if text[cursor : cursor + 3] == "...":
+            cursor += 3
+            while cursor < len(text) and text[cursor].isspace():
+                cursor += 1
+            if cursor != len(text):
+                return None
+            return parameters, True
+        scanned = _guard_scan_identifier(text, cursor)
+        if scanned is None:
+            return None
+        name, cursor = scanned
+        if name in parameters:
+            return None
+        parameters = parameters + (name,)
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor >= len(text):
+            return parameters, False
+        if text[cursor] != ",":
+            return None
+        cursor += 1
+
+
+def _parse_macro_invocation_no_callback(
+    text: str,
+    index: int,
+) -> tuple[list[str], int] | None:
     cursor = index
     while cursor < len(text) and text[cursor].isspace():
         cursor += 1
     if cursor >= len(text) or text[cursor] != "(":
-        return index
-    depth = 0
+        return None
+    arguments: list[str] = []
+    depth = 1
+    argument_start = cursor + 1
+    cursor += 1
     while cursor < len(text):
         ch = text[cursor]
+        if ch == '"' or ch == "'":
+            quote = ch
+            cursor += 1
+            while cursor < len(text):
+                if text[cursor] == "\\" and cursor + 1 < len(text):
+                    cursor += 2
+                    continue
+                if text[cursor] == quote:
+                    cursor += 1
+                    break
+                cursor += 1
+            continue
+        if ch == "/" and cursor + 1 < len(text):
+            next_ch = text[cursor + 1]
+            if next_ch == "/":
+                return None
+            if next_ch == "*":
+                end = text.find("*/", cursor + 2)
+                if end == -1:
+                    return None
+                cursor = end + 2
+                continue
         if ch == "(":
             depth += 1
         elif ch == ")":
             depth -= 1
-            cursor += 1
             if depth == 0:
-                return cursor
-            continue
+                argument = text[argument_start:cursor].strip()
+                if argument or arguments:
+                    arguments.append(argument)
+                return arguments, cursor + 1
+        elif ch == "," and depth == 1:
+            arguments.append(text[argument_start:cursor].strip())
+            argument_start = cursor + 1
         cursor += 1
-    return index
+    return None
+
+
+def _macro_argument_no_callback(
+    macro: _Macro,
+    arguments: list[str],
+    name: str,
+) -> tuple[str, bool]:
+    parameters = macro.parameters
+    if parameters is None:
+        return "", False
+    for index, parameter in enumerate(parameters):
+        if name == parameter:
+            return arguments[index], True
+    if macro.is_variadic and name == "__VA_ARGS__":
+        result = ""
+        for index in range(len(parameters), len(arguments)):
+            if result:
+                result += ", "
+            result += arguments[index]
+        return result, True
+    return "", False
+
+
+def _stringize_macro_argument_no_callback(argument: str) -> str:
+    normalized = ""
+    pending_space = False
+    for ch in argument.strip():
+        if ch.isspace():
+            pending_space = bool(normalized)
+            continue
+        if pending_space:
+            normalized += " "
+            pending_space = False
+        normalized += ch
+    escaped = normalized.replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + escaped + '"'
+
+
+def _substitute_macro_arguments_no_callback(
+    macro: _Macro,
+    arguments: list[str],
+) -> str:
+    replacement = _render_macro_replacement_no_callback(macro)
+    result = ""
+    index = 0
+    while index < len(replacement):
+        ch = replacement[index]
+        if ch == '"' or ch == "'":
+            quote = ch
+            start = index
+            index += 1
+            while index < len(replacement):
+                if replacement[index] == "\\" and index + 1 < len(replacement):
+                    index += 2
+                    continue
+                if replacement[index] == quote:
+                    index += 1
+                    break
+                index += 1
+            result += replacement[start:index]
+            continue
+        if ch == "/" and index + 1 < len(replacement):
+            next_ch = replacement[index + 1]
+            if next_ch == "/":
+                result += replacement[index:]
+                break
+            if next_ch == "*":
+                end = replacement.find("*/", index + 2)
+                if end == -1:
+                    result += replacement[index:]
+                    break
+                result += replacement[index : end + 2]
+                index = end + 2
+                continue
+        if ch == "#" and index + 1 < len(replacement) and replacement[index + 1] == "#":
+            result += "##"
+            index += 2
+            continue
+        if ch == "#" and (index + 1 >= len(replacement) or replacement[index + 1] != "#"):
+            cursor = index + 1
+            while cursor < len(replacement) and replacement[cursor].isspace():
+                cursor += 1
+            scanned = _guard_scan_identifier(replacement, cursor)
+            if scanned is not None:
+                parameter, end = scanned
+                argument, found = _macro_argument_no_callback(
+                    macro,
+                    arguments,
+                    parameter,
+                )
+                if found:
+                    result += _stringize_macro_argument_no_callback(argument)
+                    index = end
+                    continue
+            result += ch
+            index += 1
+            continue
+        scanned = _guard_scan_identifier(replacement, index)
+        if scanned is None:
+            result += ch
+            index += 1
+            continue
+        name, index = scanned
+        argument, found = _macro_argument_no_callback(macro, arguments, name)
+        result += argument if found else name
+    return result
+
+
+def _apply_token_paste_no_callback(text: str) -> str:
+    paste = text.find("##")
+    while paste != -1:
+        left_end = paste
+        while left_end > 0 and text[left_end - 1].isspace():
+            left_end -= 1
+        right_start = paste + 2
+        while right_start < len(text) and text[right_start].isspace():
+            right_start += 1
+        before = text[:left_end]
+        after = text[right_start:]
+        if before.endswith(",") and (not after or after[0] in ")]} ;"):
+            before = before[:-1]
+        text = before + after
+        paste = text.find("##")
+    return text
 
 
 def _strip_block_comments_no_callback(text: str) -> str:
@@ -1654,7 +1843,7 @@ class _Preprocessor:
         if not condition:
             return False
         condition = self._replace_defined_no_callback(condition)
-        condition = self._expand_text_no_callback(condition, ())
+        condition = self._expand_text_no_callback(condition, (), location)
         condition = _strip_condition_comments(condition).strip()
         condition = self._replace_feature_probes_no_callback(
             condition,
@@ -1820,7 +2009,23 @@ class _Preprocessor:
         name, cursor = scanned
         tail = define_body[cursor:]
         if tail.startswith("("):
-            return _Macro(name, (), parameters=("__xcc_arg",))
+            close_index = tail.find(")")
+            if close_index < 0:
+                return None
+            parsed = _parse_macro_parameters_no_callback(tail[1:close_index])
+            if parsed is None:
+                return None
+            parameters, is_variadic = parsed
+            replacement_text = tail[close_index + 1 :].strip()
+            function_replacement: tuple[_MacroToken, ...] = ()
+            if replacement_text:
+                function_replacement = (_MacroToken(TokenKind.IDENT, replacement_text),)
+            return _Macro(
+                name,
+                function_replacement,
+                parameters=parameters,
+                is_variadic=is_variadic,
+            )
         replacement: tuple[_MacroToken, ...] = ()
         replacement_text = tail.strip()
         if replacement_text:
@@ -1858,9 +2063,14 @@ class _Preprocessor:
     def _expand_line_no_callback(self, line: str, location: _SourceLocation) -> str:
         trailing_newline = "\n" if line.endswith("\n") else ""
         text = line[0 : len(line) - 1] if trailing_newline else line
-        return self._expand_text_no_callback(text, ()) + trailing_newline
+        return self._expand_text_no_callback(text, (), location) + trailing_newline
 
-    def _expand_text_no_callback(self, text: str, blocked: tuple[str, ...]) -> str:
+    def _expand_text_no_callback(
+        self,
+        text: str,
+        blocked: tuple[str, ...],
+        location: _SourceLocation,
+    ) -> str:
         result = ""
         index = 0
         while index < len(text):
@@ -1910,11 +2120,44 @@ class _Preprocessor:
                 continue
             replacement = _render_macro_replacement_no_callback(macro)
             if macro.parameters is not None:
-                skipped = _skip_macro_invocation_no_callback(text, index)
-                if skipped != index:
-                    index = skipped
+                invocation = _parse_macro_invocation_no_callback(text, index)
+                if invocation is None:
+                    cursor = index
+                    while cursor < len(text) and text[cursor].isspace():
+                        cursor += 1
+                    if cursor < len(text) and text[cursor] == "(":
+                        raise PreprocessorError(
+                            "Unterminated macro invocation",
+                            location.line,
+                            1,
+                            filename=location.filename,
+                            code=_PP_UNTERMINATED_MACRO,
+                        )
+                    result += name
+                    continue
+                arguments, end = invocation
+                expected = len(macro.parameters)
+                valid = len(arguments) >= expected
+                if not macro.is_variadic:
+                    valid = len(arguments) == expected
+                if not valid:
+                    result += text[start:end]
+                    index = end
+                    continue
+                replacement = _substitute_macro_arguments_no_callback(macro, arguments)
+                replacement = _apply_token_paste_no_callback(replacement)
+                result += self._expand_text_no_callback(
+                    replacement,
+                    blocked + (name,),
+                    location,
+                )
+                index = end
                 continue
-            result += self._expand_text_no_callback(replacement, blocked + (name,))
+            result += self._expand_text_no_callback(
+                replacement,
+                blocked + (name,),
+                location,
+            )
         return result
 
     def _handle_pragma_operator(self, text: str) -> str:

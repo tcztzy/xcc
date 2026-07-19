@@ -135,6 +135,44 @@ class PreprocessorTests(unittest.TestCase):
             "\n\nstruct native_record { int value ; } ;\n\nSELF marker ;\n",
         )
 
+    def test_no_callback_variadic_function_macro_expands_and_pastes(self) -> None:
+        options = FrontendOptions()
+        processor = _Preprocessor(options)
+        processor._init_no_callback(options)
+        processor._handle_define_no_callback(
+            "WRAP(name, type, ...) enum { __VA_ARGS__ }; typedef type name##_t"
+        )
+        with self.assertRaises(PreprocessorError) as context:
+            processor._expand_line_no_callback(
+                "WRAP(qos_class, unsigned int,\n",
+                _SourceLocation("function_macro.c", 2),
+            )
+        result = processor._expand_line_no_callback(
+            "WRAP(qos_class, unsigned int,\n"
+            "QOS_USER = 1, QOS_DEFAULT = 2\n"
+            ");\n",
+            _SourceLocation("function_macro.c", 2),
+        )
+
+        self.assertEqual(context.exception.code, "XCC-PP-0202")
+        self.assertIn("enum { QOS_USER = 1, QOS_DEFAULT = 2 }", result)
+        self.assertIn("typedef unsigned int qos_class_t", result)
+
+    def test_no_callback_token_paste_does_not_stringize_rhs(self) -> None:
+        options = FrontendOptions()
+        processor = _Preprocessor(options)
+        processor._init_no_callback(options)
+        processor._handle_define_no_callback(
+            "DEPRECATED(ver) ___POSIX_C_DEPRECATED_STARTING_##ver"
+        )
+
+        result = processor._expand_line_no_callback(
+            "int old(void) DEPRECATED(200112L);\n",
+            _SourceLocation("token_paste.c", 2),
+        )
+
+        self.assertIn("___POSIX_C_DEPRECATED_STARTING_200112L", result)
+
     def test_no_callback_does_not_expand_macros_in_comments_or_literals(self) -> None:
         result = preprocess_source_no_callback(
             "#define SIGNAL 4 /* signal value */\n"

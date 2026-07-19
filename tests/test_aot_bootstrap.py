@@ -2140,6 +2140,44 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(obj.exists())
 
+    def test_real_native_bootstrap_expands_variadic_function_macro(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b576-function-macro"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "function_macro.c"
+            obj = root / "function_macro.o"
+            source.write_text(
+                "#define ___POSIX_C_DEPRECATED_STARTING_200112L\n"
+                "#define DEPRECATED(ver) ___POSIX_C_DEPRECATED_STARTING_##ver\n"
+                "#define WRAP(name, type, ...) "
+                "enum { __VA_ARGS__ }; typedef type name##_t\n"
+                "int old(void) DEPRECATED(200112L);\n"
+                "WRAP(qos_class, unsigned int,\n"
+                "    QOS_USER = 1,\n"
+                "    QOS_DEFAULT = 2,\n"
+                ");\n"
+                "int main(void) {\n"
+                "    qos_class_t value;\n"
+                "    return 0;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
     def test_real_native_bootstrap_links_configure_style_object_when_llc_exists(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():
