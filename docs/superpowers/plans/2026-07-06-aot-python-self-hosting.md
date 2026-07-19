@@ -498,9 +498,13 @@ UV_CACHE_DIR=/private/tmp/uv-cache-xcc uv run python \
   --build-dir build/cpython-native-aot \
   --clean \
   --native-aot-cc build/aot/xcc \
-  --jobs 8 \
+  --jobs 1 \
   --timeout 900
 ```
+
+Native-AOT-backed integration remains serial until the runtime has verified
+allocation lifetimes and a bounded out-of-memory path. Parallel native compiler
+processes are not an accepted Milestone 9 gate while that work is incomplete.
 
 Also repeat the direct audited Stage 1->2 and Stage 2->3 commands from
 Milestones 7 and 8 after the final source commit.

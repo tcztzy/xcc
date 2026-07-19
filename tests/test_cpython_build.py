@@ -26,6 +26,13 @@ def _load_cpython_build_module():
 
 
 class CPythonBuildScriptTests(unittest.TestCase):
+    def test_default_make_parallelism_is_serial(self) -> None:
+        validate = _load_cpython_build_module()
+
+        args = validate._build_arg_parser().parse_args([])
+
+        self.assertEqual(args.jobs, 1)
+
     def test_build_commands_use_clean_out_of_tree_configure_and_make(self) -> None:
         validate = _load_cpython_build_module()
         env = {"PATH": os.environ.get("PATH", "")}
@@ -190,6 +197,22 @@ class CPythonBuildScriptTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "build_native")
         self.assertEqual(calls[1][0], "run")
         self.assertEqual(calls[1][2], str((Path(tmp) / "native-xcc").resolve()))
+
+    def test_main_rejects_parallel_native_aot_validation(self) -> None:
+        validate = _load_cpython_build_module()
+
+        with self.assertRaisesRegex(
+            SystemExit,
+            "--native-aot-cc requires --jobs 1",
+        ):
+            validate.main(
+                [
+                    "--native-aot-cc",
+                    "/tmp/native-xcc",
+                    "--jobs",
+                    "2",
+                ]
+            )
 
 
 class CPythonBuildToxConfigTests(unittest.TestCase):

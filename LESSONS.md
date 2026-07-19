@@ -1,5 +1,9 @@
 # Lessons
 
+- Treat native compiler peak memory as an acceptance property, not an operator
+  concern. A no-GC runtime multiplied by build parallelism can starve the OS
+  before a normal process-level failure is observable; keep native integration
+  serial until phase lifetimes and a controlled OOM path are verified.
 - Parent-package source resolution can legitimately pull two compiler families
   with the same short class name into one hosted source set. Keep the
   deterministic class owner and its refined metadata coupled; filtering the

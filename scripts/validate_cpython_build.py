@@ -12,7 +12,6 @@ from pathlib import Path
 
 from xcc.aot.bootstrap import build_native_bootstrap
 
-
 DEFAULT_LLC = Path("/opt/homebrew/opt/llvm/bin/llc")
 
 
@@ -119,7 +118,7 @@ def run_step(step: CommandStep) -> CommandResult:
 
 
 def _jobs_default() -> int:
-    return max(1, os.cpu_count() or 1)
+    return 1
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -139,7 +138,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="out-of-tree CPython build directory",
     )
     parser.add_argument("--cc", default=default_cc(), help="compiler command assigned to CC")
-    parser.add_argument("--jobs", type=int, default=_jobs_default(), help="make parallelism")
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=_jobs_default(),
+        help="make parallelism (default: 1; native AOT validation requires 1)",
+    )
     parser.add_argument(
         "--pythonpath",
         type=Path,
@@ -178,6 +182,11 @@ def main(argv: Sequence[str] | None = None, *, run_step: RunStep = run_step) -> 
     args = parser.parse_args(argv)
     if args.jobs < 1:
         raise SystemExit("--jobs must be >= 1")
+    if args.native_aot_cc is not None and args.jobs != 1:
+        raise SystemExit(
+            "--native-aot-cc requires --jobs 1 until native AOT allocation "
+            "lifetimes are bounded"
+        )
 
     cpython_root = args.cpython.resolve()
     configure = cpython_root / "configure"

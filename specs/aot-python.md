@@ -91,6 +91,9 @@ V381: Native C compiler smoke and CPython `configure && make` ! final secondary 
 V382: Every non-`src/xcc/aot` source change for AOT ! ledger reason + subset decision + CPython oracle + native oracle or explicit missing-gate status.
 V383: All-source admission ! syntax/type preflight only; it cannot satisfy V376 or any strong-bootstrap stage gate.
 V384: Bootstrap outputs ! deterministic module ordering, source manifest, normalized IR, and reproducible diagnostics.
+V385: Native compiler resource safety ! allocation lifetimes and peak memory are
+bounded; an input or parallel gate must fail through a controlled diagnostic
+before exhausting host memory or starving the OS watchdog.
 
 ## §T TASKS
 id|status|task|cites
@@ -427,3 +430,4 @@ B585|2026-07-19|the no-callback preprocessor omitted Clang/GCC's six integer `__
 B586|2026-07-19|module-global literal collection preserved dictionary literals but ignored ordinary `dict(existing_mapping)` construction; `BASE_TYPE_ALIGNMENTS = dict(BASE_TYPE_SIZES)` therefore vanished from the native constant environment, every primitive natural-alignment lookup returned `None`, and CPython's valid explicitly aligned `_aligner` member failed sema; the AOT subset must materialize a fresh dictionary constant with the source mapping's entries and layout|V368,V374,V375,V376,V384
 B587|2026-07-19|the no-callback preprocessor seeded target integer limits but omitted the compiler floating minima already exposed by the hosted path; Darwin `<math.h>` therefore left `__FLT_MIN__`, `__DBL_MIN__`, and `__LDBL_MIN__` as undeclared identifiers in valid inline normalization helpers while compiling CPython's first translation unit; the native subset must define the three target-consistent minimum normal values without adding floating builtins or rewriting system headers|V379,V381,V382,V384
 B588|2026-07-19|record-constructor default lowering recognized scalar and container globals but ignored an annotated global record such as `EnumConstSymbol.type_ = INT`; native construction therefore synthesized `Type(name="")`, made every enum constant appear non-scalar, and rejected even a minimal valid enum return/comparison; a matching annotated global record default must remain an `IrName` so the emitter materializes the canonical record constant|V368,V374,V375,V376,V384
+B589|2026-07-19|the native AOT runtime retained allocations for the lifetime of each compiler process while the Milestone 9 plan and CPython build helper allowed eight native compilers concurrently; two runs reached 6.5-19.5 GiB resident memory per process, saturated the macOS compressor, and ended in watchdog kernel panics; native-backed integration must remain serial until stable container handles, bounded phase lifetimes, and a controlled OOM path satisfy the resource-safety invariant|V379,V381,V382,V385

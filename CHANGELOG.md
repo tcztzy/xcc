@@ -2,6 +2,10 @@
 
 ## Current
 
+- Made CPython integration serial by default and rejected parallel
+  `--native-aot-cc` validation after two parallel native builds exhausted host
+  memory and triggered watchdog kernel panics. Native compiler execution remains
+  paused until allocation lifetimes and a controlled OOM path are implemented.
 - Completed the approved strong-bootstrap Milestone 8. Native Stage 2 built
   independent cache-free Stage 3-A and Stage 3-B compilers from the same 65-unit
   repository `.py` snapshot under the execution audit boundary. Both builds
