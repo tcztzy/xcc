@@ -1948,6 +1948,19 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="dict-copy-forwarded.py",
         )
 
+    def test_module_dict_copy_preserves_literal_entries(self) -> None:
+        self.assert_native_matches_cpython(
+            "BASE: dict[str, int] = {'char': 1, 'int': 4}\n"
+            "COPIED: dict[str, int] = dict(BASE)\n"
+            "def inspect(base: dict[str, int], copied: dict[str, int]) -> int:\n"
+            "    copied['char'] = 7\n"
+            "    return base['char'] * 10 + copied['char']\n"
+            "def entry() -> int:\n"
+            "    return inspect(BASE, COPIED)\n",
+            expected=17,
+            filename="module-dict-copy.py",
+        )
+
     def test_dict_copy_and_update_preserve_record_base_values(self) -> None:
         self.assert_native_matches_cpython(
             "class ValueType:\n"

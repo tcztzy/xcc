@@ -7079,11 +7079,15 @@ def _global_literal_element(
     if (
         isinstance(value, ast.Call)
         and isinstance(value.func, ast.Name)
-        and value.func.id in {"frozenset", "list", "set", "tuple"}
+        and value.func.id in {"dict", "frozenset", "list", "set", "tuple"}
         and len(value.args) == 1
         and not value.keywords
     ):
-        return _global_literal_element(value.args[0], literal_names)
+        source = _global_literal_element(value.args[0], literal_names)
+        if value.func.id != "dict":
+            return source
+        if isinstance(source, IrTuple) and isinstance(source.type, IrDictType):
+            return IrTuple(tuple(source.elements), source.type)
     return None
 
 
