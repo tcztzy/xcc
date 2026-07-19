@@ -266,6 +266,26 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("wrong_char_limits", result.source)
         self.assertNotIn("wrong_integer_limits", result.source)
 
+    def test_no_callback_defines_atomic_memory_orders(self) -> None:
+        result = preprocess_source_no_callback(
+            "enum memory_order {\n"
+            "    relaxed = __ATOMIC_RELAXED,\n"
+            "    consume = __ATOMIC_CONSUME,\n"
+            "    acquire = __ATOMIC_ACQUIRE,\n"
+            "    release = __ATOMIC_RELEASE,\n"
+            "    acq_rel = __ATOMIC_ACQ_REL,\n"
+            "    seq_cst = __ATOMIC_SEQ_CST\n"
+            "};\n",
+            filename="atomic_orders.c",
+        )
+
+        self.assertIn("relaxed = 0", result.source)
+        self.assertIn("consume = 1", result.source)
+        self.assertIn("acquire = 2", result.source)
+        self.assertIn("release = 3", result.source)
+        self.assertIn("acq_rel = 4", result.source)
+        self.assertIn("seq_cst = 5", result.source)
+
     def test_no_callback_evaluates_feature_probe_conditions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
