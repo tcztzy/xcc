@@ -1997,6 +1997,20 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         self.assertRegex(llvm_ir, r"%optional\.int\.payload\d+ = getelementptr i8")
 
+    def test_coerces_optional_integer_to_nullable_llvm_pointer(self) -> None:
+        emitter = _Emitter(IrModule("optional-pointer.py", (), ()))
+        lines: list[str] = []
+
+        pointer = emitter._coerce_llvm_pointer(
+            _EmittedValue("%optional", IrRecordType("int | None")),
+            lines,
+        )
+
+        self.assertRegex("\n".join(lines), r"icmp ne ptr %optional, null")
+        self.assertRegex("\n".join(lines), r"load i64, ptr %optional\.int\.payload\d+")
+        self.assertRegex("\n".join(lines), r"inttoptr i64 %optional\.int\d+ to ptr")
+        self.assertRegex("\n".join(lines), rf"{pointer} = phi ptr")
+
     def test_boxes_optional_integer_on_break_exit_edge(self) -> None:
         module = lower_source_to_ir(
             "def find() -> int:\n"

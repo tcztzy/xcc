@@ -2276,6 +2276,39 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             )
             self.assertEqual(run_result.returncode, 0, run_result.stdout + run_result.stderr)
 
+    def test_real_native_bootstrap_emits_switch_default(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b581-switch-default"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "switch_default.c"
+            obj = root / "switch_default.o"
+            source.write_text(
+                "int choose(int value) {\n"
+                "    switch (value) {\n"
+                "    case 1:\n"
+                "        return 1;\n"
+                "    default:\n"
+                "        return 0;\n"
+                "    }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
     def test_real_native_bootstrap_accepts_function_pointer_argument(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():

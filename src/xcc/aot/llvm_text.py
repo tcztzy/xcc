@@ -7081,6 +7081,29 @@ class _Emitter:
             result = self._tmp("bytesdata")
             lines.append(f"  {result} = call ptr @__xcc_aot_bytes_data(ptr {value.value})")
             return result
+        if _is_optional_int_type(value.type):
+            present = self._tmp("optional.int.ptr.present")
+            present_label = self._label("optional.int.ptr.present")
+            absent_label = self._label("optional.int.ptr.absent")
+            end_label = self._label("optional.int.ptr.end")
+            payload = self._tmp("optional.int.payload")
+            integer = self._tmp("optional.int")
+            pointer = self._tmp("optional.int.ptr")
+            result = self._tmp("optional.int.ptr")
+            lines.append(f"  {present} = icmp ne ptr {value.value}, null")
+            lines.append(f"  br i1 {present}, label %{present_label}, label %{absent_label}")
+            lines.append(f"{present_label}:")
+            lines.append(f"  {payload} = getelementptr i8, ptr {value.value}, i64 8")
+            lines.append(f"  {integer} = load i64, ptr {payload}")
+            lines.append(f"  {pointer} = inttoptr i64 {integer} to ptr")
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{absent_label}:")
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{end_label}:")
+            lines.append(
+                f"  {result} = phi ptr [ {pointer}, %{present_label} ], [ null, %{absent_label} ]"
+            )
+            return result
         if _is_pointer_type(value.type):
             return value.value
         if isinstance(value.type, IrIntType):
