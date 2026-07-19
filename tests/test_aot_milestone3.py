@@ -385,7 +385,7 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertEqual(completed.stdout, "")
         self.assertEqual(completed.stderr, "xcc-aot: allocation limit exceeded\n")
 
-    def test_tuple_alias_resolver_is_iterative_and_compresses_the_root_path(self) -> None:
+    def test_tuple_backing_uses_a_stable_handle_without_global_forwarding_tables(self) -> None:
         prelude = runtime_prelude()
         resolver = prelude.split(
             "define ptr @__xcc_aot_tuple_resolve(ptr %tuple) {",
@@ -393,8 +393,37 @@ class AotMilestone3IrTests(unittest.TestCase):
         )[1].split("define void @__xcc_aot_tuple_forward", 1)[0]
 
         self.assertNotIn("call ptr @__xcc_aot_tuple_resolve", resolver)
-        self.assertIn("%current = phi ptr [ %tuple, %start ], [ %new, %follow ]", resolver)
-        self.assertIn("store ptr %terminal, ptr %root_new_slot", resolver)
+        self.assertIn("ret ptr %tuple", resolver)
+        self.assertNotIn("@__xcc_aot_tuple_aliases", prelude)
+        self.assertNotIn("@__xcc_aot_tuple_capacities", prelude)
+        self.assertNotIn("@__xcc_aot_tuple_object_layouts", prelude)
+        self.assertIn("define ptr @__xcc_aot_tuple_new(i64 %length)", prelude)
+        self.assertIn("call ptr @__xcc_aot_realloc", prelude)
+
+    def test_tuple_append_keeps_the_original_handle(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %tuple = call ptr @__xcc_aot_tuple_new(i64 0)\n"
+            + "  %appended = call ptr @__xcc_aot_tuple_append(ptr %tuple, ptr null)\n"
+            + "  %same = icmp eq ptr %tuple, %appended\n"
+            + "  %length = call i64 @__xcc_aot_tuple_len(ptr %tuple)\n"
+            + "  %right_length = icmp eq i64 %length, 1\n"
+            + "  %ok = and i1 %same, %right_length\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "stable-tuple-handle",
+                filename="stable-tuple-handle.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
 
     def test_annotation_name_edge_forms(self) -> None:
         string_annotation = parse_source(

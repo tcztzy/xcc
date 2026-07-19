@@ -1,5 +1,10 @@
 # Lessons
 
+- Give mutable runtime values a stable identity before optimizing lookup tables.
+  If growth changes the externally visible payload pointer, alias correctness
+  forces permanent forwarding metadata and makes memory usage depend on mutation
+  history. A fixed handle with a separately resizable buffer makes both aliasing
+  and allocation accounting local and testable.
 - Centralize generated allocations before adding reclamation. A conservative
   emergency budget provides one auditable containment point for leaks and size
   overflows, while ownership/drop work can replace the temporary process exit

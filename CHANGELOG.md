@@ -2,6 +2,12 @@
 
 ## Current
 
+- Replaced tuple-backed inline payload pointers and three million-slot global
+  metadata tables with stable runtime handles. Tuple/list/dict/set growth now
+  resizes only the owned element buffer through the allocation boundary,
+  preserves aliases without forwarding chains, and keeps object-layout metadata
+  in the handle. Out-of-range runtime get/set operations cannot access the
+  backing buffer.
 - Routed generated `malloc` and `calloc` operations through an overflow-checked
   AOT allocation boundary with a 512 MiB cumulative emergency limit and a
   deterministic exit-70 diagnostic. This is crash containment, not completion

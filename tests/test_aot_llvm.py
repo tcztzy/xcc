@@ -1959,12 +1959,12 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertRegex(
             llvm_ir,
             r"%loopexit\d+ = phi ptr \[ %loop\d+, %while\.cond\d+ \], "
-            r"\[ %tuple\d+, %while\.body\d+ \]",
+            r"\[ %loop\d+, %while\.body\d+ \]",
         )
         self.assertRegex(
             llvm_ir,
             r"%loopexit\d+ = phi ptr \[ %loop\d+, %for\.cond\d+ \], "
-            r"\[ %tuple\d+, %for\.body\d+ \]",
+            r"\[ %loop\d+, %for\.body\d+ \]",
         )
 
     def test_emits_for_each_continue_through_increment_block(self) -> None:
@@ -2005,7 +2005,8 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertRegex(
             llvm_ir,
-            r"%loop\d+ = phi ptr \[ %tuple\d+, %entry \], \[ %tuple\d+, %for\.next\d+ \]",
+            r"%loop(\d+) = phi ptr \[ %tuple\d+, %entry \], "
+            r"\[ %loop\1, %for\.next\d+ \]",
         )
         self.assertRegex(llvm_ir, r"call i64 @__xcc_aot_tuple_len\(ptr %loop\d+\)")
 
@@ -2789,7 +2790,10 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         llvm_ir = emit_llvm_text(module)
         self.assertIn("; build enumerate pair", llvm_ir)
-        self.assertRegex(llvm_ir, r"%enumpair\d+ = call ptr @__xcc_aot_alloc\(i64 24\)")
+        self.assertRegex(
+            llvm_ir,
+            r"%enumpair\d+ = call ptr @__xcc_aot_tuple_new\(i64 2\)",
+        )
         self.assertRegex(llvm_ir, r"%enumindex\d+ = add i64 %index\d+, 1")
 
     def test_emits_subscript_assignment_via_tuple_set(self) -> None:
@@ -3966,7 +3970,10 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertRegex(llvm_ir, r"store i64 9, ptr %object\d+")
         self.assertRegex(llvm_ir, r"store ptr %tuple\d+, ptr %object\.payload\d+")
-        self.assertRegex(llvm_ir, r"store ptr %object\d+, ptr %tupleslot\d+")
+        self.assertRegex(
+            llvm_ir,
+            r"call void @__xcc_aot_tuple_set\(ptr %tuple\d+, i64 \d+, ptr %object\d+\)",
+        )
 
     def test_tuple_concat_keeps_homogeneous_declared_object_layout(self) -> None:
         module = lower_source_to_ir(
@@ -4000,7 +4007,10 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
         self.assertRegex(llvm_ir, r"store i64 2, ptr %object\d+")
-        self.assertRegex(llvm_ir, r"store ptr %object\d+, ptr %tupleslot\d+")
+        self.assertRegex(
+            llvm_ir,
+            r"call void @__xcc_aot_tuple_set\(ptr %tuple\d+, i64 \d+, ptr %object\d+\)",
+        )
 
     def test_emits_range_intrinsic_as_runtime_tuple(self) -> None:
         int64 = IrIntType(64, signed=True)

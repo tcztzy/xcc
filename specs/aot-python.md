@@ -94,6 +94,9 @@ V384: Bootstrap outputs ! deterministic module ordering, source manifest, normal
 V385: Native compiler resource safety ! allocation lifetimes and peak memory are
 bounded; an input or parallel gate must fail through a controlled diagnostic
 before exhausting host memory or starving the OS watchdog.
+V386: Tuple-backed runtime identity ! one stable handle owns length, capacity,
+element storage, and object-layout metadata; growth may replace only the owned
+element buffer, and process-global forwarding/capacity/layout tables ⊥.
 
 ## §T TASKS
 id|status|task|cites
@@ -432,3 +435,4 @@ B587|2026-07-19|the no-callback preprocessor seeded target integer limits but om
 B588|2026-07-19|record-constructor default lowering recognized scalar and container globals but ignored an annotated global record such as `EnumConstSymbol.type_ = INT`; native construction therefore synthesized `Type(name="")`, made every enum constant appear non-scalar, and rejected even a minimal valid enum return/comparison; a matching annotated global record default must remain an `IrName` so the emitter materializes the canonical record constant|V368,V374,V375,V376,V384
 B589|2026-07-19|the native AOT runtime retained allocations for the lifetime of each compiler process while the Milestone 9 plan and CPython build helper allowed eight native compilers concurrently; two runs reached 6.5-19.5 GiB resident memory per process, saturated the macOS compressor, and ended in watchdog kernel panics; native-backed integration must remain serial until stable container handles, bounded phase lifetimes, and a controlled OOM path satisfy the resource-safety invariant|V379,V381,V382,V385
 B590|2026-07-19|every generated heap allocation called libc `malloc`/`calloc` directly, so an ownership leak or malformed dynamic size had no process-local containment and could consume host memory until the OS watchdog panicked; all generated allocations must route through one overflow-checked runtime boundary with a conservative cumulative hard limit and deterministic emergency diagnostic while the stronger Arena/drop ABI remains incomplete|V368,V376,V380,V384,V385
+B591|2026-07-19|tuple-backed mutable containers represented identity with replaceable inline payload pointers, so alias preservation required permanent process-global forwarding, capacity, and object-layout tables while each growth retained obsolete payloads and metadata; every tuple/list/dict/set value now uses one fixed-size stable handle with an overflow-checked resizable element buffer and in-handle layout metadata, and mutating operations return the original handle|V368,V375,V376,V384,V385,V386

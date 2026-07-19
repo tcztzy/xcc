@@ -1514,14 +1514,9 @@ class _Emitter:
             lines,
         )
         lines.append("  ; build enumerate pair")
-        lines.append(f"  {result} = call ptr @malloc(i64 24)")
-        lines.append(f"  store i64 2, ptr {result}")
-        index_slot = self._tmp("enumpairslot")
-        item_slot = self._tmp("enumpairslot")
-        lines.append(f"  {index_slot} = getelementptr ptr, ptr {result}, i64 1")
-        lines.append(f"  store ptr {index_box}, ptr {index_slot}")
-        lines.append(f"  {item_slot} = getelementptr ptr, ptr {result}, i64 2")
-        lines.append(f"  store ptr {item}, ptr {item_slot}")
+        lines.append(f"  {result} = call ptr @__xcc_aot_tuple_new(i64 2)")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {result}, i64 0, ptr {index_box})")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {result}, i64 1, ptr {item})")
         return _EmittedValue(result, enumerate_type)
 
     def _emit_runtime_tuple_get(
@@ -1943,17 +1938,14 @@ class _Emitter:
         self.needs_runtime_prelude = True
         args = [self._emit_expr(element, names, lines) for element in expr.elements]
         result = self._tmp("tuple")
-        size = (len(args) + 1) * 8
-        lines.append(f"  {result} = call ptr @malloc(i64 {size})")
-        lines.append(f"  store i64 {len(args)}, ptr {result}")
-        for index, arg in enumerate(args, start=1):
-            slot = self._tmp("tupleslot")
+        lines.append(f"  {result} = call ptr @__xcc_aot_tuple_new(i64 {len(args)})")
+        for index, arg in enumerate(args):
             if isinstance(expr.type, IrDictType):
                 item_type: IrType = IrTupleType((expr.type.key, expr.type.value))
             elif len(expr.type.elements) == 1:
                 item_type = expr.type.elements[0]
             elif len(expr.type.elements) == len(args):
-                item_type = expr.type.elements[index - 1]
+                item_type = expr.type.elements[index]
             else:
                 item_type = arg.type
             item = (
@@ -1965,8 +1957,7 @@ class _Emitter:
                     else self._box_to_runtime_ptr(arg, lines)
                 )
             )
-            lines.append(f"  {slot} = getelementptr ptr, ptr {result}, i64 {index}")
-            lines.append(f"  store ptr {item}, ptr {slot}")
+            lines.append(f"  call void @__xcc_aot_tuple_set(ptr {result}, i64 {index}, ptr {item})")
         self._register_tuple_object_layout(result, expr.type, lines)
         return _EmittedValue(result, expr.type)
 
@@ -3930,10 +3921,7 @@ class _Emitter:
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{insert_label}:")
         pair = self._tmp("dictdefault.pair")
-        key_slot = self._tmp("dictdefault.keyslot")
-        value_slot = self._tmp("dictdefault.valueslot")
         singleton = self._tmp("dictdefault.singleton")
-        singleton_slot = self._tmp("dictdefault.singletonslot")
         appended = self._tmp("dictdefault.appended")
         coerced_key = _EmittedValue(
             self._value_for_result_type(key, key_type, lines),
@@ -3945,16 +3933,11 @@ class _Emitter:
         )
         key_box = self._box_to_runtime_ptr(coerced_key, lines)
         default_box = self._box_to_runtime_ptr(coerced_default, lines)
-        lines.append(f"  {pair} = call ptr @malloc(i64 24)")
-        lines.append(f"  store i64 2, ptr {pair}")
-        lines.append(f"  {key_slot} = getelementptr ptr, ptr {pair}, i64 1")
-        lines.append(f"  store ptr {key_box}, ptr {key_slot}")
-        lines.append(f"  {value_slot} = getelementptr ptr, ptr {pair}, i64 2")
-        lines.append(f"  store ptr {default_box}, ptr {value_slot}")
-        lines.append(f"  {singleton} = call ptr @malloc(i64 16)")
-        lines.append(f"  store i64 1, ptr {singleton}")
-        lines.append(f"  {singleton_slot} = getelementptr ptr, ptr {singleton}, i64 1")
-        lines.append(f"  store ptr {pair}, ptr {singleton_slot}")
+        lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {default_box})")
+        lines.append(f"  {singleton} = call ptr @__xcc_aot_tuple_new(i64 1)")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {singleton}, i64 0, ptr {pair})")
         lines.append(
             f"  {appended} = call ptr @__xcc_aot_tuple_concat("
             f"ptr {dict_value.value}, ptr {singleton})"
@@ -4021,9 +4004,7 @@ class _Emitter:
             value_type,
         )
         value_box = self._box_to_runtime_ptr(coerced_value, lines)
-        value_slot = self._tmp("dictset.valueslot")
-        lines.append(f"  {value_slot} = getelementptr ptr, ptr {raw_pair}, i64 2")
-        lines.append(f"  store ptr {value_box}, ptr {value_slot}")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {raw_pair}, i64 1, ptr {value_box})")
         lines.append(f"  store ptr {dict_value.value}, ptr {result_ptr}")
         lines.append(f"  br label %{end_label}")
         lines.append(f"{next_label}:")
@@ -4033,10 +4014,7 @@ class _Emitter:
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{append_label}:")
         pair = self._tmp("dictset.pair")
-        key_slot = self._tmp("dictset.keyslot")
-        append_value_slot = self._tmp("dictset.valueslot")
         singleton = self._tmp("dictset.singleton")
-        singleton_slot = self._tmp("dictset.singletonslot")
         appended = self._tmp("dictset.appended")
         coerced_key = _EmittedValue(self._value_for_result_type(key, key_type, lines), key_type)
         key_box = self._box_to_runtime_ptr(coerced_key, lines)
@@ -4048,16 +4026,11 @@ class _Emitter:
             coerced_append_value,
             lines,
         )
-        lines.append(f"  {pair} = call ptr @malloc(i64 24)")
-        lines.append(f"  store i64 2, ptr {pair}")
-        lines.append(f"  {key_slot} = getelementptr ptr, ptr {pair}, i64 1")
-        lines.append(f"  store ptr {key_box}, ptr {key_slot}")
-        lines.append(f"  {append_value_slot} = getelementptr ptr, ptr {pair}, i64 2")
-        lines.append(f"  store ptr {append_value_box}, ptr {append_value_slot}")
-        lines.append(f"  {singleton} = call ptr @malloc(i64 16)")
-        lines.append(f"  store i64 1, ptr {singleton}")
-        lines.append(f"  {singleton_slot} = getelementptr ptr, ptr {singleton}, i64 1")
-        lines.append(f"  store ptr {pair}, ptr {singleton_slot}")
+        lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {append_value_box})")
+        lines.append(f"  {singleton} = call ptr @__xcc_aot_tuple_new(i64 1)")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {singleton}, i64 0, ptr {pair})")
         lines.append(
             f"  {appended} = call ptr @__xcc_aot_tuple_concat("
             f"ptr {dict_value.value}, ptr {singleton})"
@@ -4068,7 +4041,7 @@ class _Emitter:
         result = self._tmp("dictset")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
         lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {dict_value.value}, ptr {result})")
-        return _EmittedValue(result, expr.type)
+        return _EmittedValue(dict_value.value, expr.type)
 
     def _emit_dict_items_call(
         self,
@@ -4188,7 +4161,7 @@ class _Emitter:
         result = self._tmp("dictupdate")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
         lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {target.value}, ptr {result})")
-        return _EmittedValue(result, target.type)
+        return _EmittedValue(target.value, target.type)
 
     def _emit_dict_remove_call(
         self,
@@ -4213,8 +4186,7 @@ class _Emitter:
         end_label = self._label("dictremove.end")
         lines.append(f"  {result_ptr} = alloca ptr")
         lines.append(f"  {index_ptr} = alloca i64")
-        lines.append(f"  {empty} = call ptr @malloc(i64 8)")
-        lines.append(f"  store i64 0, ptr {empty}")
+        lines.append(f"  {empty} = call ptr @__xcc_aot_tuple_new(i64 0)")
         lines.append(f"  store ptr {empty}, ptr {result_ptr}")
         lines.append(f"  store i64 0, ptr {index_ptr}")
         lines.append(f"  br label %{cond_label}")
@@ -4235,13 +4207,10 @@ class _Emitter:
         lines.append(f"{append_label}:")
         current = self._tmp("dictremove.current")
         singleton = self._tmp("dictremove.singleton")
-        singleton_slot = self._tmp("dictremove.slot")
         appended = self._tmp("dictremove.appended")
         lines.append(f"  {current} = load ptr, ptr {result_ptr}")
-        lines.append(f"  {singleton} = call ptr @malloc(i64 16)")
-        lines.append(f"  store i64 1, ptr {singleton}")
-        lines.append(f"  {singleton_slot} = getelementptr ptr, ptr {singleton}, i64 1")
-        lines.append(f"  store ptr {pair}, ptr {singleton_slot}")
+        lines.append(f"  {singleton} = call ptr @__xcc_aot_tuple_new(i64 1)")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {singleton}, i64 0, ptr {pair})")
         lines.append(
             f"  {appended} = call ptr @__xcc_aot_tuple_concat(ptr {current}, ptr {singleton})"
         )
@@ -4256,7 +4225,7 @@ class _Emitter:
         result = self._tmp("dictremove")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
         lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {target.value}, ptr {result})")
-        return _EmittedValue(result, target.type)
+        return _EmittedValue(target.value, target.type)
 
     def _emit_dict_comprehension_call(
         self,
@@ -4282,8 +4251,7 @@ class _Emitter:
         result_ptr = self._tmp("dictcomp.resultptr")
         empty = self._tmp("dictcomp.empty")
         lines.append(f"  {result_ptr} = alloca ptr")
-        lines.append(f"  {empty} = call ptr @malloc(i64 8)")
-        lines.append(f"  store i64 0, ptr {empty}")
+        lines.append(f"  {empty} = call ptr @__xcc_aot_tuple_new(i64 0)")
         lines.append(f"  store ptr {empty}, ptr {result_ptr}")
         self._emit_dict_comprehension_level(
             expr,
@@ -4493,8 +4461,7 @@ class _Emitter:
         result_ptr = self._tmp("seqcomp.resultptr")
         empty = self._tmp("seqcomp.empty")
         lines.append(f"  {result_ptr} = alloca ptr")
-        lines.append(f"  {empty} = call ptr @malloc(i64 8)")
-        lines.append(f"  store i64 0, ptr {empty}")
+        lines.append(f"  {empty} = call ptr @__xcc_aot_tuple_new(i64 0)")
         lines.append(f"  store ptr {empty}, ptr {result_ptr}")
         self._emit_sequence_comprehension_level(
             expr,
@@ -4685,18 +4652,13 @@ class _Emitter:
             lines.append(f"  {shorter} = icmp ult i64 {length}, {count}")
             lines.append(f"  {next_count} = select i1 {shorter}, i64 {length}, i64 {count}")
             count = next_count
-        slot_count = self._tmp("zip.slotcount")
-        allocation_size = self._tmp("zip.allocsize")
         result = self._tmp("zip")
         index_ptr = self._tmp("zip.indexptr")
         cond_label = self._label("zip.cond")
         body_label = self._label("zip.body")
         next_label = self._label("zip.next")
         end_label = self._label("zip.end")
-        lines.append(f"  {slot_count} = add i64 {count}, 1")
-        lines.append(f"  {allocation_size} = mul i64 {slot_count}, 8")
-        lines.append(f"  {result} = call ptr @malloc(i64 {allocation_size})")
-        lines.append(f"  store i64 {count}, ptr {result}")
+        lines.append(f"  {result} = call ptr @__xcc_aot_tuple_new(i64 {count})")
         lines.append(f"  {index_ptr} = alloca i64")
         lines.append(f"  store i64 0, ptr {index_ptr}")
         lines.append(f"  br label %{cond_label}")
@@ -4707,23 +4669,17 @@ class _Emitter:
         lines.append(f"  {done} = icmp uge i64 {index}, {count}")
         lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
         lines.append(f"{body_label}:")
-        pair_size = (len(iterables) + 1) * 8
         pair = self._tmp("zip.item")
-        lines.append(f"  {pair} = call ptr @malloc(i64 {pair_size})")
-        lines.append(f"  store i64 {len(iterables)}, ptr {pair}")
-        for item_index, iterable in enumerate(iterables, start=1):
+        lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 {len(iterables)})")
+        for item_index, iterable in enumerate(iterables):
             item = self._tmp("zip.value")
-            slot = self._tmp("zip.itemslot")
             lines.append(
                 f"  {item} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})"
             )
-            lines.append(f"  {slot} = getelementptr ptr, ptr {pair}, i64 {item_index}")
-            lines.append(f"  store ptr {item}, ptr {slot}")
-        result_index = self._tmp("zip.resultindex")
-        result_slot = self._tmp("zip.resultslot")
-        lines.append(f"  {result_index} = add i64 {index}, 1")
-        lines.append(f"  {result_slot} = getelementptr ptr, ptr {result}, i64 {result_index}")
-        lines.append(f"  store ptr {pair}, ptr {result_slot}")
+            lines.append(
+                f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 {item_index}, ptr {item})"
+            )
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {result}, i64 {index}, ptr {pair})")
         lines.append(f"  br label %{next_label}")
         lines.append(f"{next_label}:")
         next_index = self._tmp("zip.next")
@@ -4752,14 +4708,9 @@ class _Emitter:
         reverse = self._coerce_to_bool(self._emit_expr(expr.args[3], names, lines), lines)
         self.needs_runtime_prelude = True
         length = self._tmp("sorted.len")
-        allocation_items = self._tmp("sorted.allocitems")
-        allocation_size = self._tmp("sorted.allocsize")
         result = self._tmp("sorted")
         lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
-        lines.append(f"  {allocation_items} = add i64 {length}, 1")
-        lines.append(f"  {allocation_size} = mul i64 {allocation_items}, 8")
-        lines.append(f"  {result} = call ptr @malloc(i64 {allocation_size})")
-        lines.append(f"  store i64 {length}, ptr {result}")
+        lines.append(f"  {result} = call ptr @__xcc_aot_tuple_new(i64 {length})")
 
         copy_index_ptr = self._tmp("sorted.copy.indexptr")
         copy_cond_label = self._label("sorted.copy.cond")
@@ -4783,11 +4734,9 @@ class _Emitter:
             raw_key = self._tmp("sorted.copy.key")
             lines.append(f"  {raw_key} = call ptr @__xcc_aot_tuple_get(ptr {raw_item}, i64 0)")
             raw_item = raw_key
-        copy_slot_index = self._tmp("sorted.copy.slotindex")
-        copy_slot = self._tmp("sorted.copy.slot")
-        lines.append(f"  {copy_slot_index} = add i64 {copy_index}, 1")
-        lines.append(f"  {copy_slot} = getelementptr ptr, ptr {result}, i64 {copy_slot_index}")
-        lines.append(f"  store ptr {raw_item}, ptr {copy_slot}")
+        lines.append(
+            f"  call void @__xcc_aot_tuple_set(ptr {result}, i64 {copy_index}, ptr {raw_item})"
+        )
         copy_next = self._tmp("sorted.copy.next")
         lines.append(f"  {copy_next} = add i64 {copy_index}, 1")
         lines.append(f"  store i64 {copy_next}, ptr {copy_index_ptr}")
@@ -4828,18 +4777,14 @@ class _Emitter:
         lines.append(f"  {inner_done} = icmp uge i64 {inner}, {pass_length}")
         lines.append(f"  br i1 {inner_done}, label %{outer_next_label}, label %{inner_body_label}")
         lines.append(f"{inner_body_label}:")
-        left_slot_index = self._tmp("sorted.left.index")
-        right_slot_index = self._tmp("sorted.right.index")
-        left_slot = self._tmp("sorted.left.slot")
-        right_slot = self._tmp("sorted.right.slot")
         left_raw = self._tmp("sorted.left")
         right_raw = self._tmp("sorted.right")
-        lines.append(f"  {left_slot_index} = add i64 {inner}, 1")
-        lines.append(f"  {right_slot_index} = add i64 {inner}, 2")
-        lines.append(f"  {left_slot} = getelementptr ptr, ptr {result}, i64 {left_slot_index}")
-        lines.append(f"  {right_slot} = getelementptr ptr, ptr {result}, i64 {right_slot_index}")
-        lines.append(f"  {left_raw} = load ptr, ptr {left_slot}")
-        lines.append(f"  {right_raw} = load ptr, ptr {right_slot}")
+        right_index = self._tmp("sorted.right.index")
+        lines.append(f"  {right_index} = add i64 {inner}, 1")
+        lines.append(f"  {left_raw} = call ptr @__xcc_aot_tuple_get(ptr {result}, i64 {inner})")
+        lines.append(
+            f"  {right_raw} = call ptr @__xcc_aot_tuple_get(ptr {result}, i64 {right_index})"
+        )
         left = self._emit_runtime_boxed_value(left_raw, marker.type, lines)
         right = self._emit_runtime_boxed_value(right_raw, marker.type, lines)
         left_names = dict(names)
@@ -4872,8 +4817,12 @@ class _Emitter:
         )
         lines.append(f"  br i1 {should_swap}, label %{swap_label}, label %{inner_next_label}")
         lines.append(f"{swap_label}:")
-        lines.append(f"  store ptr {right_raw}, ptr {left_slot}")
-        lines.append(f"  store ptr {left_raw}, ptr {right_slot}")
+        lines.append(
+            f"  call void @__xcc_aot_tuple_set(ptr {result}, i64 {inner}, ptr {right_raw})"
+        )
+        lines.append(
+            f"  call void @__xcc_aot_tuple_set(ptr {result}, i64 {right_index}, ptr {left_raw})"
+        )
         lines.append(f"  br label %{inner_next_label}")
         lines.append(f"{inner_next_label}:")
         inner_next = self._tmp("sorted.inner.next")
@@ -5287,7 +5236,7 @@ class _Emitter:
             result_type = expr.type if isinstance(expr.type, IrTupleType) else receiver.type
             if isinstance(expr.type, IrNoneType):
                 return _EmittedValue("null", expr.type)
-            return _EmittedValue(result, result_type)
+            return _EmittedValue(receiver.value, result_type)
         if len(expr.args) != 2:
             self._error(f"{method} expects receiver and one argument")
         result_type = expr.type if isinstance(expr.type, IrTupleType) else receiver.type
@@ -5303,7 +5252,7 @@ class _Emitter:
             lines.append(
                 f"  call void @__xcc_aot_tuple_forward(ptr {receiver.value}, ptr {result})"
             )
-            return _EmittedValue(result, result_type)
+            return _EmittedValue(receiver.value, result_type)
         if method == "extend":
             extension = self._emit_expr(expr.args[1], names, lines)
             if not isinstance(extension.type, IrTupleType):
@@ -5317,7 +5266,7 @@ class _Emitter:
             lines.append(
                 f"  call void @__xcc_aot_tuple_forward(ptr {receiver.value}, ptr {result})"
             )
-            return _EmittedValue(result, result_type)
+            return _EmittedValue(receiver.value, result_type)
         item = self._emit_expr(expr.args[1], names, lines)
         singleton = self._runtime_singleton_tuple(item, lines)
         result = self._tmp("tuple")
@@ -5326,7 +5275,7 @@ class _Emitter:
             f"  {result} = call ptr @__xcc_aot_tuple_concat(ptr {receiver.value}, ptr {singleton})"
         )
         lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {receiver.value}, ptr {result})")
-        return _EmittedValue(result, result_type)
+        return _EmittedValue(receiver.value, result_type)
 
     def _emit_tuple_pop_item_call(
         self,
@@ -5443,13 +5392,10 @@ class _Emitter:
 
     def _runtime_singleton_tuple(self, item: _EmittedValue, lines: list[str]) -> str:
         result = self._tmp("tuple")
-        slot = self._tmp("tupleslot")
         boxed = self._box_to_runtime_ptr(item, lines)
         lines.append("  ; tuple-backed append singleton")
-        lines.append(f"  {result} = call ptr @malloc(i64 16)")
-        lines.append(f"  store i64 1, ptr {result}")
-        lines.append(f"  {slot} = getelementptr ptr, ptr {result}, i64 1")
-        lines.append(f"  store ptr {boxed}, ptr {slot}")
+        lines.append(f"  {result} = call ptr @__xcc_aot_tuple_new(i64 1)")
+        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {result}, i64 0, ptr {boxed})")
         return result
 
     def _emit_float_call(
@@ -5826,8 +5772,7 @@ class _Emitter:
         result_ptr = self._tmp("setop.resultptr")
         empty = self._tmp("setop.empty")
         lines.append(f"  {result_ptr} = alloca ptr")
-        lines.append(f"  {empty} = call ptr @malloc(i64 8)")
-        lines.append(f"  store i64 0, ptr {empty}")
+        lines.append(f"  {empty} = call ptr @__xcc_aot_tuple_new(i64 0)")
         lines.append(f"  store ptr {empty}, ptr {result_ptr}")
         if expr.target in {"__set_union", "__set_update"}:
             self._emit_set_binary_phase(
@@ -5897,6 +5842,7 @@ class _Emitter:
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
         if expr.target == "__set_update":
             lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {left.value}, ptr {result})")
+            return _EmittedValue(left.value, expr.type)
         return _EmittedValue(result, expr.type)
 
     def _emit_set_add_call(
@@ -5940,11 +5886,7 @@ class _Emitter:
         lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {receiver.value}, ptr {updated})")
         lines.append(f"  br label %{end_label}")
         lines.append(f"{end_label}:")
-        result = self._tmp("setadd")
-        lines.append(
-            f"  {result} = phi ptr [{receiver.value}, %{keep_label}], [{updated}, %{append_label}]"
-        )
-        return _EmittedValue(result, expr.type)
+        return _EmittedValue(receiver.value, expr.type)
 
     def _emit_set_equality_call(
         self,
