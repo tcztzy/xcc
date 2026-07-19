@@ -2317,6 +2317,39 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             )
             self.assertEqual(run_result.returncode, 0, run_result.stdout + run_result.stderr)
 
+    def test_real_native_bootstrap_expands_limits_macros(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b584-limits"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "limits.c"
+            obj = root / "limits.o"
+            source.write_text(
+                "#include <limits.h>\n"
+                "#if UCHAR_MAX != 255 || CHAR_BIT != 8\n"
+                '#error "invalid char limits"\n'
+                "#endif\n"
+                "#if SHRT_MAX != 32767 || INT_MAX != 2147483647\n"
+                '#error "invalid integer limits"\n'
+                "#endif\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
     def test_real_native_bootstrap_emits_switch_default(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():

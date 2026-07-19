@@ -248,6 +248,24 @@ class PreprocessorTests(unittest.TestCase):
         self.assertNotIn("missing_order", result.source)
         self.assertNotIn("wrong_precedence", result.source)
 
+    def test_no_callback_defines_compiler_integer_limits(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define UCHAR_MAX (__SCHAR_MAX__ * 2 + 1)\n"
+            "#define CHAR_BIT __CHAR_BIT__\n"
+            "#if UCHAR_MAX != 255 || CHAR_BIT != 8\n"
+            "int wrong_char_limits;\n"
+            "#elif __SHRT_MAX__ != 32767 || __INT_MAX__ != 2147483647\n"
+            "int wrong_integer_limits;\n"
+            "#else\n"
+            "int limits_ok;\n"
+            "#endif\n",
+            filename="compiler_limits.c",
+        )
+
+        self.assertIn("limits_ok", result.source)
+        self.assertNotIn("wrong_char_limits", result.source)
+        self.assertNotIn("wrong_integer_limits", result.source)
+
     def test_no_callback_evaluates_feature_probe_conditions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
