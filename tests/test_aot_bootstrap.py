@@ -2309,6 +2309,43 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(obj.exists())
 
+    def test_real_native_bootstrap_emits_inferred_global_array(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b582-inferred-global-array"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "inferred_global_array.c"
+            program = root / "inferred_global_array"
+            source.write_text(
+                "static double values[] = {9.090423496703681e+223, 0.0};\n"
+                "int main(void) { return values[0] > 0.0 ? 0 : 1; }\n",
+                encoding="utf-8",
+            )
+
+            compile_result = subprocess.run(
+                (str(executable), str(source), "-o", str(program)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                compile_result.stdout + compile_result.stderr,
+            )
+            run_result = subprocess.run(
+                (str(program),),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run_result.returncode, 0, run_result.stdout + run_result.stderr)
+
     def test_real_native_bootstrap_accepts_function_pointer_argument(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():

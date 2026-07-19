@@ -1074,6 +1074,26 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="fixed-tuple-object-slot.py",
         )
 
+    def test_tuple_concat_preserves_declared_tagged_object_slot(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "FunctionParams = tuple[tuple['Type', ...] | None, bool]\n"
+            "TypeOp = tuple[str, int | FunctionParams]\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "    declarator_ops: tuple[TypeOp, ...]\n"
+            "def entry() -> int:\n"
+            "    inferred = 2\n"
+            "    tail: tuple[TypeOp, ...] = ()\n"
+            "    new_ops = (('arr', inferred),) + tail\n"
+            "    type_ = Type('int', new_ops)\n"
+            "    value = type_.declarator_ops[0][1]\n"
+            "    return 7 if isinstance(value, int) and value == 2 else 1\n",
+            expected=7,
+            filename="tuple-concat-tagged-object-slot.py",
+        )
+
     def test_branch_join_preserves_nullable_record_for_object_boxing(self) -> None:
         self.assert_native_matches_cpython(
             "class Node:\n"

@@ -4718,6 +4718,12 @@ class _Lowerer:
                     return left_type
                 if not left_type.elements:
                     return right_type
+                merged_homogeneous = _merge_homogeneous_tuple_concat_types(
+                    left_type,
+                    right_type,
+                )
+                if merged_homogeneous is not None:
+                    return merged_homogeneous
                 return IrTupleType(left_type.elements + right_type.elements)
             if (
                 isinstance(expr.op, (ast.Sub, ast.BitOr, ast.BitAnd, ast.BitXor))
@@ -6218,6 +6224,63 @@ def _record_type_contains_type(container_name: str, member_name: str) -> bool:
     container_parts = _top_level_union_parts(container_name) or (container_name,)
     member_parts = _top_level_union_parts(member_name) or (member_name,)
     return all(part in container_parts for part in member_parts)
+
+
+def _merge_homogeneous_tuple_concat_types(
+    left: IrTupleType,
+    right: IrTupleType,
+) -> IrTupleType | None:
+    if len(left.elements) != 1 or len(right.elements) != 1:
+        return None
+    merged = _merge_storage_compatible_types(left.elements[0], right.elements[0])
+    if merged is None:
+        return None
+    return IrTupleType((merged,))
+
+
+def _merge_storage_compatible_types(left: IrType, right: IrType) -> IrType | None:
+    if left == right:
+        return left
+    if isinstance(left, IrTupleType) and isinstance(right, IrTupleType):
+        if len(left.elements) != len(right.elements):
+            return None
+        merged_elements: list[IrType] = []
+        for left_element, right_element in zip(
+            left.elements,
+            right.elements,
+            strict=True,
+        ):
+            merged = _merge_storage_compatible_types(left_element, right_element)
+            if merged is None:
+                return None
+            merged_elements.append(merged)
+        return IrTupleType(tuple(merged_elements))
+    if isinstance(left, IrRecordType) and _record_type_accepts_ir_type(left, right):
+        return left
+    if isinstance(right, IrRecordType) and _record_type_accepts_ir_type(right, left):
+        return right
+    return None
+
+
+def _record_type_accepts_ir_type(container: IrRecordType, member: IrType) -> bool:
+    if container.name == "object":
+        return True
+    member_name: str | None = None
+    if isinstance(member, IrRecordType):
+        member_name = member.name
+    elif isinstance(member, IrStringType):
+        member_name = "str"
+    elif isinstance(member, IrBytesType):
+        member_name = "bytes"
+    elif isinstance(member, IrBoolType):
+        member_name = "bool"
+    elif isinstance(member, IrIntType):
+        member_name = "int"
+    elif isinstance(member, IrFloatType):
+        member_name = "float"
+    elif isinstance(member, IrNoneType):
+        member_name = "None"
+    return member_name is not None and _record_type_contains_type(container.name, member_name)
 
 
 def _preserves_nullable_record_join(

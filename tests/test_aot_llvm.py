@@ -3935,6 +3935,40 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertRegex(llvm_ir, r"store ptr %tuple\d+, ptr %object\.payload\d+")
         self.assertRegex(llvm_ir, r"store ptr %object\d+, ptr %tupleslot\d+")
 
+    def test_tuple_concat_keeps_homogeneous_declared_object_layout(self) -> None:
+        module = lower_source_to_ir(
+            "from dataclasses import dataclass\n"
+            "FunctionParams = tuple[tuple['Type', ...] | None, bool]\n"
+            "TypeOp = tuple[str, int | FunctionParams]\n"
+            "@dataclass(frozen=True)\n"
+            "class Type:\n"
+            "    name: str\n"
+            "    declarator_ops: tuple[TypeOp, ...]\n"
+            "def build(inferred: int, tail: tuple[TypeOp, ...]) -> Type:\n"
+            "    new_ops = (('arr', inferred),) + tail\n"
+            "    return Type('int', new_ops)\n",
+            filename="tuple-concat-tagged-object-slot.py",
+        )
+
+        assignment = module.functions[-1].body[0]
+        self.assertIsInstance(assignment, IrAssign)
+        assert isinstance(assignment, IrAssign)
+        self.assertIsInstance(assignment.value, IrCall)
+        assert isinstance(assignment.value, IrCall)
+        concat_type = assignment.value.type
+        self.assertIsInstance(concat_type, IrTupleType)
+        assert isinstance(concat_type, IrTupleType)
+        self.assertEqual(len(concat_type.elements), 1)
+        type_op = concat_type.elements[0]
+        self.assertIsInstance(type_op, IrTupleType)
+        assert isinstance(type_op, IrTupleType)
+        self.assertIsInstance(type_op.elements[1], IrRecordType)
+        self.assertIn("int | tuple", type_op.elements[1].name)
+
+        llvm_ir = emit_llvm_text(module)
+        self.assertRegex(llvm_ir, r"store i64 2, ptr %object\d+")
+        self.assertRegex(llvm_ir, r"store ptr %object\d+, ptr %tupleslot\d+")
+
     def test_emits_range_intrinsic_as_runtime_tuple(self) -> None:
         int64 = IrIntType(64, signed=True)
         tuple_type = IrTupleType((int64,))
