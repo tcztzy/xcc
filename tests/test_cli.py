@@ -83,6 +83,23 @@ class CliTests(unittest.TestCase):
             self.assertIn("define i32 @main()", llvm_ir)
             self.assertIn("ret i32 0", llvm_ir)
 
+    def test_aot_smoke_compiler_accepts_build_flags_under_cpython(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "smoke.c"
+            output = root / "smoke.o"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+
+            with patch("xcc.cc_driver._aot_exec_argv", return_value=0) as exec_argv:
+                code = cc_driver._aot_compile_smoke_source_to_object(
+                    7,
+                    ("xcc", "-c", "-O3", "-Wall", str(source), "-o", str(output)),
+                )
+
+            self.assertEqual(code, 0)
+            exec_argv.assert_called_once()
+            self.assertTrue((root / "smoke.o.ll").exists())
+
     def test_aot_source_to_llvm_uses_frontend_backend_under_cpython(self) -> None:
         llvm_ir = cc_driver._aot_compile_source_to_llvm_ir(
             "smoke.c",

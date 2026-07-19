@@ -656,6 +656,8 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
             std = "c11"
         elif arg == "-std=gnu11":
             std = "gnu11"
+        elif arg in ("-O0", "-O1", "-O2", "-O3", "-Os", "-Oz", "-Wall", "-Wextra"):
+            pass
         elif _aot_arg_is_c_source(arg):
             if source_path != "" or object_input != "":
                 return 1

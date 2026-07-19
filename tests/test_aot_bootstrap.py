@@ -1889,6 +1889,47 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             run_result = subprocess.run((str(exe),), check=False)
             self.assertEqual(run_result.returncode, 0)
 
+    def test_real_native_bootstrap_accepts_build_flags(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = ROOT / "build/aot/xcc-b583-build-flags"
+            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            source = root / "build_flags.c"
+            obj = root / "build_flags.o"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+
+            result = subprocess.run(
+                (str(executable), "-c", "-O3", "-Wall", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(obj.exists())
+
+            unknown_obj = root / "unknown.o"
+            unknown = subprocess.run(
+                (
+                    str(executable),
+                    "-c",
+                    "-funknown-xcc-option",
+                    str(source),
+                    "-o",
+                    str(unknown_obj),
+                ),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(unknown.returncode, 1, unknown.stdout + unknown.stderr)
+            self.assertFalse(unknown_obj.exists())
+
     def test_real_native_bootstrap_preserves_object_macro_replacement(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():
