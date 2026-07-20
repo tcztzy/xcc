@@ -989,9 +989,9 @@ class AotMilestone3IrTests(unittest.TestCase):
             "internal global [1024 x ptr] zeroinitializer",
             runtime,
         )
-        mark_body = runtime.split("define ptr @__xcc_aot_phase_mark()", 1)[1].split(
-            "\n}", 1
-        )[0]
+        mark_body = runtime.split(
+            "define internal ptr @__xcc_aot_phase_mark_with_mode", 1
+        )[1].split("\n}", 1)[0]
         self.assertIn("load i64, ptr @__xcc_aot_phase_mark_generation", mark_body)
         self.assertIn("shl i64 %next_generation, 25", mark_body)
         llvm_ir = (
@@ -1123,6 +1123,166 @@ class AotMilestone3IrTests(unittest.TestCase):
             completed = subprocess.run((str(executable),), check=False)
 
         self.assertEqual(completed.returncode, 0)
+
+    def test_v427_while_iteration_region_reclaims_scratch(self) -> None:
+        source = (
+            "def collect(count: int) -> list[str]:\n"
+            "    values: list[str] = []\n"
+            "    index = 0\n"
+            "    while index < count:\n"
+            "        scratch = 'x' * 1048576\n"
+            "        values.append(str(index))\n"
+            "        index += 1\n"
+            "    return values\n"
+            "def entry() -> int:\n"
+            "    values = collect(600)\n"
+            "    return 7 if len(values) == 600 and values[-1] == '599' else 1\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="while-iteration-region.py", entry="entry")
+        )
+        collect_body = llvm_ir.split("define ptr @collect(i64 %count)", 1)[1].split(
+            "\n}", 1
+        )[0]
+        capture_defer = llvm_ir.split(
+            "define i1 @__xcc_aot_phase_capture_defer", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_phase_iteration_mark()", collect_body)
+        self.assertIn("call void @__xcc_aot_phase_finish", collect_body)
+        self.assertIn("%target_exact", capture_defer)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "while-iteration-region",
+                filename="while-iteration-region.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 7)
+
+    def test_v427_exact_boundary_forces_ancestor_capture_promotion(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\n@v427_external = private constant [1 x i8] zeroinitializer\n"
+            + "\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %outer = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %inner = call ptr @__xcc_aot_phase_iteration_mark()\n"
+            + "  %value = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 7, ptr %value\n"
+            + "  %scratch = call ptr @__xcc_aot_alloc(i64 16)\n"
+            + "  %target = call ptr @__xcc_aot_phase_capture_target(ptr @v427_external)\n"
+            + "  %deferred = call i1 @__xcc_aot_phase_capture_defer(ptr %target)\n"
+            + "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)\n"
+            + "  call void @__xcc_aot_phase_finish(ptr %inner)\n"
+            + "  %after_inner = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %inner_delta = sub i64 %after_inner, %baseline\n"
+            + "  %inner_reclaimed = icmp eq i64 %inner_delta, 88\n"
+            + "  call void @__xcc_aot_phase_finish(ptr %outer)\n"
+            + "  %stored = load i64, ptr %value\n"
+            + "  %value_live = icmp eq i64 %stored, 7\n"
+            + "  %after_outer = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %outer_delta = sub i64 %after_outer, %baseline\n"
+            + "  %only_value_live = icmp eq i64 %outer_delta, 48\n"
+            + "  call void @__xcc_aot_free(ptr %value)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %not_deferred = xor i1 %deferred, true\n"
+            + "  %capture_ok = and i1 %not_deferred, %promoted\n"
+            + "  %lifetime_ok = and i1 %inner_reclaimed, %value_live\n"
+            + "  %account_ok = and i1 %only_value_live, %balanced\n"
+            + "  %first = and i1 %capture_ok, %lifetime_ok\n"
+            + "  %ok = and i1 %first, %account_ok\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-exact-ancestor-capture",
+                filename="phase-exact-ancestor-capture.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v427_while_iteration_region_cleans_control_flow_edges(self) -> None:
+        source = (
+            "def flow(count: int) -> list[str]:\n"
+            "    values: list[str] = []\n"
+            "    index = 0\n"
+            "    while index < count:\n"
+            "        scratch = 'q' * 64\n"
+            "        index += 1\n"
+            "        if index == 2:\n"
+            "            continue\n"
+            "        values.append(str(index))\n"
+            "        if index == 4:\n"
+            "            break\n"
+            "    return values\n"
+            "def early(count: int) -> str:\n"
+            "    index = 0\n"
+            "    while index < count:\n"
+            "        value = 'r' * 64\n"
+            "        return value\n"
+            "    return ''\n"
+            "def fail(count: int) -> int:\n"
+            "    index = 0\n"
+            "    while index < count:\n"
+            "        message = 'bad' * 32\n"
+            "        raise ValueError(message)\n"
+            "    return 0\n"
+            "def entry() -> int:\n"
+            "    values = flow(10)\n"
+            "    if len(values) != 3:\n"
+            "        return 1\n"
+            "    if values[0] != '1' or values[1] != '3' or values[2] != '4':\n"
+            "        return 1\n"
+            "    return 7 if len(early(1)) == 64 else 1\n"
+            "def fail_entry() -> int:\n"
+            "    return fail(1)\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="while-iteration-edges.py", entry="entry")
+        )
+        early_body = llvm_ir.split("define ptr @early(i64 %count)", 1)[1].split(
+            "\n}", 1
+        )[0]
+        fail_body = llvm_ir.split("define i32 @fail(", 1)[1].split("\n}", 1)[0]
+        iteration_finish = "call void @__xcc_aot_phase_finish(ptr %phase.iteration.mark"
+        iteration_commit = "call void @__xcc_aot_phase_commit(ptr %phase.iteration.mark"
+        self.assertIn(iteration_finish, early_body)
+        self.assertIn(iteration_commit, fail_body)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "while-iteration-edges",
+                filename="while-iteration-edges.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 7)
+
+        failing_ir = emit_llvm_text(
+            lower_source_to_ir(
+                source,
+                filename="while-iteration-failure.py",
+                entry="fail_entry",
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                failing_ir,
+                Path(tmp) / "while-iteration-failure",
+                filename="while-iteration-failure.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False, capture_output=True)
+
+        self.assertEqual(completed.returncode, 2)
 
     def test_v415_direct_parent_capture_defers_graph_walk_until_region_finish(self) -> None:
         llvm_ir = (

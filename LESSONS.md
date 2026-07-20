@@ -1,5 +1,14 @@
 # Lessons
 
+- A function region cannot reclaim compiler scratch produced by a long worklist
+  loop. Add a compiler-generated exact child region at each statically safe,
+  allocating iteration, promote only loop-carried and captured graphs, and
+  finish it on every normal control-flow edge. A capture target may be an
+  ancestor of that child, so exactness is a property of the whole top-to-target
+  mark path rather than only the target mark. Returns must promote first and
+  finish inner-to-outer; uncaught failures must commit inner-to-outer. This
+  preserves ordinary Python semantics while turning phase lifetime from
+  function-sized into iteration-sized without source-shape directives.
 - Allocation identity and region order are different runtime concerns. A
   global lifetime list is appropriate for reset/commit/splice, but it makes an
   ambiguous `str` or opaque pointer pay linear time merely to learn whether it

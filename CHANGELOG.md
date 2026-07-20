@@ -2,6 +2,28 @@
 
 ## Current
 
+- B640 gives compiler-generated `while` iterations an exact child lifetime
+  inside the function-owned phase. B639 reached the exact B615 frontier of
+  3,137 opens over 818 unique paths in 6.37 seconds and then exhausted the
+  unchanged 512 MiB guard, proving that allocation lookup time was fixed while
+  function-wide retention remained. `_lower_named_slice_from_roots` processes
+  its pending work in a `while`; without a nested boundary, temporary strings,
+  tuples, and records from every completed item survive until the whole lowerer
+  returns. V427 reserves one bit of the phase-mark state for an exact boundary,
+  leaving a 38-bit monotonic generation, and makes capture deferral reject any
+  target path that crosses such a boundary. The LLVM emitter now inserts an
+  iteration mark after loop-header phi nodes only for statically safe,
+  allocating `while` bodies with promotable carries. Normal backedges,
+  `continue`, and `break` promote live loop-carried graphs before finishing the
+  iteration; returns promote their result before finishing active iterations;
+  uncaught failures commit active iterations from inner to outer. Ordinary
+  Python source is unchanged. Native invariants cover a 600-iteration loop with
+  a 1 MiB scratch string per iteration, capture through an ancestor region,
+  `continue`, `break`, early return, and failure transfer; the ordinary source
+  agrees under CPython and native execution. All 495 combined AOT tests, lint,
+  type, and `git diff --check` pass. Stage 1/Stage 2 evidence has not yet been
+  rerun, so this is not a Stage 2 or strong-bootstrap claim.
+
 - B639 separates live-allocation identity from region ordering for ambiguous
   pointer-shaped values. The post-B635 sample spent 2,393 of 3,797 stacks in
   generic promotion, 805 in generic capture, and 430 in allocation lookup;

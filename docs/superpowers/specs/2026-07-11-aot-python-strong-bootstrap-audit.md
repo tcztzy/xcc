@@ -427,3 +427,23 @@ error ABI, native AOT CLI, and `xcc.aot` reachability. P1 is runtime semantic
 correctness for the declared subset. P2 is worktree decomposition and oracle
 coverage. Native C compiler and CPython build blockers are P3 final integration
 work and must not drive core source rewrites before P0-P2 are established.
+
+## Active Stage 1-to-2 Retention Finding
+
+B639/V426 removed the remaining linear live-allocation identity lookup and
+reached the exact B615 frontier of 3,137 source opens over 818 unique paths in
+6.37 seconds rather than 628.95 seconds. It then exited at the unchanged 512 MiB
+allocation guard. This separates the resolved time-complexity defect from the
+remaining lifetime defect: a function-owned phase retains every temporary made
+by `_lower_named_slice_from_roots` across its pending-work `while` loop.
+
+B640/V427 defines an exact iteration region for statically safe, allocating
+`while` loops with promotable carries. Captures that cross any exact boundary
+must promote the captured graph rather than defer and commit the whole child
+region. All normal loop exits promote live carries before finishing the child;
+returns promote their result before finishing active children; uncaught errors
+commit children from inner to outer. This is compiler-generated ownership
+metadata over ordinary Python source, not a marker, pragma, source rewrite, or
+change to CPython semantics. Focused native tests and 495 combined AOT tests
+pass. Stage 1-to-2 and Stage 2-to-3 remain unproven pending bounded native
+integration evidence.

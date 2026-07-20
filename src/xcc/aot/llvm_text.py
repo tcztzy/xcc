@@ -276,6 +276,8 @@ class _LoopLabels:
     break_label: str
     continue_sources: list[tuple[str, dict[str, _EmittedValue]]] | None = None
     break_sources: list[tuple[str, dict[str, _EmittedValue]]] | None = None
+    iteration_phase_mark: str | None = None
+    carried_types: dict[str, IrType] | None = None
 
 
 @dataclass
@@ -1921,6 +1923,7 @@ class _Emitter:
         self.global_constants: dict[str, str] = {}
         self.global_tuple_constants: dict[str, str] = {}
         self.loop_stack: list[_LoopLabels] = []
+        self.iteration_phase_marks: list[str] = []
         self.extra_declarations: set[str] = set()
         self.needs_puts = False
         self.needs_runtime_prelude = False
@@ -2088,6 +2091,7 @@ class _Emitter:
         previous_phase_mark = self.current_phase_mark
         previous_phase_promotes_return = self.current_phase_promotes_return
         previous_phase_exact_return = self.current_phase_exact_return
+        previous_iteration_phase_marks = self.iteration_phase_marks
         previous_failure_scopes = self.failure_scopes
         previous_caught_status_stack = self.caught_status_stack
         self.current_function = function
@@ -2101,6 +2105,7 @@ class _Emitter:
         self.current_phase_mark = None
         self.current_phase_promotes_return = function.name in self.phase_owned_return_functions
         self.current_phase_exact_return = function.name in self.phase_exact_return_functions
+        self.iteration_phase_marks = []
         self.failure_scopes = []
         self.caught_status_stack = []
         names = {
@@ -2135,6 +2140,7 @@ class _Emitter:
             self.current_phase_mark = previous_phase_mark
             self.current_phase_promotes_return = previous_phase_promotes_return
             self.current_phase_exact_return = previous_phase_exact_return
+            self.iteration_phase_marks = previous_iteration_phase_marks
             self.failure_scopes = previous_failure_scopes
             self.caught_status_stack = previous_caught_status_stack
         lines = _hoist_allocas_to_entry(lines)
@@ -2203,6 +2209,7 @@ class _Emitter:
             if _block_is_terminated(lines):
                 return
             loop = self.loop_stack[-1]
+            self._emit_iteration_phase_finish(loop, names, lines)
             if loop.break_sources is not None:
                 loop.break_sources.append((_current_label(lines), dict(names)))
             lines.append(f"  br label %{loop.break_label}")
@@ -2214,6 +2221,7 @@ class _Emitter:
             if _block_is_terminated(lines):
                 return
             loop = self.loop_stack[-1]
+            self._emit_iteration_phase_finish(loop, names, lines)
             if loop.continue_sources is not None:
                 loop.continue_sources.append((_current_label(lines), dict(names)))
             lines.append(f"  br label %{self.loop_stack[-1].continue_label}")
@@ -2282,6 +2290,7 @@ class _Emitter:
             return
         if self.current_function_is_fallible:
             if isinstance(return_type, IrNoneType):
+                self._emit_active_iteration_phase_finishes(lines)
                 self._emit_phase_reset(lines)
                 lines.append("  ret i32 0")
                 return
@@ -2297,10 +2306,12 @@ class _Emitter:
                 f"  store {self._storage_llvm_type(return_type)} {stored}, "
                 f"ptr {self.current_result_out}"
             )
+            self._emit_active_iteration_phase_finishes(lines)
             self._emit_phase_reset(lines)
             lines.append("  ret i32 0")
             return
         if isinstance(return_type, IrNoneType):
+            self._emit_active_iteration_phase_finishes(lines)
             self._emit_phase_reset(lines)
             lines.append("  ret void")
             return
@@ -2309,6 +2320,7 @@ class _Emitter:
             return
         returned = self._value_for_result_type(value, return_type, lines)
         self._emit_phase_promote_return(returned, return_type, lines)
+        self._emit_active_iteration_phase_finishes(lines)
         self._emit_phase_reset(lines)
         lines.append(f"  ret {self._llvm_type(return_type)} {returned}")
 
@@ -2825,6 +2837,40 @@ class _Emitter:
             return
         lines.append(f"  call void @__xcc_aot_phase_finish(ptr {self.current_phase_mark})")
 
+    def _emit_iteration_phase_finish(
+        self,
+        loop: _LoopLabels,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> None:
+        mark = loop.iteration_phase_mark
+        if mark is None:
+            return
+        carried_types = loop.carried_types or {}
+        promotable = tuple(
+            (name, type_info)
+            for name, type_info in carried_types.items()
+            if _phase_pointer_type(type_info) or isinstance(type_info, IrFloatType)
+        )
+        if promotable:
+            lines.append(f"  call void @__xcc_aot_phase_promote_begin(ptr {mark})")
+            for name, type_info in promotable:
+                value = names.get(name)
+                if value is None:
+                    continue
+                promoted_value = self._value_for_result_type(value, type_info, lines)
+                self._emit_phase_promote_value(promoted_value, type_info, mark, lines)
+            lines.append(f"  call void @__xcc_aot_phase_promote_end(ptr {mark})")
+        lines.append(f"  call void @__xcc_aot_phase_finish(ptr {mark})")
+
+    def _emit_active_iteration_phase_finishes(self, lines: list[str]) -> None:
+        for mark in reversed(self.iteration_phase_marks):
+            lines.append(f"  call void @__xcc_aot_phase_finish(ptr {mark})")
+
+    def _emit_active_iteration_phase_commits(self, lines: list[str]) -> None:
+        for mark in reversed(self.iteration_phase_marks):
+            lines.append(f"  call void @__xcc_aot_phase_commit(ptr {mark})")
+
     def _emit_phase_commit(self, lines: list[str]) -> None:
         if self.current_phase_mark is None:
             return
@@ -2855,6 +2901,7 @@ class _Emitter:
             return
         if not self.current_function_is_fallible:
             self._error("failure propagation requires a fallible function")
+        self._emit_active_iteration_phase_commits(lines)
         self._emit_phase_commit(lines)
         lines.append(f"  ret i32 {status}")
 
@@ -3809,6 +3856,40 @@ class _Emitter:
                 else:
                     names[slot] = item
 
+    def _while_uses_iteration_phase(
+        self,
+        statement: IrWhile,
+        loop_types: dict[str, IrType],
+    ) -> bool:
+        if self.current_phase_mark is None:
+            return False
+        if any(
+            _phase_pointer_type(type_info)
+            and not _phase_type_is_promotable_under(
+                type_info,
+                self.records,
+                self.phase_record_descendants,
+                self.phase_promotable_records,
+            )
+            for type_info in loop_types.values()
+        ):
+            return False
+        condition_safe, condition_allocates = _phase_expr_effect(
+            statement.condition,
+            self.phase_function_summaries,
+            self.records,
+            self.phase_record_descendants,
+            self.phase_promotable_records,
+        )
+        body_safe, body_allocates = _phase_block_effect(
+            statement.body.statements,
+            self.phase_function_summaries,
+            self.records,
+            self.phase_record_descendants,
+            self.phase_promotable_records,
+        )
+        return condition_safe and body_safe and (condition_allocates or body_allocates)
+
     def _emit_while(
         self,
         statement: IrWhile,
@@ -3829,6 +3910,8 @@ class _Emitter:
         cond_label = self._label("while.cond")
         body_label = self._label("while.body")
         end_label = self._label("while.end")
+        uses_iteration_phase = self._while_uses_iteration_phase(statement, loop_types)
+        cleanup_label = self._label("while.cleanup") if uses_iteration_phase else end_label
         incoming_label = _current_label(lines)
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{cond_label}:")
@@ -3842,19 +3925,37 @@ class _Emitter:
             phi_values[name] = _EmittedValue(result, loop_type)
             cond_names[name] = phi_values[name]
             lines.append("")
+        iteration_mark = None
+        if uses_iteration_phase:
+            self.needs_runtime_prelude = True
+            iteration_mark = self._tmp("phase.iteration.mark")
+            lines.append(f"  {iteration_mark} = call ptr @__xcc_aot_phase_iteration_mark()")
+            self.iteration_phase_marks.append(iteration_mark)
         condition = self._emit_condition(statement.condition, cond_names, lines)
         condition_source = _current_label(lines)
-        lines.append(f"  br i1 {condition.value}, label %{body_label}, label %{end_label}")
+        lines.append(f"  br i1 {condition.value}, label %{body_label}, label %{cleanup_label}")
         lines.append(f"{body_label}:")
         body_names = dict(cond_names)
-        loop_labels = _LoopLabels(cond_label, end_label, [], [])
+        loop_labels = _LoopLabels(
+            cond_label,
+            end_label,
+            [],
+            [],
+            iteration_mark,
+            loop_types,
+        )
         self.loop_stack.append(loop_labels)
         self._emit_branch(statement.body, body_names, lines, return_type)
         self.loop_stack.pop()
         incoming_edges: list[tuple[str, dict[str, _EmittedValue]]] = []
         if not _block_is_terminated(lines):
+            self._emit_iteration_phase_finish(loop_labels, body_names, lines)
             incoming_edges.append((_current_label(lines), body_names))
             lines.append(f"  br label %{cond_label}")
+        if iteration_mark is not None:
+            popped_mark = self.iteration_phase_marks.pop()
+            if popped_mark != iteration_mark:
+                self._error("Mismatched while iteration phase mark")
         incoming_edges.extend(loop_labels.continue_sources or ())
         for name, line_index in phi_lines.items():
             initial = initial_values[name]
@@ -3868,11 +3969,17 @@ class _Emitter:
             lines[line_index] = (
                 f"  {phi_values[name].value} = phi {self._storage_llvm_type(loop_type)} {incoming}"
             )
+        exit_source = condition_source
+        if iteration_mark is not None:
+            lines.append(f"{cleanup_label}:")
+            lines.append(f"  call void @__xcc_aot_phase_finish(ptr {iteration_mark})")
+            lines.append(f"  br label %{end_label}")
+            exit_source = cleanup_label
         lines.append(f"{end_label}:")
         self._emit_loop_exit_phis(
             names,
             cond_names,
-            condition_source,
+            exit_source,
             loop_labels.break_sources or (),
             loop_types,
             lines,
@@ -11398,6 +11505,7 @@ class _Emitter:
             lines.append(f"  store {llvm_type} {value}, ptr {field_ptr}")
 
     def _emit_default_return(self, lines: list[str], return_type: IrType) -> None:
+        self._emit_active_iteration_phase_finishes(lines)
         self._emit_phase_reset(lines)
         if self.current_function_is_fallible:
             if not isinstance(return_type, IrNoneType):

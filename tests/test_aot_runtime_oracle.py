@@ -737,6 +737,23 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="heap-string-record-lifetime.py",
         )
 
+    def test_while_iteration_region_reclaims_scratch_and_keeps_list_values(self) -> None:
+        self.assert_native_matches_cpython(
+            "def collect(count: int) -> list[str]:\n"
+            "    values: list[str] = []\n"
+            "    index = 0\n"
+            "    while index < count:\n"
+            "        scratch = 'x' * 1048576\n"
+            "        values.append(str(index))\n"
+            "        index += 1\n"
+            "    return values\n"
+            "def entry() -> int:\n"
+            "    values = collect(600)\n"
+            "    return 7 if len(values) == 600 and values[-1] == '599' else 1\n",
+            expected=7,
+            filename="while-iteration-region.py",
+        )
+
     def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"
