@@ -1,5 +1,19 @@
 # Lessons
 
+- A tagged dynamic value can participate in region ownership without changing
+  ordinary Python source. Promote its box first, use the existing runtime tag
+  and tuple layout as the traversal proof, and fail closed when either is
+  missing. Generate record dispatch only for types that are actually boxed;
+  dispatching every record inflates the compiler and reaches unrelated ABI
+  aliases. A static base type and a runtime-exact record id are different proof
+  levels: the former dispatches, while the latter must enter a deduplicated
+  exact-layout walker instead of recursively calling the static dispatcher.
+  Keep effect analysis and helper emission aligned for shallow aliases such as
+  string-backed `Path` values and static `Enum` member pointers.
+- Intrinsic capture classification and one exact emitted operation are different
+  proof levels. A built-in `super().__init__` emitter that only evaluates and
+  discards arguments can reclaim those temporaries locally, while the generic
+  intrinsic must remain conservative for any future retaining implementation.
 - A stable container runtime needs barrier coverage at semantic mutation
   boundaries, not just syntax-level field and subscript stores. Dictionary
   default/update, set update, slice replacement, and lazy global initialization

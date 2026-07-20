@@ -544,9 +544,9 @@ class AotMilestone3IrTests(unittest.TestCase):
 
     def test_v405_phase_promotion_search_stops_at_current_mark(self) -> None:
         runtime = runtime_prelude()
-        promote_body = runtime.split(
-            "define i1 @__xcc_aot_phase_promote(ptr %payload)", 1
-        )[1].split("\n}", 1)[0]
+        promote_body = runtime.split("define i1 @__xcc_aot_phase_promote(ptr %payload)", 1)[
+            1
+        ].split("\n}", 1)[0]
         self.assertNotIn("call ptr @__xcc_aot_find_allocation", promote_body)
         self.assertIn("load ptr, ptr @__xcc_aot_allocation_head", promote_body)
         self.assertIn("icmp eq ptr %node, %mark", promote_body)
@@ -742,9 +742,9 @@ class AotMilestone3IrTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(
             lower_source_to_ir(source, filename="phase-capture-store.py", entry="entry")
         )
-        write_body = llvm_ir.split(
-            "define void @write(ptr %values, ptr %value)", 1
-        )[1].split("\n}", 1)[0]
+        write_body = llvm_ir.split("define void @write(ptr %values, ptr %value)", 1)[1].split(
+            "\n}", 1
+        )[0]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", write_body)
         self.assertIn('call void @"__xcc_aot_phase_capture:', write_body)
         with tempfile.TemporaryDirectory() as tmp:
@@ -782,9 +782,9 @@ class AotMilestone3IrTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(
             lower_source_to_ir(source, filename="phase-capture-field.py", entry="entry")
         )
-        write_body = llvm_ir.split(
-            "define void @write(ptr %box, ptr %value)", 1
-        )[1].split("\n}", 1)[0]
+        write_body = llvm_ir.split("define void @write(ptr %box, ptr %value)", 1)[1].split(
+            "\n}", 1
+        )[0]
         self.assertIn("getelementptr i8, ptr %box, i64 -8", write_body)
         self.assertIn('call void @"__xcc_aot_phase_capture:', write_body)
         with tempfile.TemporaryDirectory() as tmp:
@@ -817,9 +817,9 @@ class AotMilestone3IrTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(
             lower_source_to_ir(source, filename="phase-capture-append.py", entry="entry")
         )
-        append_body = llvm_ir.split(
-            "define void @append_value(ptr %values, ptr %value)", 1
-        )[1].split("\n}", 1)[0]
+        append_body = llvm_ir.split("define void @append_value(ptr %values, ptr %value)", 1)[
+            1
+        ].split("\n}", 1)[0]
         self.assertIn('call void @"__xcc_aot_phase_capture:', append_body)
         self.assertIn("call ptr @__xcc_aot_tuple_append", append_body)
         with tempfile.TemporaryDirectory() as tmp:
@@ -876,7 +876,7 @@ class AotMilestone3IrTests(unittest.TestCase):
             "define void @update(ptr %mapping, ptr %values, ptr %items, ptr %value)", 1
         )[1].split("\n}", 1)[0]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", update_body)
-        self.assertGreaterEqual(update_body.count('__xcc_aot_phase_capture:'), 7)
+        self.assertGreaterEqual(update_body.count("__xcc_aot_phase_capture:"), 7)
         with tempfile.TemporaryDirectory() as tmp:
             executable = compile_llvm_executable(
                 llvm_ir,
@@ -916,6 +916,101 @@ class AotMilestone3IrTests(unittest.TestCase):
                 llvm_ir,
                 Path(tmp) / "phase-capture-global",
                 filename="phase-capture-global.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v409_dynamic_object_graphs_survive_callee_phase_reset(self) -> None:
+        source = (
+            "class Payload:\n"
+            "    label: str\n"
+            "    def __init__(self, label: str) -> None:\n"
+            "        self.label = label\n"
+            "\n"
+            "class Box:\n"
+            "    value: object\n"
+            "    def __init__(self) -> None:\n"
+            "        self.value = None\n"
+            "\n"
+            "class OptionalBox:\n"
+            "    value: object | None\n"
+            "    def __init__(self) -> None:\n"
+            "        self.value = None\n"
+            "\n"
+            "class Base:\n"
+            "    label: str\n"
+            "    def __init__(self, label: str) -> None:\n"
+            "        self.label = label\n"
+            "\n"
+            "class Child(Base):\n"
+            "    def __init__(self, label: str) -> None:\n"
+            "        self.label = label\n"
+            "\n"
+            "def store_text(box: OptionalBox, value: str) -> None:\n"
+            "    scratch = value + '-scratch'\n"
+            "    box.value = value + '-text'\n"
+            "\n"
+            "def store_tuple(box: Box, value: str) -> None:\n"
+            "    scratch = value + '-scratch'\n"
+            "    box.value = (value + '-tuple',)\n"
+            "\n"
+            "def store_record(box: Box, value: str) -> None:\n"
+            "    scratch = value + '-scratch'\n"
+            "    box.value = Payload(value + '-record')\n"
+            "\n"
+            "def make_child(value: str) -> Base:\n"
+            "    scratch = value + '-scratch'\n"
+            "    return Child(value + '-child')\n"
+            "\n"
+            "def make_base(value: str) -> Base:\n"
+            "    scratch = value + '-scratch'\n"
+            "    return Base(value + '-base')\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    optional_box = OptionalBox()\n"
+            "    store_text(optional_box, 'root')\n"
+            "    text = optional_box.value\n"
+            "    if not isinstance(text, str) or text != 'root-text':\n"
+            "        return 1\n"
+            "    box = Box()\n"
+            "    store_tuple(box, 'root')\n"
+            "    items = box.value\n"
+            "    if not isinstance(items, tuple):\n"
+            "        return 2\n"
+            "    typed_items: tuple[str, ...] = items\n"
+            "    if typed_items[0] != 'root-tuple':\n"
+            "        return 3\n"
+            "    store_record(box, 'root')\n"
+            "    payload = box.value\n"
+            "    if not isinstance(payload, Payload):\n"
+            "        return 4\n"
+            "    if payload.label != 'root-record':\n"
+            "        return 5\n"
+            "    child = make_child('root')\n"
+            "    if not isinstance(child, Child):\n"
+            "        return 6\n"
+            "    if child.label != 'root-child':\n"
+            "        return 7\n"
+            "    base = make_base('root')\n"
+            "    if isinstance(base, Child):\n"
+            "        return 8\n"
+            "    return 0 if base.label == 'root-base' else 9\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="dynamic-object-capture.py", entry="entry")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "dynamic-object-capture",
+                filename="dynamic-object-capture.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 
@@ -984,12 +1079,12 @@ class AotMilestone3IrTests(unittest.TestCase):
     def test_v403_borrowed_pointer_return_survives_owned_phase_reset(self) -> None:
         source = (
             "def first(values: tuple[str, ...]) -> str:\n"
-            "    scratch = (\"temporary\",)\n"
+            '    scratch = ("temporary",)\n'
             "    return values[0]\n"
             "\n"
             "def entry() -> int:\n"
-            "    value = first((\"kept\",))\n"
-            "    return 0 if value == \"kept\" else 1\n"
+            '    value = first(("kept",))\n'
+            '    return 0 if value == "kept" else 1\n'
         )
         namespace: dict[str, object] = {}
         exec(source, namespace)
@@ -1000,9 +1095,7 @@ class AotMilestone3IrTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(
             lower_source_to_ir(source, filename="borrowed-phase.py", entry="entry")
         )
-        first_body = llvm_ir.split("define ptr @first(ptr %values)", 1)[1].split(
-            "\n}", 1
-        )[0]
+        first_body = llvm_ir.split("define ptr @first(ptr %values)", 1)[1].split("\n}", 1)[0]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", first_body)
         self.assertIn("call void @__xcc_aot_phase_reset", first_body)
         with tempfile.TemporaryDirectory() as tmp:
@@ -1035,10 +1128,8 @@ class AotMilestone3IrTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(
             lower_source_to_ir(source, filename="owned-phase.py", entry="entry")
         )
-        make_body = llvm_ir.split("define ptr @make(ptr %value)", 1)[1].split(
-            "\n}", 1
-        )[0]
-        promote_index = make_body.index("call void @\"__xcc_aot_phase_promote:")
+        make_body = llvm_ir.split("define ptr @make(ptr %value)", 1)[1].split("\n}", 1)[0]
+        promote_index = make_body.index('call void @"__xcc_aot_phase_promote:')
         reset_index = make_body.index("call void @__xcc_aot_phase_reset")
         self.assertLess(promote_index, reset_index)
         with tempfile.TemporaryDirectory() as tmp:
@@ -1095,9 +1186,9 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
 
     def test_annotation_name_edge_forms(self) -> None:
-        string_annotation = parse_source(
-            'def f() -> "Type | None":\n    pass\n'
-        ).tree.body[0].returns
+        string_annotation = (
+            parse_source('def f() -> "Type | None":\n    pass\n').tree.body[0].returns
+        )
         tuple_expr = parse_source("value = (int, str)\n").tree.body[0].value
         attribute_annotation = (
             parse_source("def f(value: module.Type) -> int:\n    pass\n")

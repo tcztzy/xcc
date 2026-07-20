@@ -246,9 +246,9 @@ class AotLlvmTextTests(unittest.TestCase):
             safe_body.count("call void @__xcc_aot_phase_reset"),
             safe_body.count("ret i64"),
         )
-        known_call_body = llvm_ir.split(
-            "define i64 @passes_to_known_call()", 1
-        )[1].split("\n}", 1)[0]
+        known_call_body = llvm_ir.split("define i64 @passes_to_known_call()", 1)[1].split("\n}", 1)[
+            0
+        ]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", known_call_body)
         self.assertIn("call void @__xcc_aot_phase_reset", known_call_body)
         borrowed_return_body = llvm_ir.split(
@@ -303,15 +303,113 @@ class AotLlvmTextTests(unittest.TestCase):
         )
 
         llvm_ir = emit_llvm_text(IrModule("capture-store.py", (), (worker,)))
-        body = llvm_ir.split(
-            "define i64 @worker(ptr %borrowed, ptr %value)", 1
-        )[1].split("\n}", 1)[0]
+        body = llvm_ir.split("define i64 @worker(ptr %borrowed, ptr %value)", 1)[1].split("\n}", 1)[
+            0
+        ]
 
         capture = 'call void @"__xcc_aot_phase_capture:'
         self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
         self.assertIn(capture, body)
         self.assertLess(body.index(capture), body.index("call void @__xcc_aot_tuple_set"))
         self.assertLess(body.index(capture), body.index("call void @__xcc_aot_phase_reset"))
+
+    def test_v409_object_capture_emits_precise_recursive_promotion(self) -> None:
+        source = (
+            "class Payload:\n"
+            "    label: str\n"
+            "    def __init__(self, label: str) -> None:\n"
+            "        self.label = label\n"
+            "\n"
+            "class Box:\n"
+            "    value: object | None\n"
+            "    def __init__(self) -> None:\n"
+            "        self.value = None\n"
+            "\n"
+            "def store(box: Box, value: str) -> None:\n"
+            "    scratch = value + '-scratch'\n"
+            "    box.value = Payload(value + '-kept')\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="object-phase-capture.py", entry="store")
+        )
+        store_body = llvm_ir.split("define void @store(ptr %box, ptr %value)", 1)[1].split(
+            "\n}", 1
+        )[0]
+        dispatcher = llvm_ir.split("define void @__xcc_aot_phase_promote_object_record", 1)[
+            1
+        ].split("\n}", 1)[0]
+
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", store_body)
+        self.assertIn(
+            "call void @\"__xcc_aot_phase_capture:IrRecordType(name='object | None')\"",
+            store_body,
+        )
+        self.assertIn("call void @__xcc_aot_phase_promote_object(", llvm_ir)
+        self.assertIn("call void @__xcc_aot_phase_promote_object_tuple(", llvm_ir)
+        self.assertIn(
+            'call void @"__xcc_aot_phase_promote_exact:Payload"',
+            dispatcher,
+        )
+        self.assertNotIn("IrRecordType(name='Box')", dispatcher)
+
+        emitter = _Emitter(IrModule("shallow-phase.py", (), ()))
+        for name in ("Enum", "Path"):
+            with self.subTest(shallow_type=name):
+                helper = emitter._emit_phase_promotion_helper(IrRecordType(name))
+                self.assertIn("call i1 @__xcc_aot_phase_promote_to", helper)
+        optional_object_helper = emitter._emit_phase_promotion_helper(IrRecordType("object | None"))
+        self.assertIn("@__xcc_aot_phase_promote_object", optional_object_helper)
+
+        base_llvm = emit_llvm_text(
+            lower_source_to_ir(
+                "class Base:\n"
+                "    pass\n"
+                "class Child(Base):\n"
+                "    label: str\n"
+                "    def __init__(self, label: str) -> None:\n"
+                "        self.label = label\n"
+                "def make(value: str) -> Base:\n"
+                "    scratch = value + '-scratch'\n"
+                "    return Child(value + '-kept')\n",
+                filename="base-phase.py",
+            )
+        )
+        base_helper = base_llvm.split(
+            "define void @\"__xcc_aot_phase_promote:IrRecordType(name='Base')\"",
+            1,
+        )[1].split("\n}", 1)[0]
+        self.assertIn(
+            'call void @"__xcc_aot_phase_promote_exact:Child"',
+            base_helper,
+        )
+        self.assertIn(
+            'call void @"__xcc_aot_phase_promote_exact:Base"',
+            base_helper,
+        )
+        self.assertIn(
+            'define void @"__xcc_aot_phase_promote_exact:Base"',
+            base_llvm,
+        )
+        self.assertIn("call void @__xcc_aot_memory_safety_fail()", base_helper)
+
+    def test_v409_super_init_arguments_can_be_reclaimed_locally(self) -> None:
+        module = lower_source_to_ir(
+            "class Problem(ValueError):\n"
+            "    def __init__(self, value: str) -> None:\n"
+            "        super().__init__(value + '-message')\n",
+            filename="super-init-phase.py",
+            entry="Problem.__init__",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        body = llvm_ir.split("define void @Problem.__init__(ptr %self, ptr %value)", 1)[1].split(
+            "\n}", 1
+        )[0]
+
+        self.assertFalse(_phase_intrinsic_is_no_capture("__super_init__"))
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
+        self.assertIn("call void @__xcc_aot_phase_reset", body)
 
     def test_emits_integer_augmented_assignment_operators(self) -> None:
         module = lower_source_to_ir(
@@ -376,13 +474,7 @@ class AotLlvmTextTests(unittest.TestCase):
                     IrStringType(),
                     (
                         IrTry(
-                            IrBranch(
-                                (
-                                    IrReturn(
-                                        IrCall(unchecked_name, (), IrStringType())
-                                    ),
-                                )
-                            ),
+                            IrBranch((IrReturn(IrCall(unchecked_name, (), IrStringType())),)),
                             (
                                 IrExceptHandler(
                                     ("FrontendError",),
@@ -421,9 +513,7 @@ class AotLlvmTextTests(unittest.TestCase):
                         (
                             IrRaise(
                                 "ValueError",
-                                IrStringConcat(
-                                    (IrConstString("bad"), IrConstString(" message"))
-                                ),
+                                IrStringConcat((IrConstString("bad"), IrConstString(" message"))),
                             ),
                         )
                     ),
@@ -433,9 +523,9 @@ class AotLlvmTextTests(unittest.TestCase):
         )
 
         llvm_ir = emit_llvm_text(IrModule("fallible-phase.py", (), (worker,)))
-        body = llvm_ir.split(
-            "define i32 @worker(i1 %fail, ptr %result_out, ptr %error_out)", 1
-        )[1].split("\n}", 1)[0]
+        body = llvm_ir.split("define i32 @worker(i1 %fail, ptr %result_out, ptr %error_out)", 1)[
+            1
+        ].split("\n}", 1)[0]
 
         self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
         self.assertIn("call void @__xcc_aot_phase_commit", body)
@@ -447,8 +537,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
     def test_emits_bytes_concat_and_repeat_runtime_calls(self) -> None:
         module = lower_source_to_ir(
-            "def combine(value: bytes, count: int) -> bytes:\n"
-            "    return value + b'x' * count\n",
+            "def combine(value: bytes, count: int) -> bytes:\n    return value + b'x' * count\n",
             filename="bytes_ops.py",
             entry="combine",
         )
@@ -460,8 +549,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
     def test_emits_string_encode_as_bytes_runtime_call(self) -> None:
         module = lower_source_to_ir(
-            "def encode(value: str) -> bytes:\n"
-            "    return value.encode()\n",
+            "def encode(value: str) -> bytes:\n    return value.encode()\n",
             filename="string_encode.py",
             entry="encode",
         )
@@ -576,7 +664,11 @@ class AotLlvmTextTests(unittest.TestCase):
                     "parse",
                     (IrParam("value", IrStringType()),),
                     IrFloatType(),
-                    (IrReturn(IrCall("__float", (IrName("value", IrStringType()),), IrFloatType())),),
+                    (
+                        IrReturn(
+                            IrCall("__float", (IrName("value", IrStringType()),), IrFloatType())
+                        ),
+                    ),
                 ),
             ),
         )
@@ -598,7 +690,9 @@ class AotLlvmTextTests(unittest.TestCase):
                     IrFloatType(),
                     (
                         IrReturn(
-                            IrCall("__float_fromhex", (IrName("value", IrStringType()),), IrFloatType())
+                            IrCall(
+                                "__float_fromhex", (IrName("value", IrStringType()),), IrFloatType()
+                            )
                         ),
                     ),
                 ),
@@ -621,7 +715,11 @@ class AotLlvmTextTests(unittest.TestCase):
                     "div",
                     (IrParam("left", int64), IrParam("right", int64)),
                     int64,
-                    (IrReturn(IrBinary("//", IrName("left", int64), IrName("right", int64), int64)),),
+                    (
+                        IrReturn(
+                            IrBinary("//", IrName("left", int64), IrName("right", int64), int64)
+                        ),
+                    ),
                 ),
             ),
         )
@@ -1231,7 +1329,10 @@ class AotLlvmTextTests(unittest.TestCase):
                         IrReturn(
                             IrCall(
                                 "__getitem",
-                                (IrName("values", values_type), IrName("index", IrRecordType("object"))),
+                                (
+                                    IrName("values", values_type),
+                                    IrName("index", IrRecordType("object")),
+                                ),
                                 IrRecordType("RecordMemberInfo"),
                             )
                         ),
@@ -1507,7 +1608,9 @@ class AotLlvmTextTests(unittest.TestCase):
         with self.assertRaises(AotError) as ctx:
             emit_llvm_text(module)
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        self.assertIn("AOT read_text helper expects str -> str", ctx.exception.diagnostics[0].message)
+        self.assertIn(
+            "AOT read_text helper expects str -> str", ctx.exception.diagnostics[0].message
+        )
 
     def test_rejects_malformed_aot_write_text_leaf(self) -> None:
         module = IrModule(
@@ -1623,9 +1726,7 @@ class AotLlvmTextTests(unittest.TestCase):
             "    return Box()\n"
         )
 
-        llvm_ir = emit_llvm_text(
-            lower_source_to_ir(source, filename="record_none_field.py")
-        )
+        llvm_ir = emit_llvm_text(lower_source_to_ir(source, filename="record_none_field.py"))
 
         self.assertIn("%Box = type { ptr }", llvm_ir)
         self.assertRegex(llvm_ir, r"store ptr null, ptr %fieldptr\d+")
@@ -3261,7 +3362,9 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         llvm_ir = emit_llvm_text(module)
         self.assertIn("define i1 @__xcc_aot_string_startswith", llvm_ir)
-        self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 2)", llvm_ir)
+        self.assertIn(
+            "call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 2)", llvm_ir
+        )
 
     def test_v399_startswith_string_concat_borrows_parts(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -3456,8 +3559,12 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 0)", llvm_ir)
-        self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str2, i64 0)", llvm_ir)
+        self.assertIn(
+            "call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 0)", llvm_ir
+        )
+        self.assertIn(
+            "call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str2, i64 0)", llvm_ir
+        )
         self.assertIn("or i1", llvm_ir)
 
     def test_emits_string_startswith_object_prefix_as_string_pointer(self) -> None:
@@ -3489,7 +3596,9 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr %prefix, i64 0)", llvm_ir)
+        self.assertIn(
+            "call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr %prefix, i64 0)", llvm_ir
+        )
 
     def test_emits_string_split_intrinsic_call(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -3929,7 +4038,11 @@ class AotLlvmTextTests(unittest.TestCase):
                         IrReturn(
                             IrCall(
                                 "__int_to_bytes",
-                                (IrConstInt(65, int64), IrConstInt(1, int64), IrConstString("little")),
+                                (
+                                    IrConstInt(65, int64),
+                                    IrConstInt(1, int64),
+                                    IrConstString("little"),
+                                ),
                                 bytes_type,
                             )
                         ),
@@ -4368,7 +4481,11 @@ class AotLlvmTextTests(unittest.TestCase):
                     "name",
                     (IrParam("path", path_type),),
                     IrStringType(),
-                    (IrReturn(IrCall("__path_name", (IrName("path", path_type),), IrStringType())),),
+                    (
+                        IrReturn(
+                            IrCall("__path_name", (IrName("path", path_type),), IrStringType())
+                        ),
+                    ),
                 ),
                 IrFunction(
                     "resolved",
@@ -5679,7 +5796,11 @@ class AotLlvmTextTests(unittest.TestCase):
                         "f",
                         (),
                         IrStringType(),
-                        (IrReturn(IrCall("__int_to_bytes", (IrConstInt(1, int64),), IrStringType())),),
+                        (
+                            IrReturn(
+                                IrCall("__int_to_bytes", (IrConstInt(1, int64),), IrStringType())
+                            ),
+                        ),
                     ),
                 ),
             ),

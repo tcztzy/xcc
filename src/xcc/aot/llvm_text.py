@@ -1084,6 +1084,8 @@ def _phase_borrowed_return_functions(
 
 _PHASE_SHALLOW_PROMOTABLE_RECORDS = frozenset(
     {
+        "Enum",
+        "Path",
         "bool",
         "bytes",
         "complex",
@@ -1104,10 +1106,72 @@ def _phase_record_part_name(
     return fallback if fallback in records else None
 
 
+def _phase_record_extends(
+    record_name: str,
+    base_name: str,
+    records: dict[str, IrRecord],
+) -> bool:
+    record = records.get(record_name)
+    if record is None:
+        return False
+    for base in record.bases:
+        if base == base_name or _phase_record_extends(base, base_name, records):
+            return True
+    return False
+
+
+def _phase_record_names_for_part(
+    part: str,
+    records: dict[str, IrRecord],
+    descendants: dict[str, tuple[str, ...]] | None = None,
+) -> tuple[str, ...]:
+    base_name = _phase_record_part_name(part, records)
+    if base_name is None:
+        return ()
+    if descendants is not None:
+        return descendants[base_name]
+    return tuple(
+        record_name
+        for record_name in sorted(records)
+        if record_name == base_name or _phase_record_extends(record_name, base_name, records)
+    )
+
+
+def _phase_record_descendant_map(
+    records: dict[str, IrRecord],
+) -> dict[str, tuple[str, ...]]:
+    return {
+        record_name: _phase_record_names_for_part(record_name, records) for record_name in records
+    }
+
+
 def _phase_type_is_promotable(
     type_info: IrType,
     records: dict[str, IrRecord],
-    visiting: set[str] | None = None,
+    descendants: dict[str, tuple[str, ...]] | None = None,
+    promotable_records: frozenset[str] | None = None,
+) -> bool:
+    resolved_descendants = (
+        _phase_record_descendant_map(records) if descendants is None else descendants
+    )
+    resolved_records = (
+        _phase_promotable_record_names(records, resolved_descendants)
+        if promotable_records is None
+        else promotable_records
+    )
+    return _phase_type_is_promotable_under(
+        type_info,
+        records,
+        resolved_descendants,
+        resolved_records,
+    )
+
+
+def _phase_type_is_promotable_under(
+    type_info: IrType,
+    records: dict[str, IrRecord],
+    descendants: dict[str, tuple[str, ...]],
+    promotable_records: frozenset[str] | set[str],
 ) -> bool:
     if isinstance(type_info, IrBoolType | IrFloatType | IrIntType | IrNoneType):
         return True
@@ -1115,12 +1179,17 @@ def _phase_type_is_promotable(
         return True
     if isinstance(type_info, IrTupleType):
         return all(
-            _phase_type_is_promotable(element, records, visiting) for element in type_info.elements
+            _phase_type_is_promotable_under(element, records, descendants, promotable_records)
+            for element in type_info.elements
         )
     if isinstance(type_info, IrDictType):
-        return _phase_type_is_promotable(
-            type_info.key, records, visiting
-        ) and _phase_type_is_promotable(type_info.value, records, visiting)
+        return _phase_type_is_promotable_under(
+            type_info.key, records, descendants, promotable_records
+        ) and _phase_type_is_promotable_under(
+            type_info.value, records, descendants, promotable_records
+        )
+    if isinstance(type_info, IrRecordType) and _is_opaque_object_type(type_info):
+        return True
     if not isinstance(type_info, IrRecordType) or type_info.name == "object":
         return False
     parts = _record_union_parts(type_info.name)
@@ -1130,19 +1199,36 @@ def _phase_type_is_promotable(
     )
     if shallow_parts:
         return len(concrete_parts) == 1
-    active = set() if visiting is None else set(visiting)
-    key = repr(type_info)
-    if key in active:
-        return True
-    active.add(key)
     for part in concrete_parts:
-        record_name = _phase_record_part_name(part, records)
-        if record_name is None:
+        record_names = _phase_record_names_for_part(part, records, descendants)
+        if not record_names:
             return False
-        for field in records[record_name].fields:
-            if not _phase_type_is_promotable(field.type, records, active):
-                return False
+        if any(record_name not in promotable_records for record_name in record_names):
+            return False
     return True
+
+
+def _phase_promotable_record_names(
+    records: dict[str, IrRecord],
+    descendants: dict[str, tuple[str, ...]],
+) -> frozenset[str]:
+    candidates = set(records)
+    while True:
+        retained: set[str] = set()
+        for record_name in candidates:
+            if all(
+                _phase_type_is_promotable_under(
+                    field.type,
+                    records,
+                    descendants,
+                    candidates,
+                )
+                for field in records[record_name].fields
+            ):
+                retained.add(record_name)
+        if retained == candidates:
+            return frozenset(retained)
+        candidates = retained
 
 
 def _phase_owned_return_functions(
@@ -1151,6 +1237,8 @@ def _phase_owned_return_functions(
     borrowed_functions: frozenset[str],
 ) -> frozenset[str]:
     records = {record.name: record for record in module.records}
+    descendants = _phase_record_descendant_map(records)
+    promotable_records = _phase_promotable_record_names(records, descendants)
     owned: set[str] = set()
     for function in module.functions:
         summary = summaries.get(function.name)
@@ -1159,7 +1247,9 @@ def _phase_owned_return_functions(
             and summary[1]
             and function.name not in borrowed_functions
             and _phase_pointer_type(function.return_type)
-            and _phase_type_is_promotable(function.return_type, records)
+            and _phase_type_is_promotable_under(
+                function.return_type, records, descendants, promotable_records
+            )
         ):
             owned.add(function.name)
     return frozenset(owned)
@@ -1168,6 +1258,8 @@ def _phase_owned_return_functions(
 def _phase_mutating_call_is_barriered(
     expr: IrCall,
     records: dict[str, IrRecord],
+    descendants: dict[str, tuple[str, ...]],
+    promotable_records: frozenset[str],
 ) -> bool:
     if not _is_tuple_mutating_method(expr.target) or not expr.args:
         return False
@@ -1176,43 +1268,57 @@ def _phase_mutating_call_is_barriered(
     method = expr.target.rsplit(".", 1)[1]
     if method in {"clear", "pop"}:
         return len(expr.args) == 1
-    return len(expr.args) == 2 and _phase_type_is_promotable(expr.args[1].type, records)
+    return len(expr.args) == 2 and _phase_type_is_promotable_under(
+        expr.args[1].type, records, descendants, promotable_records
+    )
 
 
 def _phase_intrinsic_capture_is_barriered(
     expr: IrCall,
     records: dict[str, IrRecord],
+    descendants: dict[str, tuple[str, ...]],
+    promotable_records: frozenset[str],
 ) -> bool:
     if expr.target in {"__dict_set", "__dict_setdefault"}:
         return (
             len(expr.args) == 3
             and isinstance(expr.args[0].type, IrDictType)
-            and _phase_type_is_promotable(expr.args[0].type, records)
+            and _phase_type_is_promotable_under(
+                expr.args[0].type, records, descendants, promotable_records
+            )
         )
     if expr.target == "__dict_update":
         return (
             len(expr.args) == 2
             and isinstance(expr.args[0].type, IrDictType)
             and expr.args[1].type == expr.args[0].type
-            and _phase_type_is_promotable(expr.args[0].type, records)
+            and _phase_type_is_promotable_under(
+                expr.args[0].type, records, descendants, promotable_records
+            )
         )
     if expr.target in {"__set_add", "__set_update"}:
         return (
             len(expr.args) == 2
             and isinstance(expr.args[0].type, IrTupleType)
-            and _phase_type_is_promotable(expr.args[1].type, records)
+            and _phase_type_is_promotable_under(
+                expr.args[1].type, records, descendants, promotable_records
+            )
         )
     if expr.target == "__tuple_set_slice":
         return (
             len(expr.args) == 6
             and isinstance(expr.args[0].type, IrTupleType)
-            and _phase_type_is_promotable(expr.args[5].type, records)
+            and _phase_type_is_promotable_under(
+                expr.args[5].type, records, descendants, promotable_records
+            )
         )
     if expr.target == "__global_tuple":
         return (
             len(expr.args) == 2
             and isinstance(expr.args[1], IrTuple)
-            and _phase_type_is_promotable(expr.args[1].type, records)
+            and _phase_type_is_promotable_under(
+                expr.args[1].type, records, descendants, promotable_records
+            )
         )
     return False
 
@@ -1229,12 +1335,14 @@ def _phase_expr_effect(
     expr: IrExpr,
     summaries: dict[str, tuple[bool, bool]],
     records: dict[str, IrRecord],
+    descendants: dict[str, tuple[str, ...]],
+    promotable_records: frozenset[str],
 ) -> tuple[bool, bool]:
     if isinstance(expr, IrBinary):
         safe, allocates = _merge_phase_effects(
             (
-                _phase_expr_effect(expr.left, summaries, records),
-                _phase_expr_effect(expr.right, summaries, records),
+                _phase_expr_effect(expr.left, summaries, records, descendants, promotable_records),
+                _phase_expr_effect(expr.right, summaries, records, descendants, promotable_records),
             )
         )
         pointer_result = isinstance(
@@ -1243,26 +1351,34 @@ def _phase_expr_effect(
         )
         return safe, allocates or pointer_result
     if isinstance(expr, IrGetField):
-        return _phase_expr_effect(expr.value, summaries, records)
+        return _phase_expr_effect(expr.value, summaries, records, descendants, promotable_records)
     if isinstance(expr, IrConstructRecord):
         safe, _ = _merge_phase_effects(
-            tuple(_phase_expr_effect(arg, summaries, records) for arg in expr.args)
+            tuple(
+                _phase_expr_effect(arg, summaries, records, descendants, promotable_records)
+                for arg in expr.args
+            )
         )
         return safe, True
     if isinstance(expr, IrCall):
         args_safe, args_allocate = _merge_phase_effects(
-            tuple(_phase_expr_effect(arg, summaries, records) for arg in expr.args)
+            tuple(
+                _phase_expr_effect(arg, summaries, records, descendants, promotable_records)
+                for arg in expr.args
+            )
         )
         if not args_safe:
             return False, args_allocate
         if expr.target.startswith("__noreturn__:"):
             return True, args_allocate
-        if _phase_mutating_call_is_barriered(expr, records):
+        if _phase_mutating_call_is_barriered(expr, records, descendants, promotable_records):
             return True, True
-        if _phase_intrinsic_capture_is_barriered(expr, records):
+        if _phase_intrinsic_capture_is_barriered(expr, records, descendants, promotable_records):
             return True, True
         if _phase_removal_call_is_region_safe(expr):
             return True, True
+        if expr.target == "__super_init__":
+            return True, args_allocate
         if expr.target.startswith(_RECORD_INIT_PREFIX):
             callee = summaries.get(expr.target.removeprefix(_RECORD_INIT_PREFIX))
             if callee is None:
@@ -1280,27 +1396,43 @@ def _phase_expr_effect(
         return callee[0], args_allocate or callee[1]
     if isinstance(expr, IrTuple):
         safe, _ = _merge_phase_effects(
-            tuple(_phase_expr_effect(element, summaries, records) for element in expr.elements)
+            tuple(
+                _phase_expr_effect(element, summaries, records, descendants, promotable_records)
+                for element in expr.elements
+            )
         )
         return safe, True
     if isinstance(expr, IrTupleSlice):
-        effects = [_phase_expr_effect(expr.value, summaries, records)]
+        effects = [
+            _phase_expr_effect(expr.value, summaries, records, descendants, promotable_records)
+        ]
         if expr.start is not None:
-            effects.append(_phase_expr_effect(expr.start, summaries, records))
+            effects.append(
+                _phase_expr_effect(expr.start, summaries, records, descendants, promotable_records)
+            )
         if expr.stop is not None:
-            effects.append(_phase_expr_effect(expr.stop, summaries, records))
+            effects.append(
+                _phase_expr_effect(expr.stop, summaries, records, descendants, promotable_records)
+            )
         safe, _ = _merge_phase_effects(tuple(effects))
         return safe, True
     if isinstance(expr, IrStringConcat):
         safe, _ = _merge_phase_effects(
-            tuple(_phase_expr_effect(part, summaries, records) for part in expr.parts)
+            tuple(
+                _phase_expr_effect(part, summaries, records, descendants, promotable_records)
+                for part in expr.parts
+            )
         )
         return safe, True
     if isinstance(expr, IrStringJoin):
         safe, _ = _merge_phase_effects(
             (
-                _phase_expr_effect(expr.separator, summaries, records),
-                _phase_expr_effect(expr.values, summaries, records),
+                _phase_expr_effect(
+                    expr.separator, summaries, records, descendants, promotable_records
+                ),
+                _phase_expr_effect(
+                    expr.values, summaries, records, descendants, promotable_records
+                ),
             )
         )
         return safe, True
@@ -1315,64 +1447,197 @@ def _phase_block_effect(
     statements: tuple[IrStmt, ...],
     summaries: dict[str, tuple[bool, bool]],
     records: dict[str, IrRecord],
+    descendants: dict[str, tuple[str, ...]],
+    promotable_records: frozenset[str],
 ) -> tuple[bool, bool]:
     effects: list[tuple[bool, bool]] = []
     for statement in statements:
         if isinstance(statement, IrAssign):
-            if not _phase_local_target(statement.target) and not _phase_type_is_promotable(
-                statement.value.type, records
+            if not _phase_local_target(statement.target) and not _phase_type_is_promotable_under(
+                statement.value.type, records, descendants, promotable_records
             ):
                 return False, False
-            effects.append(_phase_expr_effect(statement.value, summaries, records))
+            effects.append(
+                _phase_expr_effect(
+                    statement.value,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
             continue
         if isinstance(statement, IrSetItem):
-            if not _phase_type_is_promotable(statement.value.type, records):
+            if not _phase_type_is_promotable_under(
+                statement.value.type, records, descendants, promotable_records
+            ):
                 return False, False
-            effects.append(_phase_expr_effect(statement.target, summaries, records))
-            effects.append(_phase_expr_effect(statement.index, summaries, records))
-            effects.append(_phase_expr_effect(statement.value, summaries, records))
+            for expression in (statement.target, statement.index, statement.value):
+                effects.append(
+                    _phase_expr_effect(
+                        expression,
+                        summaries,
+                        records,
+                        descendants,
+                        promotable_records,
+                    )
+                )
             if isinstance(statement.value.type, IrFloatType):
                 effects.append((True, True))
             continue
         if isinstance(statement, IrRaise):
-            effects.append(_phase_expr_effect(statement.message, summaries, records))
+            effects.append(
+                _phase_expr_effect(
+                    statement.message,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
             if statement.payload is not None:
-                effects.append(_phase_expr_effect(statement.payload, summaries, records))
+                effects.append(
+                    _phase_expr_effect(
+                        statement.payload,
+                        summaries,
+                        records,
+                        descendants,
+                        promotable_records,
+                    )
+                )
             continue
         if isinstance(statement, IrReraise):
             continue
         if isinstance(statement, IrReturn):
-            effects.append(_phase_expr_effect(statement.value, summaries, records))
+            effects.append(
+                _phase_expr_effect(
+                    statement.value,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
             continue
         if isinstance(statement, IrIf):
-            effects.append(_phase_expr_effect(statement.condition, summaries, records))
             effects.append(
-                _phase_block_effect(statement.then_branch.statements, summaries, records)
+                _phase_expr_effect(
+                    statement.condition,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
+            effects.append(
+                _phase_block_effect(
+                    statement.then_branch.statements,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
             )
             if statement.else_branch is not None:
                 effects.append(
-                    _phase_block_effect(statement.else_branch.statements, summaries, records)
+                    _phase_block_effect(
+                        statement.else_branch.statements,
+                        summaries,
+                        records,
+                        descendants,
+                        promotable_records,
+                    )
                 )
             continue
         if isinstance(statement, IrForEach):
             if not _phase_local_target(statement.target):
                 return False, False
-            effects.append(_phase_expr_effect(statement.iterable, summaries, records))
-            effects.append(_phase_block_effect(statement.body.statements, summaries, records))
+            effects.append(
+                _phase_expr_effect(
+                    statement.iterable,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
+            effects.append(
+                _phase_block_effect(
+                    statement.body.statements,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
             continue
         if isinstance(statement, IrWhile):
-            effects.append(_phase_expr_effect(statement.condition, summaries, records))
-            effects.append(_phase_block_effect(statement.body.statements, summaries, records))
+            effects.append(
+                _phase_expr_effect(
+                    statement.condition,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
+            effects.append(
+                _phase_block_effect(
+                    statement.body.statements,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
             continue
         if isinstance(statement, IrPrint):
-            effects.append(_phase_expr_effect(statement.value, summaries, records))
+            effects.append(
+                _phase_expr_effect(
+                    statement.value,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
             continue
         if isinstance(statement, IrTry):
-            effects.append(_phase_block_effect(statement.body.statements, summaries, records))
-            effects.append(_phase_block_effect(statement.orelse.statements, summaries, records))
-            effects.append(_phase_block_effect(statement.finalbody.statements, summaries, records))
+            effects.append(
+                _phase_block_effect(
+                    statement.body.statements,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
+            effects.append(
+                _phase_block_effect(
+                    statement.orelse.statements,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
+            effects.append(
+                _phase_block_effect(
+                    statement.finalbody.statements,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
+            )
             effects.extend(
-                _phase_block_effect(handler.body.statements, summaries, records)
+                _phase_block_effect(
+                    handler.body.statements,
+                    summaries,
+                    records,
+                    descendants,
+                    promotable_records,
+                )
                 for handler in statement.handlers
             )
             continue
@@ -1387,6 +1652,8 @@ def _phase_function_summaries(
     _fallible: frozenset[str],
 ) -> dict[str, tuple[bool, bool]]:
     records = {record.name: record for record in module.records}
+    descendants = _phase_record_descendant_map(records)
+    promotable_records = _phase_promotable_record_names(records, descendants)
     functions = tuple(
         function
         for function in module.functions
@@ -1401,7 +1668,13 @@ def _phase_function_summaries(
         for function in functions:
             if (
                 function.name in candidates
-                and _phase_block_effect(function.body, assumed, records)[0]
+                and _phase_block_effect(
+                    function.body,
+                    assumed,
+                    records,
+                    descendants,
+                    promotable_records,
+                )[0]
             ):
                 retained.add(function.name)
         if retained == candidates:
@@ -1416,7 +1689,13 @@ def _phase_function_summaries(
             if function.name in candidates:
                 updated[function.name] = (
                     True,
-                    _phase_block_effect(function.body, summaries, records)[1],
+                    _phase_block_effect(
+                        function.body,
+                        summaries,
+                        records,
+                        descendants,
+                        promotable_records,
+                    )[1],
                 )
         if updated == summaries:
             return summaries
@@ -1452,6 +1731,10 @@ class _Emitter:
     def __init__(self, module: IrModule) -> None:
         self.module = module
         self.records = {record.name: record for record in module.records}
+        self.phase_record_descendants = _phase_record_descendant_map(self.records)
+        self.phase_promotable_records = _phase_promotable_record_names(
+            self.records, self.phase_record_descendants
+        )
         self.record_type_ids = {name: index + 1 for index, name in enumerate(sorted(self.records))}
         self.functions = {function.name: function for function in module.functions}
         self.fallible_functions = analyze_fallibility(module)
@@ -1488,6 +1771,9 @@ class _Emitter:
         self.current_phase_promotes_return = False
         self.phase_promote_types: dict[str, IrType] = {}
         self.phase_capture_types: dict[str, IrType] = {}
+        self.needs_phase_object_promotion_helpers = False
+        self.phase_object_promotion_records: set[str] = set()
+        self.phase_exact_promotion_records: set[str] = set()
         self.failure_scopes: list[_FailureScope] = []
         self.caught_status_stack: list[str] = []
         self.record_equality_records: set[str] = set()
@@ -1903,7 +2189,12 @@ class _Emitter:
     ) -> None:
         if not _phase_pointer_type(type_info) and not isinstance(type_info, IrFloatType):
             return
-        if not _phase_type_is_promotable(type_info, self.records):
+        if not _phase_type_is_promotable_under(
+            type_info,
+            self.records,
+            self.phase_record_descendants,
+            self.phase_promotable_records,
+        ):
             return
         key = repr(type_info)
         self.phase_capture_types[key] = type_info
@@ -1916,13 +2207,33 @@ class _Emitter:
     def _emit_phase_promotion_helpers(self) -> list[str]:
         helpers: list[str] = []
         emitted: set[str] = set()
+        emitted_exact_records: set[str] = set()
+        emitted_object_helpers = False
         while True:
             pending = sorted(key for key in self.phase_promote_types if key not in emitted)
-            if not pending:
-                return helpers
-            key = pending[0]
-            emitted.add(key)
-            helpers.append(self._emit_phase_promotion_helper(self.phase_promote_types[key]))
+            if pending:
+                key = pending[0]
+                emitted.add(key)
+                helpers.append(self._emit_phase_promotion_helper(self.phase_promote_types[key]))
+                continue
+            pending_exact_records = sorted(
+                self.phase_exact_promotion_records - emitted_exact_records
+            )
+            if pending_exact_records:
+                record_name = pending_exact_records[0]
+                emitted_exact_records.add(record_name)
+                helpers.append(
+                    self._emit_phase_record_promotion_helper(
+                        _phase_exact_record_promotion_symbol(record_name),
+                        record_name,
+                    )
+                )
+                continue
+            if self.needs_phase_object_promotion_helpers and not emitted_object_helpers:
+                emitted_object_helpers = True
+                helpers.extend(self._emit_phase_object_promotion_helpers())
+                continue
+            return helpers
 
     def _emit_phase_capture_helpers(self) -> list[str]:
         helpers: list[str] = []
@@ -1948,6 +2259,162 @@ class _Emitter:
             helpers.append("\n".join(lines))
         return helpers
 
+    def _emit_phase_object_promotion_helpers(self) -> list[str]:
+        object_lines = [
+            "define void @__xcc_aot_phase_promote_object(ptr %value, ptr %target) {",
+            "entry:",
+            "  %nonnull = icmp ne ptr %value, null",
+            "  br i1 %nonnull, label %promote, label %done",
+            "promote:",
+            "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)",
+            "  br i1 %promoted, label %dispatch, label %done",
+            "dispatch:",
+            "  %tag = load i64, ptr %value",
+            "  %payload.ptr = getelementptr i8, ptr %value, i64 8",
+            "  switch i64 %tag, label %fail [",
+            f"    i64 {_OBJECT_TAG_BOOL}, label %done",
+            f"    i64 {_OBJECT_TAG_INT}, label %done",
+            f"    i64 {_OBJECT_TAG_FLOAT}, label %done",
+            f"    i64 {_OBJECT_TAG_STRING}, label %pointer",
+            f"    i64 {_OBJECT_TAG_BYTES}, label %pointer",
+            f"    i64 {_OBJECT_TAG_COMPLEX}, label %pointer",
+            f"    i64 {_OBJECT_TAG_ELLIPSIS}, label %done",
+            f"    i64 {_OBJECT_TAG_RECORD}, label %record",
+            f"    i64 {_OBJECT_TAG_TUPLE}, label %tuple",
+            f"    i64 {_OBJECT_TAG_DICT}, label %tuple",
+            "  ]",
+            "pointer:",
+            "  %pointer.value = load ptr, ptr %payload.ptr",
+            "  %pointer.promoted = call i1 @__xcc_aot_phase_promote_to("
+            "ptr %pointer.value, ptr %target)",
+            "  br label %done",
+            "record:",
+            "  %record.value = load ptr, ptr %payload.ptr",
+            "  call void @__xcc_aot_phase_promote_object_record(ptr %record.value, ptr %target)",
+            "  br label %done",
+            "tuple:",
+            "  %tuple.value = load ptr, ptr %payload.ptr",
+            "  call void @__xcc_aot_phase_promote_object_tuple(ptr %tuple.value, ptr %target)",
+            "  br label %done",
+            "fail:",
+            "  call void @__xcc_aot_memory_safety_fail()",
+            "  unreachable",
+            "done:",
+            "  ret void",
+            "}",
+        ]
+        tuple_lines = [
+            "define void @__xcc_aot_phase_promote_object_tuple(ptr %value, ptr %target) {",
+            "entry:",
+            "  %nonnull = icmp ne ptr %value, null",
+            "  br i1 %nonnull, label %promote, label %done",
+            "promote:",
+            "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)",
+            "  br i1 %promoted, label %storage, label %done",
+            "storage:",
+            "  %data.ptr = getelementptr ptr, ptr %value, i64 2",
+            "  %data = load ptr, ptr %data.ptr",
+            "  %data.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %data, ptr %target)",
+            "  %layout.count.ptr = getelementptr i64, ptr %value, i64 3",
+            "  %layout.count = load i64, ptr %layout.count.ptr",
+            "  %layout.tags.ptr = getelementptr ptr, ptr %value, i64 4",
+            "  %layout.tags = load ptr, ptr %layout.tags.ptr",
+            "  %layout.promoted = call i1 @__xcc_aot_phase_promote_to("
+            "ptr %layout.tags, ptr %target)",
+            "  %length = call i64 @__xcc_aot_tuple_len(ptr %value)",
+            "  %empty = icmp eq i64 %length, 0",
+            "  br i1 %empty, label %done, label %validate.layout",
+            "validate.layout:",
+            "  %has.count = icmp ugt i64 %layout.count, 0",
+            "  %has.tags = icmp ne ptr %layout.tags, null",
+            "  %valid.layout = and i1 %has.count, %has.tags",
+            "  br i1 %valid.layout, label %loop.cond, label %fail",
+            "loop.cond:",
+            "  %index = phi i64 [ 0, %validate.layout ], [ %next, %loop.next ]",
+            "  %finished = icmp uge i64 %index, %length",
+            "  br i1 %finished, label %done, label %loop.body",
+            "loop.body:",
+            "  %raw = call ptr @__xcc_aot_tuple_get(ptr %value, i64 %index)",
+            "  %homogeneous = icmp eq i64 %layout.count, 1",
+            "  %tag.index = select i1 %homogeneous, i64 0, i64 %index",
+            "  %tag.in.bounds = icmp ult i64 %tag.index, %layout.count",
+            "  br i1 %tag.in.bounds, label %load.tag, label %fail",
+            "load.tag:",
+            "  %tag.ptr = getelementptr i64, ptr %layout.tags, i64 %tag.index",
+            "  %tag = load i64, ptr %tag.ptr",
+            "  switch i64 %tag, label %fail [",
+            "    i64 0, label %object",
+            f"    i64 {_OBJECT_TAG_BOOL}, label %loop.next",
+            f"    i64 {_OBJECT_TAG_INT}, label %loop.next",
+            f"    i64 {_OBJECT_TAG_FLOAT}, label %pointer",
+            f"    i64 {_OBJECT_TAG_STRING}, label %pointer",
+            f"    i64 {_OBJECT_TAG_BYTES}, label %pointer",
+            f"    i64 {_OBJECT_TAG_COMPLEX}, label %pointer",
+            f"    i64 {_OBJECT_TAG_ELLIPSIS}, label %loop.next",
+            f"    i64 {_OBJECT_TAG_RECORD}, label %record",
+            f"    i64 {_OBJECT_TAG_TUPLE}, label %tuple",
+            f"    i64 {_OBJECT_TAG_DICT}, label %tuple",
+            "  ]",
+            "object:",
+            "  call void @__xcc_aot_phase_promote_object(ptr %raw, ptr %target)",
+            "  br label %loop.next",
+            "pointer:",
+            "  %pointer.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %raw, ptr %target)",
+            "  br label %loop.next",
+            "record:",
+            "  call void @__xcc_aot_phase_promote_object_record(ptr %raw, ptr %target)",
+            "  br label %loop.next",
+            "tuple:",
+            "  call void @__xcc_aot_phase_promote_object_tuple(ptr %raw, ptr %target)",
+            "  br label %loop.next",
+            "loop.next:",
+            "  %next = add i64 %index, 1",
+            "  br label %loop.cond",
+            "fail:",
+            "  call void @__xcc_aot_memory_safety_fail()",
+            "  unreachable",
+            "done:",
+            "  ret void",
+            "}",
+        ]
+        record_names = sorted(self.phase_object_promotion_records)
+        record_lines = [
+            "define void @__xcc_aot_phase_promote_object_record(ptr %value, ptr %target) {",
+            "entry:",
+            "  %nonnull = icmp ne ptr %value, null",
+            "  br i1 %nonnull, label %dispatch, label %done",
+            "dispatch:",
+            "  %raw = getelementptr i8, ptr %value, i64 -8",
+            "  %tag = load i64, ptr %raw",
+            "  switch i64 %tag, label %fail [",
+        ]
+        for index, record_name in enumerate(record_names):
+            record_lines.append(
+                f"    i64 {self.record_type_ids[record_name]}, label %record.{index}"
+            )
+        record_lines.append("  ]")
+        for index, record_name in enumerate(record_names):
+            self.phase_exact_promotion_records.add(record_name)
+            target = _phase_exact_record_promotion_symbol(record_name)
+            record_lines.extend(
+                (
+                    f"record.{index}:",
+                    f"  call void {target}(ptr %value, ptr %target)",
+                    "  br label %done",
+                )
+            )
+        record_lines.extend(
+            (
+                "fail:",
+                "  call void @__xcc_aot_memory_safety_fail()",
+                "  unreachable",
+                "done:",
+                "  ret void",
+                "}",
+            )
+        )
+        return ["\n".join(object_lines), "\n".join(tuple_lines), "\n".join(record_lines)]
+
     def _emit_phase_promotion_helper(self, type_info: IrType) -> str:
         helper = _llvm_symbol("__xcc_aot_phase_promote:" + repr(type_info))
         if isinstance(type_info, IrStringType | IrBytesType):
@@ -1969,6 +2436,16 @@ class _Emitter:
             return self._emit_phase_tuple_promotion_helper(helper, (pair_type,))
         if not isinstance(type_info, IrRecordType):
             self._error(f"Unsupported phase promotion type: {type(type_info).__name__}")
+        if _is_opaque_object_type(type_info):
+            self.needs_phase_object_promotion_helpers = True
+            return (
+                f"define void {helper}(ptr %value, ptr %target) {{\n"
+                "entry:\n"
+                "  call void @__xcc_aot_phase_promote_object("
+                "ptr %value, ptr %target)\n"
+                "  ret void\n"
+                "}"
+            )
         parts = _record_union_parts(type_info.name)
         concrete_parts = tuple(part for part in parts if part != "None")
         if len(concrete_parts) == 1 and concrete_parts[0] in (_PHASE_SHALLOW_PROMOTABLE_RECORDS):
@@ -1982,10 +2459,14 @@ class _Emitter:
             )
         concrete_records: list[str] = []
         for part in concrete_parts:
-            record_name = _phase_record_part_name(part, self.records)
-            if record_name is None:
+            record_names = _phase_record_names_for_part(
+                part, self.records, self.phase_record_descendants
+            )
+            if not record_names:
                 self._error(f"Unsupported phase promotion record: {part}")
-            concrete_records.append(record_name)
+            for record_name in record_names:
+                if record_name not in concrete_records:
+                    concrete_records.append(record_name)
         if len(concrete_records) == 1:
             return self._emit_phase_record_promotion_helper(
                 helper,
@@ -2039,16 +2520,14 @@ class _Emitter:
             "dispatch:",
             "  %raw = getelementptr i8, ptr %value, i64 -8",
             "  %tag = load i64, ptr %raw",
-            "  switch i64 %tag, label %done [",
+            "  switch i64 %tag, label %fail [",
         ]
         for index, record_name in enumerate(record_names):
             lines.append(f"    i64 {self.record_type_ids[record_name]}, label %record.{index}")
         lines.append("  ]")
         for index, record_name in enumerate(record_names):
-            type_info = IrRecordType(record_name)
-            key = repr(type_info)
-            self.phase_promote_types[key] = type_info
-            target = _llvm_symbol("__xcc_aot_phase_promote:" + key)
+            self.phase_exact_promotion_records.add(record_name)
+            target = _phase_exact_record_promotion_symbol(record_name)
             lines.extend(
                 (
                     f"record.{index}:",
@@ -2056,7 +2535,16 @@ class _Emitter:
                     "  br label %done",
                 )
             )
-        lines.extend(("done:", "  ret void", "}"))
+        lines.extend(
+            (
+                "fail:",
+                "  call void @__xcc_aot_memory_safety_fail()",
+                "  unreachable",
+                "done:",
+                "  ret void",
+                "}",
+            )
+        )
         return "\n".join(lines)
 
     def _emit_phase_tuple_promotion_helper(
@@ -3594,6 +4082,7 @@ class _Emitter:
             tag = _OBJECT_TAG_COMPLEX
         elif isinstance(value.type, IrRecordType):
             tag = _OBJECT_TAG_RECORD
+            self.phase_object_promotion_records.update(self._concrete_record_type_names(value.type))
         else:
             self._error(f"Unsupported object value type: {type(value.type).__name__}")
         self.needs_runtime_prelude = True
@@ -5581,10 +6070,12 @@ class _Emitter:
         lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {default_box})")
+        pair_type = IrTupleType((key_type, value_type))
+        self._register_tuple_object_layout(pair, pair_type, lines)
         self._emit_phase_capture_value(
             dict_value.value,
             pair,
-            IrTupleType((key_type, value_type)),
+            pair_type,
             lines,
         )
         lines.append(
@@ -5674,10 +6165,12 @@ class _Emitter:
         lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {append_value_box})")
+        pair_type = IrTupleType((key_type, value_type))
+        self._register_tuple_object_layout(pair, pair_type, lines)
         self._emit_phase_capture_value(
             dict_value.value,
             pair,
-            IrTupleType((key_type, value_type)),
+            pair_type,
             lines,
         )
         lines.append(
@@ -9209,6 +9702,16 @@ class _Emitter:
                 names.append(name)
         return tuple(names)
 
+    def _concrete_record_type_names(self, type_info: IrType) -> tuple[str, ...]:
+        names: list[str] = []
+        for base_name in self._known_record_type_names(type_info):
+            for record_name in _phase_record_names_for_part(
+                base_name, self.records, self.phase_record_descendants
+            ):
+                if record_name not in names:
+                    names.append(record_name)
+        return tuple(names)
+
     def _emit_record_equality_helpers(self) -> list[str]:
         if self.needs_tagged_object_equality_helpers:
             self.record_equality_records.update(self.tuple_object_equality_records)
@@ -10613,7 +11116,9 @@ class _Emitter:
             for element in type_info.elements:
                 self._collect_tuple_object_equality_records(element)
             return
-        self.tuple_object_equality_records.update(self._known_record_type_names(type_info))
+        record_names = self._concrete_record_type_names(type_info)
+        self.tuple_object_equality_records.update(record_names)
+        self.phase_object_promotion_records.update(record_names)
 
     def _register_tuple_object_layout(
         self,
@@ -10621,6 +11126,8 @@ class _Emitter:
         type_info: IrType,
         lines: list[str],
     ) -> None:
+        if isinstance(type_info, IrDictType):
+            type_info = IrTupleType((IrTupleType((type_info.key, type_info.value)),))
         if not isinstance(type_info, IrTupleType):
             return
         self._collect_tuple_object_equality_records(type_info)
@@ -10858,6 +11365,8 @@ def _is_opaque_object_type(type_info: IrType) -> bool:
     if len(parts) < 2:
         return False
     non_none_parts = tuple(part for part in parts if part != "None")
+    if "object" in non_none_parts:
+        return True
     if len(non_none_parts) == 1 and len(non_none_parts) != len(parts):
         return False
     scalar_parts = {"bool", "bytes", "float", "int", "str"}
@@ -11012,6 +11521,10 @@ def _record_constructor_type_base_name(type_info: IrType) -> str | None:
 
 def _record_allocation_size(record: IrRecord) -> int:
     return 8 + max(8, len(record.fields) * 8)
+
+
+def _phase_exact_record_promotion_symbol(record_name: str) -> str:
+    return _llvm_symbol("__xcc_aot_phase_promote_exact:" + record_name)
 
 
 def _format_float_literal(value: float) -> str:

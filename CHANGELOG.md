@@ -2,6 +2,24 @@
 
 ## Current
 
+- B622 adds fail-closed promotion for native tagged `object` graphs. The owner
+  barrier now moves the tag box and recursively handles pointer payloads,
+  registered tuple/dict layouts, and only the concrete record types actually
+  boxed by the module. Static base/union walkers dispatch by the runtime record
+  id into a deduplicated exact-layout walker, so both an actual base instance
+  and every subclass retain all fields without recursively re-entering the
+  static dispatcher; unknown tags, layouts, and record ids remain memory safety
+  failures. Built-in `super().__init__` argument evaluation receives a narrow
+  region-safe effect matching its emitter, while its generic intrinsic
+  classification stays conservative. V409 CPython/native oracles preserve
+  string, tuple, actual-base, and subclass values across callee reset. The
+  862-function full slice now has 828 owners and 469 fallible owners, covering
+  parser, analyzer, binder, named-slice, and lowerer roots. A retained hosted
+  Stage 1 build completes in 27.99 seconds at 321,060,864-byte maximum RSS with
+  zero swap. Its tiny native CLI reaches emitter effect analysis, where the
+  pre-existing pointer-only lowering of structural dict equality prevents the
+  fixed point from converging; no Stage 1-to-2 result is claimed yet.
+
 - B621 extends owner-targeted barriers through typed dictionary insertion and
   update, set insertion and update, sequence slice replacement, and lazy module
   containers. Pure builders and removal-only operations keep a separate
