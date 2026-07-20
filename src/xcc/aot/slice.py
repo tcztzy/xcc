@@ -632,9 +632,11 @@ def _lower_named_slice_from_roots(
         bodyless = (
             frozenset({local_name}) if target in _NATIVE_EMITTED_LEAF_FUNCTIONS else frozenset()
         )
-        include_records = set(record_names)
+        include_records = record_names.difference(records_by_name)
         if "." in local_name:
-            include_records.add(local_name.split(".", 1)[0])
+            owner_record = local_name.split(".", 1)[0]
+            if owner_record not in records_by_name:
+                include_records.add(owner_record)
         rename_map = rename_maps[module_name]
         module = lower_analysis_to_ir(
             analysis_cache[module_name],

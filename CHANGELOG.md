@@ -2,6 +2,12 @@
 
 ## Current
 
+- B614 makes reachability materialize each record at most once.
+  `_lower_named_slice_from_roots` now passes only records not already emitted.
+  The CPython oracle produced 10,346 `IrGetField` nodes; 248 AOT tests, lint,
+  and type checks pass. Stage 1 has 835 functions, 174 records, and 8,709
+  edges, depends only on `libSystem`, and has no Python symbols.
+
 - Revalidated Stage 0 -> Stage 1 after virtual borrowed string locals at
   `52d6395`. The clean no-cache hosted build admitted 65 source units and
   emitted 835 functions, 174 records, 8,709 reachability edges, and 32 lazy

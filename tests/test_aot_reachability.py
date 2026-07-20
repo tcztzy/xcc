@@ -35,6 +35,33 @@ AOT_ROOT = ROOT / "src/xcc/aot"
 
 
 class AotReachabilityTests(unittest.TestCase):
+    def test_v401_reachability_materializes_each_record_once(self) -> None:
+        source = (
+            "class Left:\n"
+            "    value: int\n"
+            "class Right:\n"
+            "    value: int\n"
+            "def consume(value: Right) -> int:\n"
+            "    return value.value\n"
+            "def main(left: Left, right: Right) -> int:\n"
+            "    return left.value + consume(right)\n"
+        )
+        inputs = (AotSliceInput("pkg.model", Path("pkg/model.py"), source),)
+        seen: set[str] = set()
+
+        with patch(
+            "xcc.aot.slice.lower_analysis_to_ir",
+            wraps=aot_slice.lower_analysis_to_ir,
+        ) as lower_analysis:
+            module = lower_named_slice(inputs, root_targets=("pkg.model.main",))
+
+        for call in lower_analysis.call_args_list:
+            included = set(call.kwargs.get("include_records") or ())
+            self.assertTrue(seen.isdisjoint(included), (seen, included))
+            seen.update(included)
+        self.assertEqual(seen, {"Left", "Right"})
+        self.assertEqual({record.name for record in module.records}, seen)
+
     def test_module_function_alias_table_excludes_shared_base_entries(self) -> None:
         run = AotFunctionInfo("run", (), AotType("int"))
         step = AotFunctionInfo("Worker.step", (), AotType("int"))
