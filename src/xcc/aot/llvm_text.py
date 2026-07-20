@@ -2249,6 +2249,9 @@ class _Emitter:
                 "  %needed = icmp ne ptr %target, null",
                 "  br i1 %needed, label %promote, label %done",
                 "promote:",
+                "  %deferred = call i1 @__xcc_aot_phase_capture_defer(ptr %target)",
+                "  br i1 %deferred, label %done, label %transfer",
+                "transfer:",
             ]
             if isinstance(type_info, IrFloatType):
                 lines.append(
@@ -2615,7 +2618,7 @@ class _Emitter:
     def _emit_phase_reset(self, lines: list[str]) -> None:
         if self.current_phase_mark is None:
             return
-        lines.append(f"  call void @__xcc_aot_phase_reset(ptr {self.current_phase_mark})")
+        lines.append(f"  call void @__xcc_aot_phase_finish(ptr {self.current_phase_mark})")
 
     def _emit_phase_commit(self, lines: list[str]) -> None:
         if self.current_phase_mark is None:

@@ -1,5 +1,12 @@
 # Lessons
 
+- When a callee stores a graph into an owner in its immediate parent region,
+  tracing every node is unnecessary: commit the complete callee allocation
+  segment into that parent and let the parent's later reset reclaim both the
+  value and callee scratch. Keep exact typed promotion for deeper ancestors,
+  and never use this shortcut for an outermost/global target where no parent
+  lifetime exists. Encoding the choice on the LIFO mark gives constant-space
+  region transfer without a process-sized ownership registry.
 - Reordering a graph walk can optimize one region boundary and pessimize the
   next. Moving append-built children newest-first made `lex_python` return much
   cheaper, but the splice order left the same graph expensive when the parser

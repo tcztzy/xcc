@@ -2,6 +2,28 @@
 
 ## Current
 
+- B628 replaces repeated direct-parent owner-graph promotion with a deferred
+  region transfer. Frame samples showed the same lexer token graph first taking
+  1,819 promotion frames on return and then another 1,900 capture frames in
+  `_PythonParser.__init__`; changing traversal order merely moved that cost.
+  When a barrier target is exactly the current mark and that mark has a parent,
+  V415 records the capture on the mark, skips recursive promotion, and commits
+  the complete callee segment into the parent on successful finish. Ancestor
+  targets still use exact typed graph promotion, and an outermost/global target
+  cannot defer. Native low-level and generated-source oracles prove O(1) mark
+  removal, value survival, eventual parent reclamation, and unchanged CPython
+  behavior. The 221 LLVM/M3 tests, lint, and type pass. A hosted Stage 1 builds
+  in 28.27 seconds at 324,698,112-byte maximum RSS with zero swap. It compiles
+  the focused capture source in 0.86 seconds at 47,415,296-byte maximum RSS,
+  invokes only `llc` and `cc`, and matches CPython with exit 7; the compiler
+  links only `libSystem`, has no Python symbols, and rejects the CPython parser.
+  In matched frame-pointer samples, the token-graph capture after `lex_python`
+  returns falls from 1,292 to one frame; the same five-second window advances
+  into 1,853 parser-module frames instead of remaining entirely in parser
+  construction. The remaining 1,488-frame lexer return promotion is the next
+  lifetime boundary. The 15-second watchdog records 299 source opens, no tool
+  execution, and no Stage 2 artifact; no Stage 1-to-2 result is claimed.
+
 - B627 materializes non-dictionary `enumerate` container constructors as typed
   comprehension builders. The direct-for enumerate IR intentionally carries a
   single `(index, item)` pair type, but `tuple(enumerate(values))` previously

@@ -243,19 +243,19 @@ class AotLlvmTextTests(unittest.TestCase):
         safe_body = llvm_ir.split("define i64 @safe()", 1)[1].split("\n}", 1)[0]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", safe_body)
         self.assertEqual(
-            safe_body.count("call void @__xcc_aot_phase_reset"),
+            safe_body.count("call void @__xcc_aot_phase_finish"),
             safe_body.count("ret i64"),
         )
         known_call_body = llvm_ir.split("define i64 @passes_to_known_call()", 1)[1].split("\n}", 1)[
             0
         ]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", known_call_body)
-        self.assertIn("call void @__xcc_aot_phase_reset", known_call_body)
+        self.assertIn("call void @__xcc_aot_phase_finish", known_call_body)
         borrowed_return_body = llvm_ir.split(
             "define ptr @returns_borrowed_pointer(ptr %values)", 1
         )[1].split("\n}", 1)[0]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", borrowed_return_body)
-        self.assertIn("call void @__xcc_aot_phase_reset", borrowed_return_body)
+        self.assertIn("call void @__xcc_aot_phase_finish", borrowed_return_body)
         for function, signature in (
             ("returns_pointer", "define ptr @returns_pointer()"),
             (
@@ -267,7 +267,7 @@ class AotLlvmTextTests(unittest.TestCase):
                 body = llvm_ir.split(signature, 1)[1].split("\n}", 1)[0]
                 self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
                 self.assertIn('call void @"__xcc_aot_phase_promote:', body)
-                self.assertIn("call void @__xcc_aot_phase_reset", body)
+                self.assertIn("call void @__xcc_aot_phase_finish", body)
         for function, signature in (
             ("passes_to_mutating_call", "define i64 @passes_to_mutating_call()"),
             (
@@ -278,7 +278,7 @@ class AotLlvmTextTests(unittest.TestCase):
             with self.subTest(function=function):
                 body = llvm_ir.split(signature, 1)[1].split("\n}", 1)[0]
                 self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
-                self.assertIn("call void @__xcc_aot_phase_reset", body)
+                self.assertIn("call void @__xcc_aot_phase_finish", body)
 
     def test_v412_borrowed_intrinsic_results_do_not_create_owned_phases(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -347,7 +347,7 @@ class AotLlvmTextTests(unittest.TestCase):
             "\n}", 1
         )[0]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", allocating_body)
-        self.assertIn("call void @__xcc_aot_phase_reset", allocating_body)
+        self.assertIn("call void @__xcc_aot_phase_finish", allocating_body)
 
     def test_v407_pointer_store_captures_value_into_owner_region(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -380,7 +380,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
         self.assertIn(capture, body)
         self.assertLess(body.index(capture), body.index("call void @__xcc_aot_tuple_set"))
-        self.assertLess(body.index(capture), body.index("call void @__xcc_aot_phase_reset"))
+        self.assertLess(body.index(capture), body.index("call void @__xcc_aot_phase_finish"))
 
     def test_v409_object_capture_emits_precise_recursive_promotion(self) -> None:
         source = (
@@ -478,7 +478,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertFalse(_phase_intrinsic_is_no_capture("__super_init__"))
         self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
-        self.assertIn("call void @__xcc_aot_phase_reset", body)
+        self.assertIn("call void @__xcc_aot_phase_finish", body)
 
     def test_v410_dict_equality_emits_order_independent_structural_walk(self) -> None:
         llvm_ir = emit_llvm_text(
@@ -620,7 +620,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
         self.assertIn("call void @__xcc_aot_phase_commit", body)
-        self.assertIn("call void @__xcc_aot_phase_reset", body)
+        self.assertIn("call void @__xcc_aot_phase_finish", body)
         self.assertLess(
             body.index("call void @__xcc_aot_phase_commit"),
             body.index("ret i32 2"),
