@@ -1,5 +1,11 @@
 # Lessons
 
+- A fresh owned return crosses the same immediate lifetime boundary as a write
+  into a direct-parent owner. When the caller already supplies an enclosing
+  region, commit the callee segment there instead of tracing the returned graph;
+  keep exact graph promotion at the outermost boundary so scratch is reclaimed
+  and only the result becomes process-lived. Apply this only after the existing
+  complete-layout ownership proof, never to borrowed or ambiguous returns.
 - When a callee stores a graph into an owner in its immediate parent region,
   tracing every node is unnecessary: commit the complete callee allocation
   segment into that parent and let the parent's later reset reclaim both the

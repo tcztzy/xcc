@@ -774,6 +774,47 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v416_outermost_owned_return_keeps_exact_promotion(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %value = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 59, ptr %value\n"
+            + "  %scratch = call ptr @__xcc_aot_alloc(i64 64)\n"
+            + "  %deferred = call i1 @__xcc_aot_phase_capture_defer(ptr %mark)\n"
+            + "  %not_deferred = xor i1 %deferred, true\n"
+            + "  %promoted = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr %value, ptr %mark)\n"
+            + "  %peak = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  call void @__xcc_aot_phase_finish(ptr %mark)\n"
+            + "  %after_finish = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %scratch_reclaimed = icmp ult i64 %after_finish, %peak\n"
+            + "  %kept = load i64, ptr %value\n"
+            + "  %value_survived = icmp eq i64 %kept, 59\n"
+            + "  call void @__xcc_aot_free(ptr %value)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %mode_ok = and i1 %not_deferred, %promoted\n"
+            + "  %lifetime_ok = and i1 %scratch_reclaimed, %value_survived\n"
+            + "  %cleanup_ok = and i1 %lifetime_ok, %balanced\n"
+            + "  %ok = and i1 %mode_ok, %cleanup_ok\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-return-outermost",
+                filename="phase-return-outermost.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v413_capture_target_cache_survives_nested_child_phase(self) -> None:
         llvm_ir = (
             runtime_prelude()
@@ -887,6 +928,41 @@ class AotMilestone3IrTests(unittest.TestCase):
                 llvm_ir,
                 Path(tmp) / "phase-capture-deferred-source",
                 filename="phase-capture-deferred-source.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v416_owned_return_defers_to_enclosing_region(self) -> None:
+        source = (
+            "def make(value: str) -> tuple[str, ...]:\n"
+            "    scratch = value + '-scratch'\n"
+            "    return (value + '-kept',)\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    result = make('root')\n"
+            "    return 0 if result[0] == 'root-kept' else 1\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="phase-return-deferred-source.py", entry="entry")
+        )
+        make_body = llvm_ir.split("define ptr @make(ptr %value)", 1)[1].split("\n}", 1)[0]
+        defer_index = make_body.index("call i1 @__xcc_aot_phase_capture_defer")
+        promote_index = make_body.index('call void @"__xcc_aot_phase_promote:')
+        finish_index = make_body.index("call void @__xcc_aot_phase_finish")
+        self.assertLess(defer_index, promote_index)
+        self.assertLess(promote_index, finish_index)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-return-deferred-source",
+                filename="phase-return-deferred-source.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 

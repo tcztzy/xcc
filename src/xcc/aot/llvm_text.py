@@ -2160,7 +2160,17 @@ class _Emitter:
         key = repr(return_type)
         self.phase_promote_types[key] = return_type
         helper = _llvm_symbol("__xcc_aot_phase_promote:" + key)
+        deferred = self._tmp("phase.return.deferred")
+        promote_label = self._label("phase.return.promote")
+        finish_label = self._label("phase.return.finish")
+        lines.append(
+            f"  {deferred} = call i1 @__xcc_aot_phase_capture_defer(ptr {self.current_phase_mark})"
+        )
+        lines.append(f"  br i1 {deferred}, label %{finish_label}, label %{promote_label}")
+        lines.append(f"{promote_label}:")
         lines.append(f"  call void {helper}(ptr {value}, ptr {self.current_phase_mark})")
+        lines.append(f"  br label %{finish_label}")
+        lines.append(f"{finish_label}:")
 
     def _emit_phase_promote_value(
         self,

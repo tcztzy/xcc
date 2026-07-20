@@ -2,6 +2,26 @@
 
 ## Current
 
+- B629 extends V415's deferred region transfer to statically owned pointer
+  returns. After B628 removed the duplicate parser-owner capture, a matched
+  sample still spent 1,488 frames recursively promoting the fresh token tuple
+  out of `lex_python`. An owned-returning callee whose mark has a parent now
+  marks the whole callee segment for transfer, skips the typed graph walk, and
+  lets normal phase finish commit it into the enclosing region. Borrowed
+  returns are unchanged; an outermost owned return still performs exact V404
+  promotion and reclaims unrelated scratch. V416 native runtime and generated
+  tuple-return oracles cover both paths and agree with CPython. The 223 LLVM/M3
+  tests, lint, and type pass. A hosted Stage 1 builds in 28.57 seconds at
+  329,875,456-byte maximum RSS with zero swap. It compiles the focused return
+  source in 0.74 seconds at 47,349,760-byte maximum RSS using only `llc` and
+  `cc`, and matches CPython with exit 7; Stage 1 has no Python dependency or
+  symbol. Two offset frame-pointer samples no longer contain the `lex_python`
+  return-promotion branch. The later window instead spends 1,803/3,825 frames
+  in lexer owner-target lookup and 745/3,825 in local promotion, identifying
+  capture provenance as the next blocker. The 17-second watchdog records 409
+  source opens, no tool execution, and no Stage 2 artifact; no Stage 1-to-2
+  result is claimed.
+
 - B628 replaces repeated direct-parent owner-graph promotion with a deferred
   region transfer. Frame samples showed the same lexer token graph first taking
   1,819 promotion frames on return and then another 1,900 capture frames in
