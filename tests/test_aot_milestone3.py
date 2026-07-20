@@ -542,6 +542,70 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 70)
         self.assertEqual(completed.stderr, "xcc-aot: memory safety violation\n")
 
+    def test_v404_promoted_allocation_outlives_inner_phase(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %kept = call ptr @__xcc_aot_alloc(i64 16)\n"
+            + "  store i64 41, ptr %kept\n"
+            + "  %temporary = call ptr @__xcc_aot_alloc(i64 64)\n"
+            + "  %promoted = call i1 @__xcc_aot_phase_promote(ptr %kept)\n"
+            + "  %null_promoted = call i1 @__xcc_aot_phase_promote(ptr null)\n"
+            + "  %peak = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
+            + "  %after_reset = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %temporary_reclaimed = icmp ult i64 %after_reset, %peak\n"
+            + "  %value = load i64, ptr %kept\n"
+            + "  %value_survived = icmp eq i64 %value, 41\n"
+            + "  %resized = call ptr @__xcc_aot_realloc(ptr %kept, i64 16, i64 24)\n"
+            + "  store i64 42, ptr %resized\n"
+            + "  %resized_value = load i64, ptr %resized\n"
+            + "  %resize_survived = icmp eq i64 %resized_value, 42\n"
+            + "  call void @__xcc_aot_free(ptr %resized)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %outer_mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %inner_mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %nested_kept = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 43, ptr %nested_kept\n"
+            + "  %nested_temporary = call ptr @__xcc_aot_alloc(i64 48)\n"
+            + "  %nested_promoted = call i1 @__xcc_aot_phase_promote(ptr %nested_kept)\n"
+            + "  %nested_peak = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %inner_mark)\n"
+            + "  %after_inner = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %inner_temporary_reclaimed = icmp ult i64 %after_inner, %nested_peak\n"
+            + "  %nested_value = load i64, ptr %nested_kept\n"
+            + "  %nested_value_survived = icmp eq i64 %nested_value, 43\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %outer_mark)\n"
+            + "  %after_outer = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %parent_reclaimed = icmp eq i64 %after_outer, %baseline\n"
+            + "  %not_null_promoted = xor i1 %null_promoted, true\n"
+            + "  %promotion_ok = and i1 %promoted, %not_null_promoted\n"
+            + "  %lifetime_ok = and i1 %temporary_reclaimed, %value_survived\n"
+            + "  %cleanup_ok = and i1 %resize_survived, %balanced\n"
+            + "  %nested_promotion_ok = and i1 %nested_promoted, %nested_value_survived\n"
+            + "  %nested_cleanup_ok = and i1 %inner_temporary_reclaimed, %parent_reclaimed\n"
+            + "  %nested_ok = and i1 %nested_promotion_ok, %nested_cleanup_ok\n"
+            + "  %partial = and i1 %promotion_ok, %lifetime_ok\n"
+            + "  %global_ok = and i1 %partial, %cleanup_ok\n"
+            + "  %ok = and i1 %global_ok, %nested_ok\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-promote",
+                filename="phase-promote.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v389_phase_free_rejects_untracked_pointer_without_prefix_read(self) -> None:
         llvm_ir = (
             runtime_prelude()
@@ -631,6 +695,42 @@ class AotMilestone3IrTests(unittest.TestCase):
                 llvm_ir,
                 Path(tmp) / "borrowed-phase",
                 filename="borrowed-phase.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v404_owned_result_graph_is_promoted_before_reset(self) -> None:
+        source = (
+            "def make(value: str) -> tuple[tuple[str, ...], ...]:\n"
+            "    scratch = value + '-temporary'\n"
+            "    kept = value + '-kept'\n"
+            "    return ((kept,),)\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    result = make('root')\n"
+            "    return 0 if result[0][0] == 'root-kept' else 1\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="owned-phase.py", entry="entry")
+        )
+        make_body = llvm_ir.split("define ptr @make(ptr %value)", 1)[1].split(
+            "\n}", 1
+        )[0]
+        promote_index = make_body.index("call void @\"__xcc_aot_phase_promote:")
+        reset_index = make_body.index("call void @__xcc_aot_phase_reset")
+        self.assertLess(promote_index, reset_index)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "owned-phase",
+                filename="owned-phase.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 

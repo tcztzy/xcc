@@ -2,6 +2,18 @@
 
 ## Current
 
+- B617 adds typed owned-result transfer between nested compiler regions. The
+  runtime moves an exact current-phase allocation before its mark without
+  changing its address; generated type-specific walkers transfer reachable
+  string/bytes, tuple, dict, and record storage before the callee reset. Unknown
+  layouts, capture-capable functions, and fallible error graphs remain
+  conservative. V404 covers outermost promotion plus tracked `realloc`/`free`,
+  child-to-parent transfer and parent reclamation, and a CPython/native nested
+  tuple graph containing a freshly allocated string. The complete 958-test AOT
+  suite passes. A hosted full slice emits 850 functions, 51 owned-result
+  functions, 46 promotion helpers, and 108 phase marks; bounded native
+  Stage 1-to-2 validation remains pending.
+
 - B616 extends compiler-derived owned phases to pointer-returning functions only
   when a fixed-point provenance proof shows that every result borrows from an
   input/static value or another proven borrowed return. Fresh, captured, and
@@ -9,12 +21,19 @@
   conservative; the focused V403 CPython/native oracle verifies that reset
   preserves the returned pointer. The hosted full AOT slice proves 22 borrowed
   returns and 17 additional phase owners (56 total); 198 emitter/M3 tests and
-  the 11 previously failing native-bootstrap oracles pass.
+  the 11 previously failing native-bootstrap oracles pass. Its bounded
+  Stage 1-to-2 oracle still exited 70 at the unchanged allocation limit after
+  59.84 seconds (58.65 seconds user), with 641,335,296-byte maximum RSS, 3,137
+  source opens, no tool execution, and no Stage 2 artifact. Borrowed-result
+  phases improved time but did not bound fresh result-graph lifetimes.
 
 - B615 caches positive and negative record-name projections per lowerer and
   replaces repeated `rsplit` tuple allocation with `rfind`. The focused V402
-  CPython oracle and 456 relevant AOT tests pass; bounded native validation remains
-  pending before the next Stage 1-to-2 attempt.
+  CPython oracle and 456 relevant AOT tests pass. Its single bounded
+  Stage 1-to-2 attempt still exited 70 at the unchanged allocation limit after
+  628.95 seconds (63.41 seconds user), with 530,612,224-byte maximum RSS and
+  640,942,896-byte peak footprint; it opened 3,137 source paths, executed no
+  tool, and produced no Stage 2 artifact.
 
 - B614 makes reachability materialize each record at most once.
   `_lower_named_slice_from_roots` now passes only records not already emitted.

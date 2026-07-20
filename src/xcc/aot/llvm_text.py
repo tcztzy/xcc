@@ -1068,6 +1068,89 @@ def _phase_borrowed_return_functions(
     return frozenset(borrowed_functions)
 
 
+_PHASE_SHALLOW_PROMOTABLE_RECORDS = frozenset(
+    {
+        "bool",
+        "bytes",
+        "complex",
+        "float",
+        "int",
+        "str",
+    }
+)
+
+
+def _phase_record_part_name(
+    part: str,
+    records: dict[str, IrRecord],
+) -> str | None:
+    if part in records:
+        return part
+    fallback = part.rsplit(".", 1)[-1]
+    return fallback if fallback in records else None
+
+
+def _phase_type_is_promotable(
+    type_info: IrType,
+    records: dict[str, IrRecord],
+    visiting: set[str] | None = None,
+) -> bool:
+    if isinstance(type_info, IrBoolType | IrFloatType | IrIntType | IrNoneType):
+        return True
+    if isinstance(type_info, IrBytesType | IrStringType):
+        return True
+    if isinstance(type_info, IrTupleType):
+        return all(
+            _phase_type_is_promotable(element, records, visiting) for element in type_info.elements
+        )
+    if isinstance(type_info, IrDictType):
+        return _phase_type_is_promotable(
+            type_info.key, records, visiting
+        ) and _phase_type_is_promotable(type_info.value, records, visiting)
+    if not isinstance(type_info, IrRecordType) or type_info.name == "object":
+        return False
+    parts = _record_union_parts(type_info.name)
+    concrete_parts = tuple(part for part in parts if part != "None")
+    shallow_parts = tuple(
+        part for part in concrete_parts if part in _PHASE_SHALLOW_PROMOTABLE_RECORDS
+    )
+    if shallow_parts:
+        return len(concrete_parts) == 1
+    active = set() if visiting is None else set(visiting)
+    key = repr(type_info)
+    if key in active:
+        return True
+    active.add(key)
+    for part in concrete_parts:
+        record_name = _phase_record_part_name(part, records)
+        if record_name is None:
+            return False
+        for field in records[record_name].fields:
+            if not _phase_type_is_promotable(field.type, records, active):
+                return False
+    return True
+
+
+def _phase_owned_return_functions(
+    module: IrModule,
+    summaries: dict[str, tuple[bool, bool]],
+    borrowed_functions: frozenset[str],
+) -> frozenset[str]:
+    records = {record.name: record for record in module.records}
+    owned: set[str] = set()
+    for function in module.functions:
+        summary = summaries.get(function.name)
+        if (
+            summary is not None
+            and summary[1]
+            and function.name not in borrowed_functions
+            and _phase_pointer_type(function.return_type)
+            and _phase_type_is_promotable(function.return_type, records)
+        ):
+            owned.add(function.name)
+    return frozenset(owned)
+
+
 def _phase_expr_effect(
     expr: IrExpr,
     summaries: dict[str, tuple[bool, bool]],
@@ -1207,12 +1290,17 @@ def _function_uses_owned_phase(
     function: IrFunction,
     summaries: dict[str, tuple[bool, bool]],
     borrowed_return_functions: frozenset[str],
+    owned_return_functions: frozenset[str],
 ) -> bool:
     scalar_return = isinstance(
         function.return_type,
         (IrBoolType, IrFloatType, IrIntType, IrNoneType),
     )
-    if not scalar_return and function.name not in borrowed_return_functions:
+    if (
+        not scalar_return
+        and function.name not in borrowed_return_functions
+        and function.name not in owned_return_functions
+    ):
         return False
     summary = summaries.get(function.name)
     return summary is not None and summary[0] and summary[1]
@@ -1238,6 +1326,11 @@ class _Emitter:
             module,
             self.phase_function_summaries,
         )
+        self.phase_owned_return_functions = _phase_owned_return_functions(
+            module,
+            self.phase_function_summaries,
+            self.phase_borrowed_return_functions,
+        )
         self.index = 0
         self.string_index = 0
         self.string_constants: list[str] = []
@@ -1255,6 +1348,8 @@ class _Emitter:
         self.current_owned_tuple_rebinds: set[int] = set()
         self.current_borrowed_string_concat_assignments: set[int] = set()
         self.current_phase_mark: str | None = None
+        self.current_phase_promotes_return = False
+        self.phase_promote_types: dict[str, IrType] = {}
         self.failure_scopes: list[_FailureScope] = []
         self.caught_status_stack: list[str] = []
         self.record_equality_records: set[str] = set()
@@ -1269,6 +1364,7 @@ class _Emitter:
         ]
         raw_main = self._emit_main()
         main = None if raw_main is None else guard_allocation_calls(raw_main)
+        phase_promotion_helpers = self._emit_phase_promotion_helpers()
         record_equality_helpers = [
             guard_allocation_calls(helper) for helper in self._emit_record_equality_helpers()
         ]
@@ -1298,6 +1394,7 @@ class _Emitter:
             lines.extend(sorted(self.extra_declarations))
             lines.append("")
         lines.extend(functions)
+        lines.extend(phase_promotion_helpers)
         lines.extend(record_equality_helpers)
         lines.extend(tagged_object_equality_helpers)
         if main is not None:
@@ -1399,6 +1496,7 @@ class _Emitter:
             self.current_borrowed_string_concat_assignments
         )
         previous_phase_mark = self.current_phase_mark
+        previous_phase_promotes_return = self.current_phase_promotes_return
         previous_failure_scopes = self.failure_scopes
         previous_caught_status_stack = self.caught_status_stack
         self.current_function = function
@@ -1410,6 +1508,7 @@ class _Emitter:
             function
         )
         self.current_phase_mark = None
+        self.current_phase_promotes_return = function.name in self.phase_owned_return_functions
         self.failure_scopes = []
         self.caught_status_stack = []
         names = {
@@ -1421,6 +1520,7 @@ class _Emitter:
                 function,
                 self.phase_function_summaries,
                 self.phase_borrowed_return_functions,
+                self.phase_owned_return_functions,
             ):
                 self.needs_runtime_prelude = True
                 self.current_phase_mark = self._tmp("phase.mark")
@@ -1441,6 +1541,7 @@ class _Emitter:
                 previous_borrowed_string_concat_assignments
             )
             self.current_phase_mark = previous_phase_mark
+            self.current_phase_promotes_return = previous_phase_promotes_return
             self.failure_scopes = previous_failure_scopes
             self.caught_status_stack = previous_caught_status_stack
         lines = _hoist_allocas_to_entry(lines)
@@ -1598,6 +1699,7 @@ class _Emitter:
                 if value is None
                 else self._value_for_result_type(value, return_type, lines)
             )
+            self._emit_phase_promote_return(stored, return_type, lines)
             lines.append(
                 f"  store {self._storage_llvm_type(return_type)} {stored}, "
                 f"ptr {self.current_result_out}"
@@ -1613,8 +1715,222 @@ class _Emitter:
             self._emit_default_return(lines, return_type)
             return
         returned = self._value_for_result_type(value, return_type, lines)
+        self._emit_phase_promote_return(returned, return_type, lines)
         self._emit_phase_reset(lines)
         lines.append(f"  ret {self._llvm_type(return_type)} {returned}")
+
+    def _emit_phase_promote_return(
+        self,
+        value: str,
+        return_type: IrType,
+        lines: list[str],
+    ) -> None:
+        if not self.current_phase_promotes_return or not _phase_pointer_type(return_type):
+            return
+        key = repr(return_type)
+        self.phase_promote_types[key] = return_type
+        helper = _llvm_symbol("__xcc_aot_phase_promote:" + key)
+        lines.append(f"  call void {helper}(ptr {value})")
+
+    def _emit_phase_promote_value(
+        self,
+        value: str,
+        type_info: IrType,
+        lines: list[str],
+    ) -> None:
+        if isinstance(type_info, IrFloatType):
+            promoted = self._tmp("phase.promote.float")
+            lines.append(f"  {promoted} = call i1 @__xcc_aot_phase_promote(ptr {value})")
+            return
+        if not _phase_pointer_type(type_info):
+            return
+        key = repr(type_info)
+        self.phase_promote_types[key] = type_info
+        helper = _llvm_symbol("__xcc_aot_phase_promote:" + key)
+        lines.append(f"  call void {helper}(ptr {value})")
+
+    def _emit_phase_promotion_helpers(self) -> list[str]:
+        helpers: list[str] = []
+        emitted: set[str] = set()
+        while True:
+            pending = sorted(key for key in self.phase_promote_types if key not in emitted)
+            if not pending:
+                return helpers
+            key = pending[0]
+            emitted.add(key)
+            helpers.append(self._emit_phase_promotion_helper(self.phase_promote_types[key]))
+
+    def _emit_phase_promotion_helper(self, type_info: IrType) -> str:
+        helper = _llvm_symbol("__xcc_aot_phase_promote:" + repr(type_info))
+        if isinstance(type_info, IrStringType | IrBytesType):
+            return (
+                f"define void {helper}(ptr %value) {{\n"
+                "entry:\n"
+                "  %promoted = call i1 @__xcc_aot_phase_promote(ptr %value)\n"
+                "  ret void\n"
+                "}"
+            )
+        if isinstance(type_info, IrTupleType):
+            return self._emit_phase_tuple_promotion_helper(
+                helper,
+                type_info.elements,
+            )
+        if isinstance(type_info, IrDictType):
+            pair_type = IrTupleType((type_info.key, type_info.value))
+            return self._emit_phase_tuple_promotion_helper(helper, (pair_type,))
+        if not isinstance(type_info, IrRecordType):
+            self._error(f"Unsupported phase promotion type: {type(type_info).__name__}")
+        parts = _record_union_parts(type_info.name)
+        concrete_parts = tuple(part for part in parts if part != "None")
+        if len(concrete_parts) == 1 and concrete_parts[0] in (_PHASE_SHALLOW_PROMOTABLE_RECORDS):
+            return (
+                f"define void {helper}(ptr %value) {{\n"
+                "entry:\n"
+                "  %promoted = call i1 @__xcc_aot_phase_promote(ptr %value)\n"
+                "  ret void\n"
+                "}"
+            )
+        concrete_records: list[str] = []
+        for part in concrete_parts:
+            record_name = _phase_record_part_name(part, self.records)
+            if record_name is None:
+                self._error(f"Unsupported phase promotion record: {part}")
+            concrete_records.append(record_name)
+        if len(concrete_records) == 1:
+            return self._emit_phase_record_promotion_helper(
+                helper,
+                concrete_records[0],
+            )
+        return self._emit_phase_record_union_promotion_helper(helper, concrete_records)
+
+    def _emit_phase_record_promotion_helper(
+        self,
+        helper: str,
+        record_name: str,
+    ) -> str:
+        lines = [
+            f"define void {helper}(ptr %value) {{",
+            "entry:",
+            "  %nonnull = icmp ne ptr %value, null",
+            "  br i1 %nonnull, label %promote, label %done",
+            "promote:",
+            "  %raw = getelementptr i8, ptr %value, i64 -8",
+            "  %promoted = call i1 @__xcc_aot_phase_promote(ptr %raw)",
+            "  br i1 %promoted, label %children, label %done",
+            "children:",
+        ]
+        record = self.records[record_name]
+        for index, field in enumerate(record.fields):
+            if not _phase_pointer_type(field.type):
+                continue
+            field_ptr = f"%field.{index}.ptr"
+            field_value = f"%field.{index}"
+            lines.append(
+                f"  {field_ptr} = getelementptr inbounds %{record_name}, "
+                f"ptr %value, i32 0, i32 {index}"
+            )
+            lines.append(
+                f"  {field_value} = load {self._storage_llvm_type(field.type)}, ptr {field_ptr}"
+            )
+            self._emit_phase_promote_value(field_value, field.type, lines)
+        lines.extend(("  br label %done", "done:", "  ret void", "}"))
+        return "\n".join(lines)
+
+    def _emit_phase_record_union_promotion_helper(
+        self,
+        helper: str,
+        record_names: list[str],
+    ) -> str:
+        lines = [
+            f"define void {helper}(ptr %value) {{",
+            "entry:",
+            "  %nonnull = icmp ne ptr %value, null",
+            "  br i1 %nonnull, label %dispatch, label %done",
+            "dispatch:",
+            "  %raw = getelementptr i8, ptr %value, i64 -8",
+            "  %tag = load i64, ptr %raw",
+            "  switch i64 %tag, label %done [",
+        ]
+        for index, record_name in enumerate(record_names):
+            lines.append(f"    i64 {self.record_type_ids[record_name]}, label %record.{index}")
+        lines.append("  ]")
+        for index, record_name in enumerate(record_names):
+            type_info = IrRecordType(record_name)
+            key = repr(type_info)
+            self.phase_promote_types[key] = type_info
+            target = _llvm_symbol("__xcc_aot_phase_promote:" + key)
+            lines.extend(
+                (
+                    f"record.{index}:",
+                    f"  call void {target}(ptr %value)",
+                    "  br label %done",
+                )
+            )
+        lines.extend(("done:", "  ret void", "}"))
+        return "\n".join(lines)
+
+    def _emit_phase_tuple_promotion_helper(
+        self,
+        helper: str,
+        element_types: tuple[IrType, ...],
+    ) -> str:
+        lines = [
+            f"define void {helper}(ptr %value) {{",
+            "entry:",
+            "  %nonnull = icmp ne ptr %value, null",
+            "  br i1 %nonnull, label %promote, label %done",
+            "promote:",
+            "  %promoted = call i1 @__xcc_aot_phase_promote(ptr %value)",
+            "  br i1 %promoted, label %storage, label %done",
+            "storage:",
+            "  %data.ptr = getelementptr ptr, ptr %value, i64 2",
+            "  %data = load ptr, ptr %data.ptr",
+            "  %data.promoted = call i1 @__xcc_aot_phase_promote(ptr %data)",
+            "  %layout.ptr = getelementptr ptr, ptr %value, i64 4",
+            "  %layout = load ptr, ptr %layout.ptr",
+            "  %layout.promoted = call i1 @__xcc_aot_phase_promote(ptr %layout)",
+        ]
+        if not element_types:
+            lines.extend(("  br label %done", "done:", "  ret void", "}"))
+            return "\n".join(lines)
+        if len(element_types) > 1:
+            for index, element_type in enumerate(element_types):
+                if not _phase_pointer_type(element_type) and not isinstance(
+                    element_type, IrFloatType
+                ):
+                    continue
+                item = f"%item.{index}"
+                lines.append(f"  {item} = call ptr @__xcc_aot_tuple_get(ptr %value, i64 {index})")
+                self._emit_phase_promote_value(item, element_type, lines)
+            lines.extend(("  br label %done", "done:", "  ret void", "}"))
+            return "\n".join(lines)
+        element_type = element_types[0]
+        if not _phase_pointer_type(element_type) and not isinstance(element_type, IrFloatType):
+            lines.extend(("  br label %done", "done:", "  ret void", "}"))
+            return "\n".join(lines)
+        lines.extend(
+            (
+                "  %length = call i64 @__xcc_aot_tuple_len(ptr %value)",
+                "  br label %loop.cond",
+                "loop.cond:",
+                "  %index = phi i64 [ 0, %storage ], [ %next, %loop.body ]",
+                "  %finished = icmp uge i64 %index, %length",
+                "  br i1 %finished, label %done, label %loop.body",
+                "loop.body:",
+                "  %item = call ptr @__xcc_aot_tuple_get(ptr %value, i64 %index)",
+            )
+        )
+        self._emit_phase_promote_value("%item", element_type, lines)
+        lines.extend(
+            (
+                "  %next = add i64 %index, 1",
+                "  br label %loop.cond",
+                "done:",
+                "  ret void",
+                "}",
+            )
+        )
+        return "\n".join(lines)
 
     def _emit_phase_reset(self, lines: list[str]) -> None:
         if self.current_phase_mark is None:

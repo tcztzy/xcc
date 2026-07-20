@@ -1,5 +1,21 @@
 # Lessons
 
+- A fresh return is a lifetime transfer, not proof that it must leak to process
+  lifetime. When the static type describes the complete reachable graph, move
+  each current-region allocation into the parent region before resetting the
+  callee; keep ordinary Python source and value semantics unchanged, and fall
+  back when layout or capture proof is incomplete.
+- Region transfer must preserve allocation addresses. Splice runtime-owned
+  headers across the current mark rather than copying or reallocating payloads;
+  the callee then frees only nonreturned temporaries, while the parent retains
+  both pointer identity and responsibility for eventual reset. Exact-chain
+  lookup must continue after the outermost reset so promoted storage can still
+  be resized or freed safely.
+- Recursive result-graph promotion needs a cycle/revisit guard that does not
+  allocate another visited set. Returning false when a node is null, untracked,
+  or already older makes the successful region move itself the visitation mark;
+  traverse children only after that move. Dynamic object layouts and fallible
+  error payloads need a separate proof and must remain conservative meanwhile.
 - Pointer return does not imply ownership escape. A no-capture helper that
   returns only a parameter element, static value, borrowed field, or another
   proven borrow can reclaim its own temporary region before returning; derive

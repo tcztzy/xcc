@@ -262,6 +262,13 @@ class AotLlvmTextTests(unittest.TestCase):
                 "returns_boxed_scalar_pointer",
                 "define ptr @returns_boxed_scalar_pointer()",
             ),
+        ):
+            with self.subTest(function=function):
+                body = llvm_ir.split(signature, 1)[1].split("\n}", 1)[0]
+                self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
+                self.assertIn('call void @"__xcc_aot_phase_promote:', body)
+                self.assertIn("call void @__xcc_aot_phase_reset", body)
+        for function, signature in (
             ("passes_to_mutating_call", "define i64 @passes_to_mutating_call()"),
             (
                 "writes_borrowed_container",
@@ -1611,9 +1618,15 @@ class AotLlvmTextTests(unittest.TestCase):
             ),
         )
         llvm_ir = emit_llvm_text(module)
-        self.assertIn("%box.raw1 = call ptr @__xcc_aot_alloc(i64 16)", llvm_ir)
-        self.assertIn("store i64 1, ptr %box.raw1", llvm_ir)
-        self.assertIn("%box2 = getelementptr i8, ptr %box.raw1, i64 8", llvm_ir)
+        self.assertRegex(
+            llvm_ir,
+            r"%box\.raw\d+ = call ptr @__xcc_aot_alloc\(i64 16\)",
+        )
+        self.assertRegex(llvm_ir, r"store i64 1, ptr %box\.raw\d+")
+        self.assertRegex(
+            llvm_ir,
+            r"%box\d+ = getelementptr i8, ptr %box\.raw\d+, i64 8",
+        )
         self.assertIn("\\22\\5C\\0A\\00", llvm_ir)
 
     def test_record_constructor_assignment_uses_unique_heap_names(self) -> None:

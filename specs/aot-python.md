@@ -165,8 +165,18 @@ V403: A pointer-returning function may own a nested phase only when a fixed-poin
 provenance analysis proves every pointer return borrows from a parameter, static
 value, field of a borrowed value, or another proven borrowed return; resetting
 that phase ! preserve the returned pointer, while a fresh, captured, unknown,
-path-ambiguous, or scalar-to-pointer return-coercion result remains on the
-conservative heap/arena path.
+or path-ambiguous result remains on the conservative heap/arena path. A
+scalar-to-pointer coercion is never a borrowed return; it may enter only the
+separate owned-result proof below.
+V404: A fresh pointer result may leave a compiler-owned nested phase only when
+its complete reachable graph has a statically known string/bytes, tuple, dict,
+or record layout. Each exact current-phase allocation in that graph ! move
+without changing address to immediately before the current mark, so the callee
+reset reclaims unreturned temporaries and the parent reset later reclaims the
+transferred result. Null, static, untracked, or already-older allocations ! no
+move; unknown/dynamic layouts, capturing effects, and fallible error-result
+graphs remain on the conservative path. Promoted allocations ! remain valid for
+exact-chain `realloc`/`free` after the outermost phase has reset.
 
 ## §T TASKS
 id|status|task|cites
@@ -531,3 +541,4 @@ B613|2026-07-20|post-B612 Stage 1 still emitted five `_rename_call_target` conca
 B614|2026-07-20|`_lower_named_slice_from_roots` re-lowered every known record for every reached function; the discarded duplicate IR remained allocated. It now requests only records not already materialized, and V401 verifies each record is included once|V376,V384,V385,V401
 B615|2026-07-20|after B614, the bounded Stage 1-to-2 run still exited at the 512 MiB allocation guard; LLDB stopped in `__xcc_aot_tuple_new` called by `_Lowerer._project_record_name`, where `name.rsplit(".", 1)[-1]` materialized a tuple for every repeated type projection. Each lowerer now caches positive and negative projections by original name and uses `rfind` plus one suffix slice only on the first qualified miss; V402 verifies repeated inputs do not repeat class-table probes|V376,V384,V385,V402
 B616|2026-07-20|the post-B615 Stage 1-to-2 run still exhausted the fixed allocation budget because generated Stage 1 inserted only 38 IR-owned phases and none covered the source/parser/binder/slice/lowerer pipeline; the phase gate treated every pointer return as escaping even when lookup and cursor helpers returned only storage borrowed from an input or static value. A fixed-point return-provenance proof now admits no-capture borrowed returns as phase owners, preserves the borrowed pointer across reset, and leaves fresh, ambiguous, or scalar results boxed by the return ABI conservative|V376,V384,V385,V390,V403
+B617|2026-07-20|the post-B616 bounded Stage 1-to-2 run still exited 70 at the unchanged 512 MiB allocation guard after 59.84 seconds, before any tool execution or Stage 2 artifact; static Stage 1 IR contained about 12,347 direct allocation calls while 57 phase owners covered only 150, and fresh typed result graphs still had to escape every callee phase for the process lifetime. The runtime can now splice an exact current-phase allocation immediately before its mark, and the emitter recursively transfers only statically promotable string/bytes, tuple, dict, and record result graphs before reset; nested V404 native oracles prove that unreturned temporaries die in the callee, the result survives in the parent, the parent later reclaims it, and post-reset `realloc`/`free` preserve accounting|V368,V376,V384,V385,V388,V390,V404
