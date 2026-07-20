@@ -110,6 +110,14 @@ V389: Allocation metadata ! dereferenced only after an exact payload identity is
 found by walking the runtime-owned live chain; phase marks ! stable LIFO sentinels,
 and an unknown pointer, non-top reset, or corrupt chain ! controlled memory-safety
 diagnostic before any unvalidated prefix read or out-of-order release.
+V390: Compiler-inserted owned phases ! derived solely from fixed-point IR effect
+and no-capture summaries, with no source marker; only allocating functions with a
+scalar/`None` result may own a phase and every return path resets it, while pointer
+results, fallible paths, unknown/special calls, and unproved field/container writes
+⊥ phase insertion.
+V391: Runtime calls classified no-capture ! retain no phase-owned pointer after
+return; raw-address caches and implicit global retention ⊥, and mutating intrinsics
+or C APIs remain outside the no-capture set until a stronger effect proof exists.
 
 ## §T TASKS
 id|status|task|cites
@@ -452,3 +460,6 @@ B591|2026-07-19|tuple-backed mutable containers represented identity with replac
 B592|2026-07-20|native lowering compiled `_split_lines_keepends` rebinding `lines = (*lines, item)` as immutable full-tuple copy on every iteration, while the no-GC runtime retained every obsolete version; the real `<math.h>` probe therefore created 1,705,370 tuples totaling 520,135,680 bytes, with one concat site responsible for 419,553,168 bytes, and hit the 512 MiB guard; conservative intraprocedural ownership/liveness analysis now lowers only fresh, single-owner homogeneous tuple rebinding to stable-handle append with geometric backing growth, while any alias or escape keeps copy semantics|V368,V375,V376,V384,V385,V386,V387
 B593|2026-07-20|making every allocation arena-addressable with a 32-byte ownership header raised the real `<math.h>` maximum RSS from about 182 MiB to 361 MiB and the `include_next` probe to about 426 MiB, leaving too little distance from the 512 MiB containment boundary; ownership headers and the doubly linked reclamation chain must be enabled only inside explicit nested phases, while ordinary bounded allocations keep their prior layout and phase reset validates/reclaims only its marked segment|V376,V384,V385,V388
 B594|2026-07-20|the first dynamic-phase draft treated the global `phase_active` bit as proof that every pointer passed to `realloc` carried a phase header, so growing an ordinary pre-phase allocation read 32 bytes before its allocation and a mark represented by a movable allocation header could become stale across nested reallocations; exact live-chain membership now establishes provenance before metadata access, and dedicated LIFO sentinel nodes keep marks stable and reject out-of-order reset before release|V376,V384,V385,V388,V389
+B595|2026-07-20|two LLVM regressions asserted exact generated temporary suffixes for record allocations and a method receiver, so inserting a valid phase-mark temporary shifted later suffixes and failed the oracle despite preserving unique SSA names and behavior; the tests now assert distinct heap names and the semantic method-call shape without binding unrelated temporary numbering|V384,V390
+B596|2026-07-20|the runtime `str.startswith` helper cached its last text pointer and length in process-global slots, so classifying the call as no-capture allowed a phase reset to free the text while the cache retained its address, enabling stale-length reads if malloc reused that address; the address cache was removed, length is measured per call, and runtime no-capture classification now forbids hidden pointer retention|V368,V376,V385,V390,V391
+B597|2026-07-20|the fixed-point phase-summary helper annotated the fallible-function set as mutable `set[str]` even though the status analysis intentionally returns `frozenset[str]`; runtime tests passed, but the required type gate rejected the overly narrow internal contract, which now accepts the actual immutable set shape|V379,V384,V390

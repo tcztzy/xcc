@@ -519,6 +519,86 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 70)
         self.assertEqual(completed.stderr, "xcc-aot: memory safety violation\n")
 
+    def test_v390_emitted_owned_phase_resets_across_repeated_calls(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        tuple_type = IrTupleType((int64,))
+        worker = IrFunction(
+            "worker",
+            (),
+            int64,
+            (
+                IrAssign(
+                    "local",
+                    IrTuple((IrConstInt(1, int64),), tuple_type),
+                ),
+                IrReturn(IrConstInt(0, int64)),
+            ),
+        )
+        entry = IrFunction(
+            "entry",
+            (),
+            int64,
+            (
+                IrAssign("first", IrCall("worker", (), int64)),
+                IrReturn(IrCall("worker", (), int64)),
+            ),
+        )
+        llvm_ir = emit_llvm_text(
+            IrModule("owned_phase_exec.py", (), (worker, entry), entry="entry")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "owned-phase-exec",
+                filename="owned-phase-exec.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v391_startswith_does_not_retain_phase_pointer(self) -> None:
+        llvm_ir = (
+            '@v391_prefix = private constant [2 x i8] c"a\\00"\n'
+            + runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %first_mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %first = call ptr @__xcc_aot_alloc(i64 4)\n"
+            + "  store i8 97, ptr %first\n"
+            + "  %first1 = getelementptr i8, ptr %first, i64 1\n"
+            + "  store i8 98, ptr %first1\n"
+            + "  %first2 = getelementptr i8, ptr %first, i64 2\n"
+            + "  store i8 99, ptr %first2\n"
+            + "  %first3 = getelementptr i8, ptr %first, i64 3\n"
+            + "  store i8 0, ptr %first3\n"
+            + "  %first_ok = call i1 @__xcc_aot_string_startswith(\n"
+            + "    ptr %first, ptr @v391_prefix, i64 0)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %first_mark)\n"
+            + "  %second_mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %second = call ptr @__xcc_aot_alloc(i64 2)\n"
+            + "  store i8 120, ptr %second\n"
+            + "  %second1 = getelementptr i8, ptr %second, i64 1\n"
+            + "  store i8 0, ptr %second1\n"
+            + "  %second_ok = call i1 @__xcc_aot_string_startswith(\n"
+            + "    ptr %second, ptr @v391_prefix, i64 0)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %second_mark)\n"
+            + "  %second_false = xor i1 %second_ok, true\n"
+            + "  %ok = and i1 %first_ok, %second_false\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        self.assertNotIn("__xcc_aot_startswith_text", llvm_ir)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "startswith-phase-pointer",
+                filename="startswith-phase-pointer.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_annotation_name_edge_forms(self) -> None:
         string_annotation = parse_source(
             'def f() -> "Type | None":\n    pass\n'

@@ -53,6 +53,7 @@ from xcc.aot.llvm_text import (
     _branch_assigned_names,
     _for_each_targets,
     _llvm_symbol,
+    _phase_intrinsic_is_no_capture,
     _statement_assignment_types,
     _statement_assigned_names,
 )
@@ -91,6 +92,150 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertNotRegex(llvm_ir, r"(?m)^\s+%.* = call ptr @malloc\(")
         self.assertNotRegex(llvm_ir, r"(?m)^\s+%.* = call ptr @calloc\(")
         self.assertIn('c"call ptr @malloc(i64 9)\\00"', llvm_ir)
+
+    def test_v390_inserts_owned_phase_only_when_local_allocations_cannot_escape(
+        self,
+    ) -> None:
+        for target in (
+            "__dict_remove",
+            "__dict_set",
+            "__dict_setdefault",
+            "__dict_update",
+            "__llvm_AddIncoming",
+            "__llvm_api",
+            "__record_init__:Box.__init__",
+            "__set_add",
+            "__super_init__",
+            "__tuple_pop_item",
+            "__tuple_remove_item",
+            "__tuple_set_slice",
+        ):
+            with self.subTest(no_capture_target=target):
+                self.assertFalse(_phase_intrinsic_is_no_capture(target))
+        for target in ("__cmp_Eq", "__dict_get", "__str_startswith"):
+            with self.subTest(borrowing_target=target):
+                self.assertTrue(_phase_intrinsic_is_no_capture(target))
+
+        int64 = IrIntType(64, signed=True)
+        tuple_type = IrTupleType((int64,))
+        local_tuple = IrTuple((IrConstInt(1, int64),), tuple_type)
+        module = IrModule(
+            "owned_phase.py",
+            (),
+            (
+                IrFunction(
+                    "safe",
+                    (),
+                    int64,
+                    (
+                        IrAssign("items", local_tuple),
+                        IrIf(
+                            IrConstBool(True),
+                            IrBranch((IrReturn(IrConstInt(1, int64)),)),
+                            IrBranch((IrReturn(IrConstInt(2, int64)),)),
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "returns_pointer",
+                    (),
+                    tuple_type,
+                    (IrReturn(local_tuple),),
+                ),
+                IrFunction(
+                    "sink",
+                    (IrParam("value", tuple_type),),
+                    IrNoneType(),
+                    (),
+                ),
+                IrFunction(
+                    "passes_to_known_call",
+                    (),
+                    int64,
+                    (
+                        IrAssign("items", local_tuple),
+                        IrAssign(
+                            "__expr",
+                            IrCall(
+                                "sink",
+                                (IrName("items", tuple_type),),
+                                IrNoneType(),
+                            ),
+                        ),
+                        IrReturn(IrConstInt(0, int64)),
+                    ),
+                ),
+                IrFunction(
+                    "mutating_sink",
+                    (IrParam("value", tuple_type),),
+                    IrNoneType(),
+                    (
+                        IrSetItem(
+                            IrName("value", tuple_type),
+                            IrConstInt(0, int64),
+                            IrConstInt(2, int64),
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "passes_to_mutating_call",
+                    (),
+                    int64,
+                    (
+                        IrAssign("items", local_tuple),
+                        IrAssign(
+                            "__expr",
+                            IrCall(
+                                "mutating_sink",
+                                (IrName("items", tuple_type),),
+                                IrNoneType(),
+                            ),
+                        ),
+                        IrReturn(IrConstInt(0, int64)),
+                    ),
+                ),
+                IrFunction(
+                    "writes_borrowed_container",
+                    (IrParam("borrowed", tuple_type),),
+                    int64,
+                    (
+                        IrAssign("items", local_tuple),
+                        IrSetItem(
+                            IrName("borrowed", tuple_type),
+                            IrConstInt(0, int64),
+                            IrConstInt(2, int64),
+                        ),
+                        IrReturn(IrConstInt(0, int64)),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        safe_body = llvm_ir.split("define i64 @safe()", 1)[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", safe_body)
+        self.assertEqual(
+            safe_body.count("call void @__xcc_aot_phase_reset"),
+            safe_body.count("ret i64"),
+        )
+        known_call_body = llvm_ir.split(
+            "define i64 @passes_to_known_call()", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", known_call_body)
+        self.assertIn("call void @__xcc_aot_phase_reset", known_call_body)
+        for function, signature in (
+            ("returns_pointer", "define ptr @returns_pointer()"),
+            ("passes_to_mutating_call", "define i64 @passes_to_mutating_call()"),
+            (
+                "writes_borrowed_container",
+                "define i64 @writes_borrowed_container(ptr %borrowed)",
+            ),
+        ):
+            with self.subTest(function=function):
+                body = llvm_ir.split(signature, 1)[1].split("\n}", 1)[0]
+                self.assertNotIn("@__xcc_aot_phase_mark", body)
+                self.assertNotIn("@__xcc_aot_phase_reset", body)
 
     def test_emits_integer_augmented_assignment_operators(self) -> None:
         module = lower_source_to_ir(
@@ -1344,7 +1489,7 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(lower_source_to_ir(source, filename="method.py", entry="entry"))
         self.assertIn("%Pair = type { i64, i64 }", llvm_ir)
         self.assertIn("define i64 @Pair.total(ptr %self)", llvm_ir)
-        self.assertIn("call i64 @Pair.total(ptr %pair2)", llvm_ir)
+        self.assertRegex(llvm_ir, r"call i64 @Pair\.total\(ptr %pair\d+\)")
 
     def test_emits_explicit_none_record_field_default_as_null(self) -> None:
         source = (
@@ -1458,8 +1603,13 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("%box.raw1 = call ptr @__xcc_aot_alloc(i64 16)", llvm_ir)
-        self.assertIn("%box.raw4 = call ptr @__xcc_aot_alloc(i64 16)", llvm_ir)
+        heap_names = [
+            line.split(" =", 1)[0].strip()
+            for line in llvm_ir.splitlines()
+            if "%box.raw" in line and "call ptr @__xcc_aot_alloc(i64 16)" in line
+        ]
+        self.assertEqual(len(heap_names), 2)
+        self.assertEqual(len(set(heap_names)), 2)
         self.assertNotIn("\n  %box = call ptr @__xcc_aot_alloc", llvm_ir)
 
     def test_emits_record_field_assignment_store(self) -> None:

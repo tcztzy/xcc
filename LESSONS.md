@@ -1,5 +1,12 @@
 # Lessons
 
+- A scalar return type is necessary but not sufficient for region reclamation.
+  Calls, error payloads, field/container writes, and runtime globals are separate
+  escape channels; derive no-capture summaries to a module fixed point and reset
+  on every exit only after all are closed. Audit helper implementations as well
+  as IR: a seemingly read-only `startswith` call retained its input through a raw
+  address cache. Compiler-inserted temporaries also make exact SSA suffixes an
+  invalid behavioral oracle; assert uniqueness and call/dataflow shape instead.
 - Do not charge every allocation for arena metadata before an arena boundary is
   proven. A 32-byte header on millions of short-lived objects can consume most
   of the safety margin by itself. Enable provenance dynamically inside nested,

@@ -515,6 +515,245 @@ def _owned_tuple_rebinds(function: IrFunction) -> set[int]:
     return rebinds
 
 
+def _merge_phase_effects(effects: tuple[tuple[bool, bool], ...]) -> tuple[bool, bool]:
+    return all(safe for safe, _ in effects), any(allocates for _, allocates in effects)
+
+
+_PHASE_NO_CAPTURE_INTRINSICS = frozenset(
+    {
+        "__abs",
+        "__all_generator",
+        "__any_generator",
+        "__bool_and",
+        "__bool_or",
+        "__bytes",
+        "__bytes_from_ints",
+        "__chr",
+        "__complex",
+        "__contains",
+        "__dict_copy",
+        "__dict_get",
+        "__dict_items",
+        "__dict_keys",
+        "__dict_values",
+        "__exec_argv",
+        "__float",
+        "__float_fromhex",
+        "__getitem",
+        "__id",
+        "__ifexp",
+        "__int_format_hex2",
+        "__int_parse",
+        "__int_to_bytes",
+        "__len",
+        "__next_generator",
+        "__not",
+        "__optional_box",
+        "__ord",
+        "__record_construct0",
+        "__repr",
+        "__set_comprehension",
+        "__set_equal",
+        "__sorted",
+        "__tuple_comprehension",
+        "__tuple_concat",
+        "__tuple_repeat",
+        "__type_marker",
+        "__type_name",
+        "__type_tag",
+        "__union_getattr",
+        "__zip",
+        "bool",
+        "isinstance",
+        "len",
+        "range",
+        "reversed",
+    }
+)
+_PHASE_SPECIAL_EMITTER_FUNCTIONS = frozenset(
+    {
+        "xcc.cc_driver._aot_exec_argv",
+        "xcc.cc_driver._aot_read_text_file",
+        "xcc.cc_driver._aot_write_text_file",
+        "xcc.codegen._llvm_print_module_to_string",
+        "xcc.lexer._aot_error_summary_for_source",
+        "xcc.lexer._aot_header_summary_for_source",
+        "xcc.lexer._aot_token_summary_for_source",
+        "xcc.lexer.translate_source",
+        "xcc.llvm_api.optional_zero_ptr_array",
+        "xcc.llvm_api.ptr_array",
+        "xcc.llvm_api.zero_ptr_array",
+        "xcc.parser.type_specs.ParserError.__str__",
+        "xcc.preprocessor.__init__._Preprocessor._expand_line",
+        "xcc.preprocessor.__init__._Preprocessor._expand_macro_text",
+        "xcc.preprocessor.__init__._Preprocessor._handle_define",
+        "xcc.preprocessor.__init__._Preprocessor._handle_pragma_operator",
+        "xcc.preprocessor.__init__._Preprocessor._handle_undef",
+        "xcc.preprocessor.__init__._Preprocessor._should_collect_function_macro_continuation",
+        "xcc.sema.type_helpers._aot_integer_type_summary",
+        "xcc.types.Type.__str__",
+    }
+)
+
+
+def _phase_intrinsic_is_no_capture(target: str) -> bool:
+    return (
+        target in _PHASE_NO_CAPTURE_INTRINSICS
+        or target.startswith("__cmp_")
+        or target.startswith("__bytes_")
+        or target.startswith("__path_")
+        or target.startswith("__str_")
+    )
+
+
+def _phase_expr_effect(
+    expr: IrExpr,
+    summaries: dict[str, tuple[bool, bool]],
+) -> tuple[bool, bool]:
+    if isinstance(expr, IrBinary):
+        safe, allocates = _merge_phase_effects(
+            (
+                _phase_expr_effect(expr.left, summaries),
+                _phase_expr_effect(expr.right, summaries),
+            )
+        )
+        pointer_result = isinstance(
+            expr.type,
+            (IrBytesType, IrDictType, IrRecordType, IrStringType, IrTupleType),
+        )
+        return safe, allocates or pointer_result
+    if isinstance(expr, IrGetField):
+        return _phase_expr_effect(expr.value, summaries)
+    if isinstance(expr, IrConstructRecord):
+        safe, _ = _merge_phase_effects(
+            tuple(_phase_expr_effect(arg, summaries) for arg in expr.args)
+        )
+        return safe, True
+    if isinstance(expr, IrCall):
+        args_safe, args_allocate = _merge_phase_effects(
+            tuple(_phase_expr_effect(arg, summaries) for arg in expr.args)
+        )
+        if not args_safe:
+            return False, args_allocate
+        if _phase_intrinsic_is_no_capture(expr.target):
+            pointer_result = isinstance(
+                expr.type,
+                (IrBytesType, IrDictType, IrRecordType, IrStringType, IrTupleType),
+            )
+            return True, args_allocate or pointer_result
+        callee = summaries.get(expr.target)
+        if callee is None:
+            return False, args_allocate
+        return callee[0], args_allocate or callee[1]
+    if isinstance(expr, IrTuple):
+        safe, _ = _merge_phase_effects(
+            tuple(_phase_expr_effect(element, summaries) for element in expr.elements)
+        )
+        return safe, True
+    if isinstance(expr, IrTupleSlice):
+        effects = [_phase_expr_effect(expr.value, summaries)]
+        if expr.start is not None:
+            effects.append(_phase_expr_effect(expr.start, summaries))
+        if expr.stop is not None:
+            effects.append(_phase_expr_effect(expr.stop, summaries))
+        safe, _ = _merge_phase_effects(tuple(effects))
+        return safe, True
+    if isinstance(expr, IrStringConcat):
+        safe, _ = _merge_phase_effects(
+            tuple(_phase_expr_effect(part, summaries) for part in expr.parts)
+        )
+        return safe, True
+    if isinstance(expr, IrStringJoin):
+        safe, _ = _merge_phase_effects(
+            (
+                _phase_expr_effect(expr.separator, summaries),
+                _phase_expr_effect(expr.values, summaries),
+            )
+        )
+        return safe, True
+    return True, False
+
+
+def _phase_local_target(target: str) -> bool:
+    return all(_plain_assignment_target(part.strip()) for part in target.split(","))
+
+
+def _phase_block_effect(
+    statements: tuple[IrStmt, ...],
+    summaries: dict[str, tuple[bool, bool]],
+) -> tuple[bool, bool]:
+    effects: list[tuple[bool, bool]] = []
+    for statement in statements:
+        if isinstance(statement, IrAssign):
+            if not _phase_local_target(statement.target):
+                return False, False
+            effects.append(_phase_expr_effect(statement.value, summaries))
+            continue
+        if isinstance(statement, IrSetItem | IrRaise | IrReraise | IrTry):
+            return False, False
+        if isinstance(statement, IrReturn):
+            effects.append(_phase_expr_effect(statement.value, summaries))
+            continue
+        if isinstance(statement, IrIf):
+            effects.append(_phase_expr_effect(statement.condition, summaries))
+            effects.append(_phase_block_effect(statement.then_branch.statements, summaries))
+            if statement.else_branch is not None:
+                effects.append(_phase_block_effect(statement.else_branch.statements, summaries))
+            continue
+        if isinstance(statement, IrForEach):
+            if not _phase_local_target(statement.target):
+                return False, False
+            effects.append(_phase_expr_effect(statement.iterable, summaries))
+            effects.append(_phase_block_effect(statement.body.statements, summaries))
+            continue
+        if isinstance(statement, IrWhile):
+            effects.append(_phase_expr_effect(statement.condition, summaries))
+            effects.append(_phase_block_effect(statement.body.statements, summaries))
+            continue
+        if isinstance(statement, IrPrint):
+            effects.append(_phase_expr_effect(statement.value, summaries))
+            continue
+        if isinstance(statement, IrBreak | IrContinue):
+            continue
+        return False, False
+    return _merge_phase_effects(tuple(effects))
+
+
+def _phase_function_summaries(
+    module: IrModule,
+    fallible: frozenset[str],
+) -> dict[str, tuple[bool, bool]]:
+    summaries: dict[str, tuple[bool, bool]] = {}
+    changed = True
+    while changed:
+        changed = False
+        for function in module.functions:
+            if (
+                function.name in summaries
+                or function.name in fallible
+                or function.name in _PHASE_SPECIAL_EMITTER_FUNCTIONS
+            ):
+                continue
+            safe, allocates = _phase_block_effect(function.body, summaries)
+            if safe:
+                summaries[function.name] = (True, allocates)
+                changed = True
+    return summaries
+
+
+def _function_uses_owned_phase(
+    function: IrFunction,
+    summaries: dict[str, tuple[bool, bool]],
+) -> bool:
+    if not isinstance(
+        function.return_type,
+        (IrBoolType, IrFloatType, IrIntType, IrNoneType),
+    ):
+        return False
+    summary = summaries.get(function.name)
+    return summary is not None and summary[0] and summary[1]
+
+
 def emit_llvm_text(module: IrModule) -> str:
     emitter = _Emitter(module)
     return emitter.emit()
@@ -527,6 +766,10 @@ class _Emitter:
         self.record_type_ids = {name: index + 1 for index, name in enumerate(sorted(self.records))}
         self.functions = {function.name: function for function in module.functions}
         self.fallible_functions = analyze_fallibility(module)
+        self.phase_function_summaries = _phase_function_summaries(
+            module,
+            self.fallible_functions,
+        )
         self.index = 0
         self.string_index = 0
         self.string_constants: list[str] = []
@@ -541,6 +784,7 @@ class _Emitter:
         self.current_result_out: str | None = None
         self.current_error_out: str | None = None
         self.current_owned_tuple_rebinds: set[int] = set()
+        self.current_phase_mark: str | None = None
         self.failure_scopes: list[_FailureScope] = []
         self.caught_status_stack: list[str] = []
         self.record_equality_records: set[str] = set()
@@ -681,6 +925,7 @@ class _Emitter:
         previous_result_out = self.current_result_out
         previous_error_out = self.current_error_out
         previous_owned_tuple_rebinds = self.current_owned_tuple_rebinds
+        previous_phase_mark = self.current_phase_mark
         previous_failure_scopes = self.failure_scopes
         previous_caught_status_stack = self.caught_status_stack
         self.current_function = function
@@ -688,6 +933,7 @@ class _Emitter:
         self.current_result_out = result_out if fallible else None
         self.current_error_out = "%error_out" if fallible else None
         self.current_owned_tuple_rebinds = _owned_tuple_rebinds(function)
+        self.current_phase_mark = None
         self.failure_scopes = []
         self.caught_status_stack = []
         names = {
@@ -695,6 +941,10 @@ class _Emitter:
             for param in function.params
         }
         try:
+            if _function_uses_owned_phase(function, self.phase_function_summaries):
+                self.needs_runtime_prelude = True
+                self.current_phase_mark = self._tmp("phase.mark")
+                lines.append(f"  {self.current_phase_mark} = call ptr @__xcc_aot_phase_mark()")
             for statement in function.body:
                 self._emit_statement(statement, names, lines, function.return_type)
                 if _block_is_terminated(lines):
@@ -707,6 +957,7 @@ class _Emitter:
             self.current_result_out = previous_result_out
             self.current_error_out = previous_error_out
             self.current_owned_tuple_rebinds = previous_owned_tuple_rebinds
+            self.current_phase_mark = previous_phase_mark
             self.failure_scopes = previous_failure_scopes
             self.caught_status_stack = previous_caught_status_stack
         lines = _hoist_allocas_to_entry(lines)
@@ -846,6 +1097,7 @@ class _Emitter:
             return
         if self.current_function_is_fallible:
             if isinstance(return_type, IrNoneType):
+                self._emit_phase_reset(lines)
                 lines.append("  ret i32 0")
                 return
             if self.current_result_out is None:
@@ -859,16 +1111,24 @@ class _Emitter:
                 f"  store {self._storage_llvm_type(return_type)} {stored}, "
                 f"ptr {self.current_result_out}"
             )
+            self._emit_phase_reset(lines)
             lines.append("  ret i32 0")
             return
         if isinstance(return_type, IrNoneType):
+            self._emit_phase_reset(lines)
             lines.append("  ret void")
             return
         if value is None:
             self._emit_default_return(lines, return_type)
             return
         returned = self._value_for_result_type(value, return_type, lines)
+        self._emit_phase_reset(lines)
         lines.append(f"  ret {self._llvm_type(return_type)} {returned}")
+
+    def _emit_phase_reset(self, lines: list[str]) -> None:
+        if self.current_phase_mark is None:
+            return
+        lines.append(f"  call void @__xcc_aot_phase_reset(ptr {self.current_phase_mark})")
 
     def _emit_failure_transfer(
         self,
@@ -895,6 +1155,7 @@ class _Emitter:
             return
         if not self.current_function_is_fallible:
             self._error("failure propagation requires a fallible function")
+        self._emit_phase_reset(lines)
         lines.append(f"  ret i32 {status}")
 
     def _emit_control_finally(
@@ -9111,6 +9372,7 @@ class _Emitter:
             lines.append(f"  store {llvm_type} {value}, ptr {field_ptr}")
 
     def _emit_default_return(self, lines: list[str], return_type: IrType) -> None:
+        self._emit_phase_reset(lines)
         if self.current_function_is_fallible:
             if not isinstance(return_type, IrNoneType):
                 if self.current_result_out is None:

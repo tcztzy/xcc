@@ -2,6 +2,13 @@
 
 ## Current
 
+- Added compiler-derived owned phases without changing Python syntax. A module
+  fixed point proves no-capture call summaries, rejects pointer/fallible/unknown
+  escape paths, and inserts balanced mark/reset calls only around allocating
+  scalar/`None` functions. The real native compiler now contains 71 such phase
+  owners; `<math.h>` and `include_next` pass at 187,990,016 and 188,039,168 bytes
+  maximum RSS. Removed the `str.startswith` raw-pointer cache so a runtime helper
+  classified no-capture cannot retain phase storage after return.
 - Added the native phase-arena runtime ABI: nested marks enable provenance
   headers only for phase-owned allocations, reset validates and releases exactly
   the marked segment, and allocation accounting returns to its pre-phase value.
