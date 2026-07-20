@@ -2,6 +2,34 @@
 
 ## Current
 
+- B638 sizes negative provenance for the emitted borrowed-pointer working set
+  and makes its weak target identity resistant to mark-address reuse. The
+  post-B637 Stage 1 contains 353 distinct empty-string constants, so V424's
+  two-entry MRU continually evicted values that every parsed `AST` observes.
+  V425 replaces it with a fixed 1,024-entry direct index keyed by mixed pointer
+  bits and records the exact `(payload, target, target-generation)` triple only
+  after the validating allocation scan reaches the target. Phase marks now pack
+  a monotonic 39-bit generation, a bounded 24-bit active depth, and the deferred
+  bit in their existing state word. Payload allocation/reuse invalidates its one
+  candidate bucket in constant time; generation comparison rejects a stale
+  weak target without scanning the index or owning the mark. Generation
+  exhaustion fails closed, and the 512 MiB allocation limit bounds live marks
+  below the depth field. A native poison oracle retains three distinct static
+  borrows past the old two-entry limit and rejects a cached entry after its
+  target generation changes. Distinct ordinary dataclass default strings agree
+  under CPython and native execution. The focused four-test invariant, all 489
+  combined AOT tests, lint, and type pass. A retained hosted Stage 1 builds in
+  28.48 seconds at 363,970,560-byte maximum RSS with zero swap, uses only `llc`
+  and `cc`, links only `libSystem`, has no Python symbols, and rejects the
+  CPython parser. It compiles a focused three-default-field source containing
+  four distinct empty-string constants in 0.32 seconds at 47,890,432-byte
+  maximum RSS, launches no Python process, and matches CPython with exit 7. The
+  post-B638 60.19-second process-group watchdog nevertheless remains at
+  166,952,960-byte maximum RSS and zero swap, with the exact B637 sequence of
+  409 source opens over 256 unique paths, no tool execution, and no Stage 2
+  artifact. V425 fixes the bounded-index invariant but is not the current
+  whole-build bottleneck; no Stage 1-to-2 result is claimed.
+
 - B637 binds repeated negative allocation provenance to both pointer and region
   lifetimes. B636 routed compiler-proven record/tuple roots through explicit
   ownership, but the unchanged integration frontier exposed values recovered

@@ -699,6 +699,27 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="repeated-default-record-string.py",
         )
 
+    def test_distinct_default_record_strings_preserve_borrowed_values(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class A:\n"
+            "    text: str = ''\n"
+            "@dataclass(frozen=True)\n"
+            "class B:\n"
+            "    text: str = ''\n"
+            "@dataclass(frozen=True)\n"
+            "class C:\n"
+            "    text: str = ''\n"
+            "def make() -> tuple[A, B, C]:\n"
+            "    return (A(), B(), C())\n"
+            "def entry() -> int:\n"
+            "    values = make()\n"
+            "    return 7 if values[0].text == values[1].text == values[2].text == '' else 1\n",
+            expected=7,
+            filename="distinct-default-record-strings.py",
+        )
+
     def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

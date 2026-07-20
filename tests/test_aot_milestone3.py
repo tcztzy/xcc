@@ -931,12 +931,14 @@ class AotMilestone3IrTests(unittest.TestCase):
             "\n}", 1
         )[0]
         free_body = runtime.split("define void @__xcc_aot_free", 1)[1].split("\n}", 1)[0]
-        cache_exit_body = runtime.split(
-            "define internal void @__xcc_aot_phase_capture_cache_exit", 1
+        cache_contains_body = runtime.split(
+            "define internal i1 @__xcc_aot_phase_promote_cache_contains", 1
         )[1].split("\n}", 1)[0]
         self.assertIn("phase_promote_cache_invalidate_payload", alloc_body)
         self.assertIn("phase_promote_cache_invalidate_payload", free_body)
-        self.assertIn("phase_promote_cache_exit_target", cache_exit_body)
+        self.assertIn("%cached_state = load i64", cache_contains_body)
+        self.assertIn("%target_state = load i64", cache_contains_body)
+        self.assertIn("%same_state = icmp eq i64", cache_contains_body)
         llvm_ir = (
             runtime
             + '\n\n@v424_external = private constant [2 x i8] c"x\\00"\n'
@@ -975,6 +977,75 @@ class AotMilestone3IrTests(unittest.TestCase):
                 llvm_ir,
                 Path(tmp) / "phase-negative-provenance-cache",
                 filename="phase-negative-provenance-cache.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v425_negative_provenance_index_covers_more_than_two_borrows(self) -> None:
+        runtime = runtime_prelude()
+        self.assertIn(
+            "@__xcc_aot_phase_promote_cache_payloads = "
+            "internal global [1024 x ptr] zeroinitializer",
+            runtime,
+        )
+        mark_body = runtime.split("define ptr @__xcc_aot_phase_mark()", 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertIn("load i64, ptr @__xcc_aot_phase_mark_generation", mark_body)
+        self.assertIn("shl i64 %next_generation, 25", mark_body)
+        llvm_ir = (
+            runtime
+            + '\n\n@v425_external_a = private constant [2 x i8] c"a\\00"\n'
+            + '@v425_external_b = private constant [2 x i8] c"b\\00"\n'
+            + '@v425_external_c = private constant [2 x i8] c"c\\00"\n'
+            + "\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %live = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %first_a = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr @v425_external_a, ptr %mark)\n"
+            + "  %first_b = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr @v425_external_b, ptr %mark)\n"
+            + "  %first_c = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr @v425_external_c, ptr %mark)\n"
+            + "  %mark.state.slot = getelementptr i8, ptr %mark, i64 32\n"
+            + "  %mark.state = load i64, ptr %mark.state.slot\n"
+            + "  %next.generation.state = add i64 %mark.state, 33554432\n"
+            + "  store i64 %next.generation.state, ptr %mark.state.slot\n"
+            + "  %stale = call i1 @__xcc_aot_phase_promote_cache_contains(\n"
+            + "    ptr @v425_external_a, ptr %mark)\n"
+            + "  store i64 %mark.state, ptr %mark.state.slot\n"
+            + "  %live.header = getelementptr i8, ptr %live, i64 -32\n"
+            + "  %magic.slot = getelementptr i8, ptr %live.header, i64 24\n"
+            + "  %saved.magic = load i64, ptr %magic.slot\n"
+            + "  store i64 0, ptr %magic.slot\n"
+            + "  %second_a = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr @v425_external_a, ptr %mark)\n"
+            + "  store i64 %saved.magic, ptr %magic.slot\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %a_false = xor i1 %first_a, true\n"
+            + "  %b_false = xor i1 %first_b, true\n"
+            + "  %c_false = xor i1 %first_c, true\n"
+            + "  %again_false = xor i1 %second_a, true\n"
+            + "  %stale_false = xor i1 %stale, true\n"
+            + "  %ab = and i1 %a_false, %b_false\n"
+            + "  %abc = and i1 %ab, %c_false\n"
+            + "  %cached_false = and i1 %abc, %again_false\n"
+            + "  %all_false = and i1 %cached_false, %stale_false\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %ok = and i1 %all_false, %balanced\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-negative-provenance-index",
+                filename="phase-negative-provenance-index.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 

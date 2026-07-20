@@ -1,5 +1,14 @@
 # Lessons
 
+- A weak provenance index needs both working-set capacity and ABA-safe lifetime
+  identity. Size a fixed table from emitted pointer diversity, mix low address
+  bits so adjacent constants do not collapse into one bucket, and compare a
+  monotonic mark generation as well as the pointer pair. This makes payload
+  invalidation and lookup constant-time while a recycled mark address cannot
+  validate stale negative provenance; unknown or collided entries still take
+  the complete validating scan. Even a clear static capacity mismatch may be
+  off the integration critical path: require the bounded source-open frontier
+  to move before attributing whole-build progress to the index.
 - A negative provenance result is a weak borrow over two lifetimes, not just a
   pointer cache. Record it only after reaching the exact region boundary;
   invalidate by payload before allocation-address reuse and by target before
