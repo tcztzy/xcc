@@ -382,6 +382,7 @@ class _Lowerer:
             fallback_global_string_container_constants or {}
         )
         self.global_record_constructor_maps = global_record_constructor_maps or {}
+        self.project_record_names: dict[str, str] = {}
         self.callable_param_targets: dict[str, str] = {}
         self.current_owner: str | None = None
 
@@ -4515,13 +4516,24 @@ class _Lowerer:
         return " | ".join(expanded)
 
     def _project_record_name(self, name: str) -> str | None:
+        cached = self.project_record_names.get(name)
+        if cached is not None:
+            return cached or None
         if _has_top_level_union(name):
+            self.project_record_names[name] = ""
             return None
         if self._has_class(name):
+            self.project_record_names[name] = name
             return name
-        unqualified = name.rsplit(".", 1)[-1]
+        separator = name.rfind(".")
+        if separator < 0:
+            self.project_record_names[name] = ""
+            return None
+        unqualified = name[separator + 1 :]
         if self._has_class(unqualified):
+            self.project_record_names[name] = unqualified
             return unqualified
+        self.project_record_names[name] = ""
         return None
 
     def _bind_assignment_target(

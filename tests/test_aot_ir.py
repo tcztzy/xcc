@@ -1,5 +1,6 @@
 import unittest
 from dataclasses import FrozenInstanceError
+from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import py_ast as ast
@@ -2228,6 +2229,19 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsNone(
             lowerer._project_record_name("PyToken | xcc.aot.py_ast.AST")
         )
+
+    def test_v402_project_record_name_is_cached(self) -> None:
+        lowerer = _Lowerer(
+            "project-record-name.py",
+            {"AST": AotClassInfo("AST", (), (), {}, {})},
+            {},
+        )
+        with patch.object(lowerer, "_has_class", wraps=lowerer._has_class) as check:
+            self.assertEqual(lowerer._project_record_name("xcc.aot.py_ast.AST"), "AST")
+            self.assertEqual(lowerer._project_record_name("xcc.aot.py_ast.AST"), "AST")
+            self.assertIsNone(lowerer._project_record_name("Missing"))
+            self.assertIsNone(lowerer._project_record_name("Missing"))
+        self.assertEqual(check.call_count, 3)
 
     def test_lowers_negative_int_literal_subscript_index(self) -> None:
         module = lower_source_to_ir(

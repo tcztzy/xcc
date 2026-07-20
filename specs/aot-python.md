@@ -157,6 +157,10 @@ and recursive use analysis ! scalar counters without tuple/slice temporaries.
 V401: Reachability ! each record is materialized at most once per slice;
 subsequent steps may request only records not already materialized, while
 re-lowering every discovered record after every reachable function ⊥.
+V402: Record-name projection within one lowerer ! cache both positive and
+negative answers by the original name; qualified-name fallback ! find the last
+separator without materializing a split tuple, while repeating class-table
+probes or `rsplit` allocations for the same name ⊥.
 
 ## §T TASKS
 id|status|task|cites
@@ -519,3 +523,4 @@ B611|2026-07-20|after B609 removed comprehension copies, the controlled Stage 1-
 B612|2026-07-20|the first V399 oracle placed `IrStringConcat` directly in the `startswith` argument, but real `_rename_call_target` IR assigned the f-string to `prefix` first, so the post-B611 Stage 1 still emitted the hot concat and static acceptance caught five remaining calls. Conservative block-local use analysis now forwards only a pure concat assignment whose immediately following statement borrows it exactly once as a `startswith` prefix and whose remaining block has zero reads; multi-use, self-referential, effectful, or nonlocal values retain materialization, and the focused oracle now covers the real assignment shape|V368,V376,V384,V385,V399
 B613|2026-07-20|post-B612 Stage 1 still emitted five `_rename_call_target` concatenations because the matching branch also reads `len(prefix)`, so the correct virtual value has two nonescaping consumers inside the same `if`; single-use analysis conservatively rejected it. Pure concat locals now remain virtual when all reads in the immediate statement are `startswith`/`len` borrows and their named parts are not rebound, `len` sums part lengths without materialization, cross-statement or unknown uses retain the ordinary string, and the recursive proof uses scalar counters and indexed suffix scans rather than recreating the V395 tuple/slice allocation pattern. The real Stage 1 function falls from five to four concat calls|V368,V376,V384,V385,V395,V399,V400
 B614|2026-07-20|`_lower_named_slice_from_roots` re-lowered every known record for every reached function; the discarded duplicate IR remained allocated. It now requests only records not already materialized, and V401 verifies each record is included once|V376,V384,V385,V401
+B615|2026-07-20|after B614, the bounded Stage 1-to-2 run still exited at the 512 MiB allocation guard; LLDB stopped in `__xcc_aot_tuple_new` called by `_Lowerer._project_record_name`, where `name.rsplit(".", 1)[-1]` materialized a tuple for every repeated type projection. Each lowerer now caches positive and negative projections by original name and uses `rfind` plus one suffix slice only on the first qualified miss; V402 verifies repeated inputs do not repeat class-table probes|V376,V384,V385,V402

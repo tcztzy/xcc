@@ -2,6 +2,11 @@
 
 ## Current
 
+- B615 caches positive and negative record-name projections per lowerer and
+  replaces repeated `rsplit` tuple allocation with `rfind`. The focused V402
+  CPython oracle and 456 relevant AOT tests pass; bounded native validation remains
+  pending before the next Stage 1-to-2 attempt.
+
 - B614 makes reachability materialize each record at most once.
   `_lower_named_slice_from_roots` now passes only records not already emitted.
   The CPython oracle produced 10,346 `IrGetField` nodes; 248 AOT tests, lint,
