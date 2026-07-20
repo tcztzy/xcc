@@ -5150,12 +5150,10 @@ class _Emitter:
             lines.append(f"  br label %{append_label}")
         lines.append(f"{append_label}:")
         current = self._tmp("seqcomp.current")
-        singleton = self._runtime_singleton_tuple(value, lines)
+        boxed = self._box_to_runtime_ptr(value, lines)
         updated = self._tmp("seqcomp.updated")
         lines.append(f"  {current} = load ptr, ptr {result_ptr}")
-        lines.append(
-            f"  {updated} = call ptr @__xcc_aot_tuple_concat(ptr {current}, ptr {singleton})"
-        )
+        lines.append(f"  {updated} = call ptr @__xcc_aot_tuple_append(ptr {current}, ptr {boxed})")
         lines.append(f"  store ptr {updated}, ptr {result_ptr}")
         lines.append(f"  br label %{next_label}")
 

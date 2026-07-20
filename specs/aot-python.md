@@ -136,6 +136,10 @@ V396: Module-level literal containers ! one lazily initialized process-stable,
 heap-backed handle per binding; repeated reads ! allocation-stable identity and
 mutations ! alias-visible, while non-growable static backing used with mutable
 tuple/list/dict/set operations ⊥.
+V397: A compiler-created sequence-comprehension builder ! one fresh stable,
+heap-backed handle whose loop iterations append boxed values directly; a set
+builder ! test membership before append, while singleton construction followed
+by full-container concatenation on each iteration ⊥.
 
 ## §T TASKS
 id|status|task|cites
@@ -492,3 +496,4 @@ B605|2026-07-20|slice-global string-container discovery constructed every module
 B606|2026-07-20|record reachability recursively returned a freshly sorted tuple from every type, expression, statement, and branch node, while each parent rebuilt a set from those results; scanning a deeply nested lowered compiler function therefore retained the entire history of temporary tuples until Stage 1 reached the 512 MiB boundary in `_statement_record_names`. The walker now borrows one root-owned set through all recursive calls and creates a single sorted tuple only at the public root boundary|V376,V384,V385,V395
 B607|2026-07-20|call-target reachability used the same value-returning recursive shape as the former record walker, concatenating freshly allocated child tuples at every expression and statement; after B606 completed record discovery, Stage 1 reached the 512 MiB boundary in `_expr_call_targets`. The call walker now appends into one borrowed root-owned list, preserving traversal order and duplicate calls, and materializes one tuple only at the public query boundary|V376,V384,V385,V395
 B608|2026-07-20|each read of a module-level literal container emitted a fresh runtime tuple graph; `_rename_call_target` therefore rebuilt the 76-entry `_PROTOCOL_METHOD_TARGETS` dictionary, including every pair tuple, on every call and Stage 1 reached the 512 MiB boundary at the first tuple allocation in that function. Global container reads now use a binding-keyed lazy LLVM slot whose first access creates one normal heap-backed stable handle and whose later accesses reuse it, preserving alias-visible mutation without unsafe non-growable static backing|V368,V376,V384,V385,V386,V396
+B609|2026-07-20|eager tuple/list/set comprehension lowering created a singleton tuple for every produced value, concatenated the complete result built so far, and stored the replacement handle; lowerer tuple/list/set literals use `tuple(generator)`, so Stage 1 retained the quadratic history until Stage 2 reached the fixed 512 MiB boundary inside `_Lowerer._lower_expr`. A fresh comprehension builder now boxes each value and appends it directly to its stable heap-backed handle, with the existing membership guard preserving set deduplication before mutation|V368,V375,V376,V384,V385,V386,V397

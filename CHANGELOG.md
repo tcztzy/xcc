@@ -2,6 +2,10 @@
 
 ## Current
 
+- Changed eager tuple, list, and set comprehension construction to append each
+  boxed value directly to the fresh stable builder handle. Set comprehensions
+  retain their membership guard, while all three forms avoid allocating a
+  singleton and copying the complete accumulated result on every iteration.
 - Revalidated Stage 0 -> Stage 1 after lazy global-container promotion at
   `c66f70b`. The clean no-cache hosted build admitted 65 source units and
   emitted 824 functions, 174 records, 8,627 reachability edges, and 32 lazy

@@ -1,5 +1,9 @@
 # Lessons
 
+- Treat a compiler-created comprehension result as a uniquely owned builder.
+  Replacing its stable handle through singleton-plus-concatenation preserves
+  values but retains quadratic allocation history in a no-GC bootstrap; append
+  directly, and place set uniqueness checks before the mutating operation.
 - Immutable source syntax does not imply per-use construction. Module-level
   literal containers need one binding-owned handle, analogous to a safe lazy
   static: initialize normal growable heap storage once, then reuse it so aliases

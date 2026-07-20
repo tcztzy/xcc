@@ -4441,6 +4441,24 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call ptr @__xcc_aot_tuple_pop(ptr %values)", llvm_ir)
         self.assertNotIn("@values.pop", llvm_ir)
 
+    def test_emits_tuple_comprehension_with_stable_builder_append(self) -> None:
+        module = lower_source_to_ir(
+            "def gather(values: tuple[int, ...]) -> tuple[int, ...]:\n"
+            "    return tuple(value + 1 for value in values)\n"
+            "def entry() -> int:\n"
+            "    return len(gather((1, 2)))\n",
+            filename="tuple_comprehension_append.py",
+            entry="entry",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        start = llvm_ir.index("define ptr @gather")
+        end = llvm_ir.index("\n}", start)
+        function_ir = llvm_ir[start:end]
+
+        self.assertIn("call ptr @__xcc_aot_tuple_append", function_ir)
+        self.assertNotIn("call ptr @__xcc_aot_tuple_concat", function_ir)
+
     def test_emits_zip_intrinsic_as_runtime_tuple_pairs(self) -> None:
         int64 = IrIntType(64, signed=True)
         names_type = IrTupleType((IrStringType(),))
