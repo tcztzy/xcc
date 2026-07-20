@@ -2,6 +2,20 @@
 
 ## Current
 
+- B621 extends owner-targeted barriers through typed dictionary insertion and
+  update, set insertion and update, sequence slice replacement, and lazy module
+  containers. Pure builders and removal-only operations keep a separate
+  nonretaining proof rather than being mislabeled as generic no-capture
+  mutators. V408 CPython/native oracles cover dict assignment/default/update,
+  set add/update, list slice replacement, and repeated reads after lazy global
+  initialization. Full-slice ownership rises from 270 to 731 functions and
+  from 71 to 381 fallible functions; lowerer entry points become phase owners,
+  but the named-slice root remains blocked by parse/analyze/bind error chains.
+  The post-B620 native-contract Stage 1 baseline built in 27.68 seconds at
+  343,474,176-byte maximum RSS with only `llc`/`cc` and no Python dependency;
+  B621 hosted full emission uses 311,164,928-byte maximum RSS with zero swap.
+  No Stage 1-to-2 run was attempted.
+
 - B620 adds owner-targeted write barriers for statically traversable graphs.
   Record fields, sequence items, and stable sequence append/add/extend stores
   now resolve the exact owner region and move newly reachable allocations

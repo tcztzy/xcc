@@ -815,18 +815,22 @@ _PHASE_NO_CAPTURE_INTRINSICS = frozenset(
         "__abs",
         "__all_generator",
         "__any_generator",
+        "__assert",
         "__bool_and",
         "__bool_or",
         "__bytes",
         "__bytes_from_ints",
         "__chr",
+        "__comprehension_iterable",
         "__complex",
         "__contains",
+        "__dict_comprehension",
         "__dict_copy",
         "__dict_get",
         "__dict_items",
         "__dict_keys",
         "__dict_values",
+        "__enumerate",
         "__exec_argv",
         "__float",
         "__float_fromhex",
@@ -844,7 +848,12 @@ _PHASE_NO_CAPTURE_INTRINSICS = frozenset(
         "__record_construct0",
         "__repr",
         "__set_comprehension",
+        "__set_difference",
+        "__set_difference_update",
         "__set_equal",
+        "__set_intersection",
+        "__set_symmetric_difference",
+        "__set_union",
         "__sorted",
         "__tuple_comprehension",
         "__tuple_concat",
@@ -853,6 +862,7 @@ _PHASE_NO_CAPTURE_INTRINSICS = frozenset(
         "__type_name",
         "__type_tag",
         "__union_getattr",
+        "__value_or",
         "__zip",
         "bool",
         "isinstance",
@@ -1169,6 +1179,52 @@ def _phase_mutating_call_is_barriered(
     return len(expr.args) == 2 and _phase_type_is_promotable(expr.args[1].type, records)
 
 
+def _phase_intrinsic_capture_is_barriered(
+    expr: IrCall,
+    records: dict[str, IrRecord],
+) -> bool:
+    if expr.target in {"__dict_set", "__dict_setdefault"}:
+        return (
+            len(expr.args) == 3
+            and isinstance(expr.args[0].type, IrDictType)
+            and _phase_type_is_promotable(expr.args[0].type, records)
+        )
+    if expr.target == "__dict_update":
+        return (
+            len(expr.args) == 2
+            and isinstance(expr.args[0].type, IrDictType)
+            and expr.args[1].type == expr.args[0].type
+            and _phase_type_is_promotable(expr.args[0].type, records)
+        )
+    if expr.target in {"__set_add", "__set_update"}:
+        return (
+            len(expr.args) == 2
+            and isinstance(expr.args[0].type, IrTupleType)
+            and _phase_type_is_promotable(expr.args[1].type, records)
+        )
+    if expr.target == "__tuple_set_slice":
+        return (
+            len(expr.args) == 6
+            and isinstance(expr.args[0].type, IrTupleType)
+            and _phase_type_is_promotable(expr.args[5].type, records)
+        )
+    if expr.target == "__global_tuple":
+        return (
+            len(expr.args) == 2
+            and isinstance(expr.args[1], IrTuple)
+            and _phase_type_is_promotable(expr.args[1].type, records)
+        )
+    return False
+
+
+def _phase_removal_call_is_region_safe(expr: IrCall) -> bool:
+    if expr.target == "__dict_remove":
+        return len(expr.args) == 2 and isinstance(expr.args[0].type, IrDictType)
+    if expr.target in {"__tuple_pop_item", "__tuple_remove_item"}:
+        return len(expr.args) == 2 and isinstance(expr.args[0].type, IrTupleType)
+    return False
+
+
 def _phase_expr_effect(
     expr: IrExpr,
     summaries: dict[str, tuple[bool, bool]],
@@ -1203,6 +1259,15 @@ def _phase_expr_effect(
             return True, args_allocate
         if _phase_mutating_call_is_barriered(expr, records):
             return True, True
+        if _phase_intrinsic_capture_is_barriered(expr, records):
+            return True, True
+        if _phase_removal_call_is_region_safe(expr):
+            return True, True
+        if expr.target.startswith(_RECORD_INIT_PREFIX):
+            callee = summaries.get(expr.target.removeprefix(_RECORD_INIT_PREFIX))
+            if callee is None:
+                return False, args_allocate
+            return callee[0], args_allocate or callee[1]
         if _phase_intrinsic_is_no_capture(expr.target):
             pointer_result = isinstance(
                 expr.type,
@@ -3444,6 +3509,7 @@ class _Emitter:
         lines.append(f"{initialize_label}:")
         initialized = self._emit_tuple(expr.args[1], names, lines)
         initialized_label = _current_label(lines)
+        self._emit_phase_capture_value(slot, initialized.value, initialized.type, lines)
         lines.append(f"  store ptr {initialized.value}, ptr {slot}")
         lines.append(f"  br label %{ready_label}")
         lines.append(f"{ready_label}:")
@@ -5515,6 +5581,12 @@ class _Emitter:
         lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {default_box})")
+        self._emit_phase_capture_value(
+            dict_value.value,
+            pair,
+            IrTupleType((key_type, value_type)),
+            lines,
+        )
         lines.append(
             f"  {appended} = call ptr @__xcc_aot_tuple_append(ptr {dict_value.value}, ptr {pair})"
         )
@@ -5577,6 +5649,7 @@ class _Emitter:
             value_type,
         )
         value_box = self._box_to_runtime_ptr(coerced_value, lines)
+        self._emit_phase_capture_value(raw_pair, value_box, value_type, lines)
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {raw_pair}, i64 1, ptr {value_box})")
         lines.append(f"  store ptr {dict_value.value}, ptr {result_ptr}")
         lines.append(f"  br label %{end_label}")
@@ -5601,6 +5674,12 @@ class _Emitter:
         lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {append_value_box})")
+        self._emit_phase_capture_value(
+            dict_value.value,
+            pair,
+            IrTupleType((key_type, value_type)),
+            lines,
+        )
         lines.append(
             f"  {appended} = call ptr @__xcc_aot_tuple_append(ptr {dict_value.value}, ptr {pair})"
         )
@@ -6903,6 +6982,12 @@ class _Emitter:
         start = self._adapt_integer_width(start, int64, lines)
         stop = self._adapt_integer_width(stop, int64, lines)
         self.needs_runtime_prelude = True
+        self._emit_phase_capture_value(
+            receiver.value,
+            replacement.value,
+            replacement.type,
+            lines,
+        )
         result = self._tmp("tuplesetlice")
         lines.append(
             f"  {result} = call ptr @__xcc_aot_tuple_set_slice("
@@ -7415,7 +7500,11 @@ class _Emitter:
             )
         result = self._tmp("setop")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
-        if expr.target in {"__set_difference_update", "__set_update"}:
+        if expr.target == "__set_update":
+            self._emit_phase_capture_value(left.value, result, expr.type, lines)
+            lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {left.value}, ptr {result})")
+            return _EmittedValue(left.value, expr.type)
+        if expr.target == "__set_difference_update":
             lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {left.value}, ptr {result})")
             return _EmittedValue(left.value, expr.type)
         return _EmittedValue(result, expr.type)
@@ -7454,9 +7543,11 @@ class _Emitter:
         lines.append(f"  br label %{end_label}")
         lines.append(f"{append_label}:")
         appended = self._tmp("setadd.appended")
+        boxed_item = self._box_to_runtime_ptr(item, lines)
+        self._emit_phase_capture_value(receiver.value, boxed_item, item.type, lines)
         lines.append(
             f"  {appended} = call ptr @__xcc_aot_tuple_append("
-            f"ptr {receiver.value}, ptr {self._box_to_runtime_ptr(item, lines)})"
+            f"ptr {receiver.value}, ptr {boxed_item})"
         )
         lines.append(f"  br label %{end_label}")
         lines.append(f"{end_label}:")

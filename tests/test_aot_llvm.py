@@ -4272,6 +4272,9 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("global.tuple.ready", llvm_ir)
         self.assertIn("= phi ptr", llvm_ir)
         self.assertIn("store ptr %tuple", llvm_ir)
+        capture = 'call void @"__xcc_aot_phase_capture:'
+        self.assertIn(capture, llvm_ir)
+        self.assertLess(llvm_ir.index(capture), llvm_ir.index("store ptr %tuple"))
 
     def test_emits_bool_builtin_as_truthiness(self) -> None:
         tuple_type = IrTupleType((IrStringType(),))

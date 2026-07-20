@@ -1,5 +1,11 @@
 # Lessons
 
+- A stable container runtime needs barrier coverage at semantic mutation
+  boundaries, not just syntax-level field and subscript stores. Dictionary
+  default/update, set update, slice replacement, and lazy global initialization
+  retain pointer graphs through specialized emitters; keep each typed and route
+  it to the same owner-region primitive. Removal-only operations can be proven
+  region-safe without erasing the distinction between mutation and no-capture.
 - A write barrier must target the owner's lifetime, not merely the caller's
   parent region. A borrowed accumulator can belong several phase levels above
   the mutating helper; promoting a stored child by only one mark still leaves a

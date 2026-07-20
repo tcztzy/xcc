@@ -832,6 +832,95 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v408_dict_and_set_mutations_capture_stored_graphs(self) -> None:
+        source = (
+            "def update(\n"
+            "    mapping: dict[str, str], values: set[str], items: list[str], value: str\n"
+            ") -> None:\n"
+            "    scratch = value + '-scratch'\n"
+            "    mapping['key'] = value + '-dict'\n"
+            "    mapping.setdefault('default', value + '-default')\n"
+            "    incoming: dict[str, str] = {'extra': value + '-extra'}\n"
+            "    mapping.update(incoming)\n"
+            "    values.add(value + '-set')\n"
+            "    additional: set[str] = {value + '-update'}\n"
+            "    values.update(additional)\n"
+            "    replacement: list[str] = [value + '-slice']\n"
+            "    items[:] = replacement\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    mapping: dict[str, str] = {}\n"
+            "    values: set[str] = set()\n"
+            "    items = ['old']\n"
+            "    update(mapping, values, items, 'root')\n"
+            "    if mapping['key'] != 'root-dict':\n"
+            "        return 1\n"
+            "    if mapping['default'] != 'root-default':\n"
+            "        return 2\n"
+            "    if mapping['extra'] != 'root-extra':\n"
+            "        return 3\n"
+            "    if 'root-set' not in values or 'root-update' not in values:\n"
+            "        return 4\n"
+            "    return 0 if items[0] == 'root-slice' else 5\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="phase-capture-containers.py", entry="entry")
+        )
+        update_body = llvm_ir.split(
+            "define void @update(ptr %mapping, ptr %values, ptr %items, ptr %value)", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", update_body)
+        self.assertGreaterEqual(update_body.count('__xcc_aot_phase_capture:'), 7)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-capture-containers",
+                filename="phase-capture-containers.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v408_lazy_global_container_escapes_all_active_phases(self) -> None:
+        source = (
+            "VALUES: dict[str, str] = {'key': 'stable'}\n"
+            "\n"
+            "def read() -> str:\n"
+            "    scratch = 'temporary' + ' value'\n"
+            "    return VALUES['key']\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    first = read()\n"
+            "    second = read()\n"
+            "    return 0 if first == 'stable' and second == 'stable' else 1\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="phase-capture-global.py", entry="entry")
+        )
+        self.assertIn("@__xcc_aot_global_tuple_0 = private global ptr null", llvm_ir)
+        self.assertIn('call void @"__xcc_aot_phase_capture:', llvm_ir)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-capture-global",
+                filename="phase-capture-global.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v389_phase_free_rejects_untracked_pointer_without_prefix_read(self) -> None:
         llvm_ir = (
             runtime_prelude()
