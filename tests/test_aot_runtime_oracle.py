@@ -682,6 +682,23 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="region-owned-record-tuple.py",
         )
 
+    def test_repeated_default_record_string_preserves_borrowed_value(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Node:\n"
+            "    value: int\n"
+            "    text: str = ''\n"
+            "def make(value: int) -> tuple[Node, Node, Node]:\n"
+            "    return (Node(value), Node(value + 1), Node(value + 2))\n"
+            "def entry() -> int:\n"
+            "    nodes = make(3)\n"
+            "    empty = nodes[0].text == nodes[1].text == nodes[2].text == ''\n"
+            "    return 7 if empty and nodes[2].value == 5 else 1\n",
+            expected=7,
+            filename="repeated-default-record-string.py",
+        )
+
     def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

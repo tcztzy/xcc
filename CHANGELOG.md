@@ -2,6 +2,30 @@
 
 ## Current
 
+- B637 binds repeated negative allocation provenance to both pointer and region
+  lifetimes. B636 routed compiler-proven record/tuple roots through explicit
+  ownership, but the unchanged integration frontier exposed values recovered
+  from fields: every parsed `AST` carries the same borrowed default `text=""`,
+  so its generic promotion repeatedly rescanned the allocation chain to prove
+  that static pointer was outside the target region. V424 records a negative
+  result only after a validated scan reaches that target, in a bounded two-entry
+  `(payload, target)` MRU. New phase allocation, realloc, and free invalidate the
+  payload axis before address reuse; mark reset/commit invalidates the target
+  axis before region-address reuse. A native poison oracle primes both entries,
+  corrupts the scan head, and proves a secondary hit returns without touching
+  the list; repeated default-string records agree under CPython and native
+  execution. 234 LLVM/M3 tests, 166 runtime oracles, lint, and type pass. A
+  retained hosted Stage 1 builds in 28.60 seconds at 363,905,024-byte maximum
+  RSS with zero swap, uses only `llc` and `cc`, links only `libSystem`, has no
+  Python symbols, and rejects the CPython parser. It compiles the focused
+  default-string record source in 0.22 seconds at 48,300,032-byte maximum RSS,
+  launches no Python process, and matches CPython with exit 7. The post-B637
+  60.11-second watchdog nevertheless remains at 166,805,504-byte maximum RSS,
+  zero swap, and the identical 409-source-open frontier, with no tool or Stage 2
+  artifact. Static Stage 1 IR contains 353 distinct empty-string constants and
+  15,326 string constants overall, proving that a two-entry cache undersizes
+  the real borrowed-pointer working set. No Stage 1-to-2 result is claimed.
+
 - B636 replaces allocation-list provenance scans for compiler-proven heap roots
   with explicit region ownership. The post-B635 single-process probe still
   reached its 60.19-second watchdog at 166,821,888-byte maximum RSS after 409

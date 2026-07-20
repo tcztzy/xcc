@@ -1,5 +1,13 @@
 # Lessons
 
+- A negative provenance result is a weak borrow over two lifetimes, not just a
+  pointer cache. Record it only after reaching the exact region boundary;
+  invalidate by payload before allocation-address reuse and by target before
+  mark-address reuse. This safely amortizes shared static/default values that a
+  typed field erases back to a plain pointer while unknown first observations
+  still take the validating path. Size the weak index from emitted working-set
+  evidence: two slots cannot retain hundreds of distinct empty-string globals,
+  even when every one carries the same Python value.
 - Region ownership should be metadata when the compiler can prove allocation
   provenance. Searching one global allocation list to rediscover whether every
   record or tuple belongs inside a mark makes typed graph transfer quadratic.

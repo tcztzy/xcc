@@ -918,6 +918,68 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v424_negative_provenance_cache_skips_repeated_static_scan(self) -> None:
+        runtime = runtime_prelude()
+        promote_body = runtime.split(
+            "define i1 @__xcc_aot_phase_promote_to", 1
+        )[1].split("\n}", 1)[0]
+        self.assertLess(
+            promote_body.index("call i1 @__xcc_aot_phase_promote_cache_contains"),
+            promote_body.index("load ptr, ptr @__xcc_aot_allocation_head"),
+        )
+        alloc_body = runtime.split("define internal ptr @__xcc_aot_alloc", 1)[1].split(
+            "\n}", 1
+        )[0]
+        free_body = runtime.split("define void @__xcc_aot_free", 1)[1].split("\n}", 1)[0]
+        cache_exit_body = runtime.split(
+            "define internal void @__xcc_aot_phase_capture_cache_exit", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("phase_promote_cache_invalidate_payload", alloc_body)
+        self.assertIn("phase_promote_cache_invalidate_payload", free_body)
+        self.assertIn("phase_promote_cache_exit_target", cache_exit_body)
+        llvm_ir = (
+            runtime
+            + '\n\n@v424_external = private constant [2 x i8] c"x\\00"\n'
+            + '@v424_external_2 = private constant [2 x i8] c"y\\00"\n'
+            + "\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %live = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %first = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr @v424_external, ptr %mark)\n"
+            + "  %other = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr @v424_external_2, ptr %mark)\n"
+            + "  %live.header = getelementptr i8, ptr %live, i64 -32\n"
+            + "  %magic.slot = getelementptr i8, ptr %live.header, i64 24\n"
+            + "  %saved.magic = load i64, ptr %magic.slot\n"
+            + "  store i64 0, ptr %magic.slot\n"
+            + "  %second = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr @v424_external, ptr %mark)\n"
+            + "  store i64 %saved.magic, ptr %magic.slot\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %first_false = xor i1 %first, true\n"
+            + "  %other_false = xor i1 %other, true\n"
+            + "  %second_false = xor i1 %second, true\n"
+            + "  %first_pair_false = and i1 %first_false, %other_false\n"
+            + "  %all_false = and i1 %first_pair_false, %second_false\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %ok = and i1 %all_false, %balanced\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-negative-provenance-cache",
+                filename="phase-negative-provenance-cache.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v415_direct_parent_capture_defers_graph_walk_until_region_finish(self) -> None:
         llvm_ir = (
             runtime_prelude()
