@@ -2,6 +2,15 @@
 
 ## Current
 
+- Added the native phase-arena runtime ABI: nested marks enable provenance
+  headers only for phase-owned allocations, reset validates and releases exactly
+  the marked segment, and allocation accounting returns to its pre-phase value.
+  Runtime-owned chain lookup establishes provenance before header access, stable
+  LIFO sentinels preserve nested marks across reallocations, and invalid reset
+  order fails before release. Ordinary bounded allocations keep their previous
+  low-overhead layout; the real `<math.h>` and `include_next` probes pass at
+  190,611,456 and 229,900,288 bytes maximum RSS respectively. Safe
+  compiler-inserted boundaries remain the next step.
 - Added conservative ownership/liveness analysis for homogeneous tuple
   rebinding. A fresh, non-escaping tuple updated as `value = (*value, item)` now
   grows its stable backing buffer geometrically; aliased values retain immutable

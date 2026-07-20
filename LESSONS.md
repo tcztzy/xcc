@@ -1,5 +1,12 @@
 # Lessons
 
+- Do not charge every allocation for arena metadata before an arena boundary is
+  proven. A 32-byte header on millions of short-lived objects can consume most
+  of the safety margin by itself. Enable provenance dynamically inside nested,
+  borrow-checked phases and leave ordinary capped allocations on the compact
+  path until they are placed under a reclaimable lifetime. A phase-active bit is
+  not pointer provenance: locate an exact payload in runtime-owned state before
+  reading its header, and represent nested marks with immovable LIFO sentinels.
 - A stable handle is the prerequisite for Rust-style uniqueness optimization,
   not proof that mutation is safe. Reuse immutable storage only after control-
   flow ownership analysis proves a fresh local remains single-owned across loop

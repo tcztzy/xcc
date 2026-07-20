@@ -102,6 +102,14 @@ only when intraprocedural ownership analysis proves that the value was freshly
 allocated, remains single-owned across every branch/loop backedge, and has not
 escaped through an alias, call, store, or return; otherwise concat must allocate
 a distinct tuple preserving CPython-visible value and identity semantics.
+V388: Phase arena provenance ! allocations made inside a compiler-inserted phase
+carry validated ownership headers in a nested mark stack, and reset frees exactly
+the allocations newer than its mark; ordinary allocations retain the low-overhead
+bounded path, and reset ⊥ until borrow analysis proves no phase pointer escapes.
+V389: Allocation metadata ! dereferenced only after an exact payload identity is
+found by walking the runtime-owned live chain; phase marks ! stable LIFO sentinels,
+and an unknown pointer, non-top reset, or corrupt chain ! controlled memory-safety
+diagnostic before any unvalidated prefix read or out-of-order release.
 
 ## §T TASKS
 id|status|task|cites
@@ -442,3 +450,5 @@ B589|2026-07-19|the native AOT runtime retained allocations for the lifetime of 
 B590|2026-07-19|every generated heap allocation called libc `malloc`/`calloc` directly, so an ownership leak or malformed dynamic size had no process-local containment and could consume host memory until the OS watchdog panicked; all generated allocations must route through one overflow-checked runtime boundary with a conservative cumulative hard limit and deterministic emergency diagnostic while the stronger Arena/drop ABI remains incomplete|V368,V376,V380,V384,V385
 B591|2026-07-19|tuple-backed mutable containers represented identity with replaceable inline payload pointers, so alias preservation required permanent process-global forwarding, capacity, and object-layout tables while each growth retained obsolete payloads and metadata; every tuple/list/dict/set value now uses one fixed-size stable handle with an overflow-checked resizable element buffer and in-handle layout metadata, and mutating operations return the original handle|V368,V375,V376,V384,V385,V386
 B592|2026-07-20|native lowering compiled `_split_lines_keepends` rebinding `lines = (*lines, item)` as immutable full-tuple copy on every iteration, while the no-GC runtime retained every obsolete version; the real `<math.h>` probe therefore created 1,705,370 tuples totaling 520,135,680 bytes, with one concat site responsible for 419,553,168 bytes, and hit the 512 MiB guard; conservative intraprocedural ownership/liveness analysis now lowers only fresh, single-owner homogeneous tuple rebinding to stable-handle append with geometric backing growth, while any alias or escape keeps copy semantics|V368,V375,V376,V384,V385,V386,V387
+B593|2026-07-20|making every allocation arena-addressable with a 32-byte ownership header raised the real `<math.h>` maximum RSS from about 182 MiB to 361 MiB and the `include_next` probe to about 426 MiB, leaving too little distance from the 512 MiB containment boundary; ownership headers and the doubly linked reclamation chain must be enabled only inside explicit nested phases, while ordinary bounded allocations keep their prior layout and phase reset validates/reclaims only its marked segment|V376,V384,V385,V388
+B594|2026-07-20|the first dynamic-phase draft treated the global `phase_active` bit as proof that every pointer passed to `realloc` carried a phase header, so growing an ordinary pre-phase allocation read 32 bytes before its allocation and a mark represented by a movable allocation header could become stale across nested reallocations; exact live-chain membership now establishes provenance before metadata access, and dedicated LIFO sentinel nodes keep marks stable and reject out-of-order reset before release|V376,V384,V385,V388,V389

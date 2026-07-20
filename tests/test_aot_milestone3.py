@@ -425,6 +425,100 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v388_phase_reset_reclaims_owned_allocations(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %persistent = call ptr @__xcc_aot_alloc(i64 64)\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %outer_mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %persistent_resized = call ptr @__xcc_aot_realloc(\n"
+            + "    ptr %persistent, i64 64, i64 64)\n"
+            + "  %outer = call ptr @__xcc_aot_alloc(i64 16)\n"
+            + "  %inner_mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %outer_resized = call ptr @__xcc_aot_realloc(\n"
+            + "    ptr %outer, i64 16, i64 64)\n"
+            + "  %inner_probe = call ptr @__xcc_aot_alloc(i64 32)\n"
+            + "  %peak = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %inner_mark)\n"
+            + "  %after_inner = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %inner_reclaimed = icmp ult i64 %after_inner, %peak\n"
+            + "  store i64 41, ptr %outer_resized\n"
+            + "  %outer_value = load i64, ptr %outer_resized\n"
+            + "  %outer_survived = icmp eq i64 %outer_value, 41\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %outer_mark)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  store i64 42, ptr %persistent_resized\n"
+            + "  %persistent_value = load i64, ptr %persistent_resized\n"
+            + "  %persistent_survived = icmp eq i64 %persistent_value, 42\n"
+            + "  %inner_ok = and i1 %inner_reclaimed, %outer_survived\n"
+            + "  %outer_ok = and i1 %balanced, %persistent_survived\n"
+            + "  %ok = and i1 %inner_ok, %outer_ok\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-reset",
+                filename="phase-reset.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v389_phase_reset_rejects_non_lifo_mark_before_release(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %outer_mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %outer_value = call ptr @__xcc_aot_alloc(i64 32)\n"
+            + "  %inner_mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %inner_value = call ptr @__xcc_aot_alloc(i64 32)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %outer_mark)\n"
+            + "  ret i32 0\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-reset-non-lifo",
+                filename="phase-reset-non-lifo.ll",
+            )
+            completed = subprocess.run(
+                (str(executable),), check=False, capture_output=True, text=True
+            )
+
+        self.assertEqual(completed.returncode, 70)
+        self.assertEqual(completed.stderr, "xcc-aot: memory safety violation\n")
+
+    def test_v389_phase_free_rejects_untracked_pointer_without_prefix_read(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %ordinary = call ptr @__xcc_aot_alloc(i64 32)\n"
+            + "  call void @__xcc_aot_free(ptr %ordinary)\n"
+            + "  ret i32 0\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-free-untracked",
+                filename="phase-free-untracked.ll",
+            )
+            completed = subprocess.run(
+                (str(executable),), check=False, capture_output=True, text=True
+            )
+
+        self.assertEqual(completed.returncode, 70)
+        self.assertEqual(completed.stderr, "xcc-aot: memory safety violation\n")
+
     def test_annotation_name_edge_forms(self) -> None:
         string_annotation = parse_source(
             'def f() -> "Type | None":\n    pass\n'
