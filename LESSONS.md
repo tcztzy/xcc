@@ -1,5 +1,11 @@
 # Lessons
 
+- An owned return does not imply that every allocation in its function region
+  belongs to the returned graph. A freshly constructed parser, lexer, or work
+  record whose fields cannot contain the call result is disjoint scratch; whole-
+  region transfer leaks that owner and its children into the caller lifetime.
+  Use type reachability to keep the fast path only when the receiver may retain
+  the result, and otherwise promote the exact graph before resetting scratch.
 - A no-capture helper may keep performance metadata only as a lifetime-bounded
   weak borrow, never as an untracked owner. Route every release and resize
   through one boundary that invalidates the exact cached payload before address

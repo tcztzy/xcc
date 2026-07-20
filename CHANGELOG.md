@@ -2,6 +2,25 @@
 
 ## Current
 
+- B633 prevents a disjoint temporary owner from hitchhiking on an owned return
+  region. The post-B632 probe moved beyond the lexer stall but hit the unchanged
+  512 MiB guard after 43.98 seconds with 2,005 source opens and zero swap. The
+  65-unit closure has 501,794 tokens and 478,099 AST nodes; `AotModule` retains
+  source/tree but not `_PythonParser.tokens`, while generated
+  `parse_subset_source` nevertheless transferred the complete parser region.
+  V420 now recognizes an owned call on a fresh receiver whose recursively
+  container-shaped fields cannot retain that call's result and selects exact
+  graph promotion plus local reset. A receiver field capable of retaining the
+  result keeps the deferred fast path. A synthetic LLVM decision oracle and a
+  CPython/native result-from-temporary oracle pass, along with 227 LLVM/M3 tests,
+  163 runtime oracles, lint, and type. The retained hosted Stage 1 builds in
+  28.65 seconds at 361,447,424-byte maximum RSS with zero swap; its emitted
+  `parse_subset_source` uses exact promotion and reset while `lex_python` keeps
+  the valid deferred path. It compiles the focused temporary-owner source in
+  0.66 seconds at 47,546,368-byte maximum RSS using only `llc` and `cc`, matches
+  CPython with exit 7, links only `libSystem`, has no Python symbols, and rejects
+  the CPython parser. No post-B633 Stage 1-to-2 result is claimed.
+
 - B632 restores immutable `str.startswith` length reuse as a region-bounded
   weak cache. After B631 removed capture lookup/promotion, the lexer sample
   spent 1,281/3,861 frames in `startswith -> strlen`; its ordinary 24-prefix

@@ -3494,6 +3494,82 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
         self.assertNotIn("call ptr @__xcc_aot_string_concat2", function_ir)
 
+    def test_v420_disjoint_temporary_owner_forces_exact_return_promotion(self) -> None:
+        string_type = IrStringType()
+        values_type = IrTupleType((string_type,))
+        scratch_type = IrRecordType("Scratch")
+        result_type = IrRecordType("Result")
+        module = IrModule(
+            "exact_owned_return.py",
+            (
+                IrRecord("Scratch", (IrField("values", values_type),)),
+                IrRecord("Result", (IrField("value", string_type),)),
+            ),
+            (
+                IrFunction(
+                    "Scratch.build",
+                    (IrParam("self", scratch_type),),
+                    result_type,
+                    (
+                        IrReturn(
+                            IrConstructRecord(
+                                "Result",
+                                (IrConstString("ok"),),
+                                result_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "build",
+                    (),
+                    result_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "Scratch.build",
+                                (
+                                    IrConstructRecord(
+                                        "Scratch",
+                                        (
+                                            IrTuple(
+                                                (IrConstString("scratch"),),
+                                                values_type,
+                                            ),
+                                        ),
+                                        scratch_type,
+                                    ),
+                                ),
+                                result_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "direct",
+                    (),
+                    result_type,
+                    (
+                        IrReturn(
+                            IrConstructRecord(
+                                "Result",
+                                (IrConstString("ok"),),
+                                result_type,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        build_ir = llvm_ir.split("define ptr @build()", 1)[1].split("\n}", 1)[0]
+        direct_ir = llvm_ir.split("define ptr @direct()", 1)[1].split("\n}", 1)[0]
+
+        self.assertIn("call void @\"__xcc_aot_phase_promote:IrRecordType", build_ir)
+        self.assertNotIn("@__xcc_aot_phase_capture_defer", build_ir)
+        self.assertIn("@__xcc_aot_phase_capture_defer", direct_ir)
+
     def test_v399_single_use_concat_assignment_is_forwarded_to_startswith(self) -> None:
         int64 = IrIntType(64, signed=True)
         concat = IrStringConcat((IrName("name", IrStringType()), IrConstString(".")))

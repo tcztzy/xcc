@@ -644,6 +644,25 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="string-startswith-negative-start.py",
         )
 
+    def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Result:\n"
+            "    value: str\n"
+            "@dataclass(frozen=True)\n"
+            "class Scratch:\n"
+            "    values: tuple[str, ...]\n"
+            "    def build(self) -> Result:\n"
+            "        return Result(self.values[0])\n"
+            "def make() -> Result:\n"
+            "    return Scratch(('kept', 'scratch')).build()\n"
+            "def entry() -> int:\n"
+            "    return 7 if make().value == 'kept' else 1\n",
+            expected=7,
+            filename="exact-owned-return.py",
+        )
+
     def test_v399_dynamic_concatenated_startswith_prefix_matches_cpython(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

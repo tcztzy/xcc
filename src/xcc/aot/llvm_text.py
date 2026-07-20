@@ -1255,6 +1255,163 @@ def _phase_owned_return_functions(
     return frozenset(owned)
 
 
+def _phase_type_may_retain(
+    container: IrType,
+    value: IrType,
+) -> bool:
+    if container == value or _is_opaque_object_type(container):
+        return True
+    if isinstance(container, IrTupleType):
+        return any(_phase_type_may_retain(element, value) for element in container.elements)
+    if isinstance(container, IrDictType):
+        return _phase_type_may_retain(container.key, value) or _phase_type_may_retain(
+            container.value, value
+        )
+    if isinstance(container, IrRecordType) and isinstance(value, IrRecordType):
+        value_parts = set(_record_union_parts(value.name))
+        return bool(value_parts & set(_record_union_parts(container.name)))
+    return False
+
+
+def _phase_expr_constructs_fresh_record(expr: IrExpr) -> bool:
+    if isinstance(expr, IrConstructRecord):
+        return True
+    return (
+        isinstance(expr, IrCall)
+        and expr.target.startswith(_RECORD_INIT_PREFIX)
+        and bool(expr.args)
+        and isinstance(expr.args[0], IrConstructRecord)
+    )
+
+
+def _phase_expr_has_disjoint_temporary_receiver(
+    expr: IrExpr,
+    owned_return_functions: frozenset[str],
+    records: dict[str, IrRecord],
+) -> bool:
+    if isinstance(expr, IrBinary):
+        return _phase_expr_has_disjoint_temporary_receiver(
+            expr.left, owned_return_functions, records
+        ) or _phase_expr_has_disjoint_temporary_receiver(
+            expr.right, owned_return_functions, records
+        )
+    if isinstance(expr, IrGetField):
+        return _phase_expr_has_disjoint_temporary_receiver(
+            expr.value, owned_return_functions, records
+        )
+    if isinstance(expr, IrConstructRecord | IrCall):
+        if (
+            isinstance(expr, IrCall)
+            and expr.target in owned_return_functions
+            and expr.args
+            and _phase_expr_constructs_fresh_record(expr.args[0])
+            and isinstance(expr.args[0].type, IrRecordType)
+        ):
+            receiver_name = _phase_record_part_name(expr.args[0].type.name, records)
+            receiver = records.get(receiver_name) if receiver_name is not None else None
+            if receiver is not None and not any(
+                _phase_type_may_retain(field.type, expr.type) for field in receiver.fields
+            ):
+                return True
+        return any(
+            _phase_expr_has_disjoint_temporary_receiver(arg, owned_return_functions, records)
+            for arg in expr.args
+        )
+    if isinstance(expr, IrTuple):
+        return any(
+            _phase_expr_has_disjoint_temporary_receiver(item, owned_return_functions, records)
+            for item in expr.elements
+        )
+    if isinstance(expr, IrTupleSlice):
+        values = [expr.value]
+        if expr.start is not None:
+            values.append(expr.start)
+        if expr.stop is not None:
+            values.append(expr.stop)
+        return any(
+            _phase_expr_has_disjoint_temporary_receiver(value, owned_return_functions, records)
+            for value in values
+        )
+    if isinstance(expr, IrStringConcat):
+        return any(
+            _phase_expr_has_disjoint_temporary_receiver(part, owned_return_functions, records)
+            for part in expr.parts
+        )
+    if isinstance(expr, IrStringJoin):
+        return _phase_expr_has_disjoint_temporary_receiver(
+            expr.separator, owned_return_functions, records
+        ) or _phase_expr_has_disjoint_temporary_receiver(
+            expr.values, owned_return_functions, records
+        )
+    return False
+
+
+def _phase_statement_has_disjoint_temporary_receiver(
+    statement: IrStmt,
+    owned_return_functions: frozenset[str],
+    records: dict[str, IrRecord],
+) -> bool:
+    expressions: list[IrExpr] = []
+    branches: list[IrBranch] = []
+    if isinstance(statement, IrAssign | IrReturn | IrPrint):
+        expressions.append(statement.value)
+    elif isinstance(statement, IrSetItem):
+        expressions.extend((statement.target, statement.index, statement.value))
+    elif isinstance(statement, IrIf):
+        expressions.append(statement.condition)
+        branches.append(statement.then_branch)
+        if statement.else_branch is not None:
+            branches.append(statement.else_branch)
+    elif isinstance(statement, IrForEach):
+        expressions.append(statement.iterable)
+        branches.append(statement.body)
+    elif isinstance(statement, IrWhile):
+        expressions.append(statement.condition)
+        branches.append(statement.body)
+    elif isinstance(statement, IrTry):
+        branches.extend((statement.body, statement.orelse, statement.finalbody))
+        branches.extend(handler.body for handler in statement.handlers)
+    elif isinstance(statement, IrRaise):
+        expressions.append(statement.message)
+        if statement.payload is not None:
+            expressions.append(statement.payload)
+    return any(
+        _phase_expr_has_disjoint_temporary_receiver(expr, owned_return_functions, records)
+        for expr in expressions
+    ) or any(
+        _phase_block_has_disjoint_temporary_receiver(
+            branch.statements, owned_return_functions, records
+        )
+        for branch in branches
+    )
+
+
+def _phase_block_has_disjoint_temporary_receiver(
+    statements: tuple[IrStmt, ...],
+    owned_return_functions: frozenset[str],
+    records: dict[str, IrRecord],
+) -> bool:
+    return any(
+        _phase_statement_has_disjoint_temporary_receiver(statement, owned_return_functions, records)
+        for statement in statements
+    )
+
+
+def _phase_exact_return_functions(
+    module: IrModule,
+    owned_return_functions: frozenset[str],
+) -> frozenset[str]:
+    records = {record.name: record for record in module.records}
+    return frozenset(
+        function.name
+        for function in module.functions
+        if function.name in owned_return_functions
+        and _phase_block_has_disjoint_temporary_receiver(
+            function.body, owned_return_functions, records
+        )
+    )
+
+
 def _phase_mutating_call_is_barriered(
     expr: IrCall,
     records: dict[str, IrRecord],
@@ -1753,6 +1910,10 @@ class _Emitter:
             self.phase_function_summaries,
             self.phase_borrowed_return_functions,
         )
+        self.phase_exact_return_functions = _phase_exact_return_functions(
+            module,
+            self.phase_owned_return_functions,
+        )
         self.index = 0
         self.string_index = 0
         self.string_constants: list[str] = []
@@ -1771,6 +1932,7 @@ class _Emitter:
         self.current_borrowed_string_concat_assignments: set[int] = set()
         self.current_phase_mark: str | None = None
         self.current_phase_promotes_return = False
+        self.current_phase_exact_return = False
         self.phase_promote_types: dict[str, IrType] = {}
         self.phase_capture_types: dict[str, IrType] = {}
         self.needs_phase_object_promotion_helpers = False
@@ -1925,6 +2087,7 @@ class _Emitter:
         )
         previous_phase_mark = self.current_phase_mark
         previous_phase_promotes_return = self.current_phase_promotes_return
+        previous_phase_exact_return = self.current_phase_exact_return
         previous_failure_scopes = self.failure_scopes
         previous_caught_status_stack = self.caught_status_stack
         self.current_function = function
@@ -1937,6 +2100,7 @@ class _Emitter:
         )
         self.current_phase_mark = None
         self.current_phase_promotes_return = function.name in self.phase_owned_return_functions
+        self.current_phase_exact_return = function.name in self.phase_exact_return_functions
         self.failure_scopes = []
         self.caught_status_stack = []
         names = {
@@ -1970,6 +2134,7 @@ class _Emitter:
             )
             self.current_phase_mark = previous_phase_mark
             self.current_phase_promotes_return = previous_phase_promotes_return
+            self.current_phase_exact_return = previous_phase_exact_return
             self.failure_scopes = previous_failure_scopes
             self.caught_status_stack = previous_caught_status_stack
         lines = _hoist_allocas_to_entry(lines)
@@ -2160,6 +2325,9 @@ class _Emitter:
         key = repr(return_type)
         self.phase_promote_types[key] = return_type
         helper = _llvm_symbol("__xcc_aot_phase_promote:" + key)
+        if self.current_phase_exact_return:
+            lines.append(f"  call void {helper}(ptr {value}, ptr {self.current_phase_mark})")
+            return
         deferred = self._tmp("phase.return.deferred")
         promote_label = self._label("phase.return.promote")
         finish_label = self._label("phase.return.finish")
