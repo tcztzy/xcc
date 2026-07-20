@@ -2,6 +2,20 @@
 
 ## Current
 
+- B627 materializes non-dictionary `enumerate` container constructors as typed
+  comprehension builders. The direct-for enumerate IR intentionally carries a
+  single `(index, item)` pair type, but `tuple(enumerate(values))` previously
+  forwarded that special marker unchanged; after `reversed`, ordinary for
+  binding saw an opaque object instead of a sequence of pairs. V414 gives
+  tuple/list/set/frozenset materialization a homogeneous pair-sequence type and
+  preserves it through wrappers. CPython and native execution agree for the
+  reversed tuple case. A proposed reverse promotion walk was rejected: it cut
+  `lex_python` return promotion from 1,819 to 251 sample frames but shifted
+  1,900 frames to the next parser-owner capture, increasing the two-boundary
+  total rather than removing linked-list lookup. The final hosted Stage 1 builds
+  in 28.18 seconds at 322,879,488-byte maximum RSS; its focused native compile
+  uses only `llc` and `cc` and exits 7. No Stage 1-to-2 claim is made.
+
 - B626 lets the single-entry owner-region cache survive nested child phases
   when its non-null target mark remains active. A new mark invalidates only a
   current-region null target; reset/commit invalidates only a null target or the

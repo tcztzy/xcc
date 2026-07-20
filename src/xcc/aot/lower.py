@@ -2883,6 +2883,26 @@ class _Lowerer:
             and len(expr.args) == 1
         ):
             value = self._lower_expr(expr.args[0], names, expected)
+            if (
+                isinstance(value, IrCall)
+                and value.target == "__enumerate"
+                and expr.func.id != "dict"
+            ):
+                marker = IrName(
+                    f"__container_item_{expr.lineno}_{expr.col_offset}",
+                    value.type,
+                )
+                result_type = IrTupleType((value.type,))
+                target = (
+                    "__set_comprehension"
+                    if expr.func.id in {"frozenset", "set"}
+                    else "__tuple_comprehension"
+                )
+                return IrCall(
+                    target,
+                    (value, marker, marker, IrConstBool(True)),
+                    result_type,
+                )
             if expr.func.id == "dict" and isinstance(value.type, IrDictType):
                 return IrCall("__dict_copy", (value,), value.type)
             if expr.func.id != "dict" and isinstance(value.type, IrDictType):

@@ -1,5 +1,16 @@
 # Lessons
 
+- Reordering a graph walk can optimize one region boundary and pessimize the
+  next. Moving append-built children newest-first made `lex_python` return much
+  cheaper, but the splice order left the same graph expensive when the parser
+  immediately captured it again. Measure the full lifetime chain; a real fix
+  needs order-independent provenance lookup or segment transfer, not a traversal
+  order tuned to one boundary.
+- A direct-loop enumerate marker is not a materialized enumerate container.
+  When `tuple`, `list`, `set`, or `frozenset` consumes `enumerate`, lower it to
+  the existing comprehension builder with a homogeneous `(index, item)` element
+  type. Forwarding the direct-for pair type through wrappers loses target types
+  after `reversed` even though each primitive is independently supported.
 - An owner-region cache should be invalidated by lifetime changes, not call
   depth alone. If a cached non-null separating mark remains an ancestor, child
   mark/reset pairs cannot change the owner's target; retain the entry until that

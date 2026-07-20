@@ -2727,6 +2727,33 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(returned, IrReturn)
         self.assertEqual(returned.value, IrName("kind", IrStringType()))
 
+    def test_lowers_reversed_materialized_enumerate_as_pair_sequence(self) -> None:
+        module = lower_source_to_ir(
+            "def last(values: tuple[str, ...]) -> str:\n"
+            "    for index, value in reversed(tuple(enumerate(values))):\n"
+            "        return value\n"
+            "    return ''\n",
+            filename="reversed_materialized_enumerate.py",
+        )
+        loop = module.functions[0].body[0]
+        self.assertIsInstance(loop, IrForEach)
+        assert isinstance(loop, IrForEach)
+        pair_type = IrTupleType((IrIntType(64, signed=True), IrStringType()))
+        sequence_type = IrTupleType((pair_type,))
+        self.assertEqual(loop.iterable.type, sequence_type)
+        self.assertIsInstance(loop.iterable, IrCall)
+        assert isinstance(loop.iterable, IrCall)
+        self.assertEqual(loop.iterable.target, "reversed")
+        materialized = loop.iterable.args[0]
+        self.assertIsInstance(materialized, IrCall)
+        assert isinstance(materialized, IrCall)
+        self.assertEqual(materialized.target, "__tuple_comprehension")
+        self.assertEqual(materialized.type, sequence_type)
+        returned = loop.body.statements[0]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertEqual(returned.value, IrName("value", IrStringType()))
+
     def test_lowerer_nested_tuple_subscript_prefers_container_element_type(self) -> None:
         int64 = IrIntType(64, signed=True)
         item_type = IrTupleType((IrStringType(), int64, IrRecordType("object")))

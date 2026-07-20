@@ -798,6 +798,33 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v414_reversed_materialized_enumerate_matches_python(self) -> None:
+        source = (
+            "def entry() -> int:\n"
+            "    values = ('first', 'second')\n"
+            "    for index, value in reversed(tuple(enumerate(values))):\n"
+            "        return 0 if index == 1 and value == 'second' else 1\n"
+            "    return 2\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="reversed-materialized-enumerate.py", entry="entry")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "reversed-materialized-enumerate",
+                filename="reversed-materialized-enumerate.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v407_pointer_store_survives_callee_phase_reset(self) -> None:
         source = (
             "def write(values: list[str], value: str) -> None:\n"
