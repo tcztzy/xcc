@@ -1944,6 +1944,21 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="set-difference-update.py",
         )
 
+    def test_list_slice_assignment_preserves_alias_and_self_replacement(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: list[int] = [1, 2, 3, 4]\n"
+            "    alias = values\n"
+            "    values[1:3] = [8, 9, 10]\n"
+            "    values[-2:] = [6]\n"
+            "    values[1:1] = values\n"
+            "    if len(alias) != 8:\n"
+            "        return 1\n"
+            "    return alias[0] + alias[1] + alias[5] + alias[-1]\n",
+            expected=16,
+            filename="list-slice-assignment.py",
+        )
+
     def test_set_add_preserves_uniqueness_and_alias_mutation(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

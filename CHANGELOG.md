@@ -2,6 +2,12 @@
 
 ## Current
 
+- Reworked native contiguous list slice assignment to mutate the stable
+  tuple-backed handle in place. Bounds remain Python-normalized, capacity grows
+  geometrically, and overlap-safe moves cover insertion, deletion, replacement,
+  and self-assignment without allocating prefix/suffix/concat temporaries. This
+  removes the retained-allocation path that exhausted 512 MiB in `py_ast.walk`
+  while Stage 1 resolved the Stage 2 source set.
 - Revalidated Stage 0 -> Stage 1 from the current memory-safe source at
   `aa20fe0`: the clean no-cache hosted build admitted 65 source units and emitted
   812 functions, 173 records, and 8,533 reachability edges. The resulting

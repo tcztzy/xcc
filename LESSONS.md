@@ -1,5 +1,10 @@
 # Lessons
 
+- Stable handles do not make a mutator memory-bounded if it still constructs a
+  full immutable result and merely copies that result back. Implement contiguous
+  list slice replacement by growing the owned buffer once and moving overlapping
+  ranges in place; breadth-first AST worklists amplify a seemingly small
+  prefix/suffix/concat leak into the whole native compiler allocation budget.
 - New ownership analysis must itself remain inside the self-hosted language
   contract. Run a clean Stage 0 build after focused hosted tests: a CPython-valid
   collection method can still be unreachable natively. When that method belongs

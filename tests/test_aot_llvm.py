@@ -4301,6 +4301,27 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call void @__xcc_aot_tuple_forward(ptr %values", llvm_ir)
         self.assertNotIn("@__set_difference_update", llvm_ir)
 
+    def test_runtime_slice_assignment_mutates_stable_handle_without_temporaries(self) -> None:
+        module = lower_source_to_ir(
+            "def replace(values: list[int], incoming: list[int]) -> int:\n"
+            "    values[1:-1] = incoming\n"
+            "    return len(values)\n",
+            filename="list_slice_assignment.py",
+            entry="replace",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        runtime_body = llvm_ir.split(
+            "define ptr @__xcc_aot_tuple_set_slice(",
+            1,
+        )[1].split("\n}", 1)[0]
+
+        self.assertIn("call ptr @memmove", runtime_body)
+        self.assertIn("call void @__xcc_aot_tuple_register_capacity", runtime_body)
+        self.assertNotIn("@__xcc_aot_tuple_slice", runtime_body)
+        self.assertNotIn("@__xcc_aot_tuple_concat", runtime_body)
+        self.assertNotIn("@__xcc_aot_tuple_forward", runtime_body)
+
     def test_emits_record_append_method_as_direct_call(self) -> None:
         output_type = IrRecordType("Output")
         module = IrModule(
