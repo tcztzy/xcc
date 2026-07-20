@@ -2,6 +2,22 @@
 
 ## Current
 
+- Revalidated Stage 0 -> Stage 1 after virtual borrowed string locals at
+  `52d6395`. The clean no-cache hosted build admitted 65 source units and
+  emitted 835 functions, 174 records, 8,709 reachability edges, and 32 lazy
+  global-container slots. `_rename_call_target` now contains four string
+  concatenations instead of five and four borrowed `startswith` calls. The
+  executable reports `xcc-aot 0.2 native-contract`, rejects the CPython parser,
+  logs only `llc` and `cc`, and has no Python/libpython dependency. Peak RSS was
+  322,633,728 bytes with no swap; source-manifest, normalized-LLVM, and
+  executable SHA-256 values are respectively
+  `83cdb73d58f295de359e62dbf128e9bdf0231e2688fb6c2ccbec4c1caebf9236`,
+  `890cf8746052a71a04bda1ad42b6c9f5c06ebf69637924997037acd583191420`,
+  and `b16a402b6f66e149f6f533975eb6fc2ad764ac5a62dea7c22ede8cee523c32a0`.
+  The direct audited Stage 1 -> Stage 2 attempt opened repository Python source
+  without executing Python or loading libpython, then exited 70 at the fixed
+  allocator boundary with 554,434,560-byte peak RSS, no swap, no signal, and no
+  Stage 2 artifact; Stage 2 therefore remains incomplete.
 - Kept pure concatenated-string locals virtual across multiple borrowing uses
   in one statement. `startswith` compares their parts, `len` sums part lengths,
   and dependency mutation or any later/unknown use forces normal materialization;
