@@ -2,6 +2,14 @@
 
 ## Current
 
+- B618 makes region-membership lookup local to the current lifetime. Promotion
+  now searches only from the allocation head to the top mark and rejects parent,
+  global, static, or untracked pointers at that boundary; it no longer performs
+  a whole-process allocation lookup followed by a second ancestry walk. V405
+  checks the emitted runtime structure and proves with a native nested-region
+  oracle that a parent allocation cannot be moved by its child. A focused
+  12,000-allocation/12,000-probe comparison improves from 0.725 to 0.434 seconds.
+
 - B617 adds typed owned-result transfer between nested compiler regions. The
   runtime moves an exact current-phase allocation before its mark without
   changing its address; generated type-specific walkers transfer reachable
@@ -11,8 +19,13 @@
   child-to-parent transfer and parent reclamation, and a CPython/native nested
   tuple graph containing a freshly allocated string. The complete 958-test AOT
   suite passes. A hosted full slice emits 850 functions, 51 owned-result
-  functions, 46 promotion helpers, and 108 phase marks; bounded native
-  Stage 1-to-2 validation remains pending.
+  functions, 46 promotion helpers, and 108 phase marks. Its bounded native
+  Stage 1-to-2 run no longer hit the allocation limit: maximum RSS fell to
+  169,164,800 bytes with zero swap. It nevertheless used 298.93 user seconds
+  until the 300.21-second process-group watchdog boundary and produced no
+  Stage 2. The audit shim produced no log because `DYLD_INSERT_LIBRARIES` was
+  inherited through SIP-protected `/usr/bin/time`; no open/exec conclusion is
+  drawn from that run.
 
 - B616 extends compiler-derived owned phases to pointer-returning functions only
   when a fixed-point provenance proof shows that every result borrows from an

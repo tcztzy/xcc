@@ -542,9 +542,16 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 70)
         self.assertEqual(completed.stderr, "xcc-aot: memory safety violation\n")
 
-    def test_v404_promoted_allocation_outlives_inner_phase(self) -> None:
+    def test_v405_phase_promotion_search_stops_at_current_mark(self) -> None:
+        runtime = runtime_prelude()
+        promote_body = runtime.split(
+            "define i1 @__xcc_aot_phase_promote(ptr %payload)", 1
+        )[1].split("\n}", 1)[0]
+        self.assertNotIn("call ptr @__xcc_aot_find_allocation", promote_body)
+        self.assertIn("load ptr, ptr @__xcc_aot_allocation_head", promote_body)
+        self.assertIn("icmp eq ptr %node, %mark", promote_body)
         llvm_ir = (
-            runtime_prelude()
+            runtime
             + "\n\ndefine i32 @main() {\n"
             + "entry:\n"
             + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
@@ -568,10 +575,13 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
             + "  %balanced = icmp eq i64 %final, %baseline\n"
             + "  %outer_mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %outer_kept = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 44, ptr %outer_kept\n"
             + "  %inner_mark = call ptr @__xcc_aot_phase_mark()\n"
             + "  %nested_kept = call ptr @__xcc_aot_alloc(i64 8)\n"
             + "  store i64 43, ptr %nested_kept\n"
             + "  %nested_temporary = call ptr @__xcc_aot_alloc(i64 48)\n"
+            + "  %outer_not_promoted = call i1 @__xcc_aot_phase_promote(ptr %outer_kept)\n"
             + "  %nested_promoted = call i1 @__xcc_aot_phase_promote(ptr %nested_kept)\n"
             + "  %nested_peak = call i64 @__xcc_aot_phase_allocated_bytes()\n"
             + "  call void @__xcc_aot_phase_reset(ptr %inner_mark)\n"
@@ -579,6 +589,8 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  %inner_temporary_reclaimed = icmp ult i64 %after_inner, %nested_peak\n"
             + "  %nested_value = load i64, ptr %nested_kept\n"
             + "  %nested_value_survived = icmp eq i64 %nested_value, 43\n"
+            + "  %outer_value = load i64, ptr %outer_kept\n"
+            + "  %outer_value_survived = icmp eq i64 %outer_value, 44\n"
             + "  call void @__xcc_aot_phase_reset(ptr %outer_mark)\n"
             + "  %after_outer = call i64 @__xcc_aot_phase_allocated_bytes()\n"
             + "  %parent_reclaimed = icmp eq i64 %after_outer, %baseline\n"
@@ -586,7 +598,10 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  %promotion_ok = and i1 %promoted, %not_null_promoted\n"
             + "  %lifetime_ok = and i1 %temporary_reclaimed, %value_survived\n"
             + "  %cleanup_ok = and i1 %resize_survived, %balanced\n"
-            + "  %nested_promotion_ok = and i1 %nested_promoted, %nested_value_survived\n"
+            + "  %outer_stayed = xor i1 %outer_not_promoted, true\n"
+            + "  %outer_ok = and i1 %outer_stayed, %outer_value_survived\n"
+            + "  %nested_survived = and i1 %nested_value_survived, %outer_ok\n"
+            + "  %nested_promotion_ok = and i1 %nested_promoted, %nested_survived\n"
             + "  %nested_cleanup_ok = and i1 %inner_temporary_reclaimed, %parent_reclaimed\n"
             + "  %nested_ok = and i1 %nested_promotion_ok, %nested_cleanup_ok\n"
             + "  %partial = and i1 %promotion_ok, %lifetime_ok\n"

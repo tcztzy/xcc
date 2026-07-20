@@ -1,5 +1,14 @@
 # Lessons
 
+- Region membership is a local question. To decide whether a result can move
+  out of the current phase, search only from the allocation head to that
+  phase's mark; looking through all older promoted storage makes every borrowed
+  child rejection slower as the compiler progresses and defeats the lifetime
+  partition that regions were meant to provide.
+- On macOS, do not place `DYLD_INSERT_LIBRARIES` outside a SIP-protected timing
+  executable and assume it reaches the audited child. Run the protected timer
+  first and set the injection variables in an `env` child beneath it, then
+  require the audit log to exist before drawing any open/exec conclusion.
 - A fresh return is a lifetime transfer, not proof that it must leak to process
   lifetime. When the static type describes the complete reachable graph, move
   each current-region allocation into the parent region before resetting the
