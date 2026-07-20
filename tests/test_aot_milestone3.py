@@ -696,8 +696,6 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  store i64 47, ptr %value\n"
             + "  %target = call ptr @__xcc_aot_phase_capture_target(ptr %owner)\n"
             + "  %right_target = icmp eq ptr %target, %middle\n"
-            + "  %deferred = call i1 @__xcc_aot_phase_capture_defer(ptr %target)\n"
-            + "  %not_deferred = xor i1 %deferred, true\n"
             + "  %promoted = call i1 @__xcc_aot_phase_promote_to(\n"
             + "    ptr %value, ptr %target)\n"
             + "  call void @__xcc_aot_phase_reset(ptr %inner)\n"
@@ -707,8 +705,7 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  call void @__xcc_aot_phase_reset(ptr %outer)\n"
             + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
             + "  %balanced = icmp eq i64 %final, %baseline\n"
-            + "  %target_and_mode = and i1 %right_target, %not_deferred\n"
-            + "  %target_and_move = and i1 %target_and_mode, %promoted\n"
+            + "  %target_and_move = and i1 %right_target, %promoted\n"
             + "  %survived = and i1 %target_and_move, %value_survived\n"
             + "  %ok = and i1 %survived, %balanced\n"
             + "  %result = select i1 %ok, i32 0, i32 1\n"
@@ -720,6 +717,62 @@ class AotMilestone3IrTests(unittest.TestCase):
                 llvm_ir,
                 Path(tmp) / "phase-capture-nested",
                 filename="phase-capture-nested.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v418_ancestor_capture_defers_complete_mark_chain(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %outer = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %owner = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %middle = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %middle_scratch = call ptr @__xcc_aot_alloc(i64 32)\n"
+            + "  %inner = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %value = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 61, ptr %value\n"
+            + "  %inner_scratch = call ptr @__xcc_aot_alloc(i64 64)\n"
+            + "  store ptr %value, ptr %owner\n"
+            + "  %target = call ptr @__xcc_aot_phase_capture_target(ptr %owner)\n"
+            + "  %right_target = icmp eq ptr %target, %middle\n"
+            + "  %deferred = call i1 @__xcc_aot_phase_capture_defer(ptr %target)\n"
+            + "  %promoted = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr %value, ptr %target)\n"
+            + "  %not_promoted = xor i1 %promoted, true\n"
+            + "  %before_inner = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  call void @__xcc_aot_phase_finish(ptr %inner)\n"
+            + "  %after_inner = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %expected_inner = sub i64 %before_inner, 40\n"
+            + "  %inner_mark_only = icmp eq i64 %after_inner, %expected_inner\n"
+            + "  call void @__xcc_aot_phase_finish(ptr %middle)\n"
+            + "  %after_middle = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %expected_middle = sub i64 %after_inner, 40\n"
+            + "  %middle_mark_only = icmp eq i64 %after_middle, %expected_middle\n"
+            + "  %stored = load ptr, ptr %owner\n"
+            + "  %kept = load i64, ptr %stored\n"
+            + "  %value_survived = icmp eq i64 %kept, 61\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %outer)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %mode_ok = and i1 %right_target, %deferred\n"
+            + "  %walk_skipped = and i1 %mode_ok, %not_promoted\n"
+            + "  %marks_only = and i1 %inner_mark_only, %middle_mark_only\n"
+            + "  %finish_ok = and i1 %marks_only, %value_survived\n"
+            + "  %lifetime_ok = and i1 %finish_ok, %balanced\n"
+            + "  %ok = and i1 %walk_skipped, %lifetime_ok\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-capture-deferred-chain",
+                filename="phase-capture-deferred-chain.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 

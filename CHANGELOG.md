@@ -2,6 +2,26 @@
 
 ## Current
 
+- B631 defers complete nested mark chains for ancestor captures. After B630
+  removed alternating owner lookup, the matched lexer sample spent 1,809/3,829
+  frames recursively promoting token graphs across an intervening lexer phase.
+  V418 first validates the LIFO mark chain from the current mark through the
+  target, then marks every member deferred; normal returns commit each segment
+  upward in order until the value reaches the owner's lifetime. A target whose
+  parent is null still rejects deferral and uses exact promotion, preventing an
+  outermost/global leak. Native accounting proves two nested finishes remove
+  only their marks, preserve the stored value, and leave final reclamation to
+  the owner region; nested CPython/native capture oracles remain equal. The 226
+  LLVM/M3 tests, lint, and type pass. A hosted Stage 1 builds in 28.40 seconds
+  at 326,778,880-byte maximum RSS with zero swap. It compiles the focused
+  nested-capture source in 0.75 seconds at 47,448,064-byte maximum RSS using
+  only `llc` and `cc`, and matches CPython with exit 7; no Python dependency is
+  present. In the matched 8--13-second sample, both `capture_target` and
+  `promote_to` fall below the five-frame top-stack threshold; actual lexer
+  `startswith` work becomes the leading stack at 1,281/3,861. The 17-second
+  watchdog records 409 source opens, no tool execution, and no Stage 2 artifact;
+  no Stage 1-to-2 result is claimed.
+
 - B630 keeps two lifetime-validated owner-region cache entries. Post-B629
   samples spent up to 1,803/3,825 frames in `capture_target`; generated
   `_PythonLexer._emit_from` alternates the token-container owner and lexer-record

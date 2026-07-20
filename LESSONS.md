@@ -1,5 +1,11 @@
 # Lessons
 
+- An ancestor capture can use region transfer without removing active caller
+  marks early. Validate the current-to-target mark chain, flag every mark, then
+  let ordinary LIFO returns commit each segment upward until the captured value
+  reaches the owner's parent lifetime. Refuse the optimization when the target
+  is outermost; otherwise the same mechanism would turn bounded scratch into a
+  process-lifetime leak.
 - Size a provenance cache from observed semantic alternation, and keep its
   lifetime proof unchanged. A write helper that alternates one container owner
   and one enclosing record defeats a single entry even though both targets stay
