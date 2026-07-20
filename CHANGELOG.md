@@ -2,6 +2,33 @@
 
 ## Current
 
+- B636 replaces allocation-list provenance scans for compiler-proven heap roots
+  with explicit region ownership. The post-B635 single-process probe still
+  reached its 60.19-second watchdog at 166,821,888-byte maximum RSS after 409
+  source opens, with no tool or Stage 2 artifact. Its bounded 3,797-stack sample
+  placed 2,393 frames in `phase_promote_to`, 805 in `phase_capture_target`, and
+  430 in `find_allocation`, while the former lexer `strlen` hotspot was absent.
+  V423 packs the allocation's owning phase depth beside its bounded size and
+  the mark depth beside its deferred bit. Record payloads and tuple handles/
+  backing stores, whose allocation provenance the emitter proves, can therefore
+  select and cross a region boundary without searching the global allocation
+  chain. Commit retags its contiguous kept segment once; strings, static layout
+  tables, globals, and opaque pointers retain the conservative validated scan.
+  Generated-LLVM, native promotion/commit/lifetime, and nested record/tuple
+  CPython/native regressions pass with 233 LLVM/M3 tests, 165 runtime oracles,
+  lint, and type. A retained hosted Stage 1 builds in 28.49 seconds at
+  363,888,640-byte maximum RSS with zero swap, uses only `llc` and `cc`, links
+  only `libSystem`, has no Python symbols, and rejects the CPython parser. It
+  compiles the focused nested record/tuple source in 0.22 seconds at
+  48,250,880-byte maximum RSS, launches no Python process, and matches CPython
+  with exit 7. Static Stage 1 IR moves promotion call sites from 621 generic to
+  141 generic plus 491 proven-allocation calls, and capture sites from 123
+  generic to 8 generic plus 120 proven-allocation calls. Nevertheless, the
+  post-B636 60.21-second process-group watchdog remains at 166,969,344-byte
+  maximum RSS, zero swap, and the same 409 source opens, with no tool or Stage 2
+  artifact. V423 therefore is not the sole remaining dynamic bottleneck; no
+  Stage 1-to-2 result is claimed.
+
 - B635 generalizes B632's lifetime-safe immutable string length cache beyond
   `startswith`. A post-B634 60.14-second probe remained at 166,641,664-byte
   maximum RSS and 409 source opens; a bounded 3,826-stack sample placed 1,947

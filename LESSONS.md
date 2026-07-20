@@ -1,5 +1,14 @@
 # Lessons
 
+- Region ownership should be metadata when the compiler can prove allocation
+  provenance. Searching one global allocation list to rediscover whether every
+  record or tuple belongs inside a mark makes typed graph transfer quadratic.
+  Encode the owning region in the guarded allocation header, retag a committed
+  segment once, and keep the validating scan for strings, globals, layouts, and
+  opaque pointers whose provenance is not statically exact. A large static
+  migration from generic to proven-allocation calls is still not evidence of a
+  whole-build speedup; keep the bounded native gate and reprofile when its time
+  and source-open frontier remain unchanged.
 - A lifetime-safe cache can still be too narrow to uphold the performance
   invariant. If `startswith` reuses a source length but ordinary `len`,
   truthiness, indexing, membership, and slicing bypass it, the lexer remains

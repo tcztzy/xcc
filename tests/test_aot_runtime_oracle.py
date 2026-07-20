@@ -659,6 +659,29 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="string-length-mru.py",
         )
 
+    def test_region_owned_record_tuple_graph_survives_nested_returns(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Token:\n"
+            "    text: str\n"
+            "    span: tuple[int, int]\n"
+            "def build(prefix: str) -> tuple[Token, ...]:\n"
+            "    scratch = prefix + '-scratch'\n"
+            "    first = Token(prefix + '-left', (1, 3))\n"
+            "    second = Token(prefix + '-right', (5, 8))\n"
+            "    return (first, second)\n"
+            "def relay(prefix: str) -> tuple[Token, ...]:\n"
+            "    return build(prefix)\n"
+            "def entry() -> int:\n"
+            "    tokens = relay('root')\n"
+            "    text_ok = tokens[0].text == 'root-left' and tokens[1].text == 'root-right'\n"
+            "    span_ok = tokens[0].span == (1, 3) and tokens[1].span == (5, 8)\n"
+            "    return 7 if text_ok and span_ok else 1\n",
+            expected=7,
+            filename="region-owned-record-tuple.py",
+        )
+
     def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

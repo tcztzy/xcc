@@ -1934,7 +1934,7 @@ class _Emitter:
         self.current_phase_promotes_return = False
         self.current_phase_exact_return = False
         self.phase_promote_types: dict[str, IrType] = {}
-        self.phase_capture_types: dict[str, IrType] = {}
+        self.phase_capture_types: dict[str, tuple[IrType, bool]] = {}
         self.needs_phase_object_promotion_helpers = False
         self.phase_object_promotion_records: set[str] = set()
         self.phase_exact_promotion_records: set[str] = set()
@@ -2371,6 +2371,7 @@ class _Emitter:
         owner: str,
         value: str,
         type_info: IrType,
+        owner_is_allocated: bool,
         lines: list[str],
     ) -> None:
         if not _phase_pointer_type(type_info) and not isinstance(type_info, IrFloatType):
@@ -2383,9 +2384,11 @@ class _Emitter:
         ):
             return
         key = repr(type_info)
-        self.phase_capture_types[key] = type_info
+        if not owner_is_allocated:
+            key += ":external-owner"
+        self.phase_capture_types[key] = (type_info, owner_is_allocated)
         if _phase_pointer_type(type_info):
-            self.phase_promote_types[key] = type_info
+            self.phase_promote_types[repr(type_info)] = type_info
         helper = _llvm_symbol("__xcc_aot_phase_capture:" + key)
         self.needs_runtime_prelude = True
         lines.append(f"  call void {helper}(ptr {owner}, ptr {value})")
@@ -2424,12 +2427,17 @@ class _Emitter:
     def _emit_phase_capture_helpers(self) -> list[str]:
         helpers: list[str] = []
         for key in sorted(self.phase_capture_types):
-            type_info = self.phase_capture_types[key]
+            type_info, owner_is_allocated = self.phase_capture_types[key]
             helper = _llvm_symbol("__xcc_aot_phase_capture:" + key)
+            capture_target = (
+                "@__xcc_aot_phase_capture_allocated_target"
+                if owner_is_allocated
+                else "@__xcc_aot_phase_capture_target"
+            )
             lines = [
                 f"define void {helper}(ptr %owner, ptr %value) {{",
                 "entry:",
-                "  %target = call ptr @__xcc_aot_phase_capture_target(ptr %owner)",
+                f"  %target = call ptr {capture_target}(ptr %owner)",
                 "  %needed = icmp ne ptr %target, null",
                 "  br i1 %needed, label %promote, label %done",
                 "promote:",
@@ -2443,7 +2451,7 @@ class _Emitter:
                     "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)"
                 )
             else:
-                target = _llvm_symbol("__xcc_aot_phase_promote:" + key)
+                target = _llvm_symbol("__xcc_aot_phase_promote:" + repr(type_info))
                 lines.append(f"  call void {target}(ptr %value, ptr %target)")
             lines.extend(
                 (
@@ -2507,7 +2515,7 @@ class _Emitter:
             "  %nonnull = icmp ne ptr %value, null",
             "  br i1 %nonnull, label %promote, label %done",
             "promote:",
-            "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)",
+            "  %promoted = call i1 @__xcc_aot_phase_promote_allocated_to(ptr %value, ptr %target)",
             "  br i1 %promoted, label %storage, label %done",
             "storage:",
             "  %data.ptr = getelementptr ptr, ptr %value, i64 2",
@@ -2518,7 +2526,8 @@ class _Emitter:
             "  %layout.tags = load ptr, ptr %layout.tags.ptr",
             "  %layout.promoted = call i1 @__xcc_aot_phase_promote_to("
             "ptr %layout.tags, ptr %target)",
-            "  %data.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %data, ptr %target)",
+            "  %data.promoted = call i1 @__xcc_aot_phase_promote_allocated_to("
+            "ptr %data, ptr %target)",
             "  %length = call i64 @__xcc_aot_tuple_len(ptr %value)",
             "  %empty = icmp eq i64 %length, 0",
             "  br i1 %empty, label %done, label %validate.layout",
@@ -2684,7 +2693,7 @@ class _Emitter:
             "  br i1 %nonnull, label %promote, label %done",
             "promote:",
             "  %raw = getelementptr i8, ptr %value, i64 -8",
-            "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %raw, ptr %target)",
+            "  %promoted = call i1 @__xcc_aot_phase_promote_allocated_to(ptr %raw, ptr %target)",
             "  br i1 %promoted, label %children, label %done",
             "children:",
         ]
@@ -2757,7 +2766,7 @@ class _Emitter:
             "  %nonnull = icmp ne ptr %value, null",
             "  br i1 %nonnull, label %promote, label %done",
             "promote:",
-            "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)",
+            "  %promoted = call i1 @__xcc_aot_phase_promote_allocated_to(ptr %value, ptr %target)",
             "  br i1 %promoted, label %storage, label %done",
             "storage:",
             "  %data.ptr = getelementptr ptr, ptr %value, i64 2",
@@ -2765,7 +2774,8 @@ class _Emitter:
             "  %layout.ptr = getelementptr ptr, ptr %value, i64 4",
             "  %layout = load ptr, ptr %layout.ptr",
             "  %layout.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %layout, ptr %target)",
-            "  %data.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %data, ptr %target)",
+            "  %data.promoted = call i1 @__xcc_aot_phase_promote_allocated_to("
+            "ptr %data, ptr %target)",
         ]
         if not element_types:
             lines.extend(("  br label %done", "done:", "  ret void", "}"))
@@ -3664,7 +3674,7 @@ class _Emitter:
         stored = self._box_to_runtime_ptr(value, lines)
         index_value = self._coerce_index_i64(index, lines, "setitem")
         self.needs_runtime_prelude = True
-        self._emit_phase_capture_value(target.value, stored, value.type, lines)
+        self._emit_phase_capture_value(target.value, stored, value.type, True, lines)
         lines.append(
             f"  call void @__xcc_aot_tuple_set(ptr {target.value}, i64 {index_value}, ptr {stored})"
         )
@@ -3696,7 +3706,7 @@ class _Emitter:
         if _phase_pointer_type(field.type):
             owner = self._tmp("field.owner")
             lines.append(f"  {owner} = getelementptr i8, ptr {receiver_value.value}, i64 -8")
-            self._emit_phase_capture_value(owner, stored, field.type, lines)
+            self._emit_phase_capture_value(owner, stored, field.type, True, lines)
         field_ptr = self._tmp("fieldptr")
         lines.append(
             f"  {field_ptr} = getelementptr inbounds %{record_name}, "
@@ -4197,7 +4207,13 @@ class _Emitter:
         lines.append(f"{initialize_label}:")
         initialized = self._emit_tuple(expr.args[1], names, lines)
         initialized_label = _current_label(lines)
-        self._emit_phase_capture_value(slot, initialized.value, initialized.type, lines)
+        self._emit_phase_capture_value(
+            slot,
+            initialized.value,
+            initialized.type,
+            False,
+            lines,
+        )
         lines.append(f"  store ptr {initialized.value}, ptr {slot}")
         lines.append(f"  br label %{ready_label}")
         lines.append(f"{ready_label}:")
@@ -6276,6 +6292,7 @@ class _Emitter:
             dict_value.value,
             pair,
             pair_type,
+            True,
             lines,
         )
         lines.append(
@@ -6340,7 +6357,7 @@ class _Emitter:
             value_type,
         )
         value_box = self._box_to_runtime_ptr(coerced_value, lines)
-        self._emit_phase_capture_value(raw_pair, value_box, value_type, lines)
+        self._emit_phase_capture_value(raw_pair, value_box, value_type, True, lines)
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {raw_pair}, i64 1, ptr {value_box})")
         lines.append(f"  store ptr {dict_value.value}, ptr {result_ptr}")
         lines.append(f"  br label %{end_label}")
@@ -6371,6 +6388,7 @@ class _Emitter:
             dict_value.value,
             pair,
             pair_type,
+            True,
             lines,
         )
         lines.append(
@@ -7577,7 +7595,7 @@ class _Emitter:
         if method == "append":
             item = self._emit_expr(expr.args[1], names, lines)
             boxed_item = self._box_to_runtime_ptr(item, lines)
-            self._emit_phase_capture_value(receiver.value, boxed_item, item.type, lines)
+            self._emit_phase_capture_value(receiver.value, boxed_item, item.type, True, lines)
             result = self._tmp("tuple")
             self.needs_runtime_prelude = True
             lines.append(
@@ -7596,6 +7614,7 @@ class _Emitter:
                 receiver.value,
                 extension.value,
                 extension.type,
+                True,
                 lines,
             )
             result = self._tmp("tuple")
@@ -7614,6 +7633,7 @@ class _Emitter:
             receiver.value,
             singleton,
             IrTupleType((item.type,)),
+            True,
             lines,
         )
         result = self._tmp("tuple")
@@ -7679,6 +7699,7 @@ class _Emitter:
             receiver.value,
             replacement.value,
             replacement.type,
+            True,
             lines,
         )
         result = self._tmp("tuplesetlice")
@@ -8194,7 +8215,7 @@ class _Emitter:
         result = self._tmp("setop")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
         if expr.target == "__set_update":
-            self._emit_phase_capture_value(left.value, result, expr.type, lines)
+            self._emit_phase_capture_value(left.value, result, expr.type, True, lines)
             lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {left.value}, ptr {result})")
             return _EmittedValue(left.value, expr.type)
         if expr.target == "__set_difference_update":
@@ -8237,7 +8258,7 @@ class _Emitter:
         lines.append(f"{append_label}:")
         appended = self._tmp("setadd.appended")
         boxed_item = self._box_to_runtime_ptr(item, lines)
-        self._emit_phase_capture_value(receiver.value, boxed_item, item.type, lines)
+        self._emit_phase_capture_value(receiver.value, boxed_item, item.type, True, lines)
         lines.append(
             f"  {appended} = call ptr @__xcc_aot_tuple_append("
             f"ptr {receiver.value}, ptr {boxed_item})"

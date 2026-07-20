@@ -462,6 +462,68 @@ class AotLlvmTextTests(unittest.TestCase):
         )
         self.assertIn("call void @__xcc_aot_memory_safety_fail()", base_helper)
 
+    def test_v423_known_heap_roots_use_region_provenance(self) -> None:
+        source = (
+            "class Payload:\n"
+            "    label: str\n"
+            "    def __init__(self, label: str) -> None:\n"
+            "        self.label = label\n"
+            "\n"
+            "def make(label: str) -> tuple[Payload]:\n"
+            "    scratch = label + '-scratch'\n"
+            "    return (Payload(label + '-kept'),)\n"
+        )
+
+        llvm_ir = emit_llvm_text(lower_source_to_ir(source, filename="region-owner.py"))
+        tuple_helper = llvm_ir.split(
+            'define void @"__xcc_aot_phase_promote:IrTupleType', 1
+        )[1].split("\n}", 1)[0]
+        record_helper = llvm_ir.split(
+            'define void @"__xcc_aot_phase_promote:IrRecordType(name=\'Payload\')"', 1
+        )[1].split("\n}", 1)[0]
+        capture_helper = llvm_ir.split(
+            'define void @"__xcc_aot_phase_capture:IrStringType()', 1
+        )[1].split("\n}", 1)[0]
+
+        self.assertIn(
+            "call i1 @__xcc_aot_phase_promote_allocated_to(ptr %value, ptr %target)",
+            tuple_helper,
+        )
+        self.assertIn(
+            "call i1 @__xcc_aot_phase_promote_allocated_to(ptr %data, ptr %target)",
+            tuple_helper,
+        )
+        self.assertIn(
+            "call i1 @__xcc_aot_phase_promote_to(ptr %layout, ptr %target)",
+            tuple_helper,
+        )
+        self.assertIn(
+            "call i1 @__xcc_aot_phase_promote_allocated_to(ptr %raw, ptr %target)",
+            record_helper,
+        )
+        self.assertIn(
+            "call ptr @__xcc_aot_phase_capture_allocated_target(ptr %owner)",
+            capture_helper,
+        )
+
+        global_ir = emit_llvm_text(
+            lower_source_to_ir(
+                "VALUES: dict[str, str] = {'key': 'stable'}\n"
+                "def read() -> str:\n"
+                "    return VALUES['key']\n",
+                filename="external-region-owner.py",
+                entry="read",
+            )
+        )
+        external_capture = global_ir.split(
+            'define void @"__xcc_aot_phase_capture:IrDictType', 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn(
+            "call ptr @__xcc_aot_phase_capture_target(ptr %owner)",
+            external_capture,
+        )
+        self.assertNotIn("phase_capture_allocated_target", external_capture)
+
     def test_v409_super_init_arguments_can_be_reclaimed_locally(self) -> None:
         module = lower_source_to_ir(
             "class Problem(ValueError):\n"

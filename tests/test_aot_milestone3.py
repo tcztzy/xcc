@@ -855,6 +855,69 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v423_region_provenance_survives_promotion_and_commit(self) -> None:
+        runtime = runtime_prelude()
+        allocated_promote = runtime.split(
+            "define i1 @__xcc_aot_phase_promote_allocated_to", 1
+        )[1].split("\n}", 1)[0]
+        self.assertNotIn("load ptr, ptr @__xcc_aot_allocation_head", allocated_promote)
+        self.assertNotIn("@__xcc_aot_find_allocation", allocated_promote)
+        llvm_ir = (
+            runtime
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %outer = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %owner = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %middle = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %inner = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %value = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 67, ptr %value\n"
+            + "  %target = call ptr @__xcc_aot_phase_capture_allocated_target(ptr %owner)\n"
+            + "  %right_target = icmp eq ptr %target, %middle\n"
+            + "  %moved = call i1 @__xcc_aot_phase_promote_allocated_to(\n"
+            + "    ptr %value, ptr %target)\n"
+            + "  %moved_again = call i1 @__xcc_aot_phase_promote_allocated_to(\n"
+            + "    ptr %value, ptr %target)\n"
+            + "  %stayed_outside = xor i1 %moved_again, true\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %inner)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %middle)\n"
+            + "  %kept = load i64, ptr %value\n"
+            + "  %promotion_survived = icmp eq i64 %kept, 67\n"
+            + "  %committed = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %committed_value = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 71, ptr %committed_value\n"
+            + "  call void @__xcc_aot_phase_commit(ptr %committed)\n"
+            + "  %reentered = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %retagged_target = call ptr @__xcc_aot_phase_capture_allocated_target(\n"
+            + "    ptr %committed_value)\n"
+            + "  %commit_retagged = icmp eq ptr %retagged_target, %reentered\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %reentered)\n"
+            + "  %committed_kept = load i64, ptr %committed_value\n"
+            + "  %commit_survived = icmp eq i64 %committed_kept, 71\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %outer)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %first_ok = and i1 %right_target, %moved\n"
+            + "  %move_ok = and i1 %first_ok, %stayed_outside\n"
+            + "  %promotion_ok = and i1 %move_ok, %promotion_survived\n"
+            + "  %commit_ok = and i1 %commit_retagged, %commit_survived\n"
+            + "  %lifetimes = and i1 %promotion_ok, %commit_ok\n"
+            + "  %ok = and i1 %lifetimes, %balanced\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-region-provenance",
+                filename="phase-region-provenance.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v415_direct_parent_capture_defers_graph_walk_until_region_finish(self) -> None:
         llvm_ir = (
             runtime_prelude()
