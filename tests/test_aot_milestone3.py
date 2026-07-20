@@ -55,13 +55,14 @@ from xcc.aot import (
 )
 from xcc.aot.core_runtime import runtime_prelude
 from xcc.aot.slice import (
-    _expr_record_names,
     _expr_call_targets,
+    _expr_record_names,
+    _function_call_targets,
     _function_record_names,
     _rename_expr_call,
     _rename_statement_calls,
-    _statement_record_names,
     _statement_call_targets,
+    _statement_record_names,
 )
 from xcc.aot.types import annotation_name
 
@@ -155,6 +156,13 @@ class AotMilestone3SliceTests(unittest.TestCase):
             IrBranch((IrRaise("ValueError", call),)),
         )
         self.assertEqual(_statement_call_targets(if_else_statement), ("cond", "local", "local"))
+        function = IrFunction("walk", (), IrNoneType(), (if_else_statement,))
+        with patch(
+            "xcc.aot.slice._statement_call_targets",
+            wraps=_statement_call_targets,
+        ) as normalized_statement_walk:
+            self.assertEqual(_function_call_targets(function), ("cond", "local", "local"))
+        self.assertEqual(normalized_statement_walk.call_count, 0)
         self.assertEqual(
             _statement_call_targets(
                 IrForEach("item", IrTuple((call,), string_tuple), IrBranch(()))

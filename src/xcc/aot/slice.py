@@ -1814,7 +1814,7 @@ def _record_constructor_type_base_name(type_info: object) -> str | None:
 def _function_call_targets(function: IrFunction) -> tuple[str, ...]:
     targets: list[str] = []
     for statement in function.body:
-        targets.extend(_statement_call_targets(statement))
+        _add_statement_call_targets(statement, targets)
     return tuple(targets)
 
 
@@ -1823,55 +1823,77 @@ def _native_leaf_dependencies(function_name: str) -> tuple[str, ...]:
 
 
 def _statement_call_targets(statement: IrStmt) -> tuple[str, ...]:
+    targets: list[str] = []
+    _add_statement_call_targets(statement, targets)
+    return tuple(targets)
+
+
+def _add_statement_call_targets(statement: IrStmt, targets: list[str]) -> None:
     if isinstance(statement, IrAssign):
-        return _expr_call_targets(statement.value)
+        _add_expr_call_targets(statement.value, targets)
+        return
     if isinstance(statement, IrSetItem):
-        return (
-            _expr_call_targets(statement.target)
-            + _expr_call_targets(statement.index)
-            + _expr_call_targets(statement.value)
-        )
+        _add_expr_call_targets(statement.target, targets)
+        _add_expr_call_targets(statement.index, targets)
+        _add_expr_call_targets(statement.value, targets)
+        return
     if isinstance(statement, IrReturn):
-        return _expr_call_targets(statement.value)
+        _add_expr_call_targets(statement.value, targets)
+        return
     if isinstance(statement, IrIf):
-        targets = list(_expr_call_targets(statement.condition))
-        targets.extend(_branch_call_targets(statement.then_branch))
+        _add_expr_call_targets(statement.condition, targets)
+        _add_branch_call_targets(statement.then_branch, targets)
         if statement.else_branch is not None:
-            targets.extend(_branch_call_targets(statement.else_branch))
-        return tuple(targets)
+            _add_branch_call_targets(statement.else_branch, targets)
+        return
     if isinstance(statement, IrForEach):
-        return _expr_call_targets(statement.iterable) + _branch_call_targets(statement.body)
+        _add_expr_call_targets(statement.iterable, targets)
+        _add_branch_call_targets(statement.body, targets)
+        return
     if isinstance(statement, IrWhile):
-        return _expr_call_targets(statement.condition) + _branch_call_targets(statement.body)
+        _add_expr_call_targets(statement.condition, targets)
+        _add_branch_call_targets(statement.body, targets)
+        return
     if isinstance(statement, (IrBreak, IrContinue)):
-        return ()
+        return
     if isinstance(statement, IrPrint):
-        return _expr_call_targets(statement.value)
+        _add_expr_call_targets(statement.value, targets)
+        return
     if isinstance(statement, IrRaise):
-        raise_targets = _expr_call_targets(statement.message)
+        _add_expr_call_targets(statement.message, targets)
         if statement.payload is not None:
-            raise_targets += _expr_call_targets(statement.payload)
-        return raise_targets
+            _add_expr_call_targets(statement.payload, targets)
+        return
     if isinstance(statement, IrReraise):
-        return ()
+        return
     if isinstance(statement, IrTry):
-        targets = list(_branch_call_targets(statement.body))
-        targets.extend(_branch_call_targets(statement.orelse))
-        targets.extend(_branch_call_targets(statement.finalbody))
+        _add_branch_call_targets(statement.body, targets)
+        _add_branch_call_targets(statement.orelse, targets)
+        _add_branch_call_targets(statement.finalbody, targets)
         for handler in statement.handlers:
-            targets.extend(_branch_call_targets(handler.body))
-        return tuple(targets)
+            _add_branch_call_targets(handler.body, targets)
+        return
     assert_never(statement)
 
 
 def _branch_call_targets(branch: IrBranch) -> tuple[str, ...]:
     targets: list[str] = []
-    for statement in branch.statements:
-        targets.extend(_statement_call_targets(statement))
+    _add_branch_call_targets(branch, targets)
     return tuple(targets)
 
 
+def _add_branch_call_targets(branch: IrBranch, targets: list[str]) -> None:
+    for statement in branch.statements:
+        _add_statement_call_targets(statement, targets)
+
+
 def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
+    targets: list[str] = []
+    _add_expr_call_targets(expr, targets)
+    return tuple(targets)
+
+
+def _add_expr_call_targets(expr: IrExpr, targets: list[str]) -> None:
     if isinstance(
         expr,
         IrConstInt
@@ -1883,43 +1905,56 @@ def _expr_call_targets(expr: IrExpr) -> tuple[str, ...]:
         | IrEnumMember
         | IrName,
     ):
-        return ()
+        return
     if isinstance(expr, IrBinary):
-        return _expr_call_targets(expr.left) + _expr_call_targets(expr.right)
+        _add_expr_call_targets(expr.left, targets)
+        _add_expr_call_targets(expr.right, targets)
+        return
     if isinstance(expr, IrGetField):
-        return _expr_call_targets(expr.value)
+        _add_expr_call_targets(expr.value, targets)
+        return
     if isinstance(expr, IrConstructRecord):
-        return (f"{expr.record}.__init__",) + _expr_tuple_call_targets(expr.args)
+        targets.append(f"{expr.record}.__init__")
+        _add_expr_tuple_call_targets(expr.args, targets)
+        return
     if isinstance(expr, IrCall):
         if expr.target.startswith(_NORETURN_CALL_PREFIX):
-            return (expr.target.removeprefix(_NORETURN_CALL_PREFIX),) + _expr_tuple_call_targets(
-                expr.args
-            )
-        if expr.target.startswith(_RECORD_INIT_PREFIX):
-            return (expr.target.removeprefix(_RECORD_INIT_PREFIX),) + _expr_tuple_call_targets(
-                expr.args
-            )
-        return (expr.target,) + _expr_tuple_call_targets(expr.args)
+            targets.append(expr.target.removeprefix(_NORETURN_CALL_PREFIX))
+        elif expr.target.startswith(_RECORD_INIT_PREFIX):
+            targets.append(expr.target.removeprefix(_RECORD_INIT_PREFIX))
+        else:
+            targets.append(expr.target)
+        _add_expr_tuple_call_targets(expr.args, targets)
+        return
     if isinstance(expr, IrTuple):
-        return _expr_tuple_call_targets(expr.elements)
+        _add_expr_tuple_call_targets(expr.elements, targets)
+        return
     if isinstance(expr, IrTupleSlice):
-        return (
-            _expr_call_targets(expr.value)
-            + (_expr_call_targets(expr.start) if expr.start is not None else ())
-            + (_expr_call_targets(expr.stop) if expr.stop is not None else ())
-        )
+        _add_expr_call_targets(expr.value, targets)
+        if expr.start is not None:
+            _add_expr_call_targets(expr.start, targets)
+        if expr.stop is not None:
+            _add_expr_call_targets(expr.stop, targets)
+        return
     if isinstance(expr, IrStringConcat):
-        return _expr_tuple_call_targets(expr.parts)
+        _add_expr_tuple_call_targets(expr.parts, targets)
+        return
     if isinstance(expr, IrStringJoin):
-        return _expr_call_targets(expr.separator) + _expr_call_targets(expr.values)
+        _add_expr_call_targets(expr.separator, targets)
+        _add_expr_call_targets(expr.values, targets)
+        return
     assert_never(expr)
 
 
 def _expr_tuple_call_targets(expressions: tuple[IrExpr, ...]) -> tuple[str, ...]:
     targets: list[str] = []
-    for expression in expressions:
-        targets.extend(_expr_call_targets(expression))
+    _add_expr_tuple_call_targets(expressions, targets)
     return tuple(targets)
+
+
+def _add_expr_tuple_call_targets(expressions: tuple[IrExpr, ...], targets: list[str]) -> None:
+    for expression in expressions:
+        _add_expr_call_targets(expression, targets)
 
 
 def _frontend_options_bad_std_wrapper() -> IrFunction:

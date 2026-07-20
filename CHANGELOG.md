@@ -2,6 +2,9 @@
 
 ## Current
 
+- Changed recursive call-target reachability discovery to append into one
+  root-owned list. It preserves source traversal order and duplicate calls while
+  eliminating per-child tuple concatenation and normalization.
 - Changed recursive IR record reachability discovery to borrow one root-owned
   mutable accumulator. Type, expression, statement, and branch walkers no
   longer allocate and sort intermediate tuples at every child node; the public

@@ -1,5 +1,8 @@
 # Lessons
 
+- Borrowed accumulators also apply when traversal order and duplicates matter:
+  use one root-owned list and append in semantic order instead of recursively
+  concatenating immutable child tuples.
 - Recursive metadata walkers should borrow one caller-owned accumulator. A
   value-returning API that materializes and sorts a tuple at every child looks
   functional, but a no-GC bootstrap retains the full temporary tree; normalize
