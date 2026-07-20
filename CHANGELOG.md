@@ -2,6 +2,10 @@
 
 ## Current
 
+- Lowered concatenated `str.startswith` prefixes as borrowed consecutive part
+  comparisons. Dynamic f-string components are still evaluated once in order,
+  but the native path no longer allocates their combined temporary merely to
+  scan it, and offset advancement saturates safely on overflow.
 - Made the default test runner and both tox test paths explicitly serial while
   native allocation lifetimes remain incomplete. This closes the remaining
   gate-level concurrency path confirmed by post-reboot panic evidence; explicit

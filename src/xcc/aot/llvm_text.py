@@ -3565,30 +3565,84 @@ class _Emitter:
         if isinstance(expr.args[1], IrTuple):
             result: _EmittedValue = _EmittedValue("false", IrBoolType())
             for prefix_expr in expr.args[1].elements:
-                prefix = self._emit_expr(prefix_expr, names, lines)
-                if not _is_string_like_type(prefix.type):
-                    self._error("__str_startswith expects string receiver and prefix")
-                current = self._tmp("startswith")
-                lines.append(
-                    f"  {current} = call i1 @__xcc_aot_string_startswith("
-                    f"ptr {value.value}, ptr {prefix.value}, i64 {start.value})"
+                current = self._emit_string_startswith_prefix(
+                    value,
+                    prefix_expr,
+                    start,
+                    names,
+                    lines,
                 )
                 if result.value == "false":
-                    result = _EmittedValue(current, IrBoolType())
+                    result = current
                 else:
                     combined = self._tmp("startswith")
-                    lines.append(f"  {combined} = or i1 {result.value}, {current}")
+                    lines.append(f"  {combined} = or i1 {result.value}, {current.value}")
                     result = _EmittedValue(combined, IrBoolType())
             return result
-        prefix = self._emit_expr(expr.args[1], names, lines)
-        if not _is_string_like_type(prefix.type):
-            self._error("__str_startswith expects string receiver and prefix")
-        call_result = self._tmp("startswith")
-        lines.append(
-            f"  {call_result} = call i1 @__xcc_aot_string_startswith("
-            f"ptr {value.value}, ptr {prefix.value}, i64 {start.value})"
+        return self._emit_string_startswith_prefix(
+            value,
+            expr.args[1],
+            start,
+            names,
+            lines,
         )
-        return _EmittedValue(call_result, expr.type)
+
+    def _emit_string_startswith_prefix(
+        self,
+        value: _EmittedValue,
+        prefix_expr: IrExpr,
+        start: _EmittedValue,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if not isinstance(prefix_expr, IrStringConcat) or len(prefix_expr.parts) < 2:
+            prefix = self._emit_expr(prefix_expr, names, lines)
+            if not _is_string_like_type(prefix.type):
+                self._error("__str_startswith expects string receiver and prefix")
+            call_result = self._tmp("startswith")
+            lines.append(
+                f"  {call_result} = call i1 @__xcc_aot_string_startswith("
+                f"ptr {value.value}, ptr {prefix.value}, i64 {start.value})"
+            )
+            return _EmittedValue(call_result, IrBoolType())
+
+        start_negative = self._tmp("startswith.start.negative")
+        normalized_start = self._tmp("startswith.start")
+        lines.append(f"  {start_negative} = icmp slt i64 {start.value}, 0")
+        lines.append(f"  {normalized_start} = select i1 {start_negative}, i64 0, i64 {start.value}")
+        offset = normalized_start
+        result: _EmittedValue | None = None
+        for index, part_expr in enumerate(prefix_expr.parts):
+            part = self._coerce_to_string(self._emit_expr(part_expr, names, lines), lines)
+            current = self._tmp("startswith.part")
+            lines.append(
+                f"  {current} = call i1 @__xcc_aot_string_startswith("
+                f"ptr {value.value}, ptr {part.value}, i64 {offset})"
+            )
+            if result is None:
+                result = _EmittedValue(current, IrBoolType())
+            else:
+                combined = self._tmp("startswith.parts")
+                lines.append(f"  {combined} = and i1 {result.value}, {current}")
+                result = _EmittedValue(combined, IrBoolType())
+            if index + 1 == len(prefix_expr.parts):
+                continue
+            part_length = self._tmp("startswith.part.length")
+            remaining = self._tmp("startswith.offset.remaining")
+            too_large = self._tmp("startswith.offset.too_large")
+            advanced = self._tmp("startswith.offset.advanced")
+            next_offset = self._tmp("startswith.offset")
+            lines.append(f"  {part_length} = call i64 @strlen(ptr {part.value})")
+            lines.append(f"  {remaining} = sub i64 9223372036854775807, {offset}")
+            lines.append(f"  {too_large} = icmp ugt i64 {part_length}, {remaining}")
+            lines.append(f"  {advanced} = add i64 {offset}, {part_length}")
+            lines.append(
+                f"  {next_offset} = select i1 {too_large}, i64 9223372036854775807, i64 {advanced}"
+            )
+            offset = next_offset
+        if result is None:
+            self._error("__str_startswith expects at least one concatenated prefix part")
+        return result
 
     def _emit_string_endswith_call(
         self,

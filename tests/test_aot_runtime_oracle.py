@@ -629,6 +629,22 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="string-startswith-length-cache.py",
         )
 
+    def test_v399_dynamic_concatenated_startswith_prefix_matches_cpython(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    name = 'xcc.aot'\n"
+            "    if not 'xcc.aot.slice'.startswith(f'{name}.'):\n"
+            "        return 1\n"
+            "    if 'xcc.aotx.slice'.startswith(f'{name}.'):\n"
+            "        return 2\n"
+            "    empty = ''\n"
+            "    if not '.slice'.startswith(f'{empty}.'):\n"
+            "        return 3\n"
+            "    return 0\n",
+            expected=0,
+            filename="startswith-concatenated-prefix.py",
+        )
+
     def test_string_rfind_semantics(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

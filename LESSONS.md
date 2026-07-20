@@ -1,5 +1,10 @@
 # Lessons
 
+- Borrowing can remove allocations without changing Python source semantics.
+  When a concatenated string is consumed only by `startswith`, evaluate its
+  parts once and compare them consecutively against the receiver; materializing
+  the temporary first recreates allocation pressure that Rust-style slices
+  avoid, and offset arithmetic still needs an explicit overflow rule.
 - A per-process allocation cap does not by itself define a safe verification
   gate: concurrent native processes multiply the bound. Make serial execution
   the non-overridable gate command and the runner default, leaving parallelism

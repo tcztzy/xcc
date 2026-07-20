@@ -3137,6 +3137,43 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("define i1 @__xcc_aot_string_startswith", llvm_ir)
         self.assertIn("call i1 @__xcc_aot_string_startswith(ptr @.str0, ptr @.str1, i64 2)", llvm_ir)
 
+    def test_v399_startswith_string_concat_borrows_parts(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        module = IrModule(
+            "startswith_concat.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (IrParam("text", IrStringType()), IrParam("name", IrStringType())),
+                    IrBoolType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__str_startswith",
+                                (
+                                    IrName("text", IrStringType()),
+                                    IrStringConcat(
+                                        (IrName("name", IrStringType()), IrConstString("."))
+                                    ),
+                                    IrConstInt(0, int64),
+                                ),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        start = llvm_ir.index("define i1 @check")
+        end = llvm_ir.index("\n}", start)
+        function_ir = llvm_ir[start:end]
+
+        self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
+        self.assertNotIn("call ptr @__xcc_aot_string_concat2", function_ir)
+
     def test_emits_string_startswith_tuple_prefix_intrinsic_calls(self) -> None:
         int64 = IrIntType(64, signed=True)
         module = IrModule(
