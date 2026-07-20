@@ -938,10 +938,9 @@ class _Lowerer:
                 if statement.value is not None
                 else self._default_expr(annotated_type)
             )
-            flow_type = (
-                annotated_type
-                if isinstance(uncoerced_value.type, IrNoneType)
-                else uncoerced_value.type
+            flow_type = _annotated_assignment_flow_type(
+                uncoerced_value.type,
+                annotated_type,
             )
             value = self._coerce_optional_assignment(uncoerced_value, annotated_type)
             target_name = ast.unparse(statement.target)
@@ -6386,6 +6385,19 @@ def _tuple_subscript_result_type(index_expr: ast.expr, tuple_type: IrTupleType) 
 
 def _is_object_type(type_info: IrType) -> bool:
     return isinstance(type_info, IrRecordType) and type_info.name == "object"
+
+
+def _annotated_assignment_flow_type(value_type: IrType, annotated_type: IrType) -> IrType:
+    if isinstance(value_type, IrNoneType):
+        return annotated_type
+    if (
+        isinstance(value_type, IrTupleType)
+        and not value_type.elements
+        and isinstance(annotated_type, IrTupleType)
+        and annotated_type.elements
+    ):
+        return annotated_type
+    return value_type
 
 
 def _compatible_optional_union_type(left: IrType, right: IrType) -> IrRecordType | None:

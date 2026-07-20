@@ -2,6 +2,24 @@
 
 ## Current
 
+- B642 completes the dynamic tuple indexing representation contract exposed by
+  B641. The first B641 Stage 1-to-2 run still reached final LLVM emission in
+  15.15 seconds at 365,789,184-byte maximum RSS with zero swap, then exited 139
+  after 3,136 source opens over 817 unique paths. The new crash report places
+  the invalid read in `__xcc_aot_string_concat2`/`strlen`. B641 correctly
+  unboxed the tuple receiver, but `_emit_getitem_call` still returned a raw
+  element when its static result type was opaque `object`; later object
+  narrowing interpreted string bytes as `{tag, payload}`. V429 routes dynamic
+  indexing through the existing central tuple getter, which selects
+  `__xcc_aot_tuple_get_object` only for opaque results and otherwise retains the
+  raw typed path. An annotated `tuple[str, ...]` now refines an unknown tuple's
+  flow type, so statically proved item types do not get unnecessarily boxed; the
+  V409 object-graph regression remains green. The focused ordinary source
+  changes from native exit 1 to exit 7 and agrees with CPython. All 500 combined
+  IR/M3/runtime-oracle tests, 173 emitter tests, and 16 status tests pass; lint,
+  type, and `git diff --check` are green. B642 has not yet received bounded
+  Stage 1-to-2 evidence, so Stage 2/Stage 3 remain unproven.
+
 - B641 restores the representation boundary between an opaque Python `object`
   box and a raw runtime tuple. The first bounded B640 Stage 1-to-2 run no longer
   reached the old allocation guard: it opened 3,136 files over the same 817
@@ -18,8 +36,9 @@
   reproducer changes from signal 11 to exit 7 and agrees with CPython, while IR
   invariants require the payload load to dominate the raw tuple call. All 497
   combined IR/M3/runtime-oracle tests, 173 emitter tests, and 16 status tests
-  pass; lint, type, and `git diff --check` are green. The B641 Stage 1-to-2
-  oracle has not yet run, and Stage 2/Stage 3 remain unproven.
+  pass; lint, type, and `git diff --check` are green. Its first Stage 1-to-2 run
+  exposed the distinct opaque-result defect recorded as B642; no Stage 2
+  artifact was produced.
 
 - B640 gives compiler-generated `while` iterations an exact child lifetime
   inside the function-owned phase. B639 reached the exact B615 frontier of

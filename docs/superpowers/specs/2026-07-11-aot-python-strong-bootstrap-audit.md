@@ -446,11 +446,14 @@ commit children from inner to outer. This is compiler-generated ownership
 metadata over ordinary Python source, not a marker, pragma, source rewrite, or
 change to CPython semantics. A retained hosted Stage 1 builds in 28.84 seconds
 at 362,938,368-byte maximum RSS, invokes only `llc` and `cc`, has no Python or
-libpython dependency/symbol, rejects the CPython parser, and passes the ordinary
-600-iteration CPython/native oracle. The first bounded Stage 1-to-2 run reaches
-final LLVM emission in 15.14 seconds at 366,362,624-byte maximum RSS with zero
-swap instead of exhausting the 512 MiB allocation guard. It then exits 139 with
-no Stage 2 artifact after 3,136 opens over the same 817 source paths.
+libpython dependency/symbol, and rejects the CPython parser. The hosted-generated
+600-iteration executable matches CPython. Retained artifacts show that the
+Stage 1-generated version instead exits 139; the earlier attribution of exit 7
+to that Stage 1 product was incorrect. This remains a separate unresolved
+focused-oracle failure. The first bounded Stage 1-to-2 run reaches final LLVM
+emission in 15.14 seconds at 366,362,624-byte maximum RSS with zero swap instead
+of exhausting the 512 MiB allocation guard. It then exits 139 with no Stage 2
+artifact after 3,136 opens over the same 817 source paths.
 
 B641/V428 records the newly exposed representation defect. The macOS crash
 report has a null read in `__xcc_aot_tuple_get`; static disassembly maps its
@@ -462,6 +465,27 @@ runtime call, while statically typed tuple receivers keep the direct path. The
 focused ordinary source previously exits by signal 11 and now agrees with
 CPython at exit 7. Its emitted IR must load `object.payload` before
 `__xcc_aot_tuple_get`. All 497 combined IR/M3/runtime-oracle tests, 173 emitter
-tests, and 16 status tests pass; lint and type are green. B641 has not yet
-received bounded Stage 1-to-2 integration evidence; Stage 2-to-3 and strong
-bootstrap remain unproven.
+tests, and 16 status tests pass; lint and type are green. A new hosted Stage 1
+builds in 28.58 seconds at 365,330,432-byte maximum RSS with zero swap, exposes
+the native contract, rejects the CPython parser, links only `libSystem`, and
+uses only `llc` and `cc`. It compiles the exact V428 ordinary source in 0.23
+seconds at 48,087,040-byte maximum RSS without Python, and the result agrees
+with CPython at exit 7. Its bounded Stage 1-to-2 run still exits 139 after 15.15
+seconds at 365,789,184-byte maximum RSS and zero swap, with no Stage 2 artifact.
+The audit contains 3,136 source opens over the same 817 paths and no Python or
+tool execution before the crash.
+
+B642/V429 records the second representation boundary exposed by that run. The
+new crash report places an invalid string pointer in
+`__xcc_aot_string_concat2`/`strlen`. B641 unboxed each inner tuple receiver, but
+dynamic `__getitem` returned a raw element even when its result type was opaque
+`object`; object narrowing then read raw string bytes as `{tag, payload}`. V429
+routes the operation through the central tuple getter, selecting
+`__xcc_aot_tuple_get_object` for opaque results and the raw helper for typed
+results. A compatible `tuple[str, ...]` annotation refines an otherwise unknown
+tuple flow type so the proven string path remains raw. The focused ordinary
+source changes from native exit 1 to exit 7 and matches CPython; V409 continues
+to protect dynamic object-graph behavior. All 500 combined
+IR/M3/runtime-oracle tests, 173 emitter tests, and 16 status tests pass. B642
+has not yet received bounded native integration evidence; lint and type are
+green. Stage 2-to-3 and strong bootstrap remain unproven.

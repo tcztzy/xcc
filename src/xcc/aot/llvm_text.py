@@ -3786,7 +3786,7 @@ class _Emitter:
     def _emit_runtime_tuple_get(
         self,
         tuple_value: str,
-        index: int,
+        index: int | str,
         result_type: IrType,
         lines: list[str],
     ) -> _EmittedValue:
@@ -8640,11 +8640,7 @@ class _Emitter:
             if narrowed is None:
                 self._error("object __getitem receiver must contain a tuple")
             tuple_value = narrowed.value
-        raw = self._tmp("call")
-        lines.append(
-            f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {tuple_value}, i64 {index_value})"
-        )
-        return self._emit_runtime_boxed_value(raw, expr.type, lines)
+        return self._emit_runtime_tuple_get(tuple_value, index_value, expr.type, lines)
 
     def _emit_not_in_tuple(
         self,

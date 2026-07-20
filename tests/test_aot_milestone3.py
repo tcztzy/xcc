@@ -1299,14 +1299,43 @@ class AotMilestone3IrTests(unittest.TestCase):
         )
         entry_body = llvm_ir.split("define i64 @entry()", 1)[1].split("\n}", 1)[0]
         self.assertIn("call ptr @__xcc_aot_tuple_get_object", entry_body)
-        self.assertIn(" = getelementptr i8, ptr %call", entry_body)
+        self.assertIn(" = getelementptr i8, ptr %itemslot", entry_body)
         self.assertIn("load ptr, ptr %object.payload", entry_body)
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %object.pointer", entry_body)
+        self.assertIn("call ptr @__xcc_aot_tuple_get_object(ptr %object.pointer", entry_body)
         with tempfile.TemporaryDirectory() as tmp:
             executable = compile_llvm_executable(
                 llvm_ir,
                 Path(tmp) / "opaque-tuple-destructure",
                 filename="opaque-tuple-destructure.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 7)
+
+    def test_v429_opaque_tuple_items_are_boxed_before_narrowing(self) -> None:
+        source = (
+            "def first(values: object) -> object:\n"
+            "    return values[0]\n"
+            "def entry() -> int:\n"
+            "    name = first(('other', 1))\n"
+            "    if not isinstance(name, str):\n"
+            "        return 1\n"
+            "    text = f'error{name}'\n"
+            "    return 7 if text == 'errorother' else 1\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="opaque-tuple-items.py", entry="entry")
+        )
+        first_body = llvm_ir.split("define ptr @first(", 1)[1].split("\n}", 1)[0]
+        self.assertIn(
+            "call ptr @__xcc_aot_tuple_get_object(ptr %object.pointer", first_body
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "opaque-tuple-items",
+                filename="opaque-tuple-items.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 

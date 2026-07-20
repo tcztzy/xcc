@@ -1291,7 +1291,7 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
         self.assertRegex(
             llvm_ir,
-            r"%call\d+ = call ptr @__xcc_aot_tuple_get\(ptr %argv, i64 2\)",
+            r"%itemslot\d+ = call ptr @__xcc_aot_tuple_get\(ptr %argv, i64 2\)",
         )
         self.assertNotIn("call ptr @__getitem", llvm_ir)
 

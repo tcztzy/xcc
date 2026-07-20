@@ -766,6 +766,20 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="opaque-tuple-destructure.py",
         )
 
+    def test_opaque_tuple_item_narrowing_matches_cpython(self) -> None:
+        self.assert_native_matches_cpython(
+            "def first(values: object) -> object:\n"
+            "    return values[0]\n"
+            "def entry() -> int:\n"
+            "    name = first(('other', 1))\n"
+            "    if not isinstance(name, str):\n"
+            "        return 1\n"
+            "    text = f'error{name}'\n"
+            "    return 7 if text == 'errorother' else 1\n",
+            expected=7,
+            filename="opaque-tuple-items.py",
+        )
+
     def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

@@ -1540,6 +1540,25 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(assigned, IrAssign)
         self.assertEqual(assigned.value, IrTuple((), IrTupleType((IrRecordType("Type"),))))
 
+    def test_annotated_tuple_refines_unknown_tuple_item_type(self) -> None:
+        module = lower_source_to_ir(
+            "def first(values: object) -> str:\n"
+            "    if not isinstance(values, tuple):\n"
+            "        return ''\n"
+            "    typed_values: tuple[str, ...] = values\n"
+            "    return typed_values[0]\n",
+            filename="annotated-tuple-refinement.py",
+            entry="first",
+        )
+
+        returned = module.functions[0].body[2]
+        self.assertIsInstance(returned, IrReturn)
+        assert isinstance(returned, IrReturn)
+        self.assertIsInstance(returned.value, IrCall)
+        assert isinstance(returned.value, IrCall)
+        self.assertEqual(returned.value.target, "__getitem")
+        self.assertEqual(returned.value.type, IrStringType())
+
     def test_lowers_empty_list_literal_with_annotated_element_type(self) -> None:
         module = lower_source_to_ir(
             "def make_values() -> int:\n"

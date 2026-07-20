@@ -1,5 +1,13 @@
 # Lessons
 
+- Dynamic container indexing has two representation boundaries: unbox the
+  receiver before the structural operation, then box a raw result when its
+  static type is opaque. Centralize both decisions in one tuple-get helper so a
+  pointer-typed LLVM value cannot silently cross in the wrong representation.
+  At the same time, let a compatible ordinary tuple annotation refine an
+  unknown tuple's item type; otherwise a statically typed string path is boxed
+  and later consumed as raw merely because earlier control flow knew only
+  `tuple`.
 - A dynamically typed container value is not necessarily the container ABI
   pointer. When a heterogeneous tuple boxes an element as `{tag, payload}`, any
   later container operation must validate/narrow the tag and load the payload
