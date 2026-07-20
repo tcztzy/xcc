@@ -2523,7 +2523,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertRegex(
             llvm_ir,
-            r"%loopexit\d+ = phi ptr \[ %loop\d+, %while\.cond\d+ \], "
+            r"%loopexit\d+ = phi ptr \[ %loop\d+, %while\.cleanup\d+ \], "
             r"\[ %loop\d+, %while\.body\d+ \]",
         )
         self.assertRegex(
