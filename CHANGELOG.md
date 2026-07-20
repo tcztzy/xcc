@@ -2,6 +2,20 @@
 
 ## Current
 
+- B626 lets the single-entry owner-region cache survive nested child phases
+  when its non-null target mark remains active. A new mark invalidates only a
+  current-region null target; reset/commit invalidates only a null target or the
+  exact target being removed. V413 poisons a newer allocation header after the
+  first lookup, proving that the same owner in a nested child reaches the cache
+  rather than rescanning, then restores it and verifies balanced reclamation;
+  repeated nested list appends also agree under CPython and native execution.
+  A matched five-second post-B626 sample reduces `capture_target` top frames
+  from 619/3,818 (16.2%) to 423/3,825 (11.1%); `promote_to` now accounts for
+  3,348/3,825 (87.5%), so graph promotion remains the next bottleneck. Hosted
+  Stage 1 builds in 27.89 seconds at 324,009,984-byte maximum RSS. Its focused
+  native compile uses only `llc` and `cc`, and the program exits 7. No full
+  post-B626 Stage 1-to-2 result is claimed.
+
 - B625 separates borrowed intrinsic results from owned allocations in phase
   effect analysis. The post-B624 full Stage 1-to-2 run still reached its
   900.12-second process-group watchdog after 896.91 user seconds with only

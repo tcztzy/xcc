@@ -1,5 +1,11 @@
 # Lessons
 
+- An owner-region cache should be invalidated by lifetime changes, not call
+  depth alone. If a cached non-null separating mark remains an ancestor, child
+  mark/reset pairs cannot change the owner's target; retain the entry until that
+  exact mark exits. A null target is different because entering a child creates
+  a new separation. Tie both cases to explicit mark invariants and test cache
+  hits with a scan-chain poison, rather than trusting timing alone.
 - Borrowed return provenance and allocation effect are related but distinct
   proofs. A pointer-shaped intrinsic result does not allocate when it aliases
   an input element or process-stable singleton; charging it from the result type
