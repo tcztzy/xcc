@@ -1,5 +1,11 @@
 # Lessons
 
+- Size a provenance cache from observed semantic alternation, and keep its
+  lifetime proof unchanged. A write helper that alternates one container owner
+  and one enclosing record defeats a single entry even though both targets stay
+  stable; two fixed MRU slots retain them without creating a heap registry.
+  Poison the scan chain after priming both keys to prove hits rather than
+  inferring them from elapsed time.
 - A fresh owned return crosses the same immediate lifetime boundary as a write
   into a direct-parent owner. When the caller already supplies an enclosing
   region, commit the callee segment there instead of tracing the returned graph;

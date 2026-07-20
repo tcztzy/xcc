@@ -2,6 +2,26 @@
 
 ## Current
 
+- B630 keeps two lifetime-validated owner-region cache entries. Post-B629
+  samples spent up to 1,803/3,825 frames in `capture_target`; generated
+  `_PythonLexer._emit_from` alternates the token-container owner and lexer-record
+  owner, so the former single entry evicted itself at every store. The primary
+  entry now shifts to one fixed secondary slot on a distinct miss, while both
+  slots retain V413's null-target, exact-mark-exit, and pointer-reuse
+  invalidation rules. This is constant-space provenance state, not an
+  allocation registry. V417 poisons the scan head after priming both owners and
+  proves both alternating nested lookups hit cache; list/record writes also
+  agree under CPython and native execution. The 225 LLVM/M3 tests, lint, and
+  type pass. A hosted Stage 1 builds in 28.13 seconds at 330,760,192-byte
+  maximum RSS with zero swap. It compiles the focused alternating-owner source
+  in 0.75 seconds at 47,595,520-byte maximum RSS using only `llc` and `cc`, and
+  matches CPython with exit 7; no Python dependency is present. In the matched
+  8--13-second frame sample, `capture_target` falls from 1,803/3,825 top frames
+  to below the five-frame report threshold; exact ancestor promotion becomes
+  the next hotspot at 1,809/3,829. The 17-second watchdog records 409 source
+  opens, no tool execution, and no Stage 2 artifact; no Stage 1-to-2 result is
+  claimed.
+
 - B629 extends V415's deferred region transfer to statically owned pointer
   returns. After B628 removed the duplicate parser-owner capture, a matched
   sample still spent 1,488 frames recursively promoting the fresh token tuple

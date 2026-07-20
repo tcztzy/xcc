@@ -855,6 +855,53 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v417_two_owner_cache_survives_alternating_nested_capture(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %outer = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %owner_a = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %owner_b = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %middle = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %first_a = call ptr @__xcc_aot_phase_capture_target(ptr %owner_a)\n"
+            + "  %first_a_right = icmp eq ptr %first_a, %middle\n"
+            + "  %first_b = call ptr @__xcc_aot_phase_capture_target(ptr %owner_b)\n"
+            + "  %first_b_right = icmp eq ptr %first_b, %middle\n"
+            + "  %inner = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %poison = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %magic_slot = getelementptr i8, ptr %poison, i64 -8\n"
+            + "  %magic = load i64, ptr %magic_slot\n"
+            + "  store i64 0, ptr %magic_slot\n"
+            + "  %second_a = call ptr @__xcc_aot_phase_capture_target(ptr %owner_a)\n"
+            + "  %second_a_right = icmp eq ptr %second_a, %middle\n"
+            + "  %second_b = call ptr @__xcc_aot_phase_capture_target(ptr %owner_b)\n"
+            + "  %second_b_right = icmp eq ptr %second_b, %middle\n"
+            + "  store i64 %magic, ptr %magic_slot\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %inner)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %middle)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %outer)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %first_right = and i1 %first_a_right, %first_b_right\n"
+            + "  %second_right = and i1 %second_a_right, %second_b_right\n"
+            + "  %targets_right = and i1 %first_right, %second_right\n"
+            + "  %ok = and i1 %targets_right, %balanced\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-capture-cache-two-owner",
+                filename="phase-capture-cache-two-owner.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v413_repeated_nested_capture_preserves_python_semantics(self) -> None:
         source = (
             "def append_value(values: list[str], value: str) -> None:\n"
@@ -886,6 +933,46 @@ class AotMilestone3IrTests(unittest.TestCase):
                 llvm_ir,
                 Path(tmp) / "phase-capture-cache-source",
                 filename="phase-capture-cache-source.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v417_alternating_owner_capture_preserves_python_semantics(self) -> None:
+        source = (
+            "class Box:\n"
+            "    value: str\n"
+            "    def __init__(self, value: str) -> None:\n"
+            "        self.value = value\n"
+            "\n"
+            "def update(values: list[str], box: Box, value: str) -> None:\n"
+            "    values.append(value + '-first')\n"
+            "    box.value = value + '-box-first'\n"
+            "    values.append(value + '-second')\n"
+            "    box.value = value + '-box-second'\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    values: list[str] = []\n"
+            "    box = Box('old')\n"
+            "    update(values, box, 'root')\n"
+            "    values_ok = values == ['root-first', 'root-second']\n"
+            "    return 0 if values_ok and box.value == 'root-box-second' else 1\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="phase-capture-two-owner.py", entry="entry")
+        )
+        self.assertIn("@__xcc_aot_phase_capture_cache_valid_2", llvm_ir)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-capture-two-owner",
+                filename="phase-capture-two-owner.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 
