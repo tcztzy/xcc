@@ -2,6 +2,11 @@
 
 ## Current
 
+- Added native `set.difference_update` for homogeneous tuple-backed sets. The
+  lowerer routes it through alias-visible stable-handle mutation, and LLVM
+  emission computes the difference before forwarding the replacement buffer
+  into the original handle; mutating set operations remain outside owned-phase
+  no-capture proofs.
 - Added compiler-derived owned phases without changing Python syntax. A module
   fixed point proves no-capture call summaries, rejects pointer/fallible/unknown
   escape paths, and inserts balanced mark/reset calls only around allocating

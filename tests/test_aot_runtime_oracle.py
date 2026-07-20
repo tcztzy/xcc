@@ -1929,6 +1929,21 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="set-update.py",
         )
 
+    def test_set_difference_update_preserves_alias_mutation(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: set[int] = {1, 2, 3, 4}\n"
+            "    alias = values\n"
+            "    values.difference_update({2, 4, 8})\n"
+            "    if len(values) != 2 or len(alias) != 2:\n"
+            "        return 1\n"
+            "    if 1 not in alias or 3 not in alias or 2 in alias or 4 in alias:\n"
+            "        return 2\n"
+            "    return 7\n",
+            expected=7,
+            filename="set-difference-update.py",
+        )
+
     def test_set_add_preserves_uniqueness_and_alias_mutation(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

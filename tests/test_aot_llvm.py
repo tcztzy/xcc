@@ -4285,6 +4285,22 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call void @__xcc_aot_tuple_forward(ptr %values", llvm_ir)
         self.assertNotIn("@__set_add", llvm_ir)
 
+    def test_emits_set_difference_update_with_alias_forwarding(self) -> None:
+        module = lower_source_to_ir(
+            "def subtract(values: set[str], removed: set[str]) -> int:\n"
+            "    values.difference_update(removed)\n"
+            "    return len(values)\n",
+            filename="set_difference_update.py",
+            entry="subtract",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %removed)", llvm_ir)
+        self.assertIn("%setop.include", llvm_ir)
+        self.assertIn("call void @__xcc_aot_tuple_forward(ptr %values", llvm_ir)
+        self.assertNotIn("@__set_difference_update", llvm_ir)
+
     def test_emits_record_append_method_as_direct_call(self) -> None:
         output_type = IrRecordType("Output")
         module = IrModule(

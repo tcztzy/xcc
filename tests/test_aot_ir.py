@@ -3315,6 +3315,27 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_set_difference_update_as_alias_visible_mutation(self) -> None:
+        module = lower_source_to_ir(
+            "def subtract(values: set[str], removed: set[str]) -> int:\n"
+            "    values.difference_update(removed)\n"
+            "    return len(values)\n",
+            filename="set_difference_update.py",
+            entry="subtract",
+        )
+        set_type = IrTupleType((IrStringType(),))
+        assigned = module.functions[0].body[0]
+        self.assertIsInstance(assigned, IrAssign)
+        assert isinstance(assigned, IrAssign)
+        self.assertEqual(
+            assigned.value,
+            IrCall(
+                "__set_difference_update",
+                (IrName("values", set_type), IrName("removed", set_type)),
+                set_type,
+            ),
+        )
+
     def test_lowers_direct_set_equality_without_tuple_order_semantics(self) -> None:
         module = lower_source_to_ir(
             "def matches(text: str) -> bool:\n"

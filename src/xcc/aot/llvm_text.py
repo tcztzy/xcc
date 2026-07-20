@@ -2918,6 +2918,7 @@ class _Emitter:
             return self._emit_set_add_call(expr, names, lines)
         if expr.target in {
             "__set_difference",
+            "__set_difference_update",
             "__set_intersection",
             "__set_symmetric_difference",
             "__set_update",
@@ -6322,7 +6323,7 @@ class _Emitter:
                 names,
                 lines,
             )
-        elif expr.target == "__set_difference":
+        elif expr.target in {"__set_difference", "__set_difference_update"}:
             self._emit_set_binary_phase(
                 left,
                 right,
@@ -6356,7 +6357,7 @@ class _Emitter:
             )
         result = self._tmp("setop")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
-        if expr.target == "__set_update":
+        if expr.target in {"__set_difference_update", "__set_update"}:
             lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {left.value}, ptr {result})")
             return _EmittedValue(left.value, expr.type)
         return _EmittedValue(result, expr.type)

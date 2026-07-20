@@ -963,7 +963,10 @@ class _Lowerer:
             not isinstance(expr, ast.Call)
             or not isinstance(expr.func, ast.Attribute)
             or not isinstance(expr.func.value, (ast.Name, ast.Attribute))
-            or (expr.func.attr not in _ALLOWED_MUTATING_TUPLE_CALLS and expr.func.attr != "update")
+            or (
+                expr.func.attr not in _ALLOWED_MUTATING_TUPLE_CALLS
+                and expr.func.attr not in {"difference_update", "update"}
+            )
         ):
             return None
         receiver = self._lower_expr(expr.func.value, names, IrRecordType("object"))
@@ -2085,7 +2088,10 @@ class _Lowerer:
                     (receiver, self._lower_expr(expr.args[0], names, item_type)),
                     IrNoneType(),
                 )
-            if isinstance(receiver_type, IrTupleType) and expr.func.attr == "update":
+            if isinstance(receiver_type, IrTupleType) and expr.func.attr in {
+                "difference_update",
+                "update",
+            }:
                 if expr.keywords or len(expr.args) != 1:
                     self._error(
                         "XCC-AOT-LOWER-0003",
@@ -2105,7 +2111,7 @@ class _Lowerer:
                         f"Unsupported call target: {ast.unparse(expr.func)}",
                         expr,
                     )
-                return IrCall("__set_update", (receiver, value), receiver_type)
+                return IrCall(f"__set_{expr.func.attr}", (receiver, value), receiver_type)
             if isinstance(receiver_type, IrTupleType) and expr.func.attr == "add":
                 if expr.keywords or len(expr.args) != 1:
                     self._error(

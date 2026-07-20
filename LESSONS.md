@@ -1,5 +1,10 @@
 # Lessons
 
+- New ownership analysis must itself remain inside the self-hosted language
+  contract. Run a clean Stage 0 build after focused hosted tests: a CPython-valid
+  collection method can still be unreachable natively. When that method belongs
+  to an already supported mutable type, implement its alias semantics at the
+  stable-handle boundary instead of rewriting the compiler analysis around it.
 - A scalar return type is necessary but not sufficient for region reclamation.
   Calls, error payloads, field/container writes, and runtime globals are separate
   escape channels; derive no-capture summaries to a module fixed point and reset
