@@ -2,6 +2,16 @@
 
 ## Current
 
+- Revalidated Stage 0 -> Stage 1 after stable `set.add` at `95d8fbd`.
+  The clean no-cache hosted build admitted 65 source units and emitted 817
+  functions, 173 records, and 8,584 reachability edges. The resulting
+  `xcc-aot 0.2 native-contract` rejects the CPython parser, logs only `llc` and
+  `cc`, and has no Python/libpython Mach-O or undefined-symbol dependency. Peak
+  hosted-build RSS was 321,454,080 bytes; the source manifest, normalized LLVM,
+  and executable SHA-256 values are respectively
+  `2be5fa44ac88410a83c9ab0398f143e5cea94188bfc9f4700c288a44cbb8ee3e`,
+  `7ebcd7f3329f750ffea80777a9f5f6ce6ed6fbccb5f97b32d69624862545be2b`,
+  and `5c0ce9369336bb9cf748c983ab62d7948b1ec8b5124431b2f244fd940cc2a1bc`.
 - Made native `set.add` append a unique item directly to its stable handle.
   Duplicate insertion remains a no-op and aliases observe the same mutation,
   while lowerer global-name collection no longer retains singleton wrappers and
