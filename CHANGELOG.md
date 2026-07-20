@@ -2,6 +2,11 @@
 
 ## Current
 
+- Replaced per-module copies of complete lowerer metadata with local-first,
+  immutable shared fallback maps. Class, function, alias, annotation, and
+  constant resolution preserves module shadowing, global annotations convert
+  lazily, and local annotations still hide incompatible shared container
+  constants without retaining a project-sized dictionary per lowerer.
 - Revalidated Stage 0 -> Stage 1 after stable `set.add` at `95d8fbd`.
   The clean no-cache hosted build admitted 65 source units and emitted 817
   functions, 173 records, and 8,584 reachability edges. The resulting

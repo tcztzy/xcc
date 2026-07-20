@@ -1,5 +1,9 @@
 # Lessons
 
+- Treat compiler-wide semantic tables as immutable shared context. Retaining a
+  lowerer per module turns an apparently harmless `dict(shared); update(local)`
+  into project-size memory growth; local-first layered lookup preserves Python
+  shadowing while retaining each shared table only once.
 - Apply the stable-handle rule uniformly across every mutator. A membership
   guard does not make `set.add` bounded if its successful arm still constructs
   a singleton and copies the full set before forwarding; append the proven-

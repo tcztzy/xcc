@@ -61,6 +61,7 @@ from xcc.aot.lower import (
     _Lowerer,
     _llvm_api_call_return_type,
     _none_guard_name,
+    _prepare_analysis_lowerer,
     _record_extends,
     _tuple_backed_container_element_name,
     _tuple_subscript_result_type,
@@ -2951,6 +2952,76 @@ class AotScalarLoweringTests(unittest.TestCase):
         container = returned.value.args[0]
         self.assertIsInstance(container, IrTuple)
         self.assertEqual(container.type, IrDictType(IrStringType(), int64))
+
+    def test_prepare_lowerer_layers_shared_context_without_copying_it(self) -> None:
+        analysis = analyze_source(
+            "class Local:\n"
+            "    pass\n"
+            "Alias = str\n"
+            "VALUE: str\n"
+            "VALUES: dict[str, int]\n"
+            "def local() -> int:\n"
+            "    return 1\n",
+            filename="layered_lowerer.py",
+        )
+        shared_classes = {
+            "Local": AotClassInfo("Local", {"wrong": AotType("int")}),
+            "Shared": AotClassInfo("Shared", {}),
+        }
+        shared_functions = {
+            "local": AotFunctionInfo("local", (), AotType("str")),
+            "shared": AotFunctionInfo("shared", (), AotType("int")),
+        }
+        fallback_functions = {
+            "fallback": AotFunctionInfo("fallback", (), AotType("bool"))
+        }
+        shared_aliases = {"Alias": AotType("int"), "SharedAlias": AotType("bool")}
+        shared_annotations = {"VALUE": "int", "SHARED_VALUE": "bool"}
+        shared_strings = {"SHARED_TEXT": "shared"}
+        shared_scalars = {"SHARED_COUNT": IrConstInt(7, IrIntType(64, signed=True))}
+        shared_containers = {
+            "VALUES": IrTuple((IrConstString("wrong"),), IrTupleType((IrStringType(),)))
+        }
+
+        lowerer = _prepare_analysis_lowerer(
+            analysis,
+            extra_classes=shared_classes,
+            extra_functions=shared_functions,
+            fallback_function_types=fallback_functions,
+            extra_aliases=shared_aliases,
+            extra_global_annotations=shared_annotations,
+            extra_global_string_constants=shared_strings,
+            extra_global_scalar_constants=shared_scalars,
+            extra_global_string_container_constants=shared_containers,
+        )
+
+        self.assertIs(lowerer.class_types, analysis.types.classes)
+        self.assertIs(lowerer.fallback_class_types, shared_classes)
+        self.assertIs(lowerer.imported_function_types, shared_functions)
+        self.assertIs(lowerer.fallback_function_types, fallback_functions)
+        self.assertIs(lowerer.fallback_aliases, shared_aliases)
+        self.assertIs(lowerer.fallback_global_annotations, shared_annotations)
+        self.assertIs(lowerer.fallback_global_string_constants, shared_strings)
+        self.assertIs(lowerer.fallback_global_scalar_constants, shared_scalars)
+        self.assertIs(
+            lowerer.fallback_global_string_container_constants,
+            shared_containers,
+        )
+        self.assertIs(lowerer._class_info("Local"), analysis.types.classes["Local"])
+        self.assertIs(lowerer._class_info("Shared"), shared_classes["Shared"])
+        self.assertIs(lowerer._function_info("local"), analysis.types.functions["local"])
+        self.assertIs(lowerer._function_info("shared"), shared_functions["shared"])
+        self.assertIs(lowerer._function_info("fallback"), fallback_functions["fallback"])
+        self.assertEqual(lowerer._alias("Alias"), AotType("str"))
+        self.assertEqual(lowerer._alias("SharedAlias"), AotType("bool"))
+        self.assertEqual(lowerer._global_type("VALUE"), IrStringType())
+        self.assertEqual(lowerer._global_type("SHARED_VALUE"), IrBoolType())
+        self.assertEqual(lowerer._global_string_constant("SHARED_TEXT"), "shared")
+        self.assertIs(
+            lowerer._global_scalar_constant("SHARED_COUNT"),
+            shared_scalars["SHARED_COUNT"],
+        )
+        self.assertIsNone(lowerer._global_string_container_constant("VALUES"))
 
     def test_lowers_isinstance_guarded_ifexp_record_field(self) -> None:
         module = lower_source_to_ir(

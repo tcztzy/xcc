@@ -121,6 +121,10 @@ or C APIs remain outside the no-capture set until a stronger effect proof exists
 V392: Native single-byte string construction from indexing, iteration, or `chr`
 ! return an immutable process-stable cached value without heap allocation; a
 character scan's retained allocation must not grow with the number of lookups.
+V393: Per-module lowerer context ! retain module-local maps plus immutable shared
+fallback maps with local-first lookup; copying complete project class, function,
+alias, annotation, or constant maps into every retained lowerer ⊥, and a local
+annotation without a local string-container constant ! hide that shared constant.
 
 ## §T TASKS
 id|status|task|cites
@@ -472,3 +476,4 @@ B600|2026-07-20|native dictionary insertion built a singleton tuple, concatenate
 B601|2026-07-20|named-slice signature, class-table, alias, and lowering passes each requested a complete `AotAnalysis` for every module even though the first three consumed only compact declaration metadata; the no-GC native runtime retained those discarded binder generations until Stage 1 exhausted the 512 MiB budget during the second class pass. Signature and class discovery now use dedicated binder queries, subset summaries are cached once, aliases reuse the sole final lowering analysis, and the compact results are required to equal full binding over the complete bootstrap source set|V376,V384,V385
 B602|2026-07-20|the owned Python lexer performs repeated character lookahead through ordinary `source[index]`, but native string subscripting allocated a new two-byte heap string for every lookup; parsing the 65-module source closure therefore retained 475,542,425 bytes before subset summaries began and left no safe budget for lowering. Single-byte results from string indexing, iteration, and `chr` now share a process-stable 256-entry runtime cache whose repeated use does not change allocation accounting|V368,V376,V385,V392
 B603|2026-07-20|tuple-backed `set.add` checked uniqueness but still built a singleton, concatenated the complete set, and forwarded the replacement into its stable handle; lowerer preparation repeatedly collects module globals into sets, so Stage 1 reached the 512 MiB boundary in `_collect_global_names` after final analysis completed. A unique item now appends directly to the original stable set handle with geometric buffer growth, while duplicates remain no-ops and aliases observe the mutation|V368,V375,V385,V386
+B604|2026-07-20|`_prepare_analysis_lowerer` copied the complete project class, function, alias, annotation, and constant maps into each of 65 retained module lowerers; after B603 reached final analysis safely, Stage 1 exhausted the fixed 512 MiB budget in the first `dict_copy` for this retained context. Lowerers now retain their existing module-local maps and immutable shared fallbacks separately, resolve local definitions first, lazily convert referenced global annotations, and preserve local annotation shadowing without cloning shared maps|V376,V384,V385,V393

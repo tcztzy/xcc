@@ -353,29 +353,118 @@ class _Lowerer:
         global_string_container_constants: dict[str, IrTuple] | None = None,
         global_record_constructor_maps: dict[str, IrTuple] | None = None,
         fallback_function_types: dict[str, AotFunctionInfo] | None = None,
+        fallback_class_types: dict[str, AotClassInfo] | None = None,
+        imported_function_types: dict[str, AotFunctionInfo] | None = None,
+        fallback_aliases: dict[str, AotType] | None = None,
+        fallback_global_annotations: dict[str, str] | None = None,
+        fallback_global_string_constants: dict[str, str] | None = None,
+        fallback_global_scalar_constants: dict[str, IrExpr] | None = None,
+        fallback_global_string_container_constants: dict[str, IrTuple] | None = None,
     ) -> None:
         self.filename = filename
         self.class_types = class_types
+        self.fallback_class_types = fallback_class_types or {}
         self.function_types = function_types or {}
+        self.imported_function_types = imported_function_types or {}
         self.fallback_function_types = fallback_function_types or {}
         self.aliases = aliases or {}
+        self.fallback_aliases = fallback_aliases or {}
         self.global_names = global_names or set()
-        self.global_types = self._global_annotation_types(global_annotations or {})
+        self.global_annotations = global_annotations or {}
+        self.fallback_global_annotations = fallback_global_annotations or {}
+        self.global_types: dict[str, IrType] = {}
         self.global_string_constants = global_string_constants or {}
+        self.fallback_global_string_constants = fallback_global_string_constants or {}
         self.global_scalar_constants = global_scalar_constants or {}
+        self.fallback_global_scalar_constants = fallback_global_scalar_constants or {}
         self.global_string_container_constants = global_string_container_constants or {}
+        self.fallback_global_string_container_constants = (
+            fallback_global_string_container_constants or {}
+        )
         self.global_record_constructor_maps = global_record_constructor_maps or {}
         self.callable_param_targets: dict[str, str] = {}
         self.current_owner: str | None = None
+
+    def _class_info(self, name: str) -> AotClassInfo | None:
+        class_info = self.class_types.get(name)
+        if class_info is not None:
+            return class_info
+        return self.fallback_class_types.get(name)
+
+    def _has_class(self, name: str) -> bool:
+        return self._class_info(name) is not None
 
     def _function_info(self, target: str) -> AotFunctionInfo | None:
         function_info = self.function_types.get(target)
         if function_info is not None:
             return function_info
+        function_info = self.imported_function_types.get(target)
+        if function_info is not None:
+            return function_info
         return self.fallback_function_types.get(target)
 
+    def _function_names_ending_with(
+        self,
+        suffix: str,
+        excluded: str | None = None,
+    ) -> list[str]:
+        matches: list[str] = []
+        for function_types in (
+            self.function_types,
+            self.imported_function_types,
+            self.fallback_function_types,
+        ):
+            for name in function_types:
+                if name != excluded and name.endswith(suffix) and name not in matches:
+                    matches.append(name)
+        return matches
+
+    def _alias(self, name: str) -> AotType | None:
+        alias = self.aliases.get(name)
+        if alias is not None:
+            return alias
+        return self.fallback_aliases.get(name)
+
+    def _global_type(self, name: str) -> IrType | None:
+        cached = self.global_types.get(name)
+        if cached is not None:
+            return cached
+        annotation = self.global_annotations.get(name)
+        if annotation is None and name not in self.global_annotations:
+            annotation = self.fallback_global_annotations.get(name)
+        if annotation is None:
+            return None
+        try:
+            global_type = self._type_name_to_ir_type(annotation, ast.Pass())
+        except AotError:
+            return None
+        self.global_types[name] = global_type
+        return global_type
+
+    def _global_string_constant(self, name: str) -> str | None:
+        value = self.global_string_constants.get(name)
+        if value is not None:
+            return value
+        return self.fallback_global_string_constants.get(name)
+
+    def _global_scalar_constant(self, name: str) -> IrExpr | None:
+        value = self.global_scalar_constants.get(name)
+        if value is not None:
+            return value
+        return self.fallback_global_scalar_constants.get(name)
+
+    def _global_string_container_constant(self, name: str) -> IrTuple | None:
+        value = self.global_string_container_constants.get(name)
+        if value is not None:
+            return value
+        if name in self.global_annotations:
+            return None
+        return self.fallback_global_string_container_constants.get(name)
+
     def lower_record(self, node: ast.ClassDef) -> IrRecord:
-        class_info = self.class_types[node.name]
+        class_info = self._class_info(node.name)
+        if class_info is None:
+            self._error("XCC-AOT-LOWER-0002", f"Unknown lowered class: {node.name}", node)
         fields = tuple(
             IrField(name, self._aot_type_to_ir_type(field_type))
             for name, field_type, _kw_only in self._record_layout_field_items(node.name)
@@ -383,7 +472,7 @@ class _Lowerer:
         return IrRecord(node.name, fields, class_info.bases)
 
     def _except_handler_target_type(self, exceptions: tuple[str, ...]) -> IrType:
-        if len(exceptions) == 1 and exceptions[0] in self.class_types:
+        if len(exceptions) == 1 and self._has_class(exceptions[0]):
             return IrRecordType(exceptions[0])
         return IrRecordType("object")
 
@@ -602,6 +691,7 @@ class _Lowerer:
                         then_type,
                         else_type,
                         self.class_types,
+                        self.fallback_class_types,
                     )
                     if merged_type is not None:
                         names[name] = merged_type
@@ -636,8 +726,20 @@ class _Lowerer:
                     for child in statement.body
                 )
             )
-            _merge_loop_fallthrough_names(names, incoming_names, body_names, self.class_types)
-            _merge_loop_assignment_names(names, incoming_names, body, self.class_types)
+            _merge_loop_fallthrough_names(
+                names,
+                incoming_names,
+                body_names,
+                self.class_types,
+                self.fallback_class_types,
+            )
+            _merge_loop_assignment_names(
+                names,
+                incoming_names,
+                body,
+                self.class_types,
+                self.fallback_class_types,
+            )
             return IrWhile(condition, body)
         if isinstance(statement, ast.For):
             iterable = self._lower_expr(statement.iter, names, IrTupleType(()))
@@ -664,8 +766,20 @@ class _Lowerer:
                     for child in statement.body
                 )
             )
-            _merge_loop_fallthrough_names(names, incoming_names, body_names, self.class_types)
-            _merge_loop_assignment_names(names, incoming_names, body, self.class_types)
+            _merge_loop_fallthrough_names(
+                names,
+                incoming_names,
+                body_names,
+                self.class_types,
+                self.fallback_class_types,
+            )
+            _merge_loop_assignment_names(
+                names,
+                incoming_names,
+                body,
+                self.class_types,
+                self.fallback_class_types,
+            )
             return IrForEach(
                 target_name,
                 iterable,
@@ -747,9 +861,9 @@ class _Lowerer:
                 names,
                 IrRecordType("object"),
             )
-            if isinstance(statement.exc.func, ast.Name) and exception in self.class_types:
+            if isinstance(statement.exc.func, ast.Name) and self._has_class(exception):
                 raised_type = IrRecordType(exception)
-            if isinstance(raised_type, IrRecordType) and raised_type.name in self.class_types:
+            if isinstance(raised_type, IrRecordType) and self._has_class(raised_type.name):
                 exception = raised_type.name
                 payload = self._lower_expr(statement.exc, names, raised_type)
             message = self._exception_message(exception, payload, argument)
@@ -1106,9 +1220,7 @@ class _Lowerer:
         value = self._lower_expr(expr.value.args[0], names, IrRecordType("object"))
         if isinstance(value.type, IrRecordType) and value.type.name != "object":
             parts = _top_level_union_parts(value.type.name) or (value.type.name,)
-            if any(
-                part != "None" and part.rsplit(".", 1)[-1] in self.class_types for part in parts
-            ):
+            if any(part != "None" and self._has_class(part.rsplit(".", 1)[-1]) for part in parts):
                 return IrCall("__type_name", (value,), IrStringType())
             return IrConstString(value.type.name)
         return IrConstString("<unknown>")
@@ -1130,13 +1242,13 @@ class _Lowerer:
             if isinstance(expr.value, float):
                 return IrConstFloat(expr.value)
         if isinstance(expr, ast.Name):
-            string_constant = self.global_string_constants.get(expr.id)
+            string_constant = self._global_string_constant(expr.id)
             if string_constant is not None:
                 return IrConstString(string_constant)
-            scalar_constant = self.global_scalar_constants.get(expr.id)
+            scalar_constant = self._global_scalar_constant(expr.id)
             if scalar_constant is not None:
                 return scalar_constant
-            string_container = self.global_string_container_constants.get(expr.id)
+            string_container = self._global_string_container_constant(expr.id)
             if string_container is not None:
                 return string_container
             constructor_map = self.global_record_constructor_maps.get(expr.id)
@@ -1144,7 +1256,7 @@ class _Lowerer:
                 return constructor_map
             value_type = names.get(expr.id)
             if value_type is None:
-                global_type = self.global_types.get(expr.id)
+                global_type = self._global_type(expr.id)
                 if global_type is not None:
                     return IrName(expr.id, global_type)
                 if (
@@ -1169,7 +1281,7 @@ class _Lowerer:
                 if record_name is not None:
                     return IrName(record_name, IrRecordType("object"))
             if isinstance(expr.value, ast.Name):
-                class_info = self.class_types.get(expr.value.id)
+                class_info = self._class_info(expr.value.id)
                 if class_info is not None and _is_enum_class(class_info):
                     return IrEnumMember(expr.value.id, expr.attr)
                 if class_info is not None and expr.attr in class_info.int_constants:
@@ -1667,7 +1779,7 @@ class _Lowerer:
         return self._type_name_to_ir_type(name, annotation)
 
     def _type_name_to_ir_type(self, name: str, node: ast.AST) -> IrType:
-        alias = self.aliases.get(name)
+        alias = self._alias(name)
         if alias is not None:
             return self._aot_type_to_ir_type(alias)
         expanded_name = self._expand_union_aliases(name)
@@ -1809,7 +1921,7 @@ class _Lowerer:
             return self._lower_isinstance_call(expr, names)
         if isinstance(expr.func, ast.Name) and expr.func.id in {"min", "max"}:
             return self._lower_minmax_call(expr, names, expected)
-        if isinstance(expr.func, ast.Name) and expr.func.id in self.class_types:
+        if isinstance(expr.func, ast.Name) and self._has_class(expr.func.id):
             return self._lower_record_constructor_call(expr.func.id, expr, names)
         if isinstance(expr.func, ast.Name):
             callable_type = names.get(expr.func.id)
@@ -2312,7 +2424,7 @@ class _Lowerer:
             return None
         if expr.id not in names and expr.id not in self.global_names:
             return None
-        existing_type = names.get(expr.id) or self.global_types.get(expr.id)
+        existing_type = names.get(expr.id) or self._global_type(expr.id)
         if isinstance(existing_type, IrRecordType) and existing_type.name != "object":
             return IrName(expr.id, existing_type)
         refined_type = self._project_role_record_type(expr.id, existing_type)
@@ -2328,7 +2440,7 @@ class _Lowerer:
         if not _is_object_type(current_type or IrRecordType("object")):
             return None
         class_name = name[:1].upper() + name[1:]
-        if class_name in self.class_types:
+        if self._has_class(class_name):
             return IrRecordType(class_name)
         return None
 
@@ -3546,7 +3658,7 @@ class _Lowerer:
         target_names: tuple[str, ...] | None = None
         target = expr.args[1]
         if isinstance(target, ast.Name):
-            marker_container = self.global_string_container_constants.get(target.id)
+            marker_container = self._global_string_container_constant(target.id)
             if (
                 marker_container is not None
                 and marker_container.elements
@@ -3679,16 +3791,16 @@ class _Lowerer:
         ):
             return IrTuple((), type_info)
         if isinstance(default, ast.Name):
-            global_type = self.global_types.get(default.id)
+            global_type = self._global_type(default.id)
             if global_type is not None and global_type == type_info:
                 return IrName(default.id, global_type)
-            string_constant = self.global_string_constants.get(default.id)
+            string_constant = self._global_string_constant(default.id)
             if string_constant is not None:
                 return IrConstString(string_constant)
-            scalar_constant = self.global_scalar_constants.get(default.id)
+            scalar_constant = self._global_scalar_constant(default.id)
             if scalar_constant is not None:
                 return scalar_constant
-            string_container = self.global_string_container_constants.get(default.id)
+            string_container = self._global_string_container_constant(default.id)
             if string_container is not None:
                 return string_container
         return None
@@ -3743,7 +3855,7 @@ class _Lowerer:
             return qualified_target
         if self._function_info(target) is not None:
             return target
-        class_info = self.class_types.get(concrete_name)
+        class_info = self._class_info(concrete_name)
         if class_info is None:
             return None
         candidates: list[str] = []
@@ -3812,12 +3924,7 @@ class _Lowerer:
 
     def _unique_qualified_function_target(self, target: str) -> str | None:
         suffix = f".{target}"
-        matches = [name for name in self.function_types if name != target and name.endswith(suffix)]
-        matches.extend(
-            name
-            for name in self.fallback_function_types
-            if name not in self.function_types and name != target and name.endswith(suffix)
-        )
+        matches = self._function_names_ending_with(suffix, target)
         if len(matches) == 1:
             return matches[0]
         if matches:
@@ -3901,7 +4008,12 @@ class _Lowerer:
         record_type = IrRecordType(record_name)
         init_target = self._record_method_target(record_type, "__init__")
         if self._function_info(init_target) is None:
-            if _record_extends(record_name, "Exception", self.class_types):
+            if _record_extends(
+                record_name,
+                "Exception",
+                self.class_types,
+                self.fallback_class_types,
+            ):
                 return IrConstructRecord(
                     record_name,
                     tuple(
@@ -3967,7 +4079,7 @@ class _Lowerer:
                 "super method calls require a typed self parameter",
                 expr,
             )
-        class_info = self.class_types.get(self.current_owner)
+        class_info = self._class_info(self.current_owner)
         candidates: list[str] = []
         if class_info is not None:
             for base in class_info.bases:
@@ -4008,7 +4120,9 @@ class _Lowerer:
         keyword_values: dict[str, ast.expr],
         field_items: tuple[tuple[str, AotType], ...],
     ) -> tuple[IrExpr, ...] | None:
-        class_info = self.class_types[record_name]
+        class_info = self._class_info(record_name)
+        if class_info is None:
+            return None
         field_parameters = class_info.init_field_parameters
         mapped_fields = tuple(
             field_name for field_name, _ in field_items if field_name in field_parameters
@@ -4215,7 +4329,7 @@ class _Lowerer:
     ) -> tuple[tuple[str, AotType, bool], ...]:
         if record_name in seen:
             return ()
-        class_info = self.class_types.get(record_name)
+        class_info = self._class_info(record_name)
         if class_info is None:
             return ()
         nested_seen = seen | {record_name}
@@ -4268,7 +4382,7 @@ class _Lowerer:
     ) -> ast.expr | None:
         if record_name in seen:
             return None
-        class_info = self.class_types.get(record_name)
+        class_info = self._class_info(record_name)
         if class_info is None:
             return None
         default = class_info.field_defaults.get(field)
@@ -4310,7 +4424,7 @@ class _Lowerer:
     def _aot_type_to_ir_type(self, type_info: AotType) -> IrType:
         if type_info.bits is not None and type_info.signed is not None:
             return IrIntType(type_info.bits, type_info.signed)
-        alias = self.aliases.get(type_info.name)
+        alias = self._alias(type_info.name)
         if alias is not None and alias != type_info:
             return self._aot_type_to_ir_type(alias)
         expanded_name = self._expand_union_aliases(type_info.name)
@@ -4374,7 +4488,7 @@ class _Lowerer:
         expanded: list[str] = []
         for part in parts:
             stripped = _strip_annotation_quotes(part)
-            alias = self.aliases.get(stripped)
+            alias = self._alias(stripped)
             if alias is None or stripped in seen:
                 expanded.append(stripped)
                 continue
@@ -4391,10 +4505,10 @@ class _Lowerer:
     def _project_record_name(self, name: str) -> str | None:
         if _has_top_level_union(name):
             return None
-        if name in self.class_types:
+        if self._has_class(name):
             return name
         unqualified = name.rsplit(".", 1)[-1]
-        if unqualified in self.class_types:
+        if self._has_class(unqualified):
             return unqualified
         return None
 
@@ -4502,7 +4616,7 @@ class _Lowerer:
             return names.get(target.id) or self._infer_assignment_expr_type(value, names, fallback)
         if isinstance(target, ast.Attribute):
             receiver = self._lower_expr(target.value, names, IrRecordType("object"))
-            if isinstance(receiver.type, IrRecordType) and receiver.type.name in self.class_types:
+            if isinstance(receiver.type, IrRecordType) and self._has_class(receiver.type.name):
                 return self._record_field_type(receiver.type, target.attr, target)
         if isinstance(target, ast.Tuple):
             return self._infer_assignment_expr_type(value, names, fallback)
@@ -4792,7 +4906,7 @@ class _Lowerer:
         if (
             isinstance(expr, ast.Call)
             and isinstance(expr.func, ast.Name)
-            and expr.func.id in self.class_types
+            and self._has_class(expr.func.id)
         ):
             return IrRecordType(expr.func.id)
         if (
@@ -4843,13 +4957,13 @@ class _Lowerer:
             name_value_type = names.get(expr.id)
             if name_value_type is not None:
                 return name_value_type
-            scalar_constant = self.global_scalar_constants.get(expr.id)
+            scalar_constant = self._global_scalar_constant(expr.id)
             if scalar_constant is not None:
                 return scalar_constant.type
-            global_type = self.global_types.get(expr.id)
+            global_type = self._global_type(expr.id)
             if global_type is not None:
                 return global_type
-            string_container = self.global_string_container_constants.get(expr.id)
+            string_container = self._global_string_container_constant(expr.id)
             if string_container is not None:
                 return string_container.type
             return fallback
@@ -4909,7 +5023,7 @@ class _Lowerer:
             return IrTuple((), type_info)
         if isinstance(type_info, IrDictType):
             return IrTuple((), type_info)
-        if isinstance(type_info, IrRecordType) and type_info.name in self.class_types:
+        if isinstance(type_info, IrRecordType) and self._has_class(type_info.name):
             if type_info.name in seen_records:
                 return IrConstNone()
             nested_seen = seen_records | {type_info.name}
@@ -5358,9 +5472,14 @@ class _Lowerer:
             if not any(
                 part == target_name
                 or (
-                    part in self.class_types
-                    and target_name in self.class_types
-                    and _record_extends(part, target_name, self.class_types)
+                    self._has_class(part)
+                    and self._has_class(target_name)
+                    and _record_extends(
+                        part,
+                        target_name,
+                        self.class_types,
+                        self.fallback_class_types,
+                    )
                 )
                 for target_name in target_names
             )
@@ -5386,7 +5505,7 @@ class _Lowerer:
             return IrStringType()
         if len(non_none) == 1 and _record_constructor_type_base_name(non_none[0]) is not None:
             return IrRecordType(non_none[0])
-        if any(part not in self.class_types for part in non_none):
+        if any(not self._has_class(part) for part in non_none):
             return None
         return IrRecordType(" | ".join(non_none))
 
@@ -5433,12 +5552,7 @@ class _Lowerer:
                 if isinstance(receiver_type, IrRecordType):
                     candidates.append(self._record_method_target(receiver_type, call.func.attr))
             suffix = f".{call.func.attr}"
-            candidates.extend(name for name in self.function_types if name.endswith(suffix))
-            candidates.extend(
-                name
-                for name in self.fallback_function_types
-                if name not in self.function_types and name.endswith(suffix)
-            )
+            candidates.extend(self._function_names_ending_with(suffix))
         for candidate in candidates:
             function_info = self._function_info(candidate)
             if function_info is not None and function_info.return_type.name == "NoReturn":
@@ -5509,7 +5623,7 @@ class _Lowerer:
                 "str": IrStringType(),
             }
             narrowed_type = builtin_types.get(marker.id)
-            if narrowed_type is None and marker.id in self.class_types:
+            if narrowed_type is None and self._has_class(marker.id):
                 narrowed_type = IrRecordType(marker.id)
         elif isinstance(marker, ast.Attribute):
             record_name = self._project_record_name(ast.unparse(marker))
@@ -5580,12 +5694,17 @@ class _Lowerer:
             narrowed_tuple = self._tuple_guard_narrowing_type(current, target_type)
             if narrowed_tuple is not None:
                 return narrowed_name, narrowed_tuple
-        if any(target_name not in self.class_types for target_name in target_names):
+        if any(not self._has_class(target_name) for target_name in target_names):
             return None
         narrowed_records = tuple(
             target_name
             for target_name in target_names
-            if _can_narrow_to_record(current, target_name, self.class_types)
+            if _can_narrow_to_record(
+                current,
+                target_name,
+                self.class_types,
+                self.fallback_class_types,
+            )
         )
         if not narrowed_records:
             return None
@@ -5780,7 +5899,7 @@ class _Lowerer:
                 "int",
                 "str",
             }
-            or expr.id in self.class_types
+            or self._has_class(expr.id)
         ):
             marker_name = expr.id
         elif isinstance(expr, ast.Attribute):
@@ -5872,7 +5991,7 @@ class _Lowerer:
         value, target_type = expr.args
         target_names = _isinstance_target_names(target_type)
         if target_names is None or any(
-            target_name not in self.class_types for target_name in target_names
+            not self._has_class(target_name) for target_name in target_names
         ):
             return False
         try:
@@ -5880,7 +5999,12 @@ class _Lowerer:
         except AotError:
             return False
         return not any(
-            _can_narrow_to_record(current, target_name, self.class_types)
+            _can_narrow_to_record(
+                current,
+                target_name,
+                self.class_types,
+                self.fallback_class_types,
+            )
             for target_name in target_names
         )
 
@@ -5986,43 +6110,36 @@ def _prepare_analysis_lowerer(
     extra_global_scalar_constants: dict[str, IrExpr] | None = None,
     extra_global_string_container_constants: dict[str, IrTuple] | None = None,
 ) -> _Lowerer:
-    class_types = dict(extra_classes or {})
-    class_types.update(analysis.types.classes)
-    function_types = dict(extra_functions or {})
-    function_types.update(analysis.types.functions)
-    aliases = dict(extra_aliases or {})
-    aliases.update(analysis.types.aliases)
     local_global_annotations = _collect_global_annotations(analysis.module.tree)
-    global_annotations = dict(extra_global_annotations or {})
-    global_annotations.update(local_global_annotations)
-    global_string_constants = dict(extra_global_string_constants or {})
-    global_string_constants.update(_collect_global_string_constants(analysis.module.tree))
-    global_scalar_constants = dict(extra_global_scalar_constants or {})
-    global_scalar_constants.update(_collect_global_scalar_constants(analysis.module.tree))
+    local_global_string_constants = _collect_global_string_constants(analysis.module.tree)
+    local_global_scalar_constants = _collect_global_scalar_constants(analysis.module.tree)
     local_global_string_container_constants = _collect_global_string_container_constants(
         analysis.module.tree
     )
-    global_string_container_constants = dict(extra_global_string_container_constants or {})
-    for name in local_global_annotations:
-        if name not in local_global_string_container_constants:
-            global_string_container_constants.pop(name, None)
-    global_string_container_constants.update(local_global_string_container_constants)
     global_record_constructor_maps = _collect_global_record_constructor_maps(
         analysis.module.tree,
-        class_types,
+        analysis.types.classes,
+        extra_classes,
     )
     return _Lowerer(
         analysis.module.filename,
-        class_types,
-        function_types,
-        aliases,
+        analysis.types.classes,
+        analysis.types.functions,
+        analysis.types.aliases,
         _collect_global_names(analysis.module.tree),
-        global_annotations,
-        global_string_constants,
-        global_scalar_constants,
-        global_string_container_constants,
+        local_global_annotations,
+        local_global_string_constants,
+        local_global_scalar_constants,
+        local_global_string_container_constants,
         global_record_constructor_maps,
         fallback_function_types=fallback_function_types,
+        fallback_class_types=extra_classes,
+        imported_function_types=extra_functions,
+        fallback_aliases=extra_aliases,
+        fallback_global_annotations=extra_global_annotations,
+        fallback_global_string_constants=extra_global_string_constants,
+        fallback_global_scalar_constants=extra_global_scalar_constants,
+        fallback_global_string_container_constants=extra_global_string_container_constants,
     )
 
 
@@ -6297,6 +6414,7 @@ def _preserves_nullable_record_join(
     then_type: IrType,
     else_type: IrType,
     class_types: dict[str, AotClassInfo],
+    fallback_class_types: dict[str, AotClassInfo] | None = None,
 ) -> bool:
     if not isinstance(incoming, IrRecordType):
         return False
@@ -6311,7 +6429,13 @@ def _preserves_nullable_record_join(
         if not isinstance(branch_type, IrRecordType):
             return False
         if not any(
-            part != "None" and _record_extends(branch_type.name, part, class_types)
+            part != "None"
+            and _record_extends(
+                branch_type.name,
+                part,
+                class_types,
+                fallback_class_types,
+            )
             for part in parts
         ):
             return False
@@ -6323,6 +6447,7 @@ def _merge_fallthrough_branch_type(
     then_type: IrType,
     else_type: IrType,
     class_types: dict[str, AotClassInfo],
+    fallback_class_types: dict[str, AotClassInfo] | None = None,
 ) -> IrType | None:
     if then_type == else_type:
         return then_type
@@ -6339,6 +6464,7 @@ def _merge_fallthrough_branch_type(
         then_type,
         else_type,
         class_types,
+        fallback_class_types,
     ):
         return incoming
     if isinstance(then_type, IrRecordType) and isinstance(else_type, IrRecordType):
@@ -6351,6 +6477,7 @@ def _merge_loop_fallthrough_names(
     incoming_names: dict[str, IrType],
     body_names: dict[str, IrType],
     class_types: dict[str, AotClassInfo],
+    fallback_class_types: dict[str, AotClassInfo] | None = None,
 ) -> None:
     for name, body_type in body_names.items():
         incoming_type = incoming_names.get(name)
@@ -6361,6 +6488,7 @@ def _merge_loop_fallthrough_names(
             incoming_type,
             body_type,
             class_types,
+            fallback_class_types,
         )
 
 
@@ -6369,6 +6497,7 @@ def _merge_loop_assignment_names(
     incoming_names: dict[str, IrType],
     body: IrBranch,
     class_types: dict[str, AotClassInfo],
+    fallback_class_types: dict[str, AotClassInfo] | None = None,
 ) -> None:
     for name, assigned_types in _lowered_branch_assignment_types(body).items():
         incoming_type = incoming_names.get(name)
@@ -6380,6 +6509,7 @@ def _merge_loop_assignment_names(
                 merged_type,
                 assigned_type,
                 class_types,
+                fallback_class_types,
             )
         names[name] = merged_type
 
@@ -6441,6 +6571,7 @@ def _merge_loop_fallthrough_type(
     incoming_type: IrType,
     body_type: IrType,
     class_types: dict[str, AotClassInfo],
+    fallback_class_types: dict[str, AotClassInfo] | None = None,
 ) -> IrType:
     if incoming_type == body_type:
         return body_type
@@ -6456,6 +6587,7 @@ def _merge_loop_fallthrough_type(
         body_type,
         incoming_type,
         class_types,
+        fallback_class_types,
     )
     return body_type if merged_type is None else merged_type
 
@@ -6616,6 +6748,7 @@ def _can_narrow_to_record(
     type_info: IrType | None,
     record_name: str,
     class_types: dict[str, AotClassInfo],
+    fallback_class_types: dict[str, AotClassInfo] | None = None,
 ) -> bool:
     if not isinstance(type_info, IrRecordType):
         return False
@@ -6624,7 +6757,7 @@ def _can_narrow_to_record(
     if any(part.strip() == "object" for part in type_info.name.split("|")):
         return True
     return any(
-        _record_extends(record_name, part.strip(), class_types)
+        _record_extends(record_name, part.strip(), class_types, fallback_class_types)
         for part in type_info.name.split("|")
     )
 
@@ -6666,16 +6799,19 @@ def _record_extends(
     record_name: str,
     base_name: str,
     class_types: dict[str, AotClassInfo],
+    fallback_class_types: dict[str, AotClassInfo] | None = None,
 ) -> bool:
     record_name = record_name.rsplit(".", 1)[-1]
     base_name = base_name.rsplit(".", 1)[-1]
     if record_name == base_name:
         return True
     class_info = class_types.get(record_name)
+    if class_info is None and fallback_class_types is not None:
+        class_info = fallback_class_types.get(record_name)
     if class_info is None:
         return False
     return any(
-        base == base_name or _record_extends(base, base_name, class_types)
+        base == base_name or _record_extends(base, base_name, class_types, fallback_class_types)
         for base in class_info.bases
     )
 
@@ -7103,6 +7239,7 @@ def _global_literal_element(
 def _collect_global_record_constructor_maps(
     tree: ast.Module,
     class_types: dict[str, AotClassInfo],
+    fallback_class_types: dict[str, AotClassInfo] | None = None,
 ) -> dict[str, IrTuple]:
     constants: dict[str, IrTuple] = {}
     for statement in tree.body:
@@ -7123,7 +7260,9 @@ def _collect_global_record_constructor_maps(
                 entries = []
                 break
             record_name = ast.unparse(value).rsplit(".", 1)[-1]
-            if record_name not in class_types:
+            if record_name not in class_types and (
+                fallback_class_types is None or record_name not in fallback_class_types
+            ):
                 entries = []
                 break
             entries.append((key.value, record_name))
@@ -7132,6 +7271,7 @@ def _collect_global_record_constructor_maps(
         base_name = _common_record_base(
             tuple(record_name for _key, record_name in entries),
             class_types,
+            fallback_class_types,
         )
         marker_type = IrRecordType(f"type[{base_name}]")
         pair_type = IrTupleType((IrStringType(), marker_type))
@@ -7152,12 +7292,24 @@ def _collect_global_record_constructor_maps(
 def _common_record_base(
     record_names: tuple[str, ...],
     class_types: dict[str, AotClassInfo],
+    fallback_class_types: dict[str, AotClassInfo] | None = None,
 ) -> str:
     first = record_names[0]
-    candidates = (first,) + class_types[first].bases
+    class_info = class_types.get(first)
+    if class_info is None and fallback_class_types is not None:
+        class_info = fallback_class_types.get(first)
+    if class_info is None:
+        return "object"
+    candidates = (first,) + class_info.bases
     for candidate in candidates:
         if all(
-            record_name == candidate or _record_extends(record_name, candidate, class_types)
+            record_name == candidate
+            or _record_extends(
+                record_name,
+                candidate,
+                class_types,
+                fallback_class_types,
+            )
             for record_name in record_names
         ):
             return candidate
