@@ -2,6 +2,11 @@
 
 ## Current
 
+- Split named-slice metadata discovery into compact binder queries. Function
+  signatures and class tables no longer retain complete per-module analyses,
+  subset summaries are checked once, and alias discovery reuses the sole final
+  lowering analysis. A 65-module oracle confirms exact equality with the former
+  full-binding results for 5,571 signatures, 305 classes, and 35 aliases.
 - Made native dictionary insertion use stable-handle append directly.
   `setdefault` and new-key subscript assignment now allocate only their
   persistent key/value pair instead of a singleton wrapper plus a full dictionary

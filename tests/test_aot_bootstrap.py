@@ -282,6 +282,64 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertEqual(protocol.return_type, concrete.return_type)
         self.assertEqual(protocol.vararg, concrete.vararg)
 
+    def test_slice_metadata_passes_retain_only_one_full_analysis_per_module(self) -> None:
+        module_inputs = aot_slice.collect_slice_inputs(
+            (
+                ROOT / "src/xcc/parser/__init__.py",
+                ROOT / "src/xcc/parser/statements.py",
+            )
+        )
+        source_cache = {
+            module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
+        }
+        parsed_cache = aot_slice._slice_parsed_module_cache(module_inputs, source_cache)
+
+        with patch.object(
+            aot_slice,
+            "check_subset",
+            wraps=aot_slice.check_subset,
+        ) as checked:
+            summary_cache = aot_slice._slice_module_summary_cache(parsed_cache)
+            function_types = aot_slice._slice_method_signature_table(
+                module_inputs,
+                source_cache,
+                parsed_cache=parsed_cache,
+                summary_cache=summary_cache,
+            )
+            module_names = frozenset(source_cache)
+            rename_maps = {
+                module.name: aot_slice._module_rename_map(
+                    module.name,
+                    source_cache[module.name],
+                    module_names,
+                    tree=parsed_cache[module.name].tree,
+                )
+                for module in module_inputs
+            }
+            module_function_types = aot_slice._module_function_alias_tables(
+                function_types,
+                rename_maps,
+            )
+            class_types, _ = aot_slice._slice_class_tables(
+                module_inputs,
+                source_cache,
+                function_types,
+                parsed_cache=parsed_cache,
+                summary_cache=summary_cache,
+                rename_maps=rename_maps,
+                module_function_types=module_function_types,
+            )
+            analysis_cache = aot_slice._slice_lowering_analysis_cache(
+                module_inputs,
+                parsed_cache,
+                class_types,
+                module_function_types,
+                summary_cache=summary_cache,
+            )
+
+        self.assertEqual(checked.call_count, len(module_inputs))
+        self.assertEqual(set(analysis_cache), {module.name for module in module_inputs})
+
     def test_rewrites_file_scope_analyzer_protocol_calls_to_concrete_analyzer(self) -> None:
         self.assertEqual(
             aot_slice._rename_call_target(

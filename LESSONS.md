@@ -1,5 +1,11 @@
 # Lessons
 
+- Treat compiler analysis products as lifetime-scoped queries. If an early pass
+  needs only signatures or class layouts, returning a complete AST/summary/type
+  analysis makes a no-GC bootstrap retain whole obsolete generations. Keep the
+  parsed source and one checked summary stable, return compact declaration
+  tables from early queries, and prove them equal to full binding before the
+  lowering pass owns the sole complete analysis.
 - A stable dictionary handle must receive new pairs directly. Building a
   singleton and concatenating the complete pair sequence before forwarding it
   preserves aliases but still retains allocation proportional to mutation

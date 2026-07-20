@@ -48,6 +48,45 @@ def bind_types(
     return binder.bind()
 
 
+def bind_function_signatures(
+    summary: AotModuleSummary,
+    module: AotModule,
+) -> dict[str, AotFunctionInfo]:
+    local_class_names = tuple(
+        statement.name for statement in module.tree.body if isinstance(statement, ast.ClassDef)
+    )
+    binder = _TypeBinder(
+        summary,
+        module,
+        known_local_classes=local_class_names,
+    )
+    binder._collect_width_aliases()
+    binder._collect_type_aliases()
+    binder._collect_functions()
+    binder._raise_if_errors()
+    return dict(binder.functions)
+
+
+def bind_class_types(
+    summary: AotModuleSummary,
+    module: AotModule,
+    *,
+    extra_classes: dict[str, AotClassInfo] | None = None,
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
+) -> dict[str, AotClassInfo]:
+    binder = _TypeBinder(
+        summary,
+        module,
+        extra_classes=extra_classes,
+        extra_functions=extra_functions,
+    )
+    binder._collect_width_aliases()
+    binder._collect_type_aliases()
+    binder._collect_classes()
+    binder._raise_if_errors()
+    return dict(binder.classes)
+
+
 class _TypeBinder:
     def __init__(
         self,
@@ -56,11 +95,13 @@ class _TypeBinder:
         *,
         extra_classes: dict[str, AotClassInfo] | None = None,
         extra_functions: dict[str, AotFunctionInfo] | None = None,
+        known_local_classes: tuple[str, ...] = (),
     ) -> None:
         self.summary = summary
         self.module = module
         self.extra_classes = extra_classes or {}
         self.extra_functions = extra_functions or {}
+        self.known_local_classes = known_local_classes
         self.width_aliases: dict[str, AotType] = {}
         self.aliases: dict[str, AotType] = {}
         self.classes: dict[str, AotClassInfo] = {}
@@ -72,8 +113,7 @@ class _TypeBinder:
         self._collect_type_aliases()
         self._collect_classes()
         self._collect_functions()
-        if self._diagnostics:
-            raise AotError(tuple(self._diagnostics))
+        self._raise_if_errors()
         return AotTypeAnalysis(
             self.summary.filename,
             dict(self.width_aliases),
@@ -81,6 +121,10 @@ class _TypeBinder:
             dict(self.functions),
             dict(self.aliases),
         )
+
+    def _raise_if_errors(self) -> None:
+        if self._diagnostics:
+            raise AotError(tuple(self._diagnostics))
 
     def _collect_width_aliases(self) -> None:
         for statement in self.module.tree.body:
@@ -504,7 +548,7 @@ class _TypeBinder:
         alias = self.aliases.get(name)
         if alias is not None:
             return alias
-        if name in self.classes or is_builtin_type_name(name):
+        if name in self.classes or name in self.known_local_classes or is_builtin_type_name(name):
             return AotType(name)
         if _is_supported_composite_annotation(name):
             return AotType(name)

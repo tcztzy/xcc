@@ -4,6 +4,7 @@ from typing import assert_never
 
 from xcc.aot import py_ast as ast
 from xcc.aot.analysis import AotAnalysis, analyze_module, analyze_source
+from xcc.aot.binder import bind_class_types, bind_function_signatures, bind_types
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.ir import (
     IrAssign,
@@ -58,6 +59,7 @@ from xcc.aot.lower import (
     lower_source_to_ir,
 )
 from xcc.aot.module import AotModule, parse_source
+from xcc.aot.subset import AotModuleSummary, check_subset
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
 
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
@@ -436,10 +438,12 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
         for module in module_inputs
     }
     parsed_cache = _slice_parsed_module_cache(module_inputs, source_cache)
+    summary_cache = _slice_module_summary_cache(parsed_cache)
     function_types = _slice_method_signature_table(
         module_inputs,
         source_cache,
         parsed_cache=parsed_cache,
+        summary_cache=summary_cache,
     )
     module_names = frozenset(source_cache)
     rename_maps = {
@@ -457,13 +461,22 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
         source_cache,
         function_types,
         parsed_cache=parsed_cache,
+        summary_cache=summary_cache,
         rename_maps=rename_maps,
         module_function_types=module_function_types,
+    )
+    analysis_cache = _slice_lowering_analysis_cache(
+        module_inputs,
+        parsed_cache,
+        class_types,
+        module_function_types,
+        summary_cache=summary_cache,
     )
     aliases = _slice_type_aliases(
         module_inputs,
         source_cache,
         parsed_cache=parsed_cache,
+        analysis_cache=analysis_cache,
     )
     global_annotations = _slice_global_annotations(
         module_inputs,
@@ -487,12 +500,6 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
     )
     records: list[IrRecord] = []
     functions: list[IrFunction] = []
-    analysis_cache = _slice_lowering_analysis_cache(
-        module_inputs,
-        parsed_cache,
-        class_types,
-        module_function_types,
-    )
     lowerer_cache = _slice_lowerer_cache(
         module_inputs,
         analysis_cache,
@@ -554,10 +561,12 @@ def _lower_named_slice_from_roots(
         for module in module_inputs
     }
     parsed_cache = _slice_parsed_module_cache(module_inputs, source_cache)
+    summary_cache = _slice_module_summary_cache(parsed_cache)
     function_types = _slice_method_signature_table(
         module_inputs,
         source_cache,
         parsed_cache=parsed_cache,
+        summary_cache=summary_cache,
     )
     module_names = frozenset(source_cache)
     rename_maps = {
@@ -575,13 +584,22 @@ def _lower_named_slice_from_roots(
         source_cache,
         function_types,
         parsed_cache=parsed_cache,
+        summary_cache=summary_cache,
         rename_maps=rename_maps,
         module_function_types=module_function_types,
+    )
+    analysis_cache = _slice_lowering_analysis_cache(
+        module_inputs,
+        parsed_cache,
+        class_types,
+        module_function_types,
+        summary_cache=summary_cache,
     )
     aliases = _slice_type_aliases(
         module_inputs,
         source_cache,
         parsed_cache=parsed_cache,
+        analysis_cache=analysis_cache,
     )
     global_annotations = _slice_global_annotations(
         module_inputs,
@@ -602,12 +620,6 @@ def _lower_named_slice_from_roots(
         module_inputs,
         source_cache,
         parsed_cache=parsed_cache,
-    )
-    analysis_cache = _slice_lowering_analysis_cache(
-        module_inputs,
-        parsed_cache,
-        class_types,
-        module_function_types,
     )
     lowerer_cache = _slice_lowerer_cache(
         module_inputs,
@@ -733,6 +745,12 @@ def _slice_parsed_module_cache(
     return parsed_cache
 
 
+def _slice_module_summary_cache(
+    parsed_cache: dict[str, AotModule],
+) -> dict[str, AotModuleSummary]:
+    return {name: check_subset(module) for name, module in parsed_cache.items()}
+
+
 def _analyze_slice_module(
     module_input: AotSliceInput,
     source_cache: dict[str, str],
@@ -760,14 +778,30 @@ def _slice_lowering_analysis_cache(
     parsed_cache: dict[str, AotModule],
     class_types: dict[str, AotClassInfo],
     module_function_types: dict[str, dict[str, AotFunctionInfo]],
+    *,
+    summary_cache: dict[str, AotModuleSummary] | None = None,
 ) -> dict[str, AotAnalysis]:
     analyses: dict[str, AotAnalysis] = {}
     for module_input in module_inputs:
-        analyses[module_input.name] = analyze_module(
-            parsed_cache[module_input.name],
-            extra_classes=class_types,
-            extra_functions=module_function_types[module_input.name],
-        )
+        module = parsed_cache[module_input.name]
+        if summary_cache is None:
+            analyses[module_input.name] = analyze_module(
+                module,
+                extra_classes=class_types,
+                extra_functions=module_function_types[module_input.name],
+            )
+        else:
+            summary = summary_cache[module_input.name]
+            analyses[module_input.name] = AotAnalysis(
+                module,
+                summary,
+                bind_types(
+                    summary,
+                    module,
+                    extra_classes=class_types,
+                    extra_functions=module_function_types[module_input.name],
+                ),
+            )
     return analyses
 
 
@@ -805,6 +839,7 @@ def _slice_class_tables(
     function_types: dict[str, AotFunctionInfo],
     *,
     parsed_cache: dict[str, AotModule] | None = None,
+    summary_cache: dict[str, AotModuleSummary] | None = None,
     rename_maps: dict[str, dict[str, str]] | None = None,
     module_function_types: dict[str, dict[str, AotFunctionInfo]] | None = None,
 ) -> tuple[dict[str, AotClassInfo], dict[str, str]]:
@@ -824,27 +859,57 @@ def _slice_class_tables(
     if module_function_types is None:
         module_function_types = _module_function_alias_tables(function_types, rename_maps)
     for module_input in module_inputs:
-        analysis = _analyze_slice_module(
+        classes = _bind_slice_class_types(
             module_input,
             source_cache,
             parsed_cache=parsed_cache,
+            summary_cache=summary_cache,
             extra_functions=module_function_types[module_input.name],
         )
-        for class_name, class_info in analysis.types.classes.items():
+        for class_name, class_info in classes.items():
             class_types.setdefault(class_name, class_info)
             class_modules.setdefault(class_name, module_input.name)
     for module_input in module_inputs:
-        analysis = _analyze_slice_module(
+        classes = _bind_slice_class_types(
             module_input,
             source_cache,
             parsed_cache=parsed_cache,
+            summary_cache=summary_cache,
             extra_classes=class_types,
             extra_functions=module_function_types[module_input.name],
         )
-        for class_name, class_info in analysis.types.classes.items():
+        for class_name, class_info in classes.items():
             if class_modules.get(class_name) == module_input.name:
                 class_types[class_name] = class_info
     return class_types, class_modules
+
+
+def _bind_slice_class_types(
+    module_input: AotSliceInput,
+    source_cache: dict[str, str],
+    *,
+    parsed_cache: dict[str, AotModule] | None = None,
+    summary_cache: dict[str, AotModuleSummary] | None = None,
+    extra_classes: dict[str, AotClassInfo] | None = None,
+    extra_functions: dict[str, AotFunctionInfo] | None = None,
+) -> dict[str, AotClassInfo]:
+    module = (
+        parsed_cache[module_input.name]
+        if parsed_cache is not None
+        else parse_source(
+            source_cache[module_input.name],
+            filename=str(module_input.path),
+        )
+    )
+    summary = (
+        summary_cache[module_input.name] if summary_cache is not None else check_subset(module)
+    )
+    return bind_class_types(
+        summary,
+        module,
+        extra_classes=extra_classes,
+        extra_functions=extra_functions,
+    )
 
 
 def _slice_method_signature_table(
@@ -852,15 +917,25 @@ def _slice_method_signature_table(
     source_cache: dict[str, str],
     *,
     parsed_cache: dict[str, AotModule] | None = None,
+    summary_cache: dict[str, AotModuleSummary] | None = None,
 ) -> dict[str, AotFunctionInfo]:
     function_types: dict[str, AotFunctionInfo] = {}
     for module_input in module_inputs:
-        analysis = _analyze_slice_module(
-            module_input,
-            source_cache,
-            parsed_cache=parsed_cache,
+        module = (
+            parsed_cache[module_input.name]
+            if parsed_cache is not None
+            else parse_source(
+                source_cache[module_input.name],
+                filename=str(module_input.path),
+            )
         )
-        for function_name, function_info in analysis.types.functions.items():
+        summary = (
+            summary_cache[module_input.name] if summary_cache is not None else check_subset(module)
+        )
+        for function_name, function_info in bind_function_signatures(
+            summary,
+            module,
+        ).items():
             function_types.setdefault(function_name, function_info)
             function_types.setdefault(f"{module_input.name}.{function_name}", function_info)
     for protocol_target, concrete_target in _PROTOCOL_METHOD_TARGETS.items():
@@ -875,13 +950,18 @@ def _slice_type_aliases(
     source_cache: dict[str, str],
     *,
     parsed_cache: dict[str, AotModule] | None = None,
+    analysis_cache: dict[str, AotAnalysis] | None = None,
 ) -> dict[str, AotType]:
     aliases: dict[str, AotType] = {}
     for module_input in module_inputs:
-        analysis = _analyze_slice_module(
-            module_input,
-            source_cache,
-            parsed_cache=parsed_cache,
+        analysis = (
+            analysis_cache[module_input.name]
+            if analysis_cache is not None
+            else _analyze_slice_module(
+                module_input,
+                source_cache,
+                parsed_cache=parsed_cache,
+            )
         )
         for alias_name, alias_type in analysis.types.aliases.items():
             aliases.setdefault(alias_name, alias_type)

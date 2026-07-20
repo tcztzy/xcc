@@ -6,7 +6,9 @@ from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
     AotDiagnostic,
     AotError,
+    AotFunctionInfo,
     AotModule,
+    AotType,
     analyze_path,
     analyze_source,
     bind_types,
@@ -19,6 +21,8 @@ from xcc.aot.py_ast import Pass
 from xcc.aot.binder import (
     _is_supported_annotation_node,
     _is_supported_composite_annotation,
+    bind_class_types,
+    bind_function_signatures,
 )
 
 
@@ -234,6 +238,39 @@ class AotSubsetCheckerTests(unittest.TestCase):
 
 
 class AotTypeBinderTests(unittest.TestCase):
+    def test_compact_declaration_queries_match_full_binding(self) -> None:
+        source = (
+            "class Box:\n"
+            "    def __init__(self, value: str) -> None:\n"
+            "        self.value = normalize(value)\n"
+            "def unwrap(box: Box) -> str:\n"
+            "    return box.value\n"
+        )
+        module = parse_source(source, filename="declarations.py")
+        summary = check_subset(module)
+        extra_functions = {
+            "normalize": AotFunctionInfo(
+                "normalize",
+                (("value", "str"),),
+                AotType("str"),
+            )
+        }
+
+        full = bind_types(summary, module, extra_functions=extra_functions)
+
+        self.assertEqual(
+            bind_function_signatures(summary, module),
+            full.functions,
+        )
+        self.assertEqual(
+            bind_class_types(
+                summary,
+                module,
+                extra_functions=extra_functions,
+            ),
+            full.classes,
+        )
+
     def test_binds_width_alias_dataclass_and_function(self) -> None:
         source = (
             "from dataclasses import dataclass\n"
