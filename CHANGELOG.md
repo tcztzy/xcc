@@ -2,6 +2,11 @@
 
 ## Current
 
+- Added a process-stable native cache for all 256 single-byte string values.
+  String indexing, string iteration, comprehensions, and `chr` now reuse cached
+  immutable values instead of retaining one two-byte allocation per character.
+  The runtime oracle verifies stable pointers and unchanged allocation
+  accounting across repeated lookup.
 - Revalidated Stage 0 -> Stage 1 after compact slice metadata at `2eea81f`.
   The clean no-cache hosted build admitted 65 source units and emitted 817
   functions, 173 records, and 8,584 reachability edges. The resulting

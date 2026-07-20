@@ -385,6 +385,39 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertEqual(completed.stdout, "")
         self.assertEqual(completed.stderr, "xcc-aot: allocation limit exceeded\n")
 
+    def test_v392_single_byte_string_cache_is_stable_and_unaccounted(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %first = call ptr @__xcc_aot_single_byte_string(i8 65)\n"
+            + "  %second = call ptr @__xcc_aot_single_byte_string(i8 65)\n"
+            + "  %after = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %same = icmp eq ptr %first, %second\n"
+            + "  %byte = load i8, ptr %first\n"
+            + "  %right_byte = icmp eq i8 %byte, 65\n"
+            + "  %nul_ptr = getelementptr i8, ptr %first, i64 1\n"
+            + "  %nul = load i8, ptr %nul_ptr\n"
+            + "  %terminated = icmp eq i8 %nul, 0\n"
+            + "  %balanced = icmp eq i64 %after, %baseline\n"
+            + "  %stable = and i1 %same, %right_byte\n"
+            + "  %valid = and i1 %terminated, %balanced\n"
+            + "  %ok = and i1 %stable, %valid\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "single-byte-string-cache",
+                filename="single-byte-string-cache.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_tuple_backing_uses_a_stable_handle_without_global_forwarding_tables(self) -> None:
         prelude = runtime_prelude()
         resolver = prelude.split(

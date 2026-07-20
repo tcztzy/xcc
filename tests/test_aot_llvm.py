@@ -878,7 +878,8 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call ptr @__xcc_aot_alloc(i64 2)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_single_byte_string(i8", llvm_ir)
+        self.assertNotIn("call ptr @__xcc_aot_alloc(i64 2)", llvm_ir)
         self.assertIn("trunc i64 65 to i8", llvm_ir)
         self.assertIn("store i8 0", llvm_ir)
         self.assertNotIn("@__chr", llvm_ir)
@@ -909,7 +910,8 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
 
         self.assertIn("getelementptr i8, ptr %text, i64 %index", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_alloc(i64 2)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_single_byte_string(i8", llvm_ir)
+        self.assertNotIn("call ptr @__xcc_aot_alloc(i64 2)", llvm_ir)
         self.assertNotIn("@__getitem", llvm_ir)
 
     def test_emits_tuple_getitem_intrinsic(self) -> None:
@@ -2515,7 +2517,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("ptrtoint ptr %item", llvm_ir)
         self.assertIn("and i64 %narrowint", llvm_ir)
 
-    def test_for_each_over_string_allocates_one_character_strings(self) -> None:
+    def test_for_each_over_string_uses_cached_one_character_strings(self) -> None:
         int64 = IrIntType(64, signed=True)
         module = IrModule(
             "string_for_each.py",
@@ -2564,7 +2566,8 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call i64 @strlen(ptr %data)", llvm_ir)
         self.assertIn("getelementptr i8, ptr %data", llvm_ir)
         self.assertIn("load i8, ptr", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_alloc(i64 2)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_single_byte_string(i8", llvm_ir)
+        self.assertNotIn("call ptr @__xcc_aot_alloc(i64 2)", llvm_ir)
         self.assertIn("store i8", llvm_ir)
         self.assertIn("zext i8", llvm_ir)
         self.assertIn("shl i64", llvm_ir)

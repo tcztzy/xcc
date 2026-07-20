@@ -1,5 +1,11 @@
 # Lessons
 
+- Apply ownership reasoning to scalar-looking language operations too. In a
+  pointer-backed runtime, `text[index]` can allocate even though the source reads
+  like a byte load; a lexer repeats that operation millions of times. Immutable
+  single-byte values have a finite domain, so a process-stable cache preserves
+  Python-visible value semantics and removes allocation growth from indexing,
+  iteration, and `chr` together.
 - Treat compiler analysis products as lifetime-scoped queries. If an early pass
   needs only signatures or class layouts, returning a complete AST/summary/type
   analysis makes a no-GC bootstrap retain whole obsolete generations. Keep the

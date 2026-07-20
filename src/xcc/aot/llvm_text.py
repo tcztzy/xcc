@@ -1807,11 +1807,7 @@ class _Emitter:
             lines.append(f"  {byte} = load i8, ptr {pointer}")
             if string_iterable:
                 character = self._tmp("charitem")
-                terminator = self._tmp("charitemnul")
-                lines.append(f"  {character} = call ptr @malloc(i64 2)")
-                lines.append(f"  store i8 {byte}, ptr {character}")
-                lines.append(f"  {terminator} = getelementptr i8, ptr {character}, i64 1")
-                lines.append(f"  store i8 0, ptr {terminator}")
+                lines.append(f"  {character} = call ptr @__xcc_aot_single_byte_string(i8 {byte})")
                 item_value = _EmittedValue(character, IrStringType())
             else:
                 wide = self._tmp("byteitem64")
@@ -4295,12 +4291,8 @@ class _Emitter:
         self.needs_runtime_prelude = True
         result = self._tmp("chr")
         byte = self._tmp("chrbyte")
-        terminator = self._tmp("chrnul")
-        lines.append(f"  {result} = call ptr @malloc(i64 2)")
         lines.append(f"  {byte} = trunc i64 {value.value} to i8")
-        lines.append(f"  store i8 {byte}, ptr {result}")
-        lines.append(f"  {terminator} = getelementptr i8, ptr {result}, i64 1")
-        lines.append(f"  store i8 0, ptr {terminator}")
+        lines.append(f"  {result} = call ptr @__xcc_aot_single_byte_string(i8 {byte})")
         return _EmittedValue(result, expr.type)
 
     def _emit_dict_get_call(
@@ -5402,11 +5394,7 @@ class _Emitter:
             lines.append(f"  {byte} = load i8, ptr {pointer}")
             if isinstance(iterable.type, IrStringType):
                 character = self._tmp(f"{mode}.character")
-                terminator = self._tmp(f"{mode}.char_nul")
-                lines.append(f"  {character} = call ptr @malloc(i64 2)")
-                lines.append(f"  store i8 {byte}, ptr {character}")
-                lines.append(f"  {terminator} = getelementptr i8, ptr {character}, i64 1")
-                lines.append(f"  store i8 0, ptr {terminator}")
+                lines.append(f"  {character} = call ptr @__xcc_aot_single_byte_string(i8 {byte})")
                 item = _EmittedValue(character, IrStringType())
             else:
                 wide = self._tmp(f"{mode}.item64")
@@ -6619,7 +6607,6 @@ class _Emitter:
             pointer = self._tmp("stritemptr")
             byte = self._tmp("stritem")
             result = self._tmp("stritem")
-            terminator = self._tmp("stritemnul")
             lines.append(f"  {negative} = icmp slt i64 {index_value}, 0")
             lines.append(f"  br i1 {negative}, label %{negative_label}, label %{nonnegative_label}")
             lines.append(f"{negative_label}:")
@@ -6635,10 +6622,7 @@ class _Emitter:
             )
             lines.append(f"  {pointer} = getelementptr i8, ptr {value.value}, i64 {normalized}")
             lines.append(f"  {byte} = load i8, ptr {pointer}")
-            lines.append(f"  {result} = call ptr @malloc(i64 2)")
-            lines.append(f"  store i8 {byte}, ptr {result}")
-            lines.append(f"  {terminator} = getelementptr i8, ptr {result}, i64 1")
-            lines.append(f"  store i8 0, ptr {terminator}")
+            lines.append(f"  {result} = call ptr @__xcc_aot_single_byte_string(i8 {byte})")
             return _EmittedValue(result, expr.type)
         if isinstance(value.type, IrBytesType):
             if not isinstance(expr.type, IrIntType):
