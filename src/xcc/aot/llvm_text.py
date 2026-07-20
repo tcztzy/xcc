@@ -10116,9 +10116,10 @@ class _Emitter:
         lengths_label = self._label("dicteq.lengths")
         outer_cond_label = self._label("dicteq.outer.cond")
         outer_body_label = self._label("dicteq.outer.body")
+        fallback_label = self._label("dicteq.fallback")
         inner_cond_label = self._label("dicteq.inner.cond")
         inner_body_label = self._label("dicteq.inner.body")
-        found_label = self._label("dicteq.found")
+        value_label = self._label("dicteq.value")
         inner_next_label = self._label("dicteq.inner.next")
         outer_next_label = self._label("dicteq.outer.next")
         mismatch_label = self._label("dicteq.mismatch")
@@ -10156,6 +10157,32 @@ class _Emitter:
         lines.append(f"  {left_value_raw} = call ptr @__xcc_aot_tuple_get(ptr {left_pair}, i64 1)")
         left_key = self._emit_runtime_boxed_value(left_key_raw, left.type.key, lines)
         left_item = self._emit_runtime_boxed_value(left_value_raw, left.type.value, lines)
+        aligned_right_pair = self._tmp("dicteq.aligned.pair")
+        aligned_right_key_raw = self._tmp("dicteq.aligned.key")
+        lines.append(
+            f"  {aligned_right_pair} = call ptr @__xcc_aot_tuple_get("
+            f"ptr {right.value}, i64 {outer_index})"
+        )
+        lines.append(
+            f"  {aligned_right_key_raw} = call ptr @__xcc_aot_tuple_get("
+            f"ptr {aligned_right_pair}, i64 0)"
+        )
+        aligned_right_key = self._emit_runtime_boxed_value(
+            aligned_right_key_raw,
+            right.type.key,
+            lines,
+        )
+        aligned_key_equal = self._emit_equality_compare(
+            left_key,
+            aligned_right_key,
+            negate=False,
+            lines=lines,
+        )
+        aligned_source = _current_label(lines)
+        lines.append(
+            f"  br i1 {aligned_key_equal.value}, label %{value_label}, label %{fallback_label}"
+        )
+        lines.append(f"{fallback_label}:")
         lines.append(f"  store i64 0, ptr {inner_index_ptr}")
         lines.append(f"  br label %{inner_cond_label}")
         lines.append(f"{inner_cond_label}:")
@@ -10178,11 +10205,18 @@ class _Emitter:
             negate=False,
             lines=lines,
         )
-        lines.append(f"  br i1 {key_equal.value}, label %{found_label}, label %{inner_next_label}")
-        lines.append(f"{found_label}:")
+        fallback_source = _current_label(lines)
+        lines.append(f"  br i1 {key_equal.value}, label %{value_label}, label %{inner_next_label}")
+        lines.append(f"{value_label}:")
+        matched_right_pair = self._tmp("dicteq.matched.pair")
+        lines.append(
+            f"  {matched_right_pair} = phi ptr "
+            f"[ {aligned_right_pair}, %{aligned_source} ], "
+            f"[ {right_pair}, %{fallback_source} ]"
+        )
         right_value_raw = self._tmp("dicteq.right.value")
         lines.append(
-            f"  {right_value_raw} = call ptr @__xcc_aot_tuple_get(ptr {right_pair}, i64 1)"
+            f"  {right_value_raw} = call ptr @__xcc_aot_tuple_get(ptr {matched_right_pair}, i64 1)"
         )
         right_item = self._emit_runtime_boxed_value(right_value_raw, right.type.value, lines)
         value_equal = self._emit_equality_compare(

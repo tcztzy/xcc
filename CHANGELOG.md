@@ -2,6 +2,18 @@
 
 ## Current
 
+- B624 adds a semantics-preserving aligned-key fast path to typed native
+  dictionary equality. Equal dictionaries built in the same deterministic order
+  now compare each key/value pair once; the V410 order-independent search remains
+  the fallback whenever aligned keys differ. The B623 full AOT suite passed all
+  973 tests in 508.10 seconds, but its first full Stage 1-to-2 run reached the
+  900.20-second process-group watchdog with only 67,059,712-byte maximum RSS,
+  zero swap, 409 source opens, no external tool execution, and no Stage 2
+  artifact. Static analysis shows 864 functions and four allocation-summary
+  iterations; the old always-search path performed 1,494,720 same-order key
+  comparisons. V411 keeps the different-order native oracle while checking both
+  aligned and fallback CFGs. No post-B624 Stage 1-to-2 result is claimed yet.
+
 - B623 restores Python structural equality for typed native dictionaries. The
   LLVM emitter now checks lengths, finds each left key in the right mapping
   independently of insertion order, and recursively compares typed key/value

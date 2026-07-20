@@ -426,6 +426,8 @@ class AotLlvmTextTests(unittest.TestCase):
         body = llvm_ir.split("define i1 @same(ptr %left, ptr %right)", 1)[1].split("\n}", 1)[0]
 
         self.assertIn("dicteq.outer.cond", body)
+        self.assertIn("dicteq.aligned.pair", body)
+        self.assertIn("dicteq.fallback", body)
         self.assertIn("dicteq.inner.cond", body)
         self.assertIn("call i32 @strcmp", body)
         self.assertIn("tupleeq.leftlen", body)

@@ -1,5 +1,11 @@
 # Lessons
 
+- Correct structural equality can still be unusably slow on a tuple-backed
+  mapping. Compiler fixed points construct deterministic mappings in matching
+  order, so compare aligned keys and values first, then fall back to the full
+  order-independent search only on a key mismatch. This preserves Python dict
+  semantics while changing the common fixed-point comparison from quadratic to
+  linear; replacing the fallback with order-sensitive equality would be wrong.
 - Container identity is not Python container equality. Lowering typed `dict`
   equality to pointer comparison made a greatest fixed point allocate forever:
   each iteration computed equal contents in a fresh mapping that could never be
