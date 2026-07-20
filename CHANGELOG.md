@@ -2,6 +2,18 @@
 
 ## Current
 
+- B620 adds owner-targeted write barriers for statically traversable graphs.
+  Record fields, sequence items, and stable sequence append/add/extend stores
+  now resolve the exact owner region and move newly reachable allocations
+  before its separating mark; grown tuple backing storage follows the same
+  lifetime. The lookup is cached per active top-mark/owner pair and invalidated
+  on mark, reset, or commit. V407 CPython/native oracles cover capture across
+  two nested child regions, string list assignment, record-field assignment,
+  and append growth from zero capacity. Full-slice ownership rises from 144 to
+  270 functions and from 12 to 71 fallible functions, emitting 271 marks, 145
+  failure commits, and 1,733 capture calls. Lower/slice/binder entry functions
+  are still excluded; B620 does not claim a bounded Stage 1-to-2 build.
+
 - B619 gives fallible compiler phases an explicit failure-lifetime transfer.
   Propagating an unhandled status removes only the validated top phase mark and
   merges its whole allocation segment into the parent, preserving arbitrary

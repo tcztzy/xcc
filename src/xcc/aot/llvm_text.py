@@ -1155,15 +1155,30 @@ def _phase_owned_return_functions(
     return frozenset(owned)
 
 
+def _phase_mutating_call_is_barriered(
+    expr: IrCall,
+    records: dict[str, IrRecord],
+) -> bool:
+    if not _is_tuple_mutating_method(expr.target) or not expr.args:
+        return False
+    if not isinstance(expr.args[0].type, IrTupleType):
+        return False
+    method = expr.target.rsplit(".", 1)[1]
+    if method in {"clear", "pop"}:
+        return len(expr.args) == 1
+    return len(expr.args) == 2 and _phase_type_is_promotable(expr.args[1].type, records)
+
+
 def _phase_expr_effect(
     expr: IrExpr,
     summaries: dict[str, tuple[bool, bool]],
+    records: dict[str, IrRecord],
 ) -> tuple[bool, bool]:
     if isinstance(expr, IrBinary):
         safe, allocates = _merge_phase_effects(
             (
-                _phase_expr_effect(expr.left, summaries),
-                _phase_expr_effect(expr.right, summaries),
+                _phase_expr_effect(expr.left, summaries, records),
+                _phase_expr_effect(expr.right, summaries, records),
             )
         )
         pointer_result = isinstance(
@@ -1172,20 +1187,22 @@ def _phase_expr_effect(
         )
         return safe, allocates or pointer_result
     if isinstance(expr, IrGetField):
-        return _phase_expr_effect(expr.value, summaries)
+        return _phase_expr_effect(expr.value, summaries, records)
     if isinstance(expr, IrConstructRecord):
         safe, _ = _merge_phase_effects(
-            tuple(_phase_expr_effect(arg, summaries) for arg in expr.args)
+            tuple(_phase_expr_effect(arg, summaries, records) for arg in expr.args)
         )
         return safe, True
     if isinstance(expr, IrCall):
         args_safe, args_allocate = _merge_phase_effects(
-            tuple(_phase_expr_effect(arg, summaries) for arg in expr.args)
+            tuple(_phase_expr_effect(arg, summaries, records) for arg in expr.args)
         )
         if not args_safe:
             return False, args_allocate
         if expr.target.startswith("__noreturn__:"):
             return True, args_allocate
+        if _phase_mutating_call_is_barriered(expr, records):
+            return True, True
         if _phase_intrinsic_is_no_capture(expr.target):
             pointer_result = isinstance(
                 expr.type,
@@ -1198,27 +1215,27 @@ def _phase_expr_effect(
         return callee[0], args_allocate or callee[1]
     if isinstance(expr, IrTuple):
         safe, _ = _merge_phase_effects(
-            tuple(_phase_expr_effect(element, summaries) for element in expr.elements)
+            tuple(_phase_expr_effect(element, summaries, records) for element in expr.elements)
         )
         return safe, True
     if isinstance(expr, IrTupleSlice):
-        effects = [_phase_expr_effect(expr.value, summaries)]
+        effects = [_phase_expr_effect(expr.value, summaries, records)]
         if expr.start is not None:
-            effects.append(_phase_expr_effect(expr.start, summaries))
+            effects.append(_phase_expr_effect(expr.start, summaries, records))
         if expr.stop is not None:
-            effects.append(_phase_expr_effect(expr.stop, summaries))
+            effects.append(_phase_expr_effect(expr.stop, summaries, records))
         safe, _ = _merge_phase_effects(tuple(effects))
         return safe, True
     if isinstance(expr, IrStringConcat):
         safe, _ = _merge_phase_effects(
-            tuple(_phase_expr_effect(part, summaries) for part in expr.parts)
+            tuple(_phase_expr_effect(part, summaries, records) for part in expr.parts)
         )
         return safe, True
     if isinstance(expr, IrStringJoin):
         safe, _ = _merge_phase_effects(
             (
-                _phase_expr_effect(expr.separator, summaries),
-                _phase_expr_effect(expr.values, summaries),
+                _phase_expr_effect(expr.separator, summaries, records),
+                _phase_expr_effect(expr.values, summaries, records),
             )
         )
         return safe, True
@@ -1232,51 +1249,65 @@ def _phase_local_target(target: str) -> bool:
 def _phase_block_effect(
     statements: tuple[IrStmt, ...],
     summaries: dict[str, tuple[bool, bool]],
+    records: dict[str, IrRecord],
 ) -> tuple[bool, bool]:
     effects: list[tuple[bool, bool]] = []
     for statement in statements:
         if isinstance(statement, IrAssign):
-            if not _phase_local_target(statement.target):
+            if not _phase_local_target(statement.target) and not _phase_type_is_promotable(
+                statement.value.type, records
+            ):
                 return False, False
-            effects.append(_phase_expr_effect(statement.value, summaries))
+            effects.append(_phase_expr_effect(statement.value, summaries, records))
             continue
         if isinstance(statement, IrSetItem):
-            return False, False
+            if not _phase_type_is_promotable(statement.value.type, records):
+                return False, False
+            effects.append(_phase_expr_effect(statement.target, summaries, records))
+            effects.append(_phase_expr_effect(statement.index, summaries, records))
+            effects.append(_phase_expr_effect(statement.value, summaries, records))
+            if isinstance(statement.value.type, IrFloatType):
+                effects.append((True, True))
+            continue
         if isinstance(statement, IrRaise):
-            effects.append(_phase_expr_effect(statement.message, summaries))
+            effects.append(_phase_expr_effect(statement.message, summaries, records))
             if statement.payload is not None:
-                effects.append(_phase_expr_effect(statement.payload, summaries))
+                effects.append(_phase_expr_effect(statement.payload, summaries, records))
             continue
         if isinstance(statement, IrReraise):
             continue
         if isinstance(statement, IrReturn):
-            effects.append(_phase_expr_effect(statement.value, summaries))
+            effects.append(_phase_expr_effect(statement.value, summaries, records))
             continue
         if isinstance(statement, IrIf):
-            effects.append(_phase_expr_effect(statement.condition, summaries))
-            effects.append(_phase_block_effect(statement.then_branch.statements, summaries))
+            effects.append(_phase_expr_effect(statement.condition, summaries, records))
+            effects.append(
+                _phase_block_effect(statement.then_branch.statements, summaries, records)
+            )
             if statement.else_branch is not None:
-                effects.append(_phase_block_effect(statement.else_branch.statements, summaries))
+                effects.append(
+                    _phase_block_effect(statement.else_branch.statements, summaries, records)
+                )
             continue
         if isinstance(statement, IrForEach):
             if not _phase_local_target(statement.target):
                 return False, False
-            effects.append(_phase_expr_effect(statement.iterable, summaries))
-            effects.append(_phase_block_effect(statement.body.statements, summaries))
+            effects.append(_phase_expr_effect(statement.iterable, summaries, records))
+            effects.append(_phase_block_effect(statement.body.statements, summaries, records))
             continue
         if isinstance(statement, IrWhile):
-            effects.append(_phase_expr_effect(statement.condition, summaries))
-            effects.append(_phase_block_effect(statement.body.statements, summaries))
+            effects.append(_phase_expr_effect(statement.condition, summaries, records))
+            effects.append(_phase_block_effect(statement.body.statements, summaries, records))
             continue
         if isinstance(statement, IrPrint):
-            effects.append(_phase_expr_effect(statement.value, summaries))
+            effects.append(_phase_expr_effect(statement.value, summaries, records))
             continue
         if isinstance(statement, IrTry):
-            effects.append(_phase_block_effect(statement.body.statements, summaries))
-            effects.append(_phase_block_effect(statement.orelse.statements, summaries))
-            effects.append(_phase_block_effect(statement.finalbody.statements, summaries))
+            effects.append(_phase_block_effect(statement.body.statements, summaries, records))
+            effects.append(_phase_block_effect(statement.orelse.statements, summaries, records))
+            effects.append(_phase_block_effect(statement.finalbody.statements, summaries, records))
             effects.extend(
-                _phase_block_effect(handler.body.statements, summaries)
+                _phase_block_effect(handler.body.statements, summaries, records)
                 for handler in statement.handlers
             )
             continue
@@ -1290,6 +1321,7 @@ def _phase_function_summaries(
     module: IrModule,
     _fallible: frozenset[str],
 ) -> dict[str, tuple[bool, bool]]:
+    records = {record.name: record for record in module.records}
     functions = tuple(
         function
         for function in module.functions
@@ -1302,7 +1334,10 @@ def _phase_function_summaries(
             assumed[name] = (True, False)
         retained: set[str] = set()
         for function in functions:
-            if function.name in candidates and _phase_block_effect(function.body, assumed)[0]:
+            if (
+                function.name in candidates
+                and _phase_block_effect(function.body, assumed, records)[0]
+            ):
                 retained.add(function.name)
         if retained == candidates:
             break
@@ -1316,7 +1351,7 @@ def _phase_function_summaries(
             if function.name in candidates:
                 updated[function.name] = (
                     True,
-                    _phase_block_effect(function.body, summaries)[1],
+                    _phase_block_effect(function.body, summaries, records)[1],
                 )
         if updated == summaries:
             return summaries
@@ -1387,6 +1422,7 @@ class _Emitter:
         self.current_phase_mark: str | None = None
         self.current_phase_promotes_return = False
         self.phase_promote_types: dict[str, IrType] = {}
+        self.phase_capture_types: dict[str, IrType] = {}
         self.failure_scopes: list[_FailureScope] = []
         self.caught_status_stack: list[str] = []
         self.record_equality_records: set[str] = set()
@@ -1402,6 +1438,7 @@ class _Emitter:
         raw_main = self._emit_main()
         main = None if raw_main is None else guard_allocation_calls(raw_main)
         phase_promotion_helpers = self._emit_phase_promotion_helpers()
+        phase_capture_helpers = self._emit_phase_capture_helpers()
         record_equality_helpers = [
             guard_allocation_calls(helper) for helper in self._emit_record_equality_helpers()
         ]
@@ -1432,6 +1469,7 @@ class _Emitter:
             lines.append("")
         lines.extend(functions)
         lines.extend(phase_promotion_helpers)
+        lines.extend(phase_capture_helpers)
         lines.extend(record_equality_helpers)
         lines.extend(tagged_object_equality_helpers)
         if main is not None:
@@ -1764,27 +1802,51 @@ class _Emitter:
     ) -> None:
         if not self.current_phase_promotes_return or not _phase_pointer_type(return_type):
             return
+        if self.current_phase_mark is None:
+            self._error("Phase-promoted return requires an active phase mark")
         key = repr(return_type)
         self.phase_promote_types[key] = return_type
         helper = _llvm_symbol("__xcc_aot_phase_promote:" + key)
-        lines.append(f"  call void {helper}(ptr {value})")
+        lines.append(f"  call void {helper}(ptr {value}, ptr {self.current_phase_mark})")
 
     def _emit_phase_promote_value(
         self,
         value: str,
         type_info: IrType,
+        target: str,
         lines: list[str],
     ) -> None:
         if isinstance(type_info, IrFloatType):
             promoted = self._tmp("phase.promote.float")
-            lines.append(f"  {promoted} = call i1 @__xcc_aot_phase_promote(ptr {value})")
+            lines.append(
+                f"  {promoted} = call i1 @__xcc_aot_phase_promote_to(ptr {value}, ptr {target})"
+            )
             return
         if not _phase_pointer_type(type_info):
             return
         key = repr(type_info)
         self.phase_promote_types[key] = type_info
         helper = _llvm_symbol("__xcc_aot_phase_promote:" + key)
-        lines.append(f"  call void {helper}(ptr {value})")
+        lines.append(f"  call void {helper}(ptr {value}, ptr {target})")
+
+    def _emit_phase_capture_value(
+        self,
+        owner: str,
+        value: str,
+        type_info: IrType,
+        lines: list[str],
+    ) -> None:
+        if not _phase_pointer_type(type_info) and not isinstance(type_info, IrFloatType):
+            return
+        if not _phase_type_is_promotable(type_info, self.records):
+            return
+        key = repr(type_info)
+        self.phase_capture_types[key] = type_info
+        if _phase_pointer_type(type_info):
+            self.phase_promote_types[key] = type_info
+        helper = _llvm_symbol("__xcc_aot_phase_capture:" + key)
+        self.needs_runtime_prelude = True
+        lines.append(f"  call void {helper}(ptr {owner}, ptr {value})")
 
     def _emit_phase_promotion_helpers(self) -> list[str]:
         helpers: list[str] = []
@@ -1797,13 +1859,38 @@ class _Emitter:
             emitted.add(key)
             helpers.append(self._emit_phase_promotion_helper(self.phase_promote_types[key]))
 
+    def _emit_phase_capture_helpers(self) -> list[str]:
+        helpers: list[str] = []
+        for key in sorted(self.phase_capture_types):
+            type_info = self.phase_capture_types[key]
+            helper = _llvm_symbol("__xcc_aot_phase_capture:" + key)
+            lines = [
+                f"define void {helper}(ptr %owner, ptr %value) {{",
+                "entry:",
+                "  %target = call ptr @__xcc_aot_phase_capture_target(ptr %owner)",
+                "  %needed = icmp ne ptr %target, null",
+                "  br i1 %needed, label %promote, label %done",
+                "promote:",
+            ]
+            if isinstance(type_info, IrFloatType):
+                lines.append(
+                    "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)"
+                )
+            else:
+                target = _llvm_symbol("__xcc_aot_phase_promote:" + key)
+                lines.append(f"  call void {target}(ptr %value, ptr %target)")
+            lines.extend(("  br label %done", "done:", "  ret void", "}"))
+            helpers.append("\n".join(lines))
+        return helpers
+
     def _emit_phase_promotion_helper(self, type_info: IrType) -> str:
         helper = _llvm_symbol("__xcc_aot_phase_promote:" + repr(type_info))
         if isinstance(type_info, IrStringType | IrBytesType):
             return (
-                f"define void {helper}(ptr %value) {{\n"
+                f"define void {helper}(ptr %value, ptr %target) {{\n"
                 "entry:\n"
-                "  %promoted = call i1 @__xcc_aot_phase_promote(ptr %value)\n"
+                "  %promoted = call i1 @__xcc_aot_phase_promote_to("
+                "ptr %value, ptr %target)\n"
                 "  ret void\n"
                 "}"
             )
@@ -1821,9 +1908,10 @@ class _Emitter:
         concrete_parts = tuple(part for part in parts if part != "None")
         if len(concrete_parts) == 1 and concrete_parts[0] in (_PHASE_SHALLOW_PROMOTABLE_RECORDS):
             return (
-                f"define void {helper}(ptr %value) {{\n"
+                f"define void {helper}(ptr %value, ptr %target) {{\n"
                 "entry:\n"
-                "  %promoted = call i1 @__xcc_aot_phase_promote(ptr %value)\n"
+                "  %promoted = call i1 @__xcc_aot_phase_promote_to("
+                "ptr %value, ptr %target)\n"
                 "  ret void\n"
                 "}"
             )
@@ -1846,13 +1934,13 @@ class _Emitter:
         record_name: str,
     ) -> str:
         lines = [
-            f"define void {helper}(ptr %value) {{",
+            f"define void {helper}(ptr %value, ptr %target) {{",
             "entry:",
             "  %nonnull = icmp ne ptr %value, null",
             "  br i1 %nonnull, label %promote, label %done",
             "promote:",
             "  %raw = getelementptr i8, ptr %value, i64 -8",
-            "  %promoted = call i1 @__xcc_aot_phase_promote(ptr %raw)",
+            "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %raw, ptr %target)",
             "  br i1 %promoted, label %children, label %done",
             "children:",
         ]
@@ -1869,7 +1957,7 @@ class _Emitter:
             lines.append(
                 f"  {field_value} = load {self._storage_llvm_type(field.type)}, ptr {field_ptr}"
             )
-            self._emit_phase_promote_value(field_value, field.type, lines)
+            self._emit_phase_promote_value(field_value, field.type, "%target", lines)
         lines.extend(("  br label %done", "done:", "  ret void", "}"))
         return "\n".join(lines)
 
@@ -1879,7 +1967,7 @@ class _Emitter:
         record_names: list[str],
     ) -> str:
         lines = [
-            f"define void {helper}(ptr %value) {{",
+            f"define void {helper}(ptr %value, ptr %target) {{",
             "entry:",
             "  %nonnull = icmp ne ptr %value, null",
             "  br i1 %nonnull, label %dispatch, label %done",
@@ -1899,7 +1987,7 @@ class _Emitter:
             lines.extend(
                 (
                     f"record.{index}:",
-                    f"  call void {target}(ptr %value)",
+                    f"  call void {target}(ptr %value, ptr %target)",
                     "  br label %done",
                 )
             )
@@ -1912,20 +2000,20 @@ class _Emitter:
         element_types: tuple[IrType, ...],
     ) -> str:
         lines = [
-            f"define void {helper}(ptr %value) {{",
+            f"define void {helper}(ptr %value, ptr %target) {{",
             "entry:",
             "  %nonnull = icmp ne ptr %value, null",
             "  br i1 %nonnull, label %promote, label %done",
             "promote:",
-            "  %promoted = call i1 @__xcc_aot_phase_promote(ptr %value)",
+            "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)",
             "  br i1 %promoted, label %storage, label %done",
             "storage:",
             "  %data.ptr = getelementptr ptr, ptr %value, i64 2",
             "  %data = load ptr, ptr %data.ptr",
-            "  %data.promoted = call i1 @__xcc_aot_phase_promote(ptr %data)",
+            "  %data.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %data, ptr %target)",
             "  %layout.ptr = getelementptr ptr, ptr %value, i64 4",
             "  %layout = load ptr, ptr %layout.ptr",
-            "  %layout.promoted = call i1 @__xcc_aot_phase_promote(ptr %layout)",
+            "  %layout.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %layout, ptr %target)",
         ]
         if not element_types:
             lines.extend(("  br label %done", "done:", "  ret void", "}"))
@@ -1938,7 +2026,7 @@ class _Emitter:
                     continue
                 item = f"%item.{index}"
                 lines.append(f"  {item} = call ptr @__xcc_aot_tuple_get(ptr %value, i64 {index})")
-                self._emit_phase_promote_value(item, element_type, lines)
+                self._emit_phase_promote_value(item, element_type, "%target", lines)
             lines.extend(("  br label %done", "done:", "  ret void", "}"))
             return "\n".join(lines)
         element_type = element_types[0]
@@ -1957,7 +2045,7 @@ class _Emitter:
                 "  %item = call ptr @__xcc_aot_tuple_get(ptr %value, i64 %index)",
             )
         )
-        self._emit_phase_promote_value("%item", element_type, lines)
+        self._emit_phase_promote_value("%item", element_type, "%target", lines)
         lines.extend(
             (
                 "  %next = add i64 %index, 1",
@@ -2823,6 +2911,7 @@ class _Emitter:
         stored = self._box_to_runtime_ptr(value, lines)
         index_value = self._coerce_index_i64(index, lines, "setitem")
         self.needs_runtime_prelude = True
+        self._emit_phase_capture_value(target.value, stored, value.type, lines)
         lines.append(
             f"  call void @__xcc_aot_tuple_set(ptr {target.value}, i64 {index_value}, ptr {stored})"
         )
@@ -2851,6 +2940,10 @@ class _Emitter:
         field_index = self._field_index(record_name, field_name)
         field = self.records[record_name].fields[field_index]
         stored = self._value_for_result_type(value, field.type, lines)
+        if _phase_pointer_type(field.type):
+            owner = self._tmp("field.owner")
+            lines.append(f"  {owner} = getelementptr i8, ptr {receiver_value.value}, i64 -8")
+            self._emit_phase_capture_value(owner, stored, field.type, lines)
         field_ptr = self._tmp("fieldptr")
         lines.append(
             f"  {field_ptr} = getelementptr inbounds %{record_name}, "
@@ -6712,6 +6805,7 @@ class _Emitter:
         if method == "append":
             item = self._emit_expr(expr.args[1], names, lines)
             boxed_item = self._box_to_runtime_ptr(item, lines)
+            self._emit_phase_capture_value(receiver.value, boxed_item, item.type, lines)
             result = self._tmp("tuple")
             self.needs_runtime_prelude = True
             lines.append(
@@ -6726,6 +6820,12 @@ class _Emitter:
             extension = self._emit_expr(expr.args[1], names, lines)
             if not isinstance(extension.type, IrTupleType):
                 self._error("extend expects a tuple-backed argument")
+            self._emit_phase_capture_value(
+                receiver.value,
+                extension.value,
+                extension.type,
+                lines,
+            )
             result = self._tmp("tuple")
             self.needs_runtime_prelude = True
             lines.append(
@@ -6738,6 +6838,12 @@ class _Emitter:
             return _EmittedValue(receiver.value, result_type)
         item = self._emit_expr(expr.args[1], names, lines)
         singleton = self._runtime_singleton_tuple(item, lines)
+        self._emit_phase_capture_value(
+            receiver.value,
+            singleton,
+            IrTupleType((item.type,)),
+            lines,
+        )
         result = self._tmp("tuple")
         self.needs_runtime_prelude = True
         lines.append(

@@ -681,6 +681,157 @@ class AotMilestone3IrTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 70)
         self.assertEqual(completed.stderr, "xcc-aot: memory safety violation\n")
 
+    def test_v407_capture_promotes_to_owner_region_across_nested_phases(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %outer = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %owner = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %middle = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %middle_temporary = call ptr @__xcc_aot_alloc(i64 64)\n"
+            + "  %inner = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %value = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 47, ptr %value\n"
+            + "  %target = call ptr @__xcc_aot_phase_capture_target(ptr %owner)\n"
+            + "  %right_target = icmp eq ptr %target, %middle\n"
+            + "  %promoted = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr %value, ptr %target)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %inner)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %middle)\n"
+            + "  %kept = load i64, ptr %value\n"
+            + "  %value_survived = icmp eq i64 %kept, 47\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %outer)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %target_and_move = and i1 %right_target, %promoted\n"
+            + "  %survived = and i1 %target_and_move, %value_survived\n"
+            + "  %ok = and i1 %survived, %balanced\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-capture-nested",
+                filename="phase-capture-nested.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v407_pointer_store_survives_callee_phase_reset(self) -> None:
+        source = (
+            "def write(values: list[str], value: str) -> None:\n"
+            "    scratch = value + '-scratch'\n"
+            "    values[0] = value + '-kept'\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    values = ['old']\n"
+            "    write(values, 'root')\n"
+            "    return 0 if values[0] == 'root-kept' else 1\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="phase-capture-store.py", entry="entry")
+        )
+        write_body = llvm_ir.split(
+            "define void @write(ptr %values, ptr %value)", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", write_body)
+        self.assertIn('call void @"__xcc_aot_phase_capture:', write_body)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-capture-store",
+                filename="phase-capture-store.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v407_record_field_store_survives_callee_phase_reset(self) -> None:
+        source = (
+            "class Box:\n"
+            "    value: str\n"
+            "    def __init__(self, value: str) -> None:\n"
+            "        self.value = value\n"
+            "\n"
+            "def write(box: Box, value: str) -> None:\n"
+            "    scratch = value + '-scratch'\n"
+            "    box.value = value + '-kept'\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    box = Box('old')\n"
+            "    write(box, 'root')\n"
+            "    return 0 if box.value == 'root-kept' else 1\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="phase-capture-field.py", entry="entry")
+        )
+        write_body = llvm_ir.split(
+            "define void @write(ptr %box, ptr %value)", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("getelementptr i8, ptr %box, i64 -8", write_body)
+        self.assertIn('call void @"__xcc_aot_phase_capture:', write_body)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-capture-field",
+                filename="phase-capture-field.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v407_append_captures_item_and_grown_backing_storage(self) -> None:
+        source = (
+            "def append_value(values: list[str], value: str) -> None:\n"
+            "    scratch = value + '-scratch'\n"
+            "    values.append(value + '-kept')\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    values: list[str] = []\n"
+            "    append_value(values, 'root')\n"
+            "    return 0 if values[0] == 'root-kept' else 1\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="phase-capture-append.py", entry="entry")
+        )
+        append_body = llvm_ir.split(
+            "define void @append_value(ptr %values, ptr %value)", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn('call void @"__xcc_aot_phase_capture:', append_body)
+        self.assertIn("call ptr @__xcc_aot_tuple_append", append_body)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-capture-append",
+                filename="phase-capture-append.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v389_phase_free_rejects_untracked_pointer_without_prefix_read(self) -> None:
         llvm_ir = (
             runtime_prelude()

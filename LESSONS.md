@@ -1,5 +1,11 @@
 # Lessons
 
+- A write barrier must target the owner's lifetime, not merely the caller's
+  parent region. A borrowed accumulator can belong several phase levels above
+  the mutating helper; promoting a stored child by only one mark still leaves a
+  dangling pointer after an intermediate reset. Resolve the separating owner
+  mark, cache it for repeated writes under the same top phase, and move both the
+  typed value graph and any newly grown container backing before that mark.
 - A fallible region needs two distinct exits. On success, move the statically
   known result graph and reclaim everything else; on propagated failure, merge
   the whole region into its parent so an arbitrary error graph stays valid.

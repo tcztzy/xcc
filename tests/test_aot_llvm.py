@@ -277,8 +277,41 @@ class AotLlvmTextTests(unittest.TestCase):
         ):
             with self.subTest(function=function):
                 body = llvm_ir.split(signature, 1)[1].split("\n}", 1)[0]
-                self.assertNotIn("@__xcc_aot_phase_mark", body)
-                self.assertNotIn("@__xcc_aot_phase_reset", body)
+                self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
+                self.assertIn("call void @__xcc_aot_phase_reset", body)
+
+    def test_v407_pointer_store_captures_value_into_owner_region(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        string_type = IrStringType()
+        tuple_type = IrTupleType((string_type,))
+        worker = IrFunction(
+            "worker",
+            (IrParam("borrowed", tuple_type), IrParam("value", string_type)),
+            int64,
+            (
+                IrAssign(
+                    "scratch",
+                    IrStringConcat((IrName("value", string_type), IrConstString("-scratch"))),
+                ),
+                IrSetItem(
+                    IrName("borrowed", tuple_type),
+                    IrConstInt(0, int64),
+                    IrStringConcat((IrName("value", string_type), IrConstString("-kept"))),
+                ),
+                IrReturn(IrConstInt(0, int64)),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(IrModule("capture-store.py", (), (worker,)))
+        body = llvm_ir.split(
+            "define i64 @worker(ptr %borrowed, ptr %value)", 1
+        )[1].split("\n}", 1)[0]
+
+        capture = 'call void @"__xcc_aot_phase_capture:'
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
+        self.assertIn(capture, body)
+        self.assertLess(body.index(capture), body.index("call void @__xcc_aot_tuple_set"))
+        self.assertLess(body.index(capture), body.index("call void @__xcc_aot_phase_reset"))
 
     def test_emits_integer_augmented_assignment_operators(self) -> None:
         module = lower_source_to_ir(
