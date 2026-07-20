@@ -1038,6 +1038,10 @@ def _phase_block_borrowed_returns(
             all_returns_borrowed = all_returns_borrowed and body_borrowed
             saw_return = saw_return or body_returns
             borrowed_names = borrowed_names & body_names
+            continue
+        if isinstance(statement, IrTry):
+            all_returns_borrowed = False
+            borrowed_names = frozenset()
     return all_returns_borrowed, saw_return, borrowed_names
 
 
@@ -1180,6 +1184,8 @@ def _phase_expr_effect(
         )
         if not args_safe:
             return False, args_allocate
+        if expr.target.startswith("__noreturn__:"):
+            return True, args_allocate
         if _phase_intrinsic_is_no_capture(expr.target):
             pointer_result = isinstance(
                 expr.type,
@@ -1234,8 +1240,15 @@ def _phase_block_effect(
                 return False, False
             effects.append(_phase_expr_effect(statement.value, summaries))
             continue
-        if isinstance(statement, IrSetItem | IrRaise | IrReraise | IrTry):
+        if isinstance(statement, IrSetItem):
             return False, False
+        if isinstance(statement, IrRaise):
+            effects.append(_phase_expr_effect(statement.message, summaries))
+            if statement.payload is not None:
+                effects.append(_phase_expr_effect(statement.payload, summaries))
+            continue
+        if isinstance(statement, IrReraise):
+            continue
         if isinstance(statement, IrReturn):
             effects.append(_phase_expr_effect(statement.value, summaries))
             continue
@@ -1258,6 +1271,15 @@ def _phase_block_effect(
         if isinstance(statement, IrPrint):
             effects.append(_phase_expr_effect(statement.value, summaries))
             continue
+        if isinstance(statement, IrTry):
+            effects.append(_phase_block_effect(statement.body.statements, summaries))
+            effects.append(_phase_block_effect(statement.orelse.statements, summaries))
+            effects.append(_phase_block_effect(statement.finalbody.statements, summaries))
+            effects.extend(
+                _phase_block_effect(handler.body.statements, summaries)
+                for handler in statement.handlers
+            )
+            continue
         if isinstance(statement, IrBreak | IrContinue):
             continue
         return False, False
@@ -1266,24 +1288,39 @@ def _phase_block_effect(
 
 def _phase_function_summaries(
     module: IrModule,
-    fallible: frozenset[str],
+    _fallible: frozenset[str],
 ) -> dict[str, tuple[bool, bool]]:
+    functions = tuple(
+        function
+        for function in module.functions
+        if function.name not in _PHASE_SPECIAL_EMITTER_FUNCTIONS
+    )
+    candidates = {function.name for function in functions}
+    while True:
+        assumed: dict[str, tuple[bool, bool]] = {}
+        for name in candidates:
+            assumed[name] = (True, False)
+        retained: set[str] = set()
+        for function in functions:
+            if function.name in candidates and _phase_block_effect(function.body, assumed)[0]:
+                retained.add(function.name)
+        if retained == candidates:
+            break
+        candidates = retained
     summaries: dict[str, tuple[bool, bool]] = {}
-    changed = True
-    while changed:
-        changed = False
-        for function in module.functions:
-            if (
-                function.name in summaries
-                or function.name in fallible
-                or function.name in _PHASE_SPECIAL_EMITTER_FUNCTIONS
-            ):
-                continue
-            safe, allocates = _phase_block_effect(function.body, summaries)
-            if safe:
-                summaries[function.name] = (True, allocates)
-                changed = True
-    return summaries
+    for name in candidates:
+        summaries[name] = (True, False)
+    while True:
+        updated: dict[str, tuple[bool, bool]] = {}
+        for function in functions:
+            if function.name in candidates:
+                updated[function.name] = (
+                    True,
+                    _phase_block_effect(function.body, summaries)[1],
+                )
+        if updated == summaries:
+            return summaries
+        summaries = updated
 
 
 def _function_uses_owned_phase(
@@ -1937,6 +1974,11 @@ class _Emitter:
             return
         lines.append(f"  call void @__xcc_aot_phase_reset(ptr {self.current_phase_mark})")
 
+    def _emit_phase_commit(self, lines: list[str]) -> None:
+        if self.current_phase_mark is None:
+            return
+        lines.append(f"  call void @__xcc_aot_phase_commit(ptr {self.current_phase_mark})")
+
     def _emit_failure_transfer(
         self,
         status: str,
@@ -1962,7 +2004,7 @@ class _Emitter:
             return
         if not self.current_function_is_fallible:
             self._error("failure propagation requires a fallible function")
-        self._emit_phase_reset(lines)
+        self._emit_phase_commit(lines)
         lines.append(f"  ret i32 {status}")
 
     def _emit_control_finally(

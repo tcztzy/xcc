@@ -621,6 +621,66 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v406_phase_commit_transfers_failure_region_to_parent(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %outer = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %inner = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %message = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 41, ptr %message\n"
+            + "  %temporary = call ptr @__xcc_aot_alloc(i64 64)\n"
+            + "  %before_commit = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  call void @__xcc_aot_phase_commit(ptr %inner)\n"
+            + "  %after_commit = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %marker_released = icmp ult i64 %after_commit, %before_commit\n"
+            + "  %message_value = load i64, ptr %message\n"
+            + "  %message_survived = icmp eq i64 %message_value, 41\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %outer)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %parent_reclaimed = icmp eq i64 %final, %baseline\n"
+            + "  %survived = and i1 %marker_released, %message_survived\n"
+            + "  %ok = and i1 %survived, %parent_reclaimed\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-commit",
+                filename="phase-commit.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v406_phase_commit_rejects_non_lifo_mark(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %outer = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %inner = call ptr @__xcc_aot_phase_mark()\n"
+            + "  call void @__xcc_aot_phase_commit(ptr %outer)\n"
+            + "  ret i32 0\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-commit-non-lifo",
+                filename="phase-commit-non-lifo.ll",
+            )
+            completed = subprocess.run(
+                (str(executable),), check=False, capture_output=True, text=True
+            )
+
+        self.assertEqual(completed.returncode, 70)
+        self.assertEqual(completed.stderr, "xcc-aot: memory safety violation\n")
+
     def test_v389_phase_free_rejects_untracked_pointer_without_prefix_read(self) -> None:
         llvm_ir = (
             runtime_prelude()

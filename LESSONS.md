@@ -1,5 +1,11 @@
 # Lessons
 
+- A fallible region needs two distinct exits. On success, move the statically
+  known result graph and reclaim everything else; on propagated failure, merge
+  the whole region into its parent so an arbitrary error graph stays valid.
+  Blanket exclusion of fallible functions avoids dangling pointers but also
+  makes successful compiler paths retain every temporary. Keep capture-heavy
+  functions conservative until write barriers make their mutations explicit.
 - Region membership is a local question. To decide whether a result can move
   out of the current phase, search only from the allocation head to that
   phase's mark; looking through all older promoted storage makes every borrowed

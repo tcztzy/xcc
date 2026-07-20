@@ -2,6 +2,20 @@
 
 ## Current
 
+- B619 gives fallible compiler phases an explicit failure-lifetime transfer.
+  Propagating an unhandled status removes only the validated top phase mark and
+  merges its whole allocation segment into the parent, preserving arbitrary
+  error graphs; successful returns still promote their statically typed result
+  graph and reset the remaining temporaries. A greatest-fixed-point capture
+  proof remains conservative around mutation and admits 12 of 471 fallible
+  functions in the full slice, with no lower/slice/binder owner yet. V406 covers
+  emitted success/failure control flow, native parent reclamation and preserved
+  storage, and non-LIFO rejection. The bounded post-B618 Stage 1-to-2 run that
+  motivated this work exited 70 after 280.90 seconds at the unchanged 512 MiB
+  allocation guard, with 597,753,856-byte maximum RSS, zero swap, 3,137 source
+  opens, no external tool execution, and no Stage 2 artifact. B619 is therefore
+  a required lifetime primitive, not a claim that Stage 2 is now bounded.
+
 - B618 makes region-membership lookup local to the current lifetime. Promotion
   now searches only from the allocation head to the top mark and rejects parent,
   global, static, or untracked pointers at that boundary; it no longer performs

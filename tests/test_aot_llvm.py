@@ -371,6 +371,47 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn(f"call i32 @{unchecked_name}(ptr %callresult", llvm_ir)
         self.assertNotIn(f"call ptr @{unchecked_name}()", llvm_ir)
 
+    def test_v406_fallible_phase_commits_failure_and_resets_success(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        worker = IrFunction(
+            "worker",
+            (IrParam("fail", IrBoolType()),),
+            IrStringType(),
+            (
+                IrAssign(
+                    "scratch",
+                    IrTuple((IrConstInt(1, int64),), IrTupleType((int64,))),
+                ),
+                IrIf(
+                    IrName("fail", IrBoolType()),
+                    IrBranch(
+                        (
+                            IrRaise(
+                                "ValueError",
+                                IrStringConcat(
+                                    (IrConstString("bad"), IrConstString(" message"))
+                                ),
+                            ),
+                        )
+                    ),
+                    IrBranch((IrReturn(IrConstString("ok")),)),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(IrModule("fallible-phase.py", (), (worker,)))
+        body = llvm_ir.split(
+            "define i32 @worker(i1 %fail, ptr %result_out, ptr %error_out)", 1
+        )[1].split("\n}", 1)[0]
+
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
+        self.assertIn("call void @__xcc_aot_phase_commit", body)
+        self.assertIn("call void @__xcc_aot_phase_reset", body)
+        self.assertLess(
+            body.index("call void @__xcc_aot_phase_commit"),
+            body.index("ret i32 2"),
+        )
+
     def test_emits_bytes_concat_and_repeat_runtime_calls(self) -> None:
         module = lower_source_to_ir(
             "def combine(value: bytes, count: int) -> bytes:\n"
