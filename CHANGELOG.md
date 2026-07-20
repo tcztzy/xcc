@@ -2,6 +2,24 @@
 
 ## Current
 
+- B635 generalizes B632's lifetime-safe immutable string length cache beyond
+  `startswith`. A post-B634 60.14-second probe remained at 166,641,664-byte
+  maximum RSS and 409 source opens; a bounded 3,826-stack sample placed 1,947
+  frames in `_PythonLexer._peek -> strlen`, 472 in `_at_end -> strlen`, and 125
+  in runtime slicing, versus 1,243 in promotion. V422 routes generated string
+  length observations and slicing through a two-entry MRU, allowing a long
+  source to survive arbitrary single-character alternation. The existing exact-
+  payload free/realloc boundary now invalidates either slot and promotes a live
+  secondary entry when the primary dies. Generated-LLVM, native poison/lifetime,
+  and repeated-length CPython/native oracles pass with 231 LLVM/M3 tests, 164
+  runtime oracles, lint, and type. The retained hosted Stage 1 builds in 28.69
+  seconds at 336,707,584-byte maximum RSS with zero swap; its generated `_peek`
+  and `_at_end` contain no raw `strlen`. It compiles the focused repeated-length
+  source in 0.11 seconds at 47,644,672-byte maximum RSS using only `llc` and
+  `cc`, matches CPython with exit 7, launches no Python process, links only
+  `libSystem`, has no Python symbols, and rejects the CPython parser. No
+  post-B635 Stage 1-to-2 result is claimed.
+
 - B634 makes exact graph promotion newest-first without reversing the retained
   allocation list. The first post-B633 probe reached the 60.13-second watchdog
   at 166,690,816-byte maximum RSS and zero swap: V420 had removed the parser/

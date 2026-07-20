@@ -1,5 +1,11 @@
 # Lessons
 
+- A lifetime-safe cache can still be too narrow to uphold the performance
+  invariant. If `startswith` reuses a source length but ordinary `len`,
+  truthiness, indexing, membership, and slicing bypass it, the lexer remains
+  quadratic. Route all generated observations through one bounded weak-borrow
+  policy, and size its fixed MRU from the semantic alternation: a long source
+  plus arbitrary single-byte values needs two slots with secondary-hit swap.
 - Region graph traversal order and retained-list order are one invariant, not
   separate micro-optimizations. Walking newest-first avoids repeated scans only
   if a scoped insertion cursor preserves the moved nodes' oldest-to-newest

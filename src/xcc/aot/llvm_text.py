@@ -3477,7 +3477,7 @@ class _Emitter:
         byte_data = iterable.value
         length = self._tmp("len")
         if string_iterable:
-            lines.append(f"  {length} = call i64 @strlen(ptr {iterable.value})")
+            lines.append(f"  {length} = call i64 @__xcc_aot_string_len(ptr {iterable.value})")
         elif bytes_iterable:
             byte_data = self._tmp("bytesdata")
             lines.append(f"  {byte_data} = call ptr @__xcc_aot_bytes_data(ptr {iterable.value})")
@@ -4828,7 +4828,7 @@ class _Emitter:
             lines.append(f"  {result} = call i64 @__xcc_aot_bytes_len(ptr {value.value})")
             return _EmittedValue(result, expr.type)
         if _is_len_string_type(value.type):
-            lines.append(f"  {result} = call i64 @strlen(ptr {value.value})")
+            lines.append(f"  {result} = call i64 @__xcc_aot_string_len(ptr {value.value})")
             return _EmittedValue(result, expr.type)
         self._error(f"Unsupported len argument type: {type(value.type).__name__}")
 
@@ -4844,7 +4844,7 @@ class _Emitter:
         for part_expr in concat.parts:
             part = self._coerce_to_string(self._emit_expr(part_expr, names, lines), lines)
             part_length = self._tmp("concat.length.part")
-            lines.append(f"  {part_length} = call i64 @strlen(ptr {part.value})")
+            lines.append(f"  {part_length} = call i64 @__xcc_aot_string_len(ptr {part.value})")
             if total == "0":
                 total = part_length
                 continue
@@ -5362,7 +5362,7 @@ class _Emitter:
             too_large = self._tmp("startswith.offset.too_large")
             advanced = self._tmp("startswith.offset.advanced")
             next_offset = self._tmp("startswith.offset")
-            lines.append(f"  {part_length} = call i64 @strlen(ptr {part.value})")
+            lines.append(f"  {part_length} = call i64 @__xcc_aot_string_len(ptr {part.value})")
             lines.append(f"  {remaining} = sub i64 9223372036854775807, {offset}")
             lines.append(f"  {too_large} = icmp ugt i64 {part_length}, {remaining}")
             lines.append(f"  {advanced} = add i64 {offset}, {part_length}")
@@ -5447,7 +5447,7 @@ class _Emitter:
         offset = self._tmp("findoffset")
         found_ok = self._tmp("findok")
         result = self._tmp("findresult")
-        lines.append(f"  {length} = call i64 @strlen(ptr {value.value})")
+        lines.append(f"  {length} = call i64 @__xcc_aot_string_len(ptr {value.value})")
         lines.append(f"  {is_negative} = icmp slt i64 {start.value}, 0")
         lines.append(f"  {nonnegative} = select i1 {is_negative}, i64 0, i64 {start.value}")
         lines.append(f"  {is_past_end} = icmp sgt i64 {nonnegative}, {length}")
@@ -7202,7 +7202,7 @@ class _Emitter:
         length = self._tmp(f"{mode}.len")
         byte_data = iterable.value
         if isinstance(iterable.type, IrStringType):
-            lines.append(f"  {length} = call i64 @strlen(ptr {iterable.value})")
+            lines.append(f"  {length} = call i64 @__xcc_aot_string_len(ptr {iterable.value})")
         elif isinstance(iterable.type, IrBytesType):
             byte_data = self._tmp(f"{mode}.bytesdata")
             lines.append(f"  {byte_data} = call ptr @__xcc_aot_bytes_data(ptr {iterable.value})")
@@ -8022,7 +8022,7 @@ class _Emitter:
         lines.append(
             f"  {written} = call i1 @__xcc_aot_write_text_file(ptr {path.value}, ptr {value.value})"
         )
-        lines.append(f"  {length} = call i64 @strlen(ptr {value.value})")
+        lines.append(f"  {length} = call i64 @__xcc_aot_string_len(ptr {value.value})")
         lines.append(f"  {result} = select i1 {written}, i64 {length}, i64 -1")
         return _EmittedValue(result, expr.type)
 
@@ -8475,7 +8475,7 @@ class _Emitter:
             lines.append(f"  {negative} = icmp slt i64 {index_value}, 0")
             lines.append(f"  br i1 {negative}, label %{negative_label}, label %{nonnegative_label}")
             lines.append(f"{negative_label}:")
-            lines.append(f"  {length} = call i64 @strlen(ptr {value.value})")
+            lines.append(f"  {length} = call i64 @__xcc_aot_string_len(ptr {value.value})")
             lines.append(f"  {wrapped} = add i64 {length}, {index_value}")
             lines.append(f"  br label %{normalized_label}")
             lines.append(f"{nonnegative_label}:")
@@ -8581,7 +8581,7 @@ class _Emitter:
         length = self._tmp("contains.len")
         done = self._tmp("contains.done")
         lines.append(f"  {index} = load i64, ptr {index_ptr}")
-        lines.append(f"  {length} = call i64 @strlen(ptr {haystack.value})")
+        lines.append(f"  {length} = call i64 @__xcc_aot_string_len(ptr {haystack.value})")
         lines.append(f"  {done} = icmp uge i64 {index}, {length}")
         lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
         lines.append(f"{body_label}:")
@@ -8952,7 +8952,7 @@ class _Emitter:
         if isinstance(value.type, IrStringType):
             length = self._tmp("strlen")
             result = self._tmp("truth")
-            lines.append(f"  {length} = call i64 @strlen(ptr {value.value})")
+            lines.append(f"  {length} = call i64 @__xcc_aot_string_len(ptr {value.value})")
             lines.append(f"  {result} = icmp ne i64 {length}, 0")
             return _EmittedValue(result, IrBoolType())
         if isinstance(value.type, IrTupleType | IrDictType):

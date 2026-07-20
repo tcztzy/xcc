@@ -644,6 +644,21 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="string-startswith-negative-start.py",
         )
 
+    def test_repeated_string_length_survives_single_byte_cache_alternation(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    text = 'abcd' * 1024\n"
+            "    seen = 0\n"
+            "    for index in range(len(text)):\n"
+            "        if len(text) != 4096:\n"
+            "            return 1\n"
+            "        if text[index]:\n"
+            "            seen += 1\n"
+            "    return 7 if seen == 4096 else 2\n",
+            expected=7,
+            filename="string-length-mru.py",
+        )
+
     def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"
@@ -2002,7 +2017,7 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "    alias = values\n"
             "    values.update({1: 'one', 2: 'two', 3: 'three'})\n"
             "    if len(values) != 3 or len(alias) != 3:\n"
-                "        return 1\n"
+            "        return 1\n"
             "    return len(alias) * 10 + (2 if 2 in alias else 0)\n",
             expected=32,
             filename="set-update.py",

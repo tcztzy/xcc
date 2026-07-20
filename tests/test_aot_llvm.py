@@ -1542,7 +1542,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call i64 @strlen(ptr %text)", llvm_ir)
+        self.assertIn("call i64 @__xcc_aot_string_len(ptr %text)", llvm_ir)
         self.assertIn("icmp ne i64 %strlen", llvm_ir)
         self.assertNotIn("icmp ne ptr %text, null", llvm_ir)
 
@@ -2881,7 +2881,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call i64 @strlen(ptr %data)", llvm_ir)
+        self.assertIn("call i64 @__xcc_aot_string_len(ptr %data)", llvm_ir)
         self.assertIn("getelementptr i8, ptr %data", llvm_ir)
         self.assertIn("load i8, ptr", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_single_byte_string(i8", llvm_ir)
@@ -3494,6 +3494,19 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
         self.assertNotIn("call ptr @__xcc_aot_string_concat2", function_ir)
 
+    def test_v422_string_length_uses_lifetime_bound_mru_cache(self) -> None:
+        module = lower_source_to_ir(
+            "def measure(text: str) -> int:\n    return len(text) + len(text)\n",
+            filename="cached-string-length.py",
+            entry="measure",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        body = llvm_ir.split("define i64 @measure(ptr %text)", 1)[1].split("\n}", 1)[0]
+
+        self.assertEqual(body.count("call i64 @__xcc_aot_string_len"), 2)
+        self.assertNotIn("call i64 @strlen", body)
+
     def test_v420_disjoint_temporary_owner_forces_exact_return_promotion(self) -> None:
         string_type = IrStringType()
         values_type = IrTupleType((string_type,))
@@ -3784,7 +3797,8 @@ class AotLlvmTextTests(unittest.TestCase):
         function_ir = llvm_ir[start:end]
 
         self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
-        self.assertEqual(function_ir.count("call i64 @strlen"), 3)
+        self.assertEqual(function_ir.count("call i64 @__xcc_aot_string_len"), 3)
+        self.assertNotIn("call i64 @strlen", function_ir)
         self.assertNotIn("call ptr @__xcc_aot_string_concat2", function_ir)
 
     def test_emits_string_startswith_tuple_prefix_intrinsic_calls(self) -> None:
@@ -4555,7 +4569,7 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
 
         self.assertIn("trunc i64 %needle to i8", llvm_ir)
-        self.assertIn("call i64 @strlen(ptr %haystack)", llvm_ir)
+        self.assertIn("call i64 @__xcc_aot_string_len(ptr %haystack)", llvm_ir)
         self.assertNotIn("@__cmp_NotIn", llvm_ir)
 
     def test_emits_dict_get_as_tuple_pair_scan(self) -> None:

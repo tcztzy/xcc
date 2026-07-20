@@ -1729,6 +1729,66 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v422_string_length_mru_survives_alternation_and_clears_on_drop(self) -> None:
+        llvm_ir = (
+            '@v422_char = private constant [2 x i8] c"x\\00"\n'
+            + runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %text = call ptr @__xcc_aot_alloc(i64 7)\n"
+            + "  store i8 97, ptr %text\n"
+            + "  %text1 = getelementptr i8, ptr %text, i64 1\n"
+            + "  store i8 98, ptr %text1\n"
+            + "  %text2 = getelementptr i8, ptr %text, i64 2\n"
+            + "  store i8 99, ptr %text2\n"
+            + "  %text3 = getelementptr i8, ptr %text, i64 3\n"
+            + "  store i8 100, ptr %text3\n"
+            + "  %text4 = getelementptr i8, ptr %text, i64 4\n"
+            + "  store i8 101, ptr %text4\n"
+            + "  %text5 = getelementptr i8, ptr %text, i64 5\n"
+            + "  store i8 102, ptr %text5\n"
+            + "  %text6 = getelementptr i8, ptr %text, i64 6\n"
+            + "  store i8 0, ptr %text6\n"
+            + "  %first = call i64 @__xcc_aot_string_len(ptr %text)\n"
+            + "  %char = call i64 @__xcc_aot_string_len(ptr @v422_char)\n"
+            + "  %again = call i64 @__xcc_aot_string_len(ptr %text)\n"
+            + "  %primary = load ptr, ptr @__xcc_aot_startswith_text\n"
+            + "  %secondary = load ptr, ptr @__xcc_aot_startswith_text_2\n"
+            + "  %primary_is_text = icmp eq ptr %primary, %text\n"
+            + "  %secondary_is_char = icmp eq ptr %secondary, @v422_char\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
+            + "  %after_primary = load ptr, ptr @__xcc_aot_startswith_text\n"
+            + "  %after_secondary = load ptr, ptr @__xcc_aot_startswith_text_2\n"
+            + "  %char_promoted = icmp eq ptr %after_primary, @v422_char\n"
+            + "  %secondary_cleared = icmp eq ptr %after_secondary, null\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %first_ok = icmp eq i64 %first, 6\n"
+            + "  %char_ok = icmp eq i64 %char, 1\n"
+            + "  %again_ok = icmp eq i64 %again, 6\n"
+            + "  %lengths_a = and i1 %first_ok, %char_ok\n"
+            + "  %lengths = and i1 %lengths_a, %again_ok\n"
+            + "  %order = and i1 %primary_is_text, %secondary_is_char\n"
+            + "  %cleared = and i1 %char_promoted, %secondary_cleared\n"
+            + "  %cache_ok = and i1 %order, %cleared\n"
+            + "  %lifetime = and i1 %cache_ok, %balanced\n"
+            + "  %ok = and i1 %lengths, %lifetime\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "string-length-mru",
+                filename="string-length-mru.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_annotation_name_edge_forms(self) -> None:
         string_annotation = (
             parse_source('def f() -> "Type | None":\n    pass\n').tree.body[0].returns
