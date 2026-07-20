@@ -778,6 +778,83 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v421_exact_promotion_preserves_newest_first_order_across_boundaries(
+        self,
+    ) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %outer = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %middle = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %inner = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %a = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 11, ptr %a\n"
+            + "  %b = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 13, ptr %b\n"
+            + "  %c = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  store i64 17, ptr %c\n"
+            + "  call void @__xcc_aot_phase_promote_begin(ptr %middle)\n"
+            + "  %moved_c = call i1 @__xcc_aot_phase_promote_to(ptr %c, ptr %middle)\n"
+            + "  %moved_b = call i1 @__xcc_aot_phase_promote_to(ptr %b, ptr %middle)\n"
+            + "  %moved_a = call i1 @__xcc_aot_phase_promote_to(ptr %a, ptr %middle)\n"
+            + "  call void @__xcc_aot_phase_promote_end(ptr %middle)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %inner)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %middle)\n"
+            + "  %a.header = getelementptr i8, ptr %a, i64 -32\n"
+            + "  %b.header = getelementptr i8, ptr %b, i64 -32\n"
+            + "  %c.header = getelementptr i8, ptr %c, i64 -32\n"
+            + "  %a.next.slot = getelementptr i8, ptr %a.header, i64 8\n"
+            + "  %a.next = load ptr, ptr %a.next.slot\n"
+            + "  %b.next.slot = getelementptr i8, ptr %b.header, i64 8\n"
+            + "  %b.next = load ptr, ptr %b.next.slot\n"
+            + "  %c.next.slot = getelementptr i8, ptr %c.header, i64 8\n"
+            + "  %c.next = load ptr, ptr %c.next.slot\n"
+            + "  %a_before_b = icmp eq ptr %a.next, %b.header\n"
+            + "  %b_before_c = icmp eq ptr %b.next, %c.header\n"
+            + "  %c_is_head = icmp eq ptr %c.next, null\n"
+            + "  %first_pair = and i1 %a_before_b, %b_before_c\n"
+            + "  %ordered = and i1 %first_pair, %c_is_head\n"
+            + "  call void @__xcc_aot_phase_promote_begin(ptr %outer)\n"
+            + "  %moved_again_c = call i1 @__xcc_aot_phase_promote_to(ptr %c, ptr %outer)\n"
+            + "  %moved_again_b = call i1 @__xcc_aot_phase_promote_to(ptr %b, ptr %outer)\n"
+            + "  %moved_again_a = call i1 @__xcc_aot_phase_promote_to(ptr %a, ptr %outer)\n"
+            + "  call void @__xcc_aot_phase_promote_end(ptr %outer)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %outer)\n"
+            + "  %a.value = load i64, ptr %a\n"
+            + "  %b.value = load i64, ptr %b\n"
+            + "  %c.value = load i64, ptr %c\n"
+            + "  %ab = add i64 %a.value, %b.value\n"
+            + "  %sum = add i64 %ab, %c.value\n"
+            + "  %values_survived = icmp eq i64 %sum, 41\n"
+            + "  call void @__xcc_aot_free(ptr %c)\n"
+            + "  call void @__xcc_aot_free(ptr %b)\n"
+            + "  call void @__xcc_aot_free(ptr %a)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %first_moves = and i1 %moved_c, %moved_b\n"
+            + "  %all_first = and i1 %first_moves, %moved_a\n"
+            + "  %second_moves = and i1 %moved_again_c, %moved_again_b\n"
+            + "  %all_second = and i1 %second_moves, %moved_again_a\n"
+            + "  %moves = and i1 %all_first, %all_second\n"
+            + "  %order_and_values = and i1 %ordered, %values_survived\n"
+            + "  %lifetime = and i1 %order_and_values, %balanced\n"
+            + "  %ok = and i1 %moves, %lifetime\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-promotion-order",
+                filename="phase-promotion-order.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v415_direct_parent_capture_defers_graph_walk_until_region_finish(self) -> None:
         llvm_ir = (
             runtime_prelude()
@@ -1641,9 +1718,7 @@ class AotMilestone3IrTests(unittest.TestCase):
             free_body.index("call void @__xcc_aot_startswith_cache_invalidate"),
             free_body.index("call void @free"),
         )
-        self.assertEqual(
-            realloc_body.count("call void @__xcc_aot_startswith_cache_invalidate"), 2
-        )
+        self.assertEqual(realloc_body.count("call void @__xcc_aot_startswith_cache_invalidate"), 2)
         with tempfile.TemporaryDirectory() as tmp:
             executable = compile_llvm_executable(
                 llvm_ir,

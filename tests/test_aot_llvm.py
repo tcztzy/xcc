@@ -343,9 +343,9 @@ class AotLlvmTextTests(unittest.TestCase):
                 body = llvm_ir.split(signature, 1)[1].split("\n}", 1)[0]
                 self.assertNotIn("@__xcc_aot_phase_mark", body)
                 self.assertNotIn("@__xcc_aot_phase_reset", body)
-        allocating_body = llvm_ir.split("define ptr @allocates(ptr %values)", 1)[1].split(
-            "\n}", 1
-        )[0]
+        allocating_body = llvm_ir.split("define ptr @allocates(ptr %values)", 1)[1].split("\n}", 1)[
+            0
+        ]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", allocating_body)
         self.assertIn("call void @__xcc_aot_phase_finish", allocating_body)
 
@@ -3566,9 +3566,102 @@ class AotLlvmTextTests(unittest.TestCase):
         build_ir = llvm_ir.split("define ptr @build()", 1)[1].split("\n}", 1)[0]
         direct_ir = llvm_ir.split("define ptr @direct()", 1)[1].split("\n}", 1)[0]
 
-        self.assertIn("call void @\"__xcc_aot_phase_promote:IrRecordType", build_ir)
+        self.assertIn('call void @"__xcc_aot_phase_promote:IrRecordType', build_ir)
         self.assertNotIn("@__xcc_aot_phase_capture_defer", build_ir)
         self.assertIn("@__xcc_aot_phase_capture_defer", direct_ir)
+
+    def test_v421_exact_promotion_walks_newest_first_inside_a_scoped_move(self) -> None:
+        string_type = IrStringType()
+        values_type = IrTupleType((string_type,))
+        scratch_type = IrRecordType("Scratch")
+        result_type = IrRecordType("Result")
+        module = IrModule(
+            "ordered_exact_return.py",
+            (
+                IrRecord("Scratch", (IrField("values", values_type),)),
+                IrRecord(
+                    "Result",
+                    (
+                        IrField("first", string_type),
+                        IrField("second", string_type),
+                        IrField("third", string_type),
+                        IrField("values", values_type),
+                    ),
+                ),
+            ),
+            (
+                IrFunction(
+                    "Scratch.build",
+                    (IrParam("self", scratch_type),),
+                    result_type,
+                    (
+                        IrReturn(
+                            IrConstructRecord(
+                                "Result",
+                                (
+                                    IrConstString("first"),
+                                    IrConstString("second"),
+                                    IrConstString("third"),
+                                    IrGetField(
+                                        IrName("self", scratch_type),
+                                        "values",
+                                        values_type,
+                                    ),
+                                ),
+                                result_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "build",
+                    (),
+                    result_type,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "Scratch.build",
+                                (
+                                    IrConstructRecord(
+                                        "Scratch",
+                                        (
+                                            IrTuple(
+                                                (IrConstString("scratch"),),
+                                                values_type,
+                                            ),
+                                        ),
+                                        scratch_type,
+                                    ),
+                                ),
+                                result_type,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        build_ir = llvm_ir.split("define ptr @build()", 1)[1].split("\n}", 1)[0]
+        result_helper = llvm_ir.split(
+            "define void @\"__xcc_aot_phase_promote:IrRecordType(name='Result')\"",
+            1,
+        )[1].split("\n}", 1)[0]
+        tuple_helper = llvm_ir.split(
+            'define void @"__xcc_aot_phase_promote:IrTupleType(elements=(IrStringType(),))"',
+            1,
+        )[1].split("\n}", 1)[0]
+
+        begin = build_ir.index("call void @__xcc_aot_phase_promote_begin")
+        promote = build_ir.index('call void @"__xcc_aot_phase_promote:IrRecordType')
+        end = build_ir.index("call void @__xcc_aot_phase_promote_end")
+        self.assertLess(begin, promote)
+        self.assertLess(promote, end)
+        self.assertLess(result_helper.index("%field.3.ptr"), result_helper.index("%field.2.ptr"))
+        self.assertLess(result_helper.index("%field.2.ptr"), result_helper.index("%field.1.ptr"))
+        self.assertLess(result_helper.index("%field.1.ptr"), result_helper.index("%field.0.ptr"))
+        self.assertIn("%remaining = phi i64 [ %length, %storage ]", tuple_helper)
+        self.assertIn("%index = sub i64 %remaining, 1", tuple_helper)
 
     def test_v399_single_use_concat_assignment_is_forwarded_to_startswith(self) -> None:
         int64 = IrIntType(64, signed=True)

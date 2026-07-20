@@ -2326,7 +2326,11 @@ class _Emitter:
         self.phase_promote_types[key] = return_type
         helper = _llvm_symbol("__xcc_aot_phase_promote:" + key)
         if self.current_phase_exact_return:
+            lines.append(
+                f"  call void @__xcc_aot_phase_promote_begin(ptr {self.current_phase_mark})"
+            )
             lines.append(f"  call void {helper}(ptr {value}, ptr {self.current_phase_mark})")
+            lines.append(f"  call void @__xcc_aot_phase_promote_end(ptr {self.current_phase_mark})")
             return
         deferred = self._tmp("phase.return.deferred")
         promote_label = self._label("phase.return.promote")
@@ -2336,7 +2340,9 @@ class _Emitter:
         )
         lines.append(f"  br i1 {deferred}, label %{finish_label}, label %{promote_label}")
         lines.append(f"{promote_label}:")
+        lines.append(f"  call void @__xcc_aot_phase_promote_begin(ptr {self.current_phase_mark})")
         lines.append(f"  call void {helper}(ptr {value}, ptr {self.current_phase_mark})")
+        lines.append(f"  call void @__xcc_aot_phase_promote_end(ptr {self.current_phase_mark})")
         lines.append(f"  br label %{finish_label}")
         lines.append(f"{finish_label}:")
 
@@ -2430,6 +2436,7 @@ class _Emitter:
                 "  %deferred = call i1 @__xcc_aot_phase_capture_defer(ptr %target)",
                 "  br i1 %deferred, label %done, label %transfer",
                 "transfer:",
+                "  call void @__xcc_aot_phase_promote_begin(ptr %target)",
             ]
             if isinstance(type_info, IrFloatType):
                 lines.append(
@@ -2438,7 +2445,15 @@ class _Emitter:
             else:
                 target = _llvm_symbol("__xcc_aot_phase_promote:" + key)
                 lines.append(f"  call void {target}(ptr %value, ptr %target)")
-            lines.extend(("  br label %done", "done:", "  ret void", "}"))
+            lines.extend(
+                (
+                    "  call void @__xcc_aot_phase_promote_end(ptr %target)",
+                    "  br label %done",
+                    "done:",
+                    "  ret void",
+                    "}",
+                )
+            )
             helpers.append("\n".join(lines))
         return helpers
 
@@ -2497,13 +2512,13 @@ class _Emitter:
             "storage:",
             "  %data.ptr = getelementptr ptr, ptr %value, i64 2",
             "  %data = load ptr, ptr %data.ptr",
-            "  %data.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %data, ptr %target)",
             "  %layout.count.ptr = getelementptr i64, ptr %value, i64 3",
             "  %layout.count = load i64, ptr %layout.count.ptr",
             "  %layout.tags.ptr = getelementptr ptr, ptr %value, i64 4",
             "  %layout.tags = load ptr, ptr %layout.tags.ptr",
             "  %layout.promoted = call i1 @__xcc_aot_phase_promote_to("
             "ptr %layout.tags, ptr %target)",
+            "  %data.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %data, ptr %target)",
             "  %length = call i64 @__xcc_aot_tuple_len(ptr %value)",
             "  %empty = icmp eq i64 %length, 0",
             "  br i1 %empty, label %done, label %validate.layout",
@@ -2513,10 +2528,11 @@ class _Emitter:
             "  %valid.layout = and i1 %has.count, %has.tags",
             "  br i1 %valid.layout, label %loop.cond, label %fail",
             "loop.cond:",
-            "  %index = phi i64 [ 0, %validate.layout ], [ %next, %loop.next ]",
-            "  %finished = icmp uge i64 %index, %length",
+            "  %remaining = phi i64 [ %length, %validate.layout ], [ %index, %loop.next ]",
+            "  %finished = icmp eq i64 %remaining, 0",
             "  br i1 %finished, label %done, label %loop.body",
             "loop.body:",
+            "  %index = sub i64 %remaining, 1",
             "  %raw = call ptr @__xcc_aot_tuple_get(ptr %value, i64 %index)",
             "  %homogeneous = icmp eq i64 %layout.count, 1",
             "  %tag.index = select i1 %homogeneous, i64 0, i64 %index",
@@ -2551,7 +2567,6 @@ class _Emitter:
             "  call void @__xcc_aot_phase_promote_object_tuple(ptr %raw, ptr %target)",
             "  br label %loop.next",
             "loop.next:",
-            "  %next = add i64 %index, 1",
             "  br label %loop.cond",
             "fail:",
             "  call void @__xcc_aot_memory_safety_fail()",
@@ -2674,7 +2689,8 @@ class _Emitter:
             "children:",
         ]
         record = self.records[record_name]
-        for index, field in enumerate(record.fields):
+        for index in range(len(record.fields) - 1, -1, -1):
+            field = record.fields[index]
             if not _phase_pointer_type(field.type):
                 continue
             field_ptr = f"%field.{index}.ptr"
@@ -2746,16 +2762,17 @@ class _Emitter:
             "storage:",
             "  %data.ptr = getelementptr ptr, ptr %value, i64 2",
             "  %data = load ptr, ptr %data.ptr",
-            "  %data.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %data, ptr %target)",
             "  %layout.ptr = getelementptr ptr, ptr %value, i64 4",
             "  %layout = load ptr, ptr %layout.ptr",
             "  %layout.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %layout, ptr %target)",
+            "  %data.promoted = call i1 @__xcc_aot_phase_promote_to(ptr %data, ptr %target)",
         ]
         if not element_types:
             lines.extend(("  br label %done", "done:", "  ret void", "}"))
             return "\n".join(lines)
         if len(element_types) > 1:
-            for index, element_type in enumerate(element_types):
+            for index in range(len(element_types) - 1, -1, -1):
+                element_type = element_types[index]
                 if not _phase_pointer_type(element_type) and not isinstance(
                     element_type, IrFloatType
                 ):
@@ -2774,17 +2791,17 @@ class _Emitter:
                 "  %length = call i64 @__xcc_aot_tuple_len(ptr %value)",
                 "  br label %loop.cond",
                 "loop.cond:",
-                "  %index = phi i64 [ 0, %storage ], [ %next, %loop.body ]",
-                "  %finished = icmp uge i64 %index, %length",
+                "  %remaining = phi i64 [ %length, %storage ], [ %index, %loop.body ]",
+                "  %finished = icmp eq i64 %remaining, 0",
                 "  br i1 %finished, label %done, label %loop.body",
                 "loop.body:",
+                "  %index = sub i64 %remaining, 1",
                 "  %item = call ptr @__xcc_aot_tuple_get(ptr %value, i64 %index)",
             )
         )
         self._emit_phase_promote_value("%item", element_type, "%target", lines)
         lines.extend(
             (
-                "  %next = add i64 %index, 1",
                 "  br label %loop.cond",
                 "done:",
                 "  ret void",

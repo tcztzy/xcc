@@ -2,6 +2,25 @@
 
 ## Current
 
+- B634 makes exact graph promotion newest-first without reversing the retained
+  allocation list. The first post-B633 probe reached the 60.13-second watchdog
+  at 166,690,816-byte maximum RSS and zero swap: V420 had removed the parser/
+  token memory accumulation, but the generated graph walker still searched a
+  newest-first allocation chain in oldest-first field/tuple order. The earlier
+  B627 reverse-walk experiment only shifted that cost because every moved node
+  was inserted at the same target. V421 scopes each top-level typed promotion
+  with a checked insertion cursor, walks record fields and tuple elements in
+  reverse construction order, and preserves a stable retained-list order for
+  later boundaries. Generated-LLVM and two-boundary native list/lifetime oracles
+  pass with 229 LLVM/M3 tests, 163 CPython/native runtime oracles, lint, and
+  type. The retained hosted Stage 1 builds in 28.60 seconds at 337,313,792-byte
+  maximum RSS with zero swap; its generated `parse_subset_source` uses scoped
+  exact promotion while `lex_python` retains the deferred fast path. It compiles
+  the focused temporary-owner source in 0.11 seconds at 47,693,824-byte maximum
+  RSS using only `llc` and `cc`, matches CPython with exit 7, launches no Python
+  process, links only `libSystem`, has no Python symbols, and rejects the CPython
+  parser. No post-B634 Stage 1-to-2 result is claimed.
+
 - B633 prevents a disjoint temporary owner from hitchhiking on an owned return
   region. The post-B632 probe moved beyond the lexer stall but hit the unchanged
   512 MiB guard after 43.98 seconds with 2,005 source opens and zero swap. The

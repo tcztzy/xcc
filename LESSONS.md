@@ -1,5 +1,11 @@
 # Lessons
 
+- Region graph traversal order and retained-list order are one invariant, not
+  separate micro-optimizations. Walking newest-first avoids repeated scans only
+  if a scoped insertion cursor preserves the moved nodes' oldest-to-newest
+  order; inserting every node at one target reverses the list and makes the next
+  lifetime boundary quadratic again. Prove the same graph can cross two exact
+  boundaries with stable link order, not merely that one sampled walk is faster.
 - An owned return does not imply that every allocation in its function region
   belongs to the returned graph. A freshly constructed parser, lexer, or work
   record whose fields cannot contain the call result is disjoint scratch; whole-
