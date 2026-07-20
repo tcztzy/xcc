@@ -50,6 +50,7 @@ from xcc.aot.ir import (
     IrWhile,
 )
 from xcc.aot.lower import (
+    _collect_global_annotations,
     _collect_global_scalar_constants,
     _collect_global_string_constants,
     _collect_global_string_container_constants,
@@ -322,6 +323,18 @@ class AotSliceInput:
     parsed: AotModule | None = None
 
 
+@dataclass(frozen=True)
+class _SliceGlobalContext:
+    annotations: dict[str, str]
+    module_annotations: dict[str, dict[str, str]]
+    string_constants: dict[str, str]
+    module_string_constants: dict[str, dict[str, str]]
+    scalar_constants: dict[str, IrExpr]
+    module_scalar_constants: dict[str, dict[str, IrExpr]]
+    string_container_constants: dict[str, IrTuple]
+    module_string_container_constants: dict[str, dict[str, IrTuple]]
+
+
 def collect_slice_inputs(paths: tuple[Path, ...]) -> tuple[AotSliceInput, ...]:
     root = (Path.cwd() / "src" / "xcc").resolve()
     modules: list[AotSliceInput] = []
@@ -478,26 +491,15 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
         parsed_cache=parsed_cache,
         analysis_cache=analysis_cache,
     )
-    global_annotations = _slice_global_annotations(
+    global_context = _slice_global_context(
         module_inputs,
         source_cache,
         parsed_cache=parsed_cache,
     )
-    global_string_constants = _slice_global_string_constants(
-        module_inputs,
-        source_cache,
-        parsed_cache=parsed_cache,
-    )
-    global_scalar_constants = _slice_global_scalar_constants(
-        module_inputs,
-        source_cache,
-        parsed_cache=parsed_cache,
-    )
-    global_string_container_constants = _slice_global_string_container_constants(
-        module_inputs,
-        source_cache,
-        parsed_cache=parsed_cache,
-    )
+    global_annotations = global_context.annotations
+    global_string_constants = global_context.string_constants
+    global_scalar_constants = global_context.scalar_constants
+    global_string_container_constants = global_context.string_container_constants
     records: list[IrRecord] = []
     functions: list[IrFunction] = []
     lowerer_cache = _slice_lowerer_cache(
@@ -507,10 +509,7 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
         module_function_types,
         function_types,
         aliases,
-        global_annotations,
-        global_string_constants,
-        global_scalar_constants,
-        global_string_container_constants,
+        global_context,
     )
     for module_input in module_inputs:
         rename_map = rename_maps[module_input.name]
@@ -601,26 +600,15 @@ def _lower_named_slice_from_roots(
         parsed_cache=parsed_cache,
         analysis_cache=analysis_cache,
     )
-    global_annotations = _slice_global_annotations(
+    global_context = _slice_global_context(
         module_inputs,
         source_cache,
         parsed_cache=parsed_cache,
     )
-    global_string_constants = _slice_global_string_constants(
-        module_inputs,
-        source_cache,
-        parsed_cache=parsed_cache,
-    )
-    global_scalar_constants = _slice_global_scalar_constants(
-        module_inputs,
-        source_cache,
-        parsed_cache=parsed_cache,
-    )
-    global_string_container_constants = _slice_global_string_container_constants(
-        module_inputs,
-        source_cache,
-        parsed_cache=parsed_cache,
-    )
+    global_annotations = global_context.annotations
+    global_string_constants = global_context.string_constants
+    global_scalar_constants = global_context.scalar_constants
+    global_string_container_constants = global_context.string_container_constants
     lowerer_cache = _slice_lowerer_cache(
         module_inputs,
         analysis_cache,
@@ -628,10 +616,7 @@ def _lower_named_slice_from_roots(
         module_function_types,
         function_types,
         aliases,
-        global_annotations,
-        global_string_constants,
-        global_scalar_constants,
-        global_string_container_constants,
+        global_context,
     )
     records_by_name: dict[str, IrRecord] = {}
     functions: dict[str, IrFunction] = {}
@@ -812,10 +797,7 @@ def _slice_lowerer_cache(
     module_function_types: dict[str, dict[str, AotFunctionInfo]],
     fallback_function_types: dict[str, AotFunctionInfo],
     aliases: dict[str, AotType],
-    global_annotations: dict[str, str],
-    global_string_constants: dict[str, str],
-    global_scalar_constants: dict[str, IrExpr],
-    global_string_container_constants: dict[str, IrTuple],
+    global_context: _SliceGlobalContext,
 ) -> dict[str, _Lowerer]:
     lowerers: dict[str, _Lowerer] = {}
     for module_input in module_inputs:
@@ -825,10 +807,16 @@ def _slice_lowerer_cache(
             extra_functions=module_function_types[module_input.name],
             fallback_function_types=fallback_function_types,
             extra_aliases=aliases,
-            extra_global_annotations=global_annotations,
-            extra_global_string_constants=global_string_constants,
-            extra_global_scalar_constants=global_scalar_constants,
-            extra_global_string_container_constants=global_string_container_constants,
+            extra_global_annotations=global_context.annotations,
+            extra_global_string_constants=global_context.string_constants,
+            extra_global_scalar_constants=global_context.scalar_constants,
+            extra_global_string_container_constants=global_context.string_container_constants,
+            local_global_annotations=global_context.module_annotations[module_input.name],
+            local_global_string_constants=global_context.module_string_constants[module_input.name],
+            local_global_scalar_constants=global_context.module_scalar_constants[module_input.name],
+            local_global_string_container_constants=(
+                global_context.module_string_container_constants[module_input.name]
+            ),
         )
     return lowerers
 
@@ -968,13 +956,20 @@ def _slice_type_aliases(
     return aliases
 
 
-def _slice_global_annotations(
+def _slice_global_context(
     module_inputs: tuple[AotSliceInput, ...],
     source_cache: dict[str, str],
     *,
     parsed_cache: dict[str, AotModule] | None = None,
-) -> dict[str, str]:
+) -> _SliceGlobalContext:
     annotations: dict[str, str] = {}
+    module_annotations: dict[str, dict[str, str]] = {}
+    string_constants: dict[str, str] = {}
+    module_string_constants: dict[str, dict[str, str]] = {}
+    scalar_constants: dict[str, IrExpr] = {}
+    module_scalar_constants: dict[str, dict[str, IrExpr]] = {}
+    string_container_constants: dict[str, IrTuple] = {}
+    module_string_container_constants: dict[str, dict[str, IrTuple]] = {}
     for module_input in module_inputs:
         tree = (
             parsed_cache[module_input.name].tree
@@ -984,73 +979,32 @@ def _slice_global_annotations(
                 filename=str(module_input.path),
             ).tree
         )
-        for statement in tree.body:
-            if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
-                annotations.setdefault(statement.target.id, ast.unparse(statement.annotation))
-    return annotations
-
-
-def _slice_global_string_constants(
-    module_inputs: tuple[AotSliceInput, ...],
-    source_cache: dict[str, str],
-    *,
-    parsed_cache: dict[str, AotModule] | None = None,
-) -> dict[str, str]:
-    constants: dict[str, str] = {}
-    for module_input in module_inputs:
-        tree = (
-            parsed_cache[module_input.name].tree
-            if parsed_cache is not None
-            else parse_source(
-                source_cache[module_input.name],
-                filename=str(module_input.path),
-            ).tree
-        )
-        for name, value in _collect_global_string_constants(tree).items():
-            constants.setdefault(name, value)
-    return constants
-
-
-def _slice_global_scalar_constants(
-    module_inputs: tuple[AotSliceInput, ...],
-    source_cache: dict[str, str],
-    *,
-    parsed_cache: dict[str, AotModule] | None = None,
-) -> dict[str, IrExpr]:
-    constants: dict[str, IrExpr] = {}
-    for module_input in module_inputs:
-        tree = (
-            parsed_cache[module_input.name].tree
-            if parsed_cache is not None
-            else parse_source(
-                source_cache[module_input.name],
-                filename=str(module_input.path),
-            ).tree
-        )
-        for name, value in _collect_global_scalar_constants(tree).items():
-            constants.setdefault(name, value)
-    return constants
-
-
-def _slice_global_string_container_constants(
-    module_inputs: tuple[AotSliceInput, ...],
-    source_cache: dict[str, str],
-    *,
-    parsed_cache: dict[str, AotModule] | None = None,
-) -> dict[str, IrTuple]:
-    constants: dict[str, IrTuple] = {}
-    for module_input in module_inputs:
-        tree = (
-            parsed_cache[module_input.name].tree
-            if parsed_cache is not None
-            else parse_source(
-                source_cache[module_input.name],
-                filename=str(module_input.path),
-            ).tree
-        )
-        for name, value in _collect_global_string_container_constants(tree).items():
-            constants.setdefault(name, value)
-    return constants
+        local_annotations = _collect_global_annotations(tree)
+        local_string_constants = _collect_global_string_constants(tree)
+        local_scalar_constants = _collect_global_scalar_constants(tree)
+        local_string_container_constants = _collect_global_string_container_constants(tree)
+        module_annotations[module_input.name] = local_annotations
+        module_string_constants[module_input.name] = local_string_constants
+        module_scalar_constants[module_input.name] = local_scalar_constants
+        module_string_container_constants[module_input.name] = local_string_container_constants
+        for name, annotation in local_annotations.items():
+            annotations.setdefault(name, annotation)
+        for name, string_value in local_string_constants.items():
+            string_constants.setdefault(name, string_value)
+        for name, scalar_value in local_scalar_constants.items():
+            scalar_constants.setdefault(name, scalar_value)
+        for name, container_value in local_string_container_constants.items():
+            string_container_constants.setdefault(name, container_value)
+    return _SliceGlobalContext(
+        annotations,
+        module_annotations,
+        string_constants,
+        module_string_constants,
+        scalar_constants,
+        module_scalar_constants,
+        string_container_constants,
+        module_string_container_constants,
+    )
 
 
 def _add_missing_records(

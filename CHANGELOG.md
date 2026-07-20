@@ -2,6 +2,10 @@
 
 ## Current
 
+- Unified slice-global and module-local constant discovery into one pass.
+  Retained lowerers now borrow the per-module annotation, string, scalar, and
+  container tables whose values already back the shared first-definition view,
+  instead of reconstructing equivalent literal IR during preparation.
 - Replaced per-module copies of complete lowerer metadata with local-first,
   immutable shared fallback maps. Class, function, alias, annotation, and
   constant resolution preserves module shadowing, global annotations convert

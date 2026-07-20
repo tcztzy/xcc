@@ -6109,13 +6109,21 @@ def _prepare_analysis_lowerer(
     extra_global_string_constants: dict[str, str] | None = None,
     extra_global_scalar_constants: dict[str, IrExpr] | None = None,
     extra_global_string_container_constants: dict[str, IrTuple] | None = None,
+    local_global_annotations: dict[str, str] | None = None,
+    local_global_string_constants: dict[str, str] | None = None,
+    local_global_scalar_constants: dict[str, IrExpr] | None = None,
+    local_global_string_container_constants: dict[str, IrTuple] | None = None,
 ) -> _Lowerer:
-    local_global_annotations = _collect_global_annotations(analysis.module.tree)
-    local_global_string_constants = _collect_global_string_constants(analysis.module.tree)
-    local_global_scalar_constants = _collect_global_scalar_constants(analysis.module.tree)
-    local_global_string_container_constants = _collect_global_string_container_constants(
-        analysis.module.tree
-    )
+    if local_global_annotations is None:
+        local_global_annotations = _collect_global_annotations(analysis.module.tree)
+    if local_global_string_constants is None:
+        local_global_string_constants = _collect_global_string_constants(analysis.module.tree)
+    if local_global_scalar_constants is None:
+        local_global_scalar_constants = _collect_global_scalar_constants(analysis.module.tree)
+    if local_global_string_container_constants is None:
+        local_global_string_container_constants = _collect_global_string_container_constants(
+            analysis.module.tree
+        )
     global_record_constructor_maps = _collect_global_record_constructor_maps(
         analysis.module.tree,
         analysis.types.classes,

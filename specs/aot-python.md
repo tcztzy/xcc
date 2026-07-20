@@ -125,6 +125,10 @@ V393: Per-module lowerer context ! retain module-local maps plus immutable share
 fallback maps with local-first lookup; copying complete project class, function,
 alias, annotation, or constant maps into every retained lowerer ⊥, and a local
 annotation without a local string-container constant ! hide that shared constant.
+V394: Slice-global annotation and literal discovery ! construct each module's
+local table once, derive the shared first-definition view from those same values,
+and pass both views to retained lowerers; reconstructing equivalent IR constants
+during lowerer preparation ⊥.
 
 ## §T TASKS
 id|status|task|cites
@@ -477,3 +481,4 @@ B601|2026-07-20|named-slice signature, class-table, alias, and lowering passes e
 B602|2026-07-20|the owned Python lexer performs repeated character lookahead through ordinary `source[index]`, but native string subscripting allocated a new two-byte heap string for every lookup; parsing the 65-module source closure therefore retained 475,542,425 bytes before subset summaries began and left no safe budget for lowering. Single-byte results from string indexing, iteration, and `chr` now share a process-stable 256-entry runtime cache whose repeated use does not change allocation accounting|V368,V376,V385,V392
 B603|2026-07-20|tuple-backed `set.add` checked uniqueness but still built a singleton, concatenated the complete set, and forwarded the replacement into its stable handle; lowerer preparation repeatedly collects module globals into sets, so Stage 1 reached the 512 MiB boundary in `_collect_global_names` after final analysis completed. A unique item now appends directly to the original stable set handle with geometric buffer growth, while duplicates remain no-ops and aliases observe the mutation|V368,V375,V385,V386
 B604|2026-07-20|`_prepare_analysis_lowerer` copied the complete project class, function, alias, annotation, and constant maps into each of 65 retained module lowerers; after B603 reached final analysis safely, Stage 1 exhausted the fixed 512 MiB budget in the first `dict_copy` for this retained context. Lowerers now retain their existing module-local maps and immutable shared fallbacks separately, resolve local definitions first, lazily convert referenced global annotations, and preserve local annotation shadowing without cloning shared maps|V376,V384,V385,V393
+B605|2026-07-20|slice-global string-container discovery constructed every module's literal IR while building the shared table, then `_prepare_analysis_lowerer` reconstructed the same local literal IR for each retained lowerer; after B604 removed project-map copies, Stage 1 reached the 512 MiB boundary in the second `_global_literal_element` pass. Slice discovery now creates shared and per-module annotation/string/scalar/container views together, shared entries reference the already-built local values, and prepared lowerers borrow those module tables without repeating literal construction|V376,V384,V385,V393,V394

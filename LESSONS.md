@@ -1,5 +1,9 @@
 # Lessons
 
+- A shared compiler table saves memory only if local consumers reuse its source
+  values. Building the shared view once and then reconstructing every module's
+  equivalent literal IR still doubles retained object graphs; produce shared
+  and local views in one discovery pass and let both reference the same values.
 - Treat compiler-wide semantic tables as immutable shared context. Retaining a
   lowerer per module turns an apparently harmless `dict(shared); update(local)`
   into project-size memory growth; local-first layered lookup preserves Python

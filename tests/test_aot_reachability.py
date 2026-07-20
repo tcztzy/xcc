@@ -85,6 +85,10 @@ class AotReachabilityTests(unittest.TestCase):
                 "xcc.aot.slice._prepare_analysis_lowerer",
                 wraps=aot_slice._prepare_analysis_lowerer,
             ) as prepare_lowerer,
+            patch(
+                "xcc.aot.slice._collect_global_string_container_constants",
+                wraps=aot_slice._collect_global_string_container_constants,
+            ) as collect_global_containers,
         ):
             module = lower_named_slice(
                 (AotSliceInput("pkg.model", Path("pkg/model.py"), source, parsed),),
@@ -93,6 +97,7 @@ class AotReachabilityTests(unittest.TestCase):
 
         self.assertEqual(expand_function_types.call_count, 1)
         self.assertEqual(prepare_lowerer.call_count, 1)
+        self.assertEqual(collect_global_containers.call_count, 1)
         self.assertEqual(
             {record.name for record in module.records},
             {"Leaf", "Middle", "Root"},
