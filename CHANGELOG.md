@@ -2,6 +2,16 @@
 
 ## Current
 
+- Revalidated Stage 0 -> Stage 1 after compact slice metadata at `2eea81f`.
+  The clean no-cache hosted build admitted 65 source units and emitted 817
+  functions, 173 records, and 8,584 reachability edges. The resulting
+  `xcc-aot 0.2 native-contract` rejects the CPython parser, its logged tools are
+  only `llc` and `cc`, and Mach-O/undefined-symbol audits contain no Python or
+  libpython dependency. Peak hosted-build RSS was 274,939,904 bytes; the source
+  manifest, normalized LLVM, and executable SHA-256 values are respectively
+  `d59e8ce23ccdfe89129b94a0b035ca0526fffcb286be0036063137231e516aff`,
+  `db0507f4cfc91d0fa54499249318e7ff524ea6ba96e42e2758a3e59b56751219`,
+  and `26d5e99655f368ce4a2a86ed8966ebe82614b2219cae34b6945a7e82caf40f05`.
 - Split named-slice metadata discovery into compact binder queries. Function
   signatures and class tables no longer retain complete per-module analyses,
   subset summaries are checked once, and alias discovery reuses the sole final
