@@ -2,6 +2,16 @@
 
 ## Current
 
+- Revalidated Stage 0 -> Stage 1 from the current memory-safe source at
+  `aa20fe0`: the clean no-cache hosted build admitted 65 source units and emitted
+  812 functions, 173 records, and 8,533 reachability edges. The resulting
+  `xcc-aot 0.2 native-contract` rejects the CPython parser, its logged tools are
+  only `llc` and `cc`, and Mach-O/undefined-symbol audits contain no Python or
+  libpython dependency. Peak hosted-build RSS was 334,004,224 bytes; the source
+  manifest, normalized LLVM, and executable SHA-256 values are respectively
+  `828e3b3cbafcc223bf3824a9210fd438e012d2ac9fbb57c0b16b90ceca1f4367`,
+  `ba01289b362752f6a06bd684df619ee44fdf2b7bb0be8b6639363b5e300ff7cc`,
+  and `5e30c84d94ebae8ec82794c418e9e20a51c91495693c58b12f94c8a0b4034f0c`.
 - Added native `set.difference_update` for homogeneous tuple-backed sets. The
   lowerer routes it through alias-visible stable-handle mutation, and LLVM
   emission computes the difference before forwarding the replacement buffer
