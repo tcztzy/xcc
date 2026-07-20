@@ -257,7 +257,12 @@ class AotMilestone3SliceTests(unittest.TestCase):
             other_type,
             statements,
         )
-        self.assertEqual(_function_record_names(function), ("Box", "Enum", "Other"))
+        with patch(
+            "xcc.aot.slice._statement_record_names",
+            wraps=_statement_record_names,
+        ) as normalized_statement_walk:
+            self.assertEqual(_function_record_names(function), ("Box", "Enum", "Other"))
+        self.assertEqual(normalized_statement_walk.call_count, 0)
         self.assertEqual(
             _expr_record_names(IrCall("__llvm_api", (), IrRecordType("LLVMApi"))),
             (),

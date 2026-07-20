@@ -1,5 +1,9 @@
 # Lessons
 
+- Recursive metadata walkers should borrow one caller-owned accumulator. A
+  value-returning API that materializes and sorts a tuple at every child looks
+  functional, but a no-GC bootstrap retains the full temporary tree; normalize
+  once at the root after in-place accumulation.
 - A shared compiler table saves memory only if local consumers reuse its source
   values. Building the shared view once and then reconstructing every module's
   equivalent literal IR still doubles retained object graphs; produce shared

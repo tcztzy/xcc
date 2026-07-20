@@ -2,6 +2,10 @@
 
 ## Current
 
+- Changed recursive IR record reachability discovery to borrow one root-owned
+  mutable accumulator. Type, expression, statement, and branch walkers no
+  longer allocate and sort intermediate tuples at every child node; the public
+  query normalizes one result after the full traversal.
 - Unified slice-global and module-local constant discovery into one pass.
   Retained lowerers now borrow the per-module annotation, string, scalar, and
   container tables whose values already back the shared first-definition view,

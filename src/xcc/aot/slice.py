@@ -1617,67 +1617,86 @@ def _rename_call_target(target: str, rename_map: dict[str, str]) -> str:
 def _function_record_names(function: IrFunction) -> tuple[str, ...]:
     names: set[str] = set()
     for param in function.params:
-        names.update(_type_record_names(param.type))
-    names.update(_type_record_names(function.return_type))
+        _add_type_record_names(param.type, names)
+    _add_type_record_names(function.return_type, names)
     for statement in function.body:
-        names.update(_statement_record_names(statement))
+        _add_statement_record_names(statement, names)
     return tuple(sorted(names))
 
 
 def _statement_record_names(statement: IrStmt) -> tuple[str, ...]:
+    names: set[str] = set()
+    _add_statement_record_names(statement, names)
+    return tuple(sorted(names))
+
+
+def _add_statement_record_names(statement: IrStmt, names: set[str]) -> None:
     if isinstance(statement, IrAssign):
-        return _expr_record_names(statement.value)
+        _add_expr_record_names(statement.value, names)
+        return
     if isinstance(statement, IrSetItem):
-        names = set(_expr_record_names(statement.target))
-        names.update(_expr_record_names(statement.index))
-        names.update(_expr_record_names(statement.value))
-        return tuple(sorted(names))
+        _add_expr_record_names(statement.target, names)
+        _add_expr_record_names(statement.index, names)
+        _add_expr_record_names(statement.value, names)
+        return
     if isinstance(statement, IrReturn):
-        return _expr_record_names(statement.value)
+        _add_expr_record_names(statement.value, names)
+        return
     if isinstance(statement, IrIf):
-        names = set(_expr_record_names(statement.condition))
-        names.update(_branch_record_names(statement.then_branch))
+        _add_expr_record_names(statement.condition, names)
+        _add_branch_record_names(statement.then_branch, names)
         if statement.else_branch is not None:
-            names.update(_branch_record_names(statement.else_branch))
-        return tuple(sorted(names))
+            _add_branch_record_names(statement.else_branch, names)
+        return
     if isinstance(statement, IrForEach):
-        names = set(_expr_record_names(statement.iterable))
-        names.update(_branch_record_names(statement.body))
-        return tuple(sorted(names))
+        _add_expr_record_names(statement.iterable, names)
+        _add_branch_record_names(statement.body, names)
+        return
     if isinstance(statement, IrWhile):
-        names = set(_expr_record_names(statement.condition))
-        names.update(_branch_record_names(statement.body))
-        return tuple(sorted(names))
+        _add_expr_record_names(statement.condition, names)
+        _add_branch_record_names(statement.body, names)
+        return
     if isinstance(statement, (IrBreak, IrContinue)):
-        return ()
+        return
     if isinstance(statement, IrPrint):
-        return _expr_record_names(statement.value)
+        _add_expr_record_names(statement.value, names)
+        return
     if isinstance(statement, IrRaise):
-        names = set(_expr_record_names(statement.message))
+        _add_expr_record_names(statement.message, names)
         if statement.payload is not None:
-            names.update(_expr_record_names(statement.payload))
-        return tuple(sorted(names))
+            _add_expr_record_names(statement.payload, names)
+        return
     if isinstance(statement, IrReraise):
-        return ()
+        return
     if isinstance(statement, IrTry):
-        names = set(_branch_record_names(statement.body))
-        names.update(_branch_record_names(statement.orelse))
-        names.update(_branch_record_names(statement.finalbody))
+        _add_branch_record_names(statement.body, names)
+        _add_branch_record_names(statement.orelse, names)
+        _add_branch_record_names(statement.finalbody, names)
         for handler in statement.handlers:
-            names.update(_branch_record_names(handler.body))
-        return tuple(sorted(names))
+            _add_branch_record_names(handler.body, names)
+        return
     assert_never(statement)
 
 
 def _branch_record_names(branch: IrBranch) -> tuple[str, ...]:
     names: set[str] = set()
-    for statement in branch.statements:
-        names.update(_statement_record_names(statement))
+    _add_branch_record_names(branch, names)
     return tuple(sorted(names))
 
 
+def _add_branch_record_names(branch: IrBranch, names: set[str]) -> None:
+    for statement in branch.statements:
+        _add_statement_record_names(statement, names)
+
+
 def _expr_record_names(expr: IrExpr) -> tuple[str, ...]:
-    names = set(_type_record_names(expr.type))
+    names: set[str] = set()
+    _add_expr_record_names(expr, names)
+    return tuple(sorted(names))
+
+
+def _add_expr_record_names(expr: IrExpr, names: set[str]) -> None:
+    _add_type_record_names(expr.type, names)
     if isinstance(expr, IrName) and _record_constructor_type_base_name(expr.type) is not None:
         names.add(expr.name)
     if isinstance(
@@ -1691,77 +1710,96 @@ def _expr_record_names(expr: IrExpr) -> tuple[str, ...]:
         | IrEnumMember
         | IrName,
     ):
-        return tuple(sorted(names))
+        return
     if isinstance(expr, IrBinary):
-        names.update(_expr_record_names(expr.left))
-        names.update(_expr_record_names(expr.right))
-        return tuple(sorted(names))
+        _add_expr_record_names(expr.left, names)
+        _add_expr_record_names(expr.right, names)
+        return
     if isinstance(expr, IrGetField):
-        names.update(_expr_record_names(expr.value))
-        return tuple(sorted(names))
+        _add_expr_record_names(expr.value, names)
+        return
     if isinstance(expr, IrConstructRecord):
         names.add(expr.record)
-        names.update(_expr_tuple_record_names(expr.args))
-        return tuple(sorted(names))
+        _add_expr_tuple_record_names(expr.args, names)
+        return
     if isinstance(expr, IrCall):
-        names.update(_expr_tuple_record_names(expr.args))
+        _add_expr_tuple_record_names(expr.args, names)
         if expr.target == "isinstance" and len(expr.args) == 2:
-            names.update(_isinstance_marker_record_names(expr.args[1]))
-        return tuple(sorted(names))
+            _add_isinstance_marker_record_names(expr.args[1], names)
+        return
     if isinstance(expr, IrTuple):
-        names.update(_expr_tuple_record_names(expr.elements))
-        return tuple(sorted(names))
+        _add_expr_tuple_record_names(expr.elements, names)
+        return
     if isinstance(expr, IrTupleSlice):
-        names.update(_expr_record_names(expr.value))
+        _add_expr_record_names(expr.value, names)
         if expr.start is not None:
-            names.update(_expr_record_names(expr.start))
+            _add_expr_record_names(expr.start, names)
         if expr.stop is not None:
-            names.update(_expr_record_names(expr.stop))
-        return tuple(sorted(names))
+            _add_expr_record_names(expr.stop, names)
+        return
     if isinstance(expr, IrStringConcat):
-        names.update(_expr_tuple_record_names(expr.parts))
-        return tuple(sorted(names))
+        _add_expr_tuple_record_names(expr.parts, names)
+        return
     if isinstance(expr, IrStringJoin):
-        names.update(_expr_record_names(expr.separator))
-        names.update(_expr_record_names(expr.values))
-        return tuple(sorted(names))
+        _add_expr_record_names(expr.separator, names)
+        _add_expr_record_names(expr.values, names)
+        return
     assert_never(expr)
 
 
 def _expr_tuple_record_names(expressions: tuple[IrExpr, ...]) -> tuple[str, ...]:
     names: set[str] = set()
-    for expression in expressions:
-        names.update(_expr_record_names(expression))
+    _add_expr_tuple_record_names(expressions, names)
     return tuple(sorted(names))
 
 
+def _add_expr_tuple_record_names(expressions: tuple[IrExpr, ...], names: set[str]) -> None:
+    for expression in expressions:
+        _add_expr_record_names(expression, names)
+
+
 def _isinstance_marker_record_names(marker: IrExpr) -> tuple[str, ...]:
+    names: set[str] = set()
+    _add_isinstance_marker_record_names(marker, names)
+    return tuple(sorted(names))
+
+
+def _add_isinstance_marker_record_names(marker: IrExpr, names: set[str]) -> None:
     if isinstance(marker, IrName):
-        return (marker.name,)
+        names.add(marker.name)
+        return
     if isinstance(marker, IrTuple):
-        return tuple(element.name for element in marker.elements if isinstance(element, IrName))
-    return ()
+        for element in marker.elements:
+            if isinstance(element, IrName):
+                names.add(element.name)
 
 
 def _type_record_names(
     type_info: IrDictType | IrRecordType | IrTupleType | object,
 ) -> tuple[str, ...]:
+    names: set[str] = set()
+    _add_type_record_names(type_info, names)
+    return tuple(sorted(names))
+
+
+def _add_type_record_names(
+    type_info: IrDictType | IrRecordType | IrTupleType | object,
+    names: set[str],
+) -> None:
     if isinstance(type_info, IrRecordType):
         if type_info.name in _INTERNAL_RECORD_TYPES:
-            return ()
+            return
         if _record_constructor_type_base_name(type_info) is not None:
-            return ()
-        return (type_info.name,)
+            return
+        names.add(type_info.name)
+        return
     if isinstance(type_info, IrTupleType):
-        names: set[str] = set()
         for element in type_info.elements:
-            names.update(_type_record_names(element))
-        return tuple(sorted(names))
+            _add_type_record_names(element, names)
+        return
     if isinstance(type_info, IrDictType):
-        names = set(_type_record_names(type_info.key))
-        names.update(_type_record_names(type_info.value))
-        return tuple(sorted(names))
-    return ()
+        _add_type_record_names(type_info.key, names)
+        _add_type_record_names(type_info.value, names)
 
 
 def _record_constructor_type_base_name(type_info: object) -> str | None:

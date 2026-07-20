@@ -129,6 +129,9 @@ V394: Slice-global annotation and literal discovery ! construct each module's
 local table once, derive the shared first-definition view from those same values,
 and pass both views to retained lowerers; reconstructing equivalent IR constants
 during lowerer preparation ⊥.
+V395: Recursive IR metadata walks ! borrow one caller-owned mutable accumulator
+through the full tree and normalize one result at the root; allocating sorted
+tuple results and replacement sets at every child node ⊥.
 
 ## §T TASKS
 id|status|task|cites
@@ -482,3 +485,4 @@ B602|2026-07-20|the owned Python lexer performs repeated character lookahead thr
 B603|2026-07-20|tuple-backed `set.add` checked uniqueness but still built a singleton, concatenated the complete set, and forwarded the replacement into its stable handle; lowerer preparation repeatedly collects module globals into sets, so Stage 1 reached the 512 MiB boundary in `_collect_global_names` after final analysis completed. A unique item now appends directly to the original stable set handle with geometric buffer growth, while duplicates remain no-ops and aliases observe the mutation|V368,V375,V385,V386
 B604|2026-07-20|`_prepare_analysis_lowerer` copied the complete project class, function, alias, annotation, and constant maps into each of 65 retained module lowerers; after B603 reached final analysis safely, Stage 1 exhausted the fixed 512 MiB budget in the first `dict_copy` for this retained context. Lowerers now retain their existing module-local maps and immutable shared fallbacks separately, resolve local definitions first, lazily convert referenced global annotations, and preserve local annotation shadowing without cloning shared maps|V376,V384,V385,V393
 B605|2026-07-20|slice-global string-container discovery constructed every module's literal IR while building the shared table, then `_prepare_analysis_lowerer` reconstructed the same local literal IR for each retained lowerer; after B604 removed project-map copies, Stage 1 reached the 512 MiB boundary in the second `_global_literal_element` pass. Slice discovery now creates shared and per-module annotation/string/scalar/container views together, shared entries reference the already-built local values, and prepared lowerers borrow those module tables without repeating literal construction|V376,V384,V385,V393,V394
+B606|2026-07-20|record reachability recursively returned a freshly sorted tuple from every type, expression, statement, and branch node, while each parent rebuilt a set from those results; scanning a deeply nested lowered compiler function therefore retained the entire history of temporary tuples until Stage 1 reached the 512 MiB boundary in `_statement_record_names`. The walker now borrows one root-owned set through all recursive calls and creates a single sorted tuple only at the public root boundary|V376,V384,V385,V395
