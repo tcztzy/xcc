@@ -5,6 +5,7 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 def _repo_root() -> Path:
@@ -23,6 +24,14 @@ def _load_run_tests_module():
 
 
 class RunTestsScriptTests(unittest.TestCase):
+    def test_default_worker_count_is_serial(self) -> None:
+        runner = _load_run_tests_module()
+
+        with patch.dict(os.environ, {}, clear=True):
+            args = runner._build_arg_parser().parse_args([])
+
+        self.assertEqual(runner._parse_jobs(args.jobs), 1)
+
     def test_discover_test_modules_returns_importable_sorted_names(self) -> None:
         runner = _load_run_tests_module()
 
@@ -122,7 +131,7 @@ class RunTestsScriptTests(unittest.TestCase):
 
 
 class GateConfigTests(unittest.TestCase):
-    def test_tox_test_envs_use_parallel_coverage_runner(self) -> None:
+    def test_tox_test_envs_use_serial_coverage_runner(self) -> None:
         config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
 
         env_run_base = config["tool"]["tox"]["env_run_base"]
@@ -131,6 +140,10 @@ class GateConfigTests(unittest.TestCase):
         self.assertEqual(env_run_base["dependency_groups"], ["dev"])
         self.assertEqual(commands[0][:2], ["python", "scripts/run_tests.py"])
         self.assertIn("--coverage", commands[0])
+        self.assertEqual(commands[0][-2:], ["--jobs", "1"])
+
+        mypyc_command = config["tool"]["tox"]["env"]["mypyc"]["commands"][1]
+        self.assertEqual(mypyc_command[-2:], ["--jobs", "1"])
 
     def test_coverage_report_uses_current_ratchet(self) -> None:
         config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))

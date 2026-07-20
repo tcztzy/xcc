@@ -2,6 +2,10 @@
 
 ## Current
 
+- Made the default test runner and both tox test paths explicitly serial while
+  native allocation lifetimes remain incomplete. This closes the remaining
+  gate-level concurrency path confirmed by post-reboot panic evidence; explicit
+  `--jobs auto` remains available only as an operator-selected mode.
 - Revalidated Stage 0 -> Stage 1 after stable comprehension builders at
   `f1cc63d`. The clean no-cache hosted build admitted 65 source units and
   emitted 824 functions, 174 records, 8,627 reachability edges, and 32 lazy

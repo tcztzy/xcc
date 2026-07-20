@@ -1,5 +1,9 @@
 # Lessons
 
+- A per-process allocation cap does not by itself define a safe verification
+  gate: concurrent native processes multiply the bound. Make serial execution
+  the non-overridable gate command and the runner default, leaving parallelism
+  as an explicit opt-in until language-level lifetimes bound live allocations.
 - Treat a compiler-created comprehension result as a uniquely owned builder.
   Replacing its stable handle through singleton-plus-concatenation preserves
   values but retains quadratic allocation history in a no-GC bootstrap; append

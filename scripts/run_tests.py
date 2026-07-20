@@ -253,7 +253,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--jobs",
-        default=os.environ.get("XCC_TEST_JOBS", "auto"),
+        default=os.environ.get("XCC_TEST_JOBS", "1"),
         help="parallel module workers: auto or a positive integer",
     )
     parser.add_argument("--coverage", action="store_true", help="collect combined coverage data")

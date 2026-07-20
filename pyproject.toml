@@ -80,7 +80,7 @@ skip_missing_interpreters = true
 
 [tool.tox.env_run_base]
 dependency_groups = ["dev"]
-commands = [["python", "scripts/run_tests.py", "--coverage"]]
+commands = [["python", "scripts/run_tests.py", "--coverage", "--jobs", "1"]]
 
 [tool.tox.env.lint]
 runner = "uv-venv-lock-runner"
@@ -99,7 +99,7 @@ runner = "uv-venv-lock-runner"
 dependency_groups = ["dev"]
 package = "skip"
 base_python = ["python3.11"]
-commands = [["python", "scripts/mypycize_xcc.py", "--build-root", "build/mypyc", "--clean", "--force"], ["python", "scripts/run_tests.py", "--pythonpath", "build/mypyc/lib"]]
+commands = [["python", "scripts/mypycize_xcc.py", "--build-root", "build/mypyc", "--clean", "--force"], ["python", "scripts/run_tests.py", "--pythonpath", "build/mypyc/lib", "--jobs", "1"]]
 
 [tool.tox.env.cpython-build]
 runner = "uv-venv-lock-runner"
