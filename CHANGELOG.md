@@ -2,6 +2,16 @@
 
 ## Current
 
+- Revalidated Stage 0 -> Stage 1 after lazy global-container promotion at
+  `c66f70b`. The clean no-cache hosted build admitted 65 source units and
+  emitted 824 functions, 174 records, 8,627 reachability edges, and 32 lazy
+  global-container slots. It reports `xcc-aot 0.2 native-contract`, rejects the
+  CPython parser, logs only `llc` and `cc`, and has no Python/libpython Mach-O or
+  undefined-symbol dependency. Peak hosted-build RSS was 332,021,760 bytes with
+  no swap; source-manifest, normalized-LLVM, and executable SHA-256 values are
+  respectively `41479fa814486352f8c189d21e222102131e3eed20030ee425da139e43eb13f4`,
+  `283056904c4ab8ad26fa02a2a56655203ee8c802feaa6445069a499a88869c7e`,
+  and `6a149c2d3d7d8922b95388b2f757584949c1f46378660446c245f049be27c853`.
 - Promoted module-level literal containers to lazily initialized process-stable
   handles. The first access creates an ordinary growable heap-backed handle;
   later reads reuse it, so global identity and alias-visible mutation are
