@@ -11,8 +11,8 @@ from xcc.aot import (
     IrAssign,
     IrBinary,
     IrBoolType,
-    IrBreak,
     IrBranch,
+    IrBreak,
     IrCall,
     IrConstBool,
     IrConstFloat,
@@ -1011,6 +1011,40 @@ class AotMilestone3IrTests(unittest.TestCase):
                 llvm_ir,
                 Path(tmp) / "dynamic-object-capture",
                 filename="dynamic-object-capture.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v410_native_dict_equality_is_structural_and_order_independent(self) -> None:
+        source = (
+            "def entry() -> int:\n"
+            "    left = {'alpha': (True, False), 'beta': (False, True)}\n"
+            "    right = {'beta': (False, True), 'alpha': (True, False)}\n"
+            "    if left != right:\n"
+            "        return 1\n"
+            "    right['alpha'] = (False, False)\n"
+            "    if left == right:\n"
+            "        return 2\n"
+            "    shorter = {'alpha': (True, False)}\n"
+            "    if left == shorter:\n"
+            "        return 3\n"
+            "    return 0\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="dict-equality.py", entry="entry")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "dict-equality",
+                filename="dict-equality.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 

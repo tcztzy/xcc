@@ -1,5 +1,12 @@
 # Lessons
 
+- Container identity is not Python container equality. Lowering typed `dict`
+  equality to pointer comparison made a greatest fixed point allocate forever:
+  each iteration computed equal contents in a fresh mapping that could never be
+  pointer-identical. Native dict equality must compare lengths, search keys
+  without depending on insertion order, and recursively apply the typed value
+  equality rule. A one-function compiler fixture can expose this more directly
+  than another full bootstrap attempt.
 - A tagged dynamic value can participate in region ownership without changing
   ordinary Python source. Promote its box first, use the existing runtime tag
   and tuple layout as the traversal proof, and fail closed when either is

@@ -6,8 +6,8 @@ from xcc.aot import (
     IrAssign,
     IrBinary,
     IrBoolType,
-    IrBreak,
     IrBranch,
+    IrBreak,
     IrBytesType,
     IrCall,
     IrConstBool,
@@ -21,11 +21,11 @@ from xcc.aot import (
     IrEnumMember,
     IrExceptHandler,
     IrField,
+    IrFloatType,
     IrForEach,
     IrFunction,
     IrGetField,
     IrIf,
-    IrFloatType,
     IrIntType,
     IrModule,
     IrName,
@@ -38,24 +38,24 @@ from xcc.aot import (
     IrSetItem,
     IrStringConcat,
     IrStringType,
+    IrTry,
     IrTuple,
     IrTupleType,
-    IrTry,
     IrWhile,
     emit_llvm_text,
     lower_source_to_ir,
 )
 from xcc.aot.llvm_text import (
     _block_is_terminated,
+    _branch_assigned_names,
     _current_label,
     _EmittedValue,
     _Emitter,
-    _branch_assigned_names,
     _for_each_targets,
     _llvm_symbol,
     _phase_intrinsic_is_no_capture,
-    _statement_assignment_types,
     _statement_assigned_names,
+    _statement_assignment_types,
 )
 
 
@@ -410,6 +410,26 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertFalse(_phase_intrinsic_is_no_capture("__super_init__"))
         self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
         self.assertIn("call void @__xcc_aot_phase_reset", body)
+
+    def test_v410_dict_equality_emits_order_independent_structural_walk(self) -> None:
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(
+                "def same(\n"
+                "    left: dict[str, tuple[bool, bool]],\n"
+                "    right: dict[str, tuple[bool, bool]],\n"
+                ") -> bool:\n"
+                "    return left == right\n",
+                filename="dict-equality.py",
+                entry="same",
+            )
+        )
+        body = llvm_ir.split("define i1 @same(ptr %left, ptr %right)", 1)[1].split("\n}", 1)[0]
+
+        self.assertIn("dicteq.outer.cond", body)
+        self.assertIn("dicteq.inner.cond", body)
+        self.assertIn("call i32 @strcmp", body)
+        self.assertIn("tupleeq.leftlen", body)
+        self.assertIn("dicteq.mismatch", body)
 
     def test_emits_integer_augmented_assignment_operators(self) -> None:
         module = lower_source_to_ir(

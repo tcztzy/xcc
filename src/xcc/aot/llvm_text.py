@@ -9645,6 +9645,13 @@ class _Emitter:
             if negate:
                 return self._emit_bool_not(value, lines)
             return value
+        if isinstance(left.type, IrDictType) and isinstance(right.type, IrDictType):
+            return self._emit_dict_equality_compare(
+                left,
+                right,
+                negate=negate,
+                lines=lines,
+            )
         if _is_pointer_type(left.type) and isinstance(right.type, IrIntType):
             cast = self._tmp("ptrint")
             lines.append(f"  {cast} = ptrtoint ptr {self._pointer_compare_value(left)} to i64")
@@ -10091,6 +10098,122 @@ class _Emitter:
         if not negate:
             return result
         return self._emit_bool_not(result, lines)
+
+    def _emit_dict_equality_compare(
+        self,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        *,
+        negate: bool,
+        lines: list[str],
+    ) -> _EmittedValue:
+        if not isinstance(left.type, IrDictType) or not isinstance(right.type, IrDictType):
+            self._error("dict equality expects dict operands")
+        self.needs_runtime_prelude = True
+        result_ptr = self._tmp("dicteq.result")
+        outer_index_ptr = self._tmp("dicteq.outer.index")
+        inner_index_ptr = self._tmp("dicteq.inner.index")
+        lengths_label = self._label("dicteq.lengths")
+        outer_cond_label = self._label("dicteq.outer.cond")
+        outer_body_label = self._label("dicteq.outer.body")
+        inner_cond_label = self._label("dicteq.inner.cond")
+        inner_body_label = self._label("dicteq.inner.body")
+        found_label = self._label("dicteq.found")
+        inner_next_label = self._label("dicteq.inner.next")
+        outer_next_label = self._label("dicteq.outer.next")
+        mismatch_label = self._label("dicteq.mismatch")
+        end_label = self._label("dicteq.end")
+        lines.append(f"  {result_ptr} = alloca i1")
+        lines.append(f"  {outer_index_ptr} = alloca i64")
+        lines.append(f"  {inner_index_ptr} = alloca i64")
+        lines.append(f"  store i1 true, ptr {result_ptr}")
+        same = self._tmp("dicteq.same")
+        lines.append(f"  {same} = icmp eq ptr {left.value}, {right.value}")
+        lines.append(f"  br i1 {same}, label %{end_label}, label %{lengths_label}")
+        lines.append(f"{lengths_label}:")
+        left_length = self._tmp("dicteq.left.len")
+        right_length = self._tmp("dicteq.right.len")
+        same_length = self._tmp("dicteq.same.len")
+        lines.append(f"  {left_length} = call i64 @__xcc_aot_tuple_len(ptr {left.value})")
+        lines.append(f"  {right_length} = call i64 @__xcc_aot_tuple_len(ptr {right.value})")
+        lines.append(f"  {same_length} = icmp eq i64 {left_length}, {right_length}")
+        lines.append(f"  store i64 0, ptr {outer_index_ptr}")
+        lines.append(f"  br i1 {same_length}, label %{outer_cond_label}, label %{mismatch_label}")
+        lines.append(f"{outer_cond_label}:")
+        outer_index = self._tmp("dicteq.outer.index")
+        outer_done = self._tmp("dicteq.outer.done")
+        lines.append(f"  {outer_index} = load i64, ptr {outer_index_ptr}")
+        lines.append(f"  {outer_done} = icmp uge i64 {outer_index}, {left_length}")
+        lines.append(f"  br i1 {outer_done}, label %{end_label}, label %{outer_body_label}")
+        lines.append(f"{outer_body_label}:")
+        left_pair = self._tmp("dicteq.left.pair")
+        left_key_raw = self._tmp("dicteq.left.key")
+        left_value_raw = self._tmp("dicteq.left.value")
+        lines.append(
+            f"  {left_pair} = call ptr @__xcc_aot_tuple_get(ptr {left.value}, i64 {outer_index})"
+        )
+        lines.append(f"  {left_key_raw} = call ptr @__xcc_aot_tuple_get(ptr {left_pair}, i64 0)")
+        lines.append(f"  {left_value_raw} = call ptr @__xcc_aot_tuple_get(ptr {left_pair}, i64 1)")
+        left_key = self._emit_runtime_boxed_value(left_key_raw, left.type.key, lines)
+        left_item = self._emit_runtime_boxed_value(left_value_raw, left.type.value, lines)
+        lines.append(f"  store i64 0, ptr {inner_index_ptr}")
+        lines.append(f"  br label %{inner_cond_label}")
+        lines.append(f"{inner_cond_label}:")
+        inner_index = self._tmp("dicteq.inner.index")
+        inner_done = self._tmp("dicteq.inner.done")
+        lines.append(f"  {inner_index} = load i64, ptr {inner_index_ptr}")
+        lines.append(f"  {inner_done} = icmp uge i64 {inner_index}, {right_length}")
+        lines.append(f"  br i1 {inner_done}, label %{mismatch_label}, label %{inner_body_label}")
+        lines.append(f"{inner_body_label}:")
+        right_pair = self._tmp("dicteq.right.pair")
+        right_key_raw = self._tmp("dicteq.right.key")
+        lines.append(
+            f"  {right_pair} = call ptr @__xcc_aot_tuple_get(ptr {right.value}, i64 {inner_index})"
+        )
+        lines.append(f"  {right_key_raw} = call ptr @__xcc_aot_tuple_get(ptr {right_pair}, i64 0)")
+        right_key = self._emit_runtime_boxed_value(right_key_raw, right.type.key, lines)
+        key_equal = self._emit_equality_compare(
+            left_key,
+            right_key,
+            negate=False,
+            lines=lines,
+        )
+        lines.append(f"  br i1 {key_equal.value}, label %{found_label}, label %{inner_next_label}")
+        lines.append(f"{found_label}:")
+        right_value_raw = self._tmp("dicteq.right.value")
+        lines.append(
+            f"  {right_value_raw} = call ptr @__xcc_aot_tuple_get(ptr {right_pair}, i64 1)"
+        )
+        right_item = self._emit_runtime_boxed_value(right_value_raw, right.type.value, lines)
+        value_equal = self._emit_equality_compare(
+            left_item,
+            right_item,
+            negate=False,
+            lines=lines,
+        )
+        lines.append(
+            f"  br i1 {value_equal.value}, label %{outer_next_label}, label %{mismatch_label}"
+        )
+        lines.append(f"{inner_next_label}:")
+        next_inner = self._tmp("dicteq.inner.next")
+        lines.append(f"  {next_inner} = add i64 {inner_index}, 1")
+        lines.append(f"  store i64 {next_inner}, ptr {inner_index_ptr}")
+        lines.append(f"  br label %{inner_cond_label}")
+        lines.append(f"{outer_next_label}:")
+        next_outer = self._tmp("dicteq.outer.next")
+        lines.append(f"  {next_outer} = add i64 {outer_index}, 1")
+        lines.append(f"  store i64 {next_outer}, ptr {outer_index_ptr}")
+        lines.append(f"  br label %{outer_cond_label}")
+        lines.append(f"{mismatch_label}:")
+        lines.append(f"  store i1 false, ptr {result_ptr}")
+        lines.append(f"  br label %{end_label}")
+        lines.append(f"{end_label}:")
+        result = self._tmp("dicteq")
+        lines.append(f"  {result} = load i1, ptr {result_ptr}")
+        value = _EmittedValue(result, IrBoolType())
+        if negate:
+            return self._emit_bool_not(value, lines)
+        return value
 
     def _tuple_equality_dynamic_item_type(
         self,

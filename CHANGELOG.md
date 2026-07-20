@@ -2,6 +2,17 @@
 
 ## Current
 
+- B623 restores Python structural equality for typed native dictionaries. The
+  LLVM emitter now checks lengths, finds each left key in the right mapping
+  independently of insertion order, and recursively compares typed key/value
+  payloads; `!=` negates the same result. V410 covers the exact
+  `dict[str, tuple[bool, bool]]` shape used by ownership fixed points with
+  CPython and native oracles. The retained B623 Stage 1 builds in 28.05 seconds
+  at 323,108,864-byte maximum RSS with zero swap. It compiles `return 7` through
+  the subset parser in 0.62 seconds at 35,405,824-byte maximum RSS, invokes only
+  `llc` and `cc`, and the result exits 7. This removes the pointer-equality
+  infinite fixed point exposed after B622; no Stage 1-to-2 claim is made yet.
+
 - B622 adds fail-closed promotion for native tagged `object` graphs. The owner
   barrier now moves the tag box and recursively handles pointer payloads,
   registered tuple/dict layouts, and only the concrete record types actually
