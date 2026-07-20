@@ -40,6 +40,19 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="for-break-continue.py",
         )
 
+    def test_set_add_preserves_aliases_and_uniqueness(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: set[str] = set()\n"
+            "    alias = values\n"
+            "    values.add('x')\n"
+            "    values.add('x')\n"
+            "    alias.add('y')\n"
+            "    return len(values) * 10 + len(alias)\n",
+            expected=22,
+            filename="set-add-alias.py",
+        )
+
     def test_record_constructor_uses_explicit_none_field_default(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

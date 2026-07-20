@@ -2,6 +2,10 @@
 
 ## Current
 
+- Made native `set.add` append a unique item directly to its stable handle.
+  Duplicate insertion remains a no-op and aliases observe the same mutation,
+  while lowerer global-name collection no longer retains singleton wrappers and
+  complete set copies for every discovered name.
 - Added a process-stable native cache for all 256 single-byte string values.
   String indexing, string iteration, comprehensions, and `chr` now reuse cached
   immutable values instead of retaining one two-byte allocation per character.

@@ -4284,8 +4284,9 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %values)", llvm_ir)
         self.assertIn("setadd.keep", llvm_ir)
         self.assertIn("setadd.append", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_tuple_concat(ptr %values", llvm_ir)
-        self.assertIn("call void @__xcc_aot_tuple_forward(ptr %values", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_append(ptr %values", llvm_ir)
+        self.assertNotIn("call ptr @__xcc_aot_tuple_concat(ptr %values", llvm_ir)
+        self.assertNotIn("call void @__xcc_aot_tuple_forward(ptr %values", llvm_ir)
         self.assertNotIn("@__set_add", llvm_ir)
 
     def test_emits_set_difference_update_with_alias_forwarding(self) -> None:

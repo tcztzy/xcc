@@ -1,5 +1,10 @@
 # Lessons
 
+- Apply the stable-handle rule uniformly across every mutator. A membership
+  guard does not make `set.add` bounded if its successful arm still constructs
+  a singleton and copies the full set before forwarding; append the proven-
+  unique value directly to the stable buffer and keep duplicate insertion a
+  no-op.
 - Apply ownership reasoning to scalar-looking language operations too. In a
   pointer-backed runtime, `text[index]` can allocate even though the source reads
   like a byte load; a lexer repeats that operation millions of times. Immutable

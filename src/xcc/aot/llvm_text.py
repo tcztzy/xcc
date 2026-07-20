@@ -6371,12 +6371,11 @@ class _Emitter:
         lines.append(f"{keep_label}:")
         lines.append(f"  br label %{end_label}")
         lines.append(f"{append_label}:")
-        singleton = self._runtime_singleton_tuple(item, lines)
-        updated = self._tmp("setadd.updated")
+        appended = self._tmp("setadd.appended")
         lines.append(
-            f"  {updated} = call ptr @__xcc_aot_tuple_concat(ptr {receiver.value}, ptr {singleton})"
+            f"  {appended} = call ptr @__xcc_aot_tuple_append("
+            f"ptr {receiver.value}, ptr {self._box_to_runtime_ptr(item, lines)})"
         )
-        lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {receiver.value}, ptr {updated})")
         lines.append(f"  br label %{end_label}")
         lines.append(f"{end_label}:")
         return _EmittedValue(receiver.value, expr.type)
