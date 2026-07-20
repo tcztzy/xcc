@@ -1052,8 +1052,15 @@ class AotScalarLoweringTests(unittest.TestCase):
                 "__cmp_In",
                 (
                     IrName("lexeme", IrStringType()),
-                    IrTuple(
-                        (IrConstString("int"), IrConstString("return")),
+                    IrCall(
+                        "__global_tuple",
+                        (
+                            IrConstString("global_string_set_membership.py:KEYWORDS"),
+                            IrTuple(
+                                (IrConstString("int"), IrConstString("return")),
+                                IrTupleType((IrStringType(),)),
+                            ),
+                        ),
                         IrTupleType((IrStringType(),)),
                     ),
                 ),
@@ -1083,8 +1090,21 @@ class AotScalarLoweringTests(unittest.TestCase):
                 "__cmp_In",
                 (
                     IrName("lexeme", IrStringType()),
-                    IrTuple(
-                        (IrConstString(">>="), IrConstString("->"), IrConstString("+")),
+                    IrCall(
+                        "__global_tuple",
+                        (
+                            IrConstString(
+                                "global_sorted_string_container.py:PUNCTUATORS_SORTED"
+                            ),
+                            IrTuple(
+                                (
+                                    IrConstString(">>="),
+                                    IrConstString("->"),
+                                    IrConstString("+"),
+                                ),
+                                IrTupleType((IrStringType(),)),
+                            ),
+                        ),
                         IrTupleType((IrStringType(),)),
                     ),
                 ),
@@ -2902,7 +2922,10 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(returned.value, IrCall)
         self.assertEqual(returned.value.target, "__dict_get")
         container = returned.value.args[0]
-        self.assertIsInstance(container, IrTuple)
+        self.assertIsInstance(container, IrCall)
+        assert isinstance(container, IrCall)
+        self.assertEqual(container.target, "__global_tuple")
+        self.assertIsInstance(container.args[1], IrTuple)
         self.assertEqual(container.type, IrDictType(IrStringType(), int64))
         self.assertEqual(returned.value.args[1], IrName("name", IrStringType()))
 
@@ -2928,7 +2951,12 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(selected, IrCall)
         self.assertEqual(selected.target, "__ifexp")
         self.assertEqual(selected.type, dict_type)
-        self.assertTrue(all(isinstance(value, IrTuple) for value in selected.args[1:]))
+        self.assertTrue(
+            all(
+                isinstance(value, IrCall) and value.target == "__global_tuple"
+                for value in selected.args[1:]
+            )
+        )
         self.assertEqual(returned.value.args[1], IrName("name", IrStringType()))
 
     def test_local_global_dict_annotation_wins_over_extra_string_container(self) -> None:
@@ -2950,7 +2978,10 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(returned.value, IrCall)
         self.assertEqual(returned.value.target, "__dict_get")
         container = returned.value.args[0]
-        self.assertIsInstance(container, IrTuple)
+        self.assertIsInstance(container, IrCall)
+        assert isinstance(container, IrCall)
+        self.assertEqual(container.target, "__global_tuple")
+        self.assertIsInstance(container.args[1], IrTuple)
         self.assertEqual(container.type, IrDictType(IrStringType(), int64))
 
     def test_prepare_lowerer_layers_shared_context_without_copying_it(self) -> None:

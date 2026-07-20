@@ -775,6 +775,7 @@ class _Emitter:
         self.string_constants: list[str] = []
         self.enum_constants: dict[tuple[str, str], str] = {}
         self.global_constants: dict[str, str] = {}
+        self.global_tuple_constants: dict[str, str] = {}
         self.loop_stack: list[_LoopLabels] = []
         self.extra_declarations: set[str] = set()
         self.needs_puts = False
@@ -2473,6 +2474,45 @@ class _Emitter:
         self._register_tuple_object_layout(result, expr.type, lines)
         return _EmittedValue(result, expr.type)
 
+    def _emit_global_tuple_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if (
+            len(expr.args) != 2
+            or not isinstance(expr.args[0], IrConstString)
+            or not isinstance(expr.args[1], IrTuple)
+        ):
+            self._error("__global_tuple expects a string key and tuple literal")
+        key = expr.args[0].value
+        slot = self.global_tuple_constants.get(key)
+        if slot is None:
+            slot = f"@__xcc_aot_global_tuple_{len(self.global_tuple_constants)}"
+            self.global_tuple_constants[key] = slot
+            self.global_constants[slot] = f"{slot} = private global ptr null"
+        source_label = _current_label(lines)
+        cached = self._tmp("global.tuple.cached")
+        empty = self._tmp("global.tuple.empty")
+        initialize_label = self._label("global.tuple.init")
+        ready_label = self._label("global.tuple.ready")
+        lines.append(f"  {cached} = load ptr, ptr {slot}")
+        lines.append(f"  {empty} = icmp eq ptr {cached}, null")
+        lines.append(f"  br i1 {empty}, label %{initialize_label}, label %{ready_label}")
+        lines.append(f"{initialize_label}:")
+        initialized = self._emit_tuple(expr.args[1], names, lines)
+        initialized_label = _current_label(lines)
+        lines.append(f"  store ptr {initialized.value}, ptr {slot}")
+        lines.append(f"  br label %{ready_label}")
+        lines.append(f"{ready_label}:")
+        result = self._tmp("global.tuple")
+        lines.append(
+            f"  {result} = phi ptr [ {cached}, %{source_label} ], "
+            f"[ {initialized.value}, %{initialized_label} ]"
+        )
+        return _EmittedValue(result, expr.type)
+
     def _box_to_runtime_ptr(self, value: _EmittedValue, lines: list[str]) -> str:
         if isinstance(value.type, IrNoneType):
             return "null"
@@ -2743,6 +2783,8 @@ class _Emitter:
     ) -> _EmittedValue | None:
         if expr.target == "__llvm_api":
             return _EmittedValue("null", expr.type)
+        if expr.target == "__global_tuple":
+            return self._emit_global_tuple_call(expr, names, lines)
         if expr.target.startswith(_NORETURN_CALL_PREFIX):
             return self._emit_noreturn_call(expr, names, lines)
         if expr.target.startswith(_RECORD_INIT_PREFIX):

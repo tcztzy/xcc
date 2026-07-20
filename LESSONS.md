@@ -1,5 +1,9 @@
 # Lessons
 
+- Immutable source syntax does not imply per-use construction. Module-level
+  literal containers need one binding-owned handle, analogous to a safe lazy
+  static: initialize normal growable heap storage once, then reuse it so aliases
+  and later mutations remain valid without pointing `realloc` at static memory.
 - Borrowed accumulators also apply when traversal order and duplicates matter:
   use one root-owned list and append in semantic order instead of recursively
   concatenating immutable child tuples.

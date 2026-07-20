@@ -453,13 +453,25 @@ class _Lowerer:
             return value
         return self.fallback_global_scalar_constants.get(name)
 
-    def _global_string_container_constant(self, name: str) -> IrTuple | None:
+    def _global_string_container_literal(self, name: str) -> IrTuple | None:
         value = self.global_string_container_constants.get(name)
         if value is not None:
             return value
         if name in self.global_annotations:
             return None
         return self.fallback_global_string_container_constants.get(name)
+
+    def _global_string_container_constant(self, name: str) -> IrCall | None:
+        value = self._global_string_container_literal(name)
+        if value is None:
+            return None
+        shared_value = self.fallback_global_string_container_constants.get(name)
+        scope = "shared" if value is shared_value else self.filename
+        return IrCall(
+            "__global_tuple",
+            (IrConstString(f"{scope}:{name}"), value),
+            value.type,
+        )
 
     def lower_record(self, node: ast.ClassDef) -> IrRecord:
         class_info = self._class_info(node.name)
@@ -3658,7 +3670,7 @@ class _Lowerer:
         target_names: tuple[str, ...] | None = None
         target = expr.args[1]
         if isinstance(target, ast.Name):
-            marker_container = self._global_string_container_constant(target.id)
+            marker_container = self._global_string_container_literal(target.id)
             if (
                 marker_container is not None
                 and marker_container.elements

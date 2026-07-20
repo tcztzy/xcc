@@ -2373,6 +2373,20 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="global-literal-dict.py",
         )
 
+    def test_global_literal_dict_keeps_process_stable_identity(self) -> None:
+        self.assert_native_matches_cpython(
+            "VALUES: dict[str, int] = {'x': 1}\n"
+            "def values() -> dict[str, int]:\n"
+            "    return VALUES\n"
+            "def entry() -> int:\n"
+            "    first = values()\n"
+            "    second = values()\n"
+            "    first['x'] = 7\n"
+            "    return second['x']\n",
+            expected=7,
+            filename="global-literal-dict-identity.py",
+        )
+
     def test_global_literal_dict_merges_empty_nested_tuple(self) -> None:
         self.assert_native_matches_cpython(
             "TABLE = {\n"

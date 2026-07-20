@@ -3951,6 +3951,41 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("ret ptr %values", llvm_ir)
         self.assertNotIn("@__dict_items", llvm_ir)
 
+    def test_emits_global_tuple_as_lazy_process_stable_handle(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        dict_type = IrDictType(IrStringType(), int64)
+        pair_type = IrTupleType((IrStringType(), int64))
+        literal = IrTuple(
+            (IrTuple((IrConstString("x"), IrConstInt(1, int64)), pair_type),),
+            dict_type,
+        )
+        global_value = IrCall(
+            "__global_tuple",
+            (IrConstString("module:VALUES"), literal),
+            dict_type,
+        )
+        module = IrModule(
+            "global_tuple.py",
+            (),
+            (
+                IrFunction(
+                    "values",
+                    (),
+                    dict_type,
+                    (IrReturn(global_value),),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("@__xcc_aot_global_tuple_0 = private global ptr null", llvm_ir)
+        self.assertIn("load ptr, ptr @__xcc_aot_global_tuple_0", llvm_ir)
+        self.assertIn("global.tuple.init", llvm_ir)
+        self.assertIn("global.tuple.ready", llvm_ir)
+        self.assertIn("= phi ptr", llvm_ir)
+        self.assertIn("store ptr %tuple", llvm_ir)
+
     def test_emits_bool_builtin_as_truthiness(self) -> None:
         tuple_type = IrTupleType((IrStringType(),))
         module = IrModule(

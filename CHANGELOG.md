@@ -2,6 +2,10 @@
 
 ## Current
 
+- Promoted module-level literal containers to lazily initialized process-stable
+  handles. The first access creates an ordinary growable heap-backed handle;
+  later reads reuse it, so global identity and alias-visible mutation are
+  preserved without rebuilding large literal graphs on every function call.
 - Changed recursive call-target reachability discovery to append into one
   root-owned list. It preserves source traversal order and duplicate calls while
   eliminating per-child tuple concatenation and normalization.

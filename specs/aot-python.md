@@ -132,6 +132,10 @@ during lowerer preparation ⊥.
 V395: Recursive IR metadata walks ! borrow one caller-owned mutable accumulator
 through the full tree and normalize one result at the root; allocating sorted
 tuple results and replacement sets at every child node ⊥.
+V396: Module-level literal containers ! one lazily initialized process-stable,
+heap-backed handle per binding; repeated reads ! allocation-stable identity and
+mutations ! alias-visible, while non-growable static backing used with mutable
+tuple/list/dict/set operations ⊥.
 
 ## §T TASKS
 id|status|task|cites
@@ -487,3 +491,4 @@ B604|2026-07-20|`_prepare_analysis_lowerer` copied the complete project class, f
 B605|2026-07-20|slice-global string-container discovery constructed every module's literal IR while building the shared table, then `_prepare_analysis_lowerer` reconstructed the same local literal IR for each retained lowerer; after B604 removed project-map copies, Stage 1 reached the 512 MiB boundary in the second `_global_literal_element` pass. Slice discovery now creates shared and per-module annotation/string/scalar/container views together, shared entries reference the already-built local values, and prepared lowerers borrow those module tables without repeating literal construction|V376,V384,V385,V393,V394
 B606|2026-07-20|record reachability recursively returned a freshly sorted tuple from every type, expression, statement, and branch node, while each parent rebuilt a set from those results; scanning a deeply nested lowered compiler function therefore retained the entire history of temporary tuples until Stage 1 reached the 512 MiB boundary in `_statement_record_names`. The walker now borrows one root-owned set through all recursive calls and creates a single sorted tuple only at the public root boundary|V376,V384,V385,V395
 B607|2026-07-20|call-target reachability used the same value-returning recursive shape as the former record walker, concatenating freshly allocated child tuples at every expression and statement; after B606 completed record discovery, Stage 1 reached the 512 MiB boundary in `_expr_call_targets`. The call walker now appends into one borrowed root-owned list, preserving traversal order and duplicate calls, and materializes one tuple only at the public query boundary|V376,V384,V385,V395
+B608|2026-07-20|each read of a module-level literal container emitted a fresh runtime tuple graph; `_rename_call_target` therefore rebuilt the 76-entry `_PROTOCOL_METHOD_TARGETS` dictionary, including every pair tuple, on every call and Stage 1 reached the 512 MiB boundary at the first tuple allocation in that function. Global container reads now use a binding-keyed lazy LLVM slot whose first access creates one normal heap-backed stable handle and whose later accesses reuse it, preserving alias-visible mutation without unsafe non-growable static backing|V368,V376,V384,V385,V386,V396
