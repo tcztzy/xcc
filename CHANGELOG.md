@@ -12,16 +12,16 @@
   and self-assignment without allocating prefix/suffix/concat temporaries. This
   removes the retained-allocation path that exhausted 512 MiB in `py_ast.walk`
   while Stage 1 resolved the Stage 2 source set.
-- Revalidated Stage 0 -> Stage 1 after the bounded slice-mutation repair at
-  `787e0f0`: the clean no-cache hosted build admitted 65 source units and emitted
+- Revalidated Stage 0 -> Stage 1 after stable dictionary insertion at
+  `056979c`: the clean no-cache hosted build admitted 65 source units and emitted
   812 functions, 173 records, and 8,533 reachability edges. The resulting
   `xcc-aot 0.2 native-contract` rejects the CPython parser, its logged tools are
   only `llc` and `cc`, and Mach-O/undefined-symbol audits contain no Python or
-  libpython dependency. Peak hosted-build RSS was 333,987,840 bytes; the source
+  libpython dependency. Peak hosted-build RSS was 334,626,816 bytes; the source
   manifest, normalized LLVM, and executable SHA-256 values are respectively
-  `6533a69e7eeb1265f3d8ea7151bf57945ea3a76d7525a7cb707fd71367d77977`,
-  `62c7ac2b0cc26d42789d9f6461ebfa0f860a848d86ccdcabfa1a886a8d6dc9e0`,
-  and `c89eacf979730b48f2e03edd293ec38bfb7228f29518e64ea3dd85ff660bb5ff`.
+  `9a277fef6f00eff04d1a4e17e586bfe7598dd9d8f9e52ce7702ec2347d31d213`,
+  `0443a6dce75d2affe29ef16a61849e050db498ac1e3731932fb1d3b7e24b068c`,
+  and `393fe9456c760e7c115ae5f43fb07a9b4f69ea48653f6026c786aa3581c0bab9`.
 - Added native `set.difference_update` for homogeneous tuple-backed sets. The
   lowerer routes it through alias-visible stable-handle mutation, and LLVM
   emission computes the difference before forwarding the replacement buffer
