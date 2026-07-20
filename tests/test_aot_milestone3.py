@@ -547,9 +547,9 @@ class AotMilestone3IrTests(unittest.TestCase):
         promote_body = runtime.split("define i1 @__xcc_aot_phase_promote(ptr %payload)", 1)[
             1
         ].split("\n}", 1)[0]
-        self.assertNotIn("call ptr @__xcc_aot_find_allocation", promote_body)
-        self.assertIn("load ptr, ptr @__xcc_aot_allocation_head", promote_body)
-        self.assertIn("icmp eq ptr %node, %mark", promote_body)
+        self.assertIn("call ptr @__xcc_aot_find_allocation", promote_body)
+        self.assertIn("call i1 @__xcc_aot_phase_promote_allocated_to", promote_body)
+        self.assertNotIn("@__xcc_aot_allocation_head", promote_body)
         llvm_ir = (
             runtime
             + "\n\ndefine i32 @main() {\n"
@@ -802,9 +802,9 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  call void @__xcc_aot_phase_promote_end(ptr %middle)\n"
             + "  call void @__xcc_aot_phase_reset(ptr %inner)\n"
             + "  call void @__xcc_aot_phase_reset(ptr %middle)\n"
-            + "  %a.header = getelementptr i8, ptr %a, i64 -32\n"
-            + "  %b.header = getelementptr i8, ptr %b, i64 -32\n"
-            + "  %c.header = getelementptr i8, ptr %c, i64 -32\n"
+            + "  %a.header = getelementptr i8, ptr %a, i64 -40\n"
+            + "  %b.header = getelementptr i8, ptr %b, i64 -40\n"
+            + "  %c.header = getelementptr i8, ptr %c, i64 -40\n"
             + "  %a.next.slot = getelementptr i8, ptr %a.header, i64 8\n"
             + "  %a.next = load ptr, ptr %a.next.slot\n"
             + "  %b.next.slot = getelementptr i8, ptr %b.header, i64 8\n"
@@ -925,7 +925,7 @@ class AotMilestone3IrTests(unittest.TestCase):
         )[1].split("\n}", 1)[0]
         self.assertLess(
             promote_body.index("call i1 @__xcc_aot_phase_promote_cache_contains"),
-            promote_body.index("load ptr, ptr @__xcc_aot_allocation_head"),
+            promote_body.index("call ptr @__xcc_aot_find_allocation"),
         )
         alloc_body = runtime.split("define internal ptr @__xcc_aot_alloc", 1)[1].split(
             "\n}", 1
@@ -952,7 +952,7 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "    ptr @v424_external, ptr %mark)\n"
             + "  %other = call i1 @__xcc_aot_phase_promote_to(\n"
             + "    ptr @v424_external_2, ptr %mark)\n"
-            + "  %live.header = getelementptr i8, ptr %live, i64 -32\n"
+            + "  %live.header = getelementptr i8, ptr %live, i64 -40\n"
             + "  %magic.slot = getelementptr i8, ptr %live.header, i64 24\n"
             + "  %saved.magic = load i64, ptr %magic.slot\n"
             + "  store i64 0, ptr %magic.slot\n"
@@ -1017,7 +1017,7 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  %stale = call i1 @__xcc_aot_phase_promote_cache_contains(\n"
             + "    ptr @v425_external_a, ptr %mark)\n"
             + "  store i64 %mark.state, ptr %mark.state.slot\n"
-            + "  %live.header = getelementptr i8, ptr %live, i64 -32\n"
+            + "  %live.header = getelementptr i8, ptr %live, i64 -40\n"
             + "  %magic.slot = getelementptr i8, ptr %live.header, i64 24\n"
             + "  %saved.magic = load i64, ptr %magic.slot\n"
             + "  store i64 0, ptr %magic.slot\n"
@@ -1046,6 +1046,79 @@ class AotMilestone3IrTests(unittest.TestCase):
                 llvm_ir,
                 Path(tmp) / "phase-negative-provenance-index",
                 filename="phase-negative-provenance-index.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v426_live_allocation_index_avoids_global_list_search(self) -> None:
+        runtime = runtime_prelude()
+        self.assertIn(
+            "@__xcc_aot_phase_allocation_buckets = "
+            "internal global [262144 x ptr] zeroinitializer",
+            runtime,
+        )
+        find_body = runtime.split(
+            "define internal ptr @__xcc_aot_find_allocation", 1
+        )[1].split("\n}", 1)[0]
+        promote_body = runtime.split(
+            "define i1 @__xcc_aot_phase_promote_to", 1
+        )[1].split("\n}", 1)[0]
+        capture_body = runtime.split(
+            "define ptr @__xcc_aot_phase_capture_target", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("@__xcc_aot_phase_allocation_buckets", find_body)
+        self.assertNotIn("@__xcc_aot_allocation_head", find_body)
+        self.assertIn("call ptr @__xcc_aot_find_allocation", promote_body)
+        self.assertNotIn("@__xcc_aot_allocation_head", promote_body)
+        self.assertIn("call ptr @__xcc_aot_find_allocation", capture_body)
+        self.assertNotIn("@__xcc_aot_allocation_head", capture_body)
+        llvm_ir = (
+            runtime
+            + '\n\n@v426_external = private constant [2 x i8] c"x\\00"\n'
+            + "\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %first = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %second = call ptr @__xcc_aot_alloc(i64 8)\n"
+            + "  %found.first = call ptr @__xcc_aot_find_allocation(ptr %first)\n"
+            + "  %found.second = call ptr @__xcc_aot_find_allocation(ptr %second)\n"
+            + "  %external = call ptr @__xcc_aot_find_allocation(ptr @v426_external)\n"
+            + "  call void @__xcc_aot_free(ptr %second)\n"
+            + "  %gone.second = call ptr @__xcc_aot_find_allocation(ptr %second)\n"
+            + "  %resized = call ptr @__xcc_aot_realloc(ptr %first, i64 8, i64 65536)\n"
+            + "  %found.resized = call ptr @__xcc_aot_find_allocation(ptr %resized)\n"
+            + "  %target = call ptr @__xcc_aot_phase_capture_target(ptr @v426_external)\n"
+            + "  %borrowed = call i1 @__xcc_aot_phase_promote_to(\n"
+            + "    ptr @v426_external, ptr %mark)\n"
+            + "  %first.ok = icmp ne ptr %found.first, null\n"
+            + "  %second.ok = icmp ne ptr %found.second, null\n"
+            + "  %external.ok = icmp eq ptr %external, null\n"
+            + "  %gone.ok = icmp eq ptr %gone.second, null\n"
+            + "  %resized.ok = icmp ne ptr %found.resized, null\n"
+            + "  %target.ok = icmp eq ptr %target, %mark\n"
+            + "  %borrowed.ok = xor i1 %borrowed, true\n"
+            + "  %first.pair = and i1 %first.ok, %second.ok\n"
+            + "  %external.pair = and i1 %external.ok, %gone.ok\n"
+            + "  %allocation.ok = and i1 %first.pair, %external.pair\n"
+            + "  %target.pair = and i1 %target.ok, %borrowed.ok\n"
+            + "  %before.release = and i1 %allocation.ok, %resized.ok\n"
+            + "  %before.reset = and i1 %before.release, %target.pair\n"
+            + "  call void @__xcc_aot_free(ptr %resized)\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %ok = and i1 %before.reset, %balanced\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "phase-allocation-index",
+                filename="phase-allocation-index.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 

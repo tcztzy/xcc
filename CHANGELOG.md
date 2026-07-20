@@ -2,6 +2,38 @@
 
 ## Current
 
+- B639 separates live-allocation identity from region ordering for ambiguous
+  pointer-shaped values. The post-B635 sample spent 2,393 of 3,797 stacks in
+  generic promotion, 805 in generic capture, and 430 in allocation lookup;
+  B636 removed most statically proven record/tuple calls and B638 removed the
+  undersized negative cache without moving the 409-open integration frontier.
+  The remaining `str`/bytes/opaque paths can hold either a static borrow or a
+  phase-heap value, so they still searched the complete region list to recover
+  allocation ownership. V426 adds a 262,144-bucket, collision-chained index of
+  every live phase allocation. A mixed aligned payload address selects the
+  bucket, while an eight-byte link in the guarded allocation header preserves
+  exact identity across collisions. Allocation, realloc, free, and reset update
+  the index; promotion and commit retain identity while changing only region
+  order/depth. Generic promote and capture now distinguish managed values from
+  external borrows through this index and reserve the allocation list for
+  lifetime ordering and splice operations. The fixed bucket table costs 2 MiB
+  of BSS, the header grows from 32 to 40 bytes, and the unchanged 512 MiB guard
+  charges the larger header. A native invariant covers allocation, realloc,
+  free, external borrow, promotion, and capture lifetimes; an ordinary nested
+  heap-string record agrees under CPython and native execution. All 491 combined
+  AOT tests, lint, and type pass. A retained hosted Stage 1 builds in 28.97
+  seconds at 339,492,864-byte maximum RSS with zero swap, uses only `llc` and
+  `cc`, links only `libSystem`, has no Python symbols, and rejects the CPython
+  parser. It compiles the focused heap-string record source in 0.11 seconds at
+  48,168,960-byte maximum RSS, launches no Python process, and matches CPython
+  with exit 7. The post-B639 native build reaches the exact prior B615
+  allocation-limit frontier of 3,137 source opens over 818 unique paths in 6.37
+  seconds instead of 628.95 seconds, then exits 70 at the unchanged 512 MiB
+  guard. Maximum RSS is 584,613,888 bytes with zero swap; no tool or Stage 2
+  artifact exists. V426 removes the known list-search time bottleneck and
+  exposes the pre-existing phase-retention limit; no Stage 1-to-2 result is
+  claimed.
+
 - B638 sizes negative provenance for the emitted borrowed-pointer working set
   and makes its weak target identity resistant to mark-address reuse. The
   post-B637 Stage 1 contains 353 distinct empty-string constants, so V424's

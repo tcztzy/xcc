@@ -1,5 +1,15 @@
 # Lessons
 
+- Allocation identity and region order are different runtime concerns. A
+  global lifetime list is appropriate for reset/commit/splice, but it makes an
+  ambiguous `str` or opaque pointer pay linear time merely to learn whether it
+  is managed. Keep an exact collision-chained payload index in allocation-owned
+  metadata, update it at alloc/realloc/free boundaries, and leave promotion to
+  change only region order/depth. Static borrows then fail lookup safely without
+  dereferencing memory before the pointer, while heap values retain exact
+  ownership under ordinary Python source semantics. Restoring the old OOM
+  frontier hundreds of seconds sooner is real time-complexity progress, but it
+  also separates that win from the still-unresolved phase-retention bound.
 - A weak provenance index needs both working-set capacity and ABA-safe lifetime
   identity. Size a fixed table from emitted pointer diversity, mix low address
   bits so adjacent constants do not collapse into one bucket, and compare a

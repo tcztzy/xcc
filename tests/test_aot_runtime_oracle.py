@@ -720,6 +720,23 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="distinct-default-record-strings.py",
         )
 
+    def test_heap_string_record_crosses_nested_phase_lifetimes(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Box:\n"
+            "    text: str\n"
+            "def make(seed: str) -> tuple[Box, str]:\n"
+            "    scratch = seed + '-scratch'\n"
+            "    kept = seed + '-kept'\n"
+            "    return (Box(kept), kept)\n"
+            "def entry() -> int:\n"
+            "    values = make('x')\n"
+            "    return 7 if values[0].text == values[1] == 'x-kept' else 1\n",
+            expected=7,
+            filename="heap-string-record-lifetime.py",
+        )
+
     def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"
