@@ -2,6 +2,10 @@
 
 ## Current
 
+- Made native dictionary insertion use stable-handle append directly.
+  `setdefault` and new-key subscript assignment now allocate only their
+  persistent key/value pair instead of a singleton wrapper plus a full dictionary
+  concatenation, preserving aliases while bounding growth by live entries.
 - Reworked native contiguous list slice assignment to mutate the stable
   tuple-backed handle in place. Bounds remain Python-normalized, capacity grows
   geometrically, and overlap-safe moves cover insertion, deletion, replacement,

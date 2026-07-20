@@ -1,5 +1,9 @@
 # Lessons
 
+- A stable dictionary handle must receive new pairs directly. Building a
+  singleton and concatenating the complete pair sequence before forwarding it
+  preserves aliases but still retains allocation proportional to mutation
+  history; signature-table construction magnifies that pattern twice per method.
 - Stable handles do not make a mutator memory-bounded if it still constructs a
   full immutable result and merely copies that result back. Implement contiguous
   list slice replacement by growing the owned buffer once and moving overlapping

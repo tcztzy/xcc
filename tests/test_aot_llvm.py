@@ -4301,6 +4301,23 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call void @__xcc_aot_tuple_forward(ptr %values", llvm_ir)
         self.assertNotIn("@__set_difference_update", llvm_ir)
 
+    def test_dict_insertions_append_pairs_without_full_container_copies(self) -> None:
+        module = lower_source_to_ir(
+            "def update(values: dict[str, int]) -> int:\n"
+            "    values.setdefault('first', 1)\n"
+            "    values['second'] = 2\n"
+            "    return len(values)\n",
+            filename="dict_stable_insert.py",
+            entry="update",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        function_body = llvm_ir.split("define i64 @update", 1)[1].split("\n}", 1)[0]
+
+        self.assertEqual(function_body.count("call ptr @__xcc_aot_tuple_append"), 2)
+        self.assertNotIn("call ptr @__xcc_aot_tuple_concat", function_body)
+        self.assertNotIn("call void @__xcc_aot_tuple_forward", function_body)
+
     def test_runtime_slice_assignment_mutates_stable_handle_without_temporaries(self) -> None:
         module = lower_source_to_ir(
             "def replace(values: list[int], incoming: list[int]) -> int:\n"

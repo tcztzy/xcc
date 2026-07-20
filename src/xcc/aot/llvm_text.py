@@ -4438,7 +4438,6 @@ class _Emitter:
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{insert_label}:")
         pair = self._tmp("dictdefault.pair")
-        singleton = self._tmp("dictdefault.singleton")
         appended = self._tmp("dictdefault.appended")
         coerced_key = _EmittedValue(
             self._value_for_result_type(key, key_type, lines),
@@ -4453,14 +4452,8 @@ class _Emitter:
         lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {default_box})")
-        lines.append(f"  {singleton} = call ptr @__xcc_aot_tuple_new(i64 1)")
-        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {singleton}, i64 0, ptr {pair})")
         lines.append(
-            f"  {appended} = call ptr @__xcc_aot_tuple_concat("
-            f"ptr {dict_value.value}, ptr {singleton})"
-        )
-        lines.append(
-            f"  call void @__xcc_aot_tuple_forward(ptr {dict_value.value}, ptr {appended})"
+            f"  {appended} = call ptr @__xcc_aot_tuple_append(ptr {dict_value.value}, ptr {pair})"
         )
         lines.append(f"  store {result_type} {default_result}, ptr {result_ptr}")
         lines.append(f"  br label %{end_label}")
@@ -4531,7 +4524,6 @@ class _Emitter:
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{append_label}:")
         pair = self._tmp("dictset.pair")
-        singleton = self._tmp("dictset.singleton")
         appended = self._tmp("dictset.appended")
         coerced_key = _EmittedValue(self._value_for_result_type(key, key_type, lines), key_type)
         key_box = self._box_to_runtime_ptr(coerced_key, lines)
@@ -4546,18 +4538,14 @@ class _Emitter:
         lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
         lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {append_value_box})")
-        lines.append(f"  {singleton} = call ptr @__xcc_aot_tuple_new(i64 1)")
-        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {singleton}, i64 0, ptr {pair})")
         lines.append(
-            f"  {appended} = call ptr @__xcc_aot_tuple_concat("
-            f"ptr {dict_value.value}, ptr {singleton})"
+            f"  {appended} = call ptr @__xcc_aot_tuple_append(ptr {dict_value.value}, ptr {pair})"
         )
         lines.append(f"  store ptr {appended}, ptr {result_ptr}")
         lines.append(f"  br label %{end_label}")
         lines.append(f"{end_label}:")
         result = self._tmp("dictset")
         lines.append(f"  {result} = load ptr, ptr {result_ptr}")
-        lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {dict_value.value}, ptr {result})")
         return _EmittedValue(dict_value.value, expr.type)
 
     def _emit_dict_items_call(

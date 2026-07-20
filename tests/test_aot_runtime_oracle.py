@@ -403,6 +403,20 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="dict-setdefault.py",
         )
 
+    def test_dict_assignment_and_setdefault_share_stable_alias(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: dict[int, int] = {}\n"
+            "    alias = values\n"
+            "    for key in range(64):\n"
+            "        values.setdefault(key, key + 1)\n"
+            "    values[32] = 9\n"
+            "    values.setdefault(32, 99)\n"
+            "    return len(alias) + alias[0] + alias[32]\n",
+            expected=74,
+            filename="dict-stable-insert.py",
+        )
+
     def test_set_intersection_accepts_dict_keys_view(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
