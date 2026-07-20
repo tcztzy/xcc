@@ -1,5 +1,11 @@
 # Lessons
 
+- A no-capture helper may keep performance metadata only as a lifetime-bounded
+  weak borrow, never as an untracked owner. Route every release and resize
+  through one boundary that invalidates the exact cached payload before address
+  reuse, and poison both drop and realloc paths in a native test. This preserves
+  region reclamation while avoiding repeated whole-string scans; a raw pointer
+  cache without that drop proof remains unsafe.
 - An ancestor capture can use region transfer without removing active caller
   marks early. Validate the current-to-target mark chain, flag every mark, then
   let ordinary LIFO returns commit each segment upward until the captured value

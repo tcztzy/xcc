@@ -629,6 +629,21 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="string-startswith-length-cache.py",
         )
 
+    def test_string_startswith_normalizes_negative_start(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    text = 'abc'\n"
+            "    if not text.startswith('a', -3):\n"
+            "        return 1\n"
+            "    if not text.startswith('a', -30):\n"
+            "        return 2\n"
+            "    if text.startswith('', len(text) + 1):\n"
+            "        return 3\n"
+            "    return 0\n",
+            expected=0,
+            filename="string-startswith-negative-start.py",
+        )
+
     def test_v399_dynamic_concatenated_startswith_prefix_matches_cpython(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

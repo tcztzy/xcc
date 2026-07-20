@@ -1589,9 +1589,10 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
-    def test_v391_startswith_does_not_retain_phase_pointer(self) -> None:
+    def test_v419_startswith_weak_cache_invalidates_before_drop_and_resize(self) -> None:
         llvm_ir = (
-            '@v391_prefix = private constant [2 x i8] c"a\\00"\n'
+            '@v419_prefix = private constant [2 x i8] c"a\\00"\n'
+            '@v419_empty = private constant [1 x i8] c"\\00"\n'
             + runtime_prelude()
             + "\n\ndefine i32 @main() {\n"
             + "entry:\n"
@@ -1605,28 +1606,49 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  %first3 = getelementptr i8, ptr %first, i64 3\n"
             + "  store i8 0, ptr %first3\n"
             + "  %first_ok = call i1 @__xcc_aot_string_startswith(\n"
-            + "    ptr %first, ptr @v391_prefix, i64 0)\n"
+            + "    ptr %first, ptr @v419_prefix, i64 0)\n"
             + "  call void @__xcc_aot_phase_reset(ptr %first_mark)\n"
+            + "  %after_drop = load ptr, ptr @__xcc_aot_startswith_text\n"
+            + "  %drop_cleared = icmp eq ptr %after_drop, null\n"
             + "  %second_mark = call ptr @__xcc_aot_phase_mark()\n"
             + "  %second = call ptr @__xcc_aot_alloc(i64 2)\n"
             + "  store i8 120, ptr %second\n"
             + "  %second1 = getelementptr i8, ptr %second, i64 1\n"
             + "  store i8 0, ptr %second1\n"
             + "  %second_ok = call i1 @__xcc_aot_string_startswith(\n"
-            + "    ptr %second, ptr @v391_prefix, i64 0)\n"
+            + "    ptr %second, ptr @v419_empty, i64 2)\n"
+            + "  %resized = call ptr @__xcc_aot_realloc(ptr %second, i64 2, i64 8)\n"
+            + "  %after_resize = load ptr, ptr @__xcc_aot_startswith_text\n"
+            + "  %resize_cleared = icmp eq ptr %after_resize, null\n"
+            + "  %resized_ok = call i1 @__xcc_aot_string_startswith(\n"
+            + "    ptr %resized, ptr @v419_empty, i64 2)\n"
             + "  call void @__xcc_aot_phase_reset(ptr %second_mark)\n"
             + "  %second_false = xor i1 %second_ok, true\n"
-            + "  %ok = and i1 %first_ok, %second_false\n"
+            + "  %resized_false = xor i1 %resized_ok, true\n"
+            + "  %drop_ok = and i1 %first_ok, %drop_cleared\n"
+            + "  %reuse_ok = and i1 %second_false, %resize_cleared\n"
+            + "  %resize_ok = and i1 %reuse_ok, %resized_false\n"
+            + "  %ok = and i1 %drop_ok, %resize_ok\n"
             + "  %result = select i1 %ok, i32 0, i32 1\n"
             + "  ret i32 %result\n"
             + "}\n"
         )
-        self.assertNotIn("__xcc_aot_startswith_text", llvm_ir)
+        free_body = llvm_ir.split("define void @__xcc_aot_free", 1)[1].split("\n}\n", 1)[0]
+        realloc_body = llvm_ir.split("define internal ptr @__xcc_aot_realloc", 1)[1].split(
+            "\n}\n", 1
+        )[0]
+        self.assertLess(
+            free_body.index("call void @__xcc_aot_startswith_cache_invalidate"),
+            free_body.index("call void @free"),
+        )
+        self.assertEqual(
+            realloc_body.count("call void @__xcc_aot_startswith_cache_invalidate"), 2
+        )
         with tempfile.TemporaryDirectory() as tmp:
             executable = compile_llvm_executable(
                 llvm_ir,
-                Path(tmp) / "startswith-phase-pointer",
-                filename="startswith-phase-pointer.ll",
+                Path(tmp) / "startswith-weak-cache",
+                filename="startswith-weak-cache.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 

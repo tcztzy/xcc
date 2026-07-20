@@ -2,6 +2,26 @@
 
 ## Current
 
+- B632 restores immutable `str.startswith` length reuse as a region-bounded
+  weak cache. After B631 removed capture lookup/promotion, the lexer sample
+  spent 1,281/3,861 frames in `startswith -> strlen`; its ordinary 24-prefix
+  operator loop repeatedly measured the complete source and made source-set
+  lexing approximately quadratic. Both tracked and untracked `realloc` paths
+  and the common phase `free` path now invalidate the exact cached payload
+  before resize/drop, so the cache never extends its owner's lifetime or
+  survives address reuse. The known-length helper also implements Python's
+  negative-start normalization. A native poison oracle covers reset/resize,
+  and long-loop plus negative-start behavior agrees with CPython. The 226
+  LLVM/M3 tests, 162 runtime CPython/native oracles, lint, and type pass. A
+  hosted Stage 1 builds in 28.61 seconds at 360,808,448-byte maximum RSS with
+  zero swap. It compiles the focused source in 0.64 seconds at 47,366,144-byte
+  maximum RSS using only `llc` and `cc`, and matches CPython with exit 7; it
+  links only `libSystem`, has no Python symbols, and rejects the CPython parser.
+  The pre-fix 60.22-second single-process probe reached only the `xcc/lexer.py`
+  source read (1,621 opens), invoked no external tool, produced no Stage 2
+  artifact, used zero swap, and reported 526,024,704-byte maximum RSS. No
+  Stage 1-to-2 result is claimed.
+
 - B631 defers complete nested mark chains for ancestor captures. After B630
   removed alternating owner lookup, the matched lexer sample spent 1,809/3,829
   frames recursively promoting token graphs across an intervening lexer phase.
