@@ -1284,6 +1284,34 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 2)
 
+    def test_v428_nested_opaque_tuple_destructure_unboxes_container(self) -> None:
+        source = (
+            "def entry() -> int:\n"
+            "    values = (('a', 'b', 'c'), ('d', 'e', 1))\n"
+            "    total = 0\n"
+            "    for index, (first, second, third) in enumerate(values):\n"
+            "        total += index\n"
+            "    return 7 if total == 1 else 1\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="opaque-tuple-destructure.py", entry="entry")
+        )
+        entry_body = llvm_ir.split("define i64 @entry()", 1)[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_tuple_get_object", entry_body)
+        self.assertIn(" = getelementptr i8, ptr %call", entry_body)
+        self.assertIn("load ptr, ptr %object.payload", entry_body)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %object.pointer", entry_body)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "opaque-tuple-destructure",
+                filename="opaque-tuple-destructure.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 7)
+
     def test_v415_direct_parent_capture_defers_graph_walk_until_region_finish(self) -> None:
         llvm_ir = (
             runtime_prelude()

@@ -754,6 +754,18 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="while-iteration-region.py",
         )
 
+    def test_nested_opaque_tuple_destructure_matches_cpython(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values = (('a', 'b', 'c'), ('d', 'e', 1))\n"
+            "    total = 0\n"
+            "    for index, (first, second, third) in enumerate(values):\n"
+            "        total += index\n"
+            "    return 7 if total == 1 else 1\n",
+            expected=7,
+            filename="opaque-tuple-destructure.py",
+        )
+
     def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

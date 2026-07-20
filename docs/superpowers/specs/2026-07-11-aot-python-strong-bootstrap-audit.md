@@ -444,6 +444,24 @@ region. All normal loop exits promote live carries before finishing the child;
 returns promote their result before finishing active children; uncaught errors
 commit children from inner to outer. This is compiler-generated ownership
 metadata over ordinary Python source, not a marker, pragma, source rewrite, or
-change to CPython semantics. Focused native tests and 495 combined AOT tests
-pass. Stage 1-to-2 and Stage 2-to-3 remain unproven pending bounded native
-integration evidence.
+change to CPython semantics. A retained hosted Stage 1 builds in 28.84 seconds
+at 362,938,368-byte maximum RSS, invokes only `llc` and `cc`, has no Python or
+libpython dependency/symbol, rejects the CPython parser, and passes the ordinary
+600-iteration CPython/native oracle. The first bounded Stage 1-to-2 run reaches
+final LLVM emission in 15.14 seconds at 366,362,624-byte maximum RSS with zero
+swap instead of exhausting the 512 MiB allocation guard. It then exits 139 with
+no Stage 2 artifact after 3,136 opens over the same 817 source paths.
+
+B641/V428 records the newly exposed representation defect. The macOS crash
+report has a null read in `__xcc_aot_tuple_get`; static disassembly maps its
+caller to `_Emitter._emit_error_record` nested tuple destructuring. A
+heterogeneous tuple boxes a tuple element as `{tag=tuple, payload=raw_tuple}`,
+but opaque `__getitem` passed the box itself to the raw tuple runtime. V428
+requires opaque tuple receivers to narrow and load their payload before the
+runtime call, while statically typed tuple receivers keep the direct path. The
+focused ordinary source previously exits by signal 11 and now agrees with
+CPython at exit 7. Its emitted IR must load `object.payload` before
+`__xcc_aot_tuple_get`. All 497 combined IR/M3/runtime-oracle tests, 173 emitter
+tests, and 16 status tests pass; lint and type are green. B641 has not yet
+received bounded Stage 1-to-2 integration evidence; Stage 2-to-3 and strong
+bootstrap remain unproven.

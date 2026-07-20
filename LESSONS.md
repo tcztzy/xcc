@@ -1,5 +1,13 @@
 # Lessons
 
+- A dynamically typed container value is not necessarily the container ABI
+  pointer. When a heterogeneous tuple boxes an element as `{tag, payload}`, any
+  later container operation must validate/narrow the tag and load the payload
+  before calling a raw tuple helper. Passing the wrapper to a structural runtime
+  can look plausible at the LLVM type level because both are `ptr`, yet reinterpret
+  the tag as a length and crash only on the nested access. Keep representation
+  transitions centralized and test both the emitted unboxing chain and ordinary
+  CPython/native behavior.
 - A function region cannot reclaim compiler scratch produced by a long worklist
   loop. Add a compiler-generated exact child region at each statically safe,
   allocating iteration, promote only loop-carried and captured graphs, and

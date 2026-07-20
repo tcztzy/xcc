@@ -1350,7 +1350,9 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %value, i64 0)", llvm_ir)
+        self.assertIn("getelementptr i8, ptr %value, i64 8", llvm_ir)
+        self.assertIn("load ptr, ptr %object.payload", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %object.pointer", llvm_ir)
         self.assertIn("icmp ne ptr", llvm_ir)
         self.assertNotIn("@__getitem", llvm_ir)
 

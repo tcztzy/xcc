@@ -2,6 +2,25 @@
 
 ## Current
 
+- B641 restores the representation boundary between an opaque Python `object`
+  box and a raw runtime tuple. The first bounded B640 Stage 1-to-2 run no longer
+  reached the old allocation guard: it opened 3,136 files over the same 817
+  source paths and reached final LLVM emission in 15.14 seconds at
+  366,362,624-byte maximum RSS, then exited 139 before producing a Stage 2
+  artifact. The macOS crash report and matching static call site place the null
+  read in `__xcc_aot_tuple_get`, called by `_Emitter._emit_error_record` while
+  lowering nested tuple destructuring. A heterogeneous outer tuple returns each
+  tuple element as `{tag=tuple, payload=raw_tuple}`; `_emit_getitem_call`
+  previously passed that wrapper itself to the raw tuple runtime, which read the
+  tag and payload as tuple length and capacity and then dereferenced a null data
+  field. V428 narrows an opaque receiver to its tuple payload before indexing;
+  statically typed tuples retain their existing direct path. The focused native
+  reproducer changes from signal 11 to exit 7 and agrees with CPython, while IR
+  invariants require the payload load to dominate the raw tuple call. All 497
+  combined IR/M3/runtime-oracle tests, 173 emitter tests, and 16 status tests
+  pass; lint, type, and `git diff --check` are green. The B641 Stage 1-to-2
+  oracle has not yet run, and Stage 2/Stage 3 remain unproven.
+
 - B640 gives compiler-generated `while` iterations an exact child lifetime
   inside the function-owned phase. B639 reached the exact B615 frontier of
   3,137 opens over 818 unique paths in 6.37 seconds and then exhausted the

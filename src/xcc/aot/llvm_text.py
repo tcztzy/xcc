@@ -8634,9 +8634,15 @@ class _Emitter:
             self._error("__getitem expects a tuple, string, or object receiver")
         if not isinstance(value.type, (IrTupleType, IrRecordType)):
             self._error("__getitem expects a tuple or string receiver")
+        tuple_value = value.value
+        if _is_opaque_object_type(value.type):
+            narrowed = self._emit_runtime_object_narrowing(value, IrTupleType(()), lines)
+            if narrowed is None:
+                self._error("object __getitem receiver must contain a tuple")
+            tuple_value = narrowed.value
         raw = self._tmp("call")
         lines.append(
-            f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {value.value}, i64 {index_value})"
+            f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {tuple_value}, i64 {index_value})"
         )
         return self._emit_runtime_boxed_value(raw, expr.type, lines)
 
