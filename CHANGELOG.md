@@ -2,6 +2,18 @@
 
 ## Current
 
+- Revalidated Stage 0 -> Stage 1 after stable comprehension builders at
+  `f1cc63d`. The clean no-cache hosted build admitted 65 source units and
+  emitted 824 functions, 174 records, 8,627 reachability edges, and 32 lazy
+  global-container slots. Its generated comprehension-emitter function calls
+  stable append 12 times and full tuple concatenation zero times. The executable
+  reports `xcc-aot 0.2 native-contract`, rejects the CPython parser, logs only
+  `llc` and `cc`, and has no Python/libpython dependency. Peak RSS was
+  332,005,376 bytes with no swap; source-manifest, normalized-LLVM, and
+  executable SHA-256 values are respectively
+  `bcea1fea01315b051f8005ba0280bbd825dfd8704cb8eb46d13a5b9b17b8b0cd`,
+  `197a7a3f74208d10f047823f1858f9662345ed8c415c6a4cea2b527fbcc08729`,
+  and `33502d9515184b76161a9df6aa4943a1a690ddaa6f0fe56173b2cbb077770017`.
 - Changed eager tuple, list, and set comprehension construction to append each
   boxed value directly to the fresh stable builder handle. Set comprehensions
   retain their membership guard, while all three forms avoid allocating a
