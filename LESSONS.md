@@ -1,5 +1,10 @@
 # Lessons
 
+- Pointer return does not imply ownership escape. A no-capture helper that
+  returns only a parameter element, static value, borrowed field, or another
+  proven borrow can reclaim its own temporary region before returning; derive
+  that lifetime relation to a fixed point, apply it after return-ABI coercion,
+  and keep fresh or path-ambiguous results on the conservative heap/arena path.
 - Rust-style borrowing is about the full use set, not simply `use_count == 1`.
   A virtual string can safely serve both `startswith` and `len` in one control
   statement when its dependencies stay stable; classify every consumer and

@@ -602,6 +602,40 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v403_borrowed_pointer_return_survives_owned_phase_reset(self) -> None:
+        source = (
+            "def first(values: tuple[str, ...]) -> str:\n"
+            "    scratch = (\"temporary\",)\n"
+            "    return values[0]\n"
+            "\n"
+            "def entry() -> int:\n"
+            "    value = first((\"kept\",))\n"
+            "    return 0 if value == \"kept\" else 1\n"
+        )
+        namespace: dict[str, object] = {}
+        exec(source, namespace)
+        entry = namespace["entry"]
+        self.assertTrue(callable(entry))
+        self.assertEqual(entry(), 0)
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="borrowed-phase.py", entry="entry")
+        )
+        first_body = llvm_ir.split("define ptr @first(ptr %values)", 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", first_body)
+        self.assertIn("call void @__xcc_aot_phase_reset", first_body)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "borrowed-phase",
+                filename="borrowed-phase.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_v391_startswith_does_not_retain_phase_pointer(self) -> None:
         llvm_ir = (
             '@v391_prefix = private constant [2 x i8] c"a\\00"\n'

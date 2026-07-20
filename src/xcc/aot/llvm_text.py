@@ -897,6 +897,177 @@ def _phase_intrinsic_is_no_capture(target: str) -> bool:
     )
 
 
+_PHASE_BORROWED_RETURN_INTRINSICS = frozenset(
+    {
+        "__dict_get",
+        "__getitem",
+        "__type_marker",
+        "__type_name",
+        "__union_getattr",
+    }
+)
+
+
+def _phase_pointer_type(type_info: IrType) -> bool:
+    return isinstance(
+        type_info,
+        (IrBytesType, IrDictType, IrRecordType, IrStringType, IrTupleType),
+    )
+
+
+def _phase_expr_is_borrowed(
+    expr: IrExpr,
+    borrowed_names: frozenset[str],
+    borrowed_functions: frozenset[str] | set[str],
+) -> bool:
+    if not _phase_pointer_type(expr.type):
+        return True
+    if isinstance(expr, IrName):
+        return expr.name in borrowed_names
+    if isinstance(expr, IrConstBytes | IrConstNone | IrConstString | IrEnumMember):
+        return True
+    if isinstance(expr, IrGetField):
+        return _phase_expr_is_borrowed(expr.value, borrowed_names, borrowed_functions)
+    if not isinstance(expr, IrCall):
+        return False
+    if (
+        expr.target not in _PHASE_BORROWED_RETURN_INTRINSICS
+        and expr.target not in borrowed_functions
+    ):
+        return False
+    return all(
+        _phase_expr_is_borrowed(arg, borrowed_names, borrowed_functions) for arg in expr.args
+    )
+
+
+def _phase_borrowed_assignment_names(
+    target: str,
+    value: IrExpr,
+    borrowed_names: frozenset[str],
+    borrowed_functions: frozenset[str] | set[str],
+) -> frozenset[str]:
+    updated = set(borrowed_names)
+    targets = tuple(part.strip() for part in target.split(","))
+    if _phase_expr_is_borrowed(value, borrowed_names, borrowed_functions):
+        updated.update(targets)
+    else:
+        updated.difference_update(targets)
+    return frozenset(updated)
+
+
+def _phase_block_borrowed_returns(
+    statements: tuple[IrStmt, ...],
+    incoming: frozenset[str],
+    borrowed_functions: frozenset[str] | set[str],
+    return_type: IrType,
+) -> tuple[bool, bool, frozenset[str]]:
+    borrowed_names = incoming
+    all_returns_borrowed = True
+    saw_return = False
+    for statement in statements:
+        if isinstance(statement, IrAssign):
+            if _phase_local_target(statement.target):
+                borrowed_names = _phase_borrowed_assignment_names(
+                    statement.target,
+                    statement.value,
+                    borrowed_names,
+                    borrowed_functions,
+                )
+            continue
+        if isinstance(statement, IrReturn):
+            saw_return = True
+            coerces_scalar_to_pointer = (
+                _phase_pointer_type(return_type)
+                and not _phase_pointer_type(statement.value.type)
+                and not isinstance(statement.value, IrConstNone)
+            )
+            if coerces_scalar_to_pointer or not _phase_expr_is_borrowed(
+                statement.value, borrowed_names, borrowed_functions
+            ):
+                all_returns_borrowed = False
+            continue
+        if isinstance(statement, IrIf):
+            then_borrowed, then_returns, then_names = _phase_block_borrowed_returns(
+                statement.then_branch.statements,
+                borrowed_names,
+                borrowed_functions,
+                return_type,
+            )
+            if statement.else_branch is None:
+                else_borrowed = True
+                else_returns = False
+                else_names = borrowed_names
+            else:
+                else_borrowed, else_returns, else_names = _phase_block_borrowed_returns(
+                    statement.else_branch.statements,
+                    borrowed_names,
+                    borrowed_functions,
+                    return_type,
+                )
+            all_returns_borrowed = all_returns_borrowed and then_borrowed and else_borrowed
+            saw_return = saw_return or then_returns or else_returns
+            borrowed_names = borrowed_names & then_names & else_names
+            continue
+        if isinstance(statement, IrForEach):
+            loop_names = borrowed_names
+            if _phase_expr_is_borrowed(
+                statement.iterable,
+                borrowed_names,
+                borrowed_functions,
+            ):
+                loop_names = loop_names | frozenset(
+                    part.strip() for part in statement.target.split(",")
+                )
+            body_borrowed, body_returns, body_names = _phase_block_borrowed_returns(
+                statement.body.statements,
+                loop_names,
+                borrowed_functions,
+                return_type,
+            )
+            all_returns_borrowed = all_returns_borrowed and body_borrowed
+            saw_return = saw_return or body_returns
+            borrowed_names = borrowed_names & body_names
+            continue
+        if isinstance(statement, IrWhile):
+            body_borrowed, body_returns, body_names = _phase_block_borrowed_returns(
+                statement.body.statements,
+                borrowed_names,
+                borrowed_functions,
+                return_type,
+            )
+            all_returns_borrowed = all_returns_borrowed and body_borrowed
+            saw_return = saw_return or body_returns
+            borrowed_names = borrowed_names & body_names
+    return all_returns_borrowed, saw_return, borrowed_names
+
+
+def _phase_borrowed_return_functions(
+    module: IrModule,
+    summaries: dict[str, tuple[bool, bool]],
+) -> frozenset[str]:
+    borrowed_functions: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for function in module.functions:
+            if (
+                function.name in borrowed_functions
+                or function.name not in summaries
+                or not _phase_pointer_type(function.return_type)
+            ):
+                continue
+            all_borrowed, saw_return, _ = _phase_block_borrowed_returns(
+                function.body,
+                frozenset(param.name for param in function.params),
+                borrowed_functions,
+                function.return_type,
+            )
+            if all_borrowed and saw_return:
+                borrowed_functions.add(function.name)
+                changed = True
+    return frozenset(borrowed_functions)
+
+
 def _phase_expr_effect(
     expr: IrExpr,
     summaries: dict[str, tuple[bool, bool]],
@@ -1035,11 +1206,13 @@ def _phase_function_summaries(
 def _function_uses_owned_phase(
     function: IrFunction,
     summaries: dict[str, tuple[bool, bool]],
+    borrowed_return_functions: frozenset[str],
 ) -> bool:
-    if not isinstance(
+    scalar_return = isinstance(
         function.return_type,
         (IrBoolType, IrFloatType, IrIntType, IrNoneType),
-    ):
+    )
+    if not scalar_return and function.name not in borrowed_return_functions:
         return False
     summary = summaries.get(function.name)
     return summary is not None and summary[0] and summary[1]
@@ -1060,6 +1233,10 @@ class _Emitter:
         self.phase_function_summaries = _phase_function_summaries(
             module,
             self.fallible_functions,
+        )
+        self.phase_borrowed_return_functions = _phase_borrowed_return_functions(
+            module,
+            self.phase_function_summaries,
         )
         self.index = 0
         self.string_index = 0
@@ -1240,7 +1417,11 @@ class _Emitter:
             for param in function.params
         }
         try:
-            if _function_uses_owned_phase(function, self.phase_function_summaries):
+            if _function_uses_owned_phase(
+                function,
+                self.phase_function_summaries,
+                self.phase_borrowed_return_functions,
+            ):
                 self.needs_runtime_prelude = True
                 self.current_phase_mark = self._tmp("phase.mark")
                 lines.append(f"  {self.current_phase_mark} = call ptr @__xcc_aot_phase_mark()")

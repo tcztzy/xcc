@@ -161,6 +161,12 @@ V402: Record-name projection within one lowerer ! cache both positive and
 negative answers by the original name; qualified-name fallback ! find the last
 separator without materializing a split tuple, while repeating class-table
 probes or `rsplit` allocations for the same name ⊥.
+V403: A pointer-returning function may own a nested phase only when a fixed-point
+provenance analysis proves every pointer return borrows from a parameter, static
+value, field of a borrowed value, or another proven borrowed return; resetting
+that phase ! preserve the returned pointer, while a fresh, captured, unknown,
+path-ambiguous, or scalar-to-pointer return-coercion result remains on the
+conservative heap/arena path.
 
 ## §T TASKS
 id|status|task|cites
@@ -524,3 +530,4 @@ B612|2026-07-20|the first V399 oracle placed `IrStringConcat` directly in the `s
 B613|2026-07-20|post-B612 Stage 1 still emitted five `_rename_call_target` concatenations because the matching branch also reads `len(prefix)`, so the correct virtual value has two nonescaping consumers inside the same `if`; single-use analysis conservatively rejected it. Pure concat locals now remain virtual when all reads in the immediate statement are `startswith`/`len` borrows and their named parts are not rebound, `len` sums part lengths without materialization, cross-statement or unknown uses retain the ordinary string, and the recursive proof uses scalar counters and indexed suffix scans rather than recreating the V395 tuple/slice allocation pattern. The real Stage 1 function falls from five to four concat calls|V368,V376,V384,V385,V395,V399,V400
 B614|2026-07-20|`_lower_named_slice_from_roots` re-lowered every known record for every reached function; the discarded duplicate IR remained allocated. It now requests only records not already materialized, and V401 verifies each record is included once|V376,V384,V385,V401
 B615|2026-07-20|after B614, the bounded Stage 1-to-2 run still exited at the 512 MiB allocation guard; LLDB stopped in `__xcc_aot_tuple_new` called by `_Lowerer._project_record_name`, where `name.rsplit(".", 1)[-1]` materialized a tuple for every repeated type projection. Each lowerer now caches positive and negative projections by original name and uses `rfind` plus one suffix slice only on the first qualified miss; V402 verifies repeated inputs do not repeat class-table probes|V376,V384,V385,V402
+B616|2026-07-20|the post-B615 Stage 1-to-2 run still exhausted the fixed allocation budget because generated Stage 1 inserted only 38 IR-owned phases and none covered the source/parser/binder/slice/lowerer pipeline; the phase gate treated every pointer return as escaping even when lookup and cursor helpers returned only storage borrowed from an input or static value. A fixed-point return-provenance proof now admits no-capture borrowed returns as phase owners, preserves the borrowed pointer across reset, and leaves fresh, ambiguous, or scalar results boxed by the return ABI conservative|V376,V384,V385,V390,V403

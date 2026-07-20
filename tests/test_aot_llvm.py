@@ -118,6 +118,9 @@ class AotLlvmTextTests(unittest.TestCase):
 
         int64 = IrIntType(64, signed=True)
         tuple_type = IrTupleType((int64,))
+        string_type = IrStringType()
+        string_tuple_type = IrTupleType((string_type,))
+        optional_int_type = IrRecordType("int | None")
         local_tuple = IrTuple((IrConstInt(1, int64),), tuple_type)
         module = IrModule(
             "owned_phase.py",
@@ -141,6 +144,30 @@ class AotLlvmTextTests(unittest.TestCase):
                     (),
                     tuple_type,
                     (IrReturn(local_tuple),),
+                ),
+                IrFunction(
+                    "returns_borrowed_pointer",
+                    (IrParam("values", string_tuple_type),),
+                    string_type,
+                    (
+                        IrAssign("scratch", local_tuple),
+                        IrReturn(
+                            IrCall(
+                                "__getitem",
+                                (IrName("values", string_tuple_type), IrConstInt(0, int64)),
+                                string_type,
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
+                    "returns_boxed_scalar_pointer",
+                    (),
+                    optional_int_type,
+                    (
+                        IrAssign("scratch", local_tuple),
+                        IrReturn(IrConstInt(1, int64)),
+                    ),
                 ),
                 IrFunction(
                     "sink",
@@ -224,8 +251,17 @@ class AotLlvmTextTests(unittest.TestCase):
         )[1].split("\n}", 1)[0]
         self.assertIn("call ptr @__xcc_aot_phase_mark()", known_call_body)
         self.assertIn("call void @__xcc_aot_phase_reset", known_call_body)
+        borrowed_return_body = llvm_ir.split(
+            "define ptr @returns_borrowed_pointer(ptr %values)", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", borrowed_return_body)
+        self.assertIn("call void @__xcc_aot_phase_reset", borrowed_return_body)
         for function, signature in (
             ("returns_pointer", "define ptr @returns_pointer()"),
+            (
+                "returns_boxed_scalar_pointer",
+                "define ptr @returns_boxed_scalar_pointer()",
+            ),
             ("passes_to_mutating_call", "define i64 @passes_to_mutating_call()"),
             (
                 "writes_borrowed_container",
@@ -921,7 +957,10 @@ class AotLlvmTextTests(unittest.TestCase):
             entry="pick",
         )
         llvm_ir = emit_llvm_text(module)
-        self.assertIn("%call1 = call ptr @__xcc_aot_tuple_get(ptr %argv, i64 2)", llvm_ir)
+        self.assertRegex(
+            llvm_ir,
+            r"%call\d+ = call ptr @__xcc_aot_tuple_get\(ptr %argv, i64 2\)",
+        )
         self.assertNotIn("call ptr @__getitem", llvm_ir)
 
     def test_emits_tuple_getitem_unboxes_integer_result(self) -> None:

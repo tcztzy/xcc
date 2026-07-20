@@ -2,6 +2,15 @@
 
 ## Current
 
+- B616 extends compiler-derived owned phases to pointer-returning functions only
+  when a fixed-point provenance proof shows that every result borrows from an
+  input/static value or another proven borrowed return. Fresh, captured, and
+  ambiguous pointers, including scalars boxed by the return ABI, remain
+  conservative; the focused V403 CPython/native oracle verifies that reset
+  preserves the returned pointer. The hosted full AOT slice proves 22 borrowed
+  returns and 17 additional phase owners (56 total); 198 emitter/M3 tests and
+  the 11 previously failing native-bootstrap oracles pass.
+
 - B615 caches positive and negative record-name projections per lowerer and
   replaces repeated `rsplit` tuple allocation with `rfind`. The focused V402
   CPython oracle and 456 relevant AOT tests pass; bounded native validation remains
