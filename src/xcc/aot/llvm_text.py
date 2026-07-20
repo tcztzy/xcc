@@ -267,6 +267,7 @@ _ERROR_LLVM_DECLARATION = "%__xcc_aot_error = type { ptr, ptr, ptr, i32, i32, i3
 class _EmittedValue:
     value: str
     type: IrType
+    borrowed_string_concat: IrStringConcat | None = None
 
 
 @dataclass
@@ -371,6 +372,236 @@ def _escaped_tuple_names(expr: IrExpr) -> set[str]:
     if isinstance(expr, IrStringJoin):
         return _escaped_tuple_names(expr.separator) | _escaped_tuple_names(expr.values)
     return set()
+
+
+def _expr_name_use_count(expr: IrExpr, name: str, *, borrowed_only: bool = False) -> int:
+    if isinstance(expr, IrName):
+        return 0 if borrowed_only or expr.name != name else 1
+    if isinstance(expr, IrBinary):
+        return _expr_name_use_count(
+            expr.left,
+            name,
+            borrowed_only=borrowed_only,
+        ) + _expr_name_use_count(
+            expr.right,
+            name,
+            borrowed_only=borrowed_only,
+        )
+    if isinstance(expr, IrGetField):
+        return _expr_name_use_count(expr.value, name, borrowed_only=borrowed_only)
+    if isinstance(expr, IrConstructRecord):
+        count = 0
+        for arg in expr.args:
+            count += _expr_name_use_count(arg, name, borrowed_only=borrowed_only)
+        return count
+    if isinstance(expr, IrCall):
+        count = 0
+        for arg in expr.args:
+            count += _expr_name_use_count(arg, name, borrowed_only=borrowed_only)
+        if (
+            borrowed_only
+            and expr.target == "__str_startswith"
+            and len(expr.args) == 3
+            and isinstance(expr.args[1], IrName)
+            and expr.args[1].name == name
+        ):
+            count += 1
+        return count
+    if isinstance(expr, IrTuple):
+        count = 0
+        for item in expr.elements:
+            count += _expr_name_use_count(item, name, borrowed_only=borrowed_only)
+        return count
+    if isinstance(expr, IrTupleSlice):
+        count = _expr_name_use_count(expr.value, name, borrowed_only=borrowed_only)
+        if expr.start is not None:
+            count += _expr_name_use_count(expr.start, name, borrowed_only=borrowed_only)
+        if expr.stop is not None:
+            count += _expr_name_use_count(expr.stop, name, borrowed_only=borrowed_only)
+        return count
+    if isinstance(expr, IrStringConcat):
+        count = 0
+        for part in expr.parts:
+            count += _expr_name_use_count(part, name, borrowed_only=borrowed_only)
+        return count
+    if isinstance(expr, IrStringJoin):
+        return _expr_name_use_count(
+            expr.separator,
+            name,
+            borrowed_only=borrowed_only,
+        ) + _expr_name_use_count(
+            expr.values,
+            name,
+            borrowed_only=borrowed_only,
+        )
+    return 0
+
+
+def _statement_name_use_count(
+    statement: IrStmt,
+    name: str,
+    *,
+    borrowed_only: bool = False,
+) -> int:
+    if isinstance(statement, IrAssign):
+        return _expr_name_use_count(statement.value, name, borrowed_only=borrowed_only)
+    if isinstance(statement, IrSetItem):
+        return (
+            _expr_name_use_count(statement.target, name, borrowed_only=borrowed_only)
+            + _expr_name_use_count(statement.index, name, borrowed_only=borrowed_only)
+            + _expr_name_use_count(statement.value, name, borrowed_only=borrowed_only)
+        )
+    if isinstance(statement, IrReturn):
+        return _expr_name_use_count(statement.value, name, borrowed_only=borrowed_only)
+    if isinstance(statement, IrIf):
+        count = _expr_name_use_count(statement.condition, name, borrowed_only=borrowed_only)
+        count += _statements_name_use_count(
+            statement.then_branch.statements,
+            name,
+            borrowed_only=borrowed_only,
+        )
+        if statement.else_branch is not None:
+            count += _statements_name_use_count(
+                statement.else_branch.statements,
+                name,
+                borrowed_only=borrowed_only,
+            )
+        return count
+    if isinstance(statement, IrForEach):
+        return _expr_name_use_count(
+            statement.iterable,
+            name,
+            borrowed_only=borrowed_only,
+        ) + _statements_name_use_count(
+            statement.body.statements,
+            name,
+            borrowed_only=borrowed_only,
+        )
+    if isinstance(statement, IrWhile):
+        return _expr_name_use_count(
+            statement.condition,
+            name,
+            borrowed_only=borrowed_only,
+        ) + _statements_name_use_count(
+            statement.body.statements,
+            name,
+            borrowed_only=borrowed_only,
+        )
+    if isinstance(statement, IrTry):
+        count = _statements_name_use_count(
+            statement.body.statements,
+            name,
+            borrowed_only=borrowed_only,
+        )
+        count += _statements_name_use_count(
+            statement.orelse.statements,
+            name,
+            borrowed_only=borrowed_only,
+        )
+        count += _statements_name_use_count(
+            statement.finalbody.statements,
+            name,
+            borrowed_only=borrowed_only,
+        )
+        for handler in statement.handlers:
+            count += _statements_name_use_count(
+                handler.body.statements,
+                name,
+                borrowed_only=borrowed_only,
+            )
+        return count
+    if isinstance(statement, IrPrint):
+        return _expr_name_use_count(statement.value, name, borrowed_only=borrowed_only)
+    if isinstance(statement, IrRaise):
+        count = _expr_name_use_count(statement.message, name, borrowed_only=borrowed_only)
+        if statement.payload is not None:
+            count += _expr_name_use_count(
+                statement.payload,
+                name,
+                borrowed_only=borrowed_only,
+            )
+        return count
+    return 0
+
+
+def _statements_name_use_count(
+    statements: tuple[IrStmt, ...],
+    name: str,
+    *,
+    borrowed_only: bool = False,
+    start: int = 0,
+) -> int:
+    count = 0
+    for index in range(start, len(statements)):
+        count += _statement_name_use_count(
+            statements[index],
+            name,
+            borrowed_only=borrowed_only,
+        )
+    return count
+
+
+def _borrowable_string_concat(expr: IrStringConcat, target: str) -> bool:
+    if len(expr.parts) < 2 or _expr_name_use_count(expr, target) != 0:
+        return False
+    index = 0
+    while index < len(expr.parts):
+        if not isinstance(expr.parts[index], IrName | IrConstString):
+            return False
+        index += 1
+    return True
+
+
+def _borrowed_string_concat_assignments(function: IrFunction) -> set[int]:
+    assignments: set[int] = set()
+    _collect_borrowed_string_concat_assignments(function.body, assignments)
+    return assignments
+
+
+def _collect_borrowed_string_concat_assignments(
+    statements: tuple[IrStmt, ...],
+    assignments: set[int],
+) -> None:
+    for index, statement in enumerate(statements):
+        if isinstance(statement, IrIf):
+            _collect_borrowed_string_concat_assignments(
+                statement.then_branch.statements,
+                assignments,
+            )
+            if statement.else_branch is not None:
+                _collect_borrowed_string_concat_assignments(
+                    statement.else_branch.statements,
+                    assignments,
+                )
+        elif isinstance(statement, IrForEach | IrWhile):
+            _collect_borrowed_string_concat_assignments(statement.body.statements, assignments)
+        elif isinstance(statement, IrTry):
+            _collect_borrowed_string_concat_assignments(statement.body.statements, assignments)
+            _collect_borrowed_string_concat_assignments(statement.orelse.statements, assignments)
+            _collect_borrowed_string_concat_assignments(statement.finalbody.statements, assignments)
+            for handler in statement.handlers:
+                _collect_borrowed_string_concat_assignments(handler.body.statements, assignments)
+        if (
+            not isinstance(statement, IrAssign)
+            or not isinstance(statement.value, IrStringConcat)
+            or not _plain_assignment_target(statement.target)
+            or index + 1 == len(statements)
+            or not _borrowable_string_concat(statement.value, statement.target)
+        ):
+            continue
+        immediate_uses = _statement_name_use_count(statements[index + 1], statement.target)
+        immediate_borrows = _statement_name_use_count(
+            statements[index + 1],
+            statement.target,
+            borrowed_only=True,
+        )
+        later_uses = _statements_name_use_count(
+            statements,
+            statement.target,
+            start=index + 2,
+        )
+        if immediate_uses == 1 and immediate_borrows == 1 and later_uses == 0:
+            assignments.add(id(statement))
 
 
 def _plain_assignment_target(target: str) -> bool:
@@ -785,6 +1016,7 @@ class _Emitter:
         self.current_result_out: str | None = None
         self.current_error_out: str | None = None
         self.current_owned_tuple_rebinds: set[int] = set()
+        self.current_borrowed_string_concat_assignments: set[int] = set()
         self.current_phase_mark: str | None = None
         self.failure_scopes: list[_FailureScope] = []
         self.caught_status_stack: list[str] = []
@@ -926,6 +1158,9 @@ class _Emitter:
         previous_result_out = self.current_result_out
         previous_error_out = self.current_error_out
         previous_owned_tuple_rebinds = self.current_owned_tuple_rebinds
+        previous_borrowed_string_concat_assignments = (
+            self.current_borrowed_string_concat_assignments
+        )
         previous_phase_mark = self.current_phase_mark
         previous_failure_scopes = self.failure_scopes
         previous_caught_status_stack = self.caught_status_stack
@@ -934,6 +1169,9 @@ class _Emitter:
         self.current_result_out = result_out if fallible else None
         self.current_error_out = "%error_out" if fallible else None
         self.current_owned_tuple_rebinds = _owned_tuple_rebinds(function)
+        self.current_borrowed_string_concat_assignments = _borrowed_string_concat_assignments(
+            function
+        )
         self.current_phase_mark = None
         self.failure_scopes = []
         self.caught_status_stack = []
@@ -958,6 +1196,9 @@ class _Emitter:
             self.current_result_out = previous_result_out
             self.current_error_out = previous_error_out
             self.current_owned_tuple_rebinds = previous_owned_tuple_rebinds
+            self.current_borrowed_string_concat_assignments = (
+                previous_borrowed_string_concat_assignments
+            )
             self.current_phase_mark = previous_phase_mark
             self.failure_scopes = previous_failure_scopes
             self.caught_status_stack = previous_caught_status_stack
@@ -983,6 +1224,14 @@ class _Emitter:
                 return
             if id(statement) in self.current_owned_tuple_rebinds:
                 value = self._emit_owned_tuple_rebind(statement, names, lines)
+            elif id(statement) in self.current_borrowed_string_concat_assignments:
+                if not isinstance(statement.value, IrStringConcat):
+                    self._error("Borrowed string concat assignment expects IrStringConcat")
+                value = _EmittedValue(
+                    self._string_constant(""),
+                    IrStringType(),
+                    statement.value,
+                )
             elif isinstance(statement.value, IrConstructRecord):
                 value = self._emit_construct_record(statement.value, names, lines, statement.target)
             else:
@@ -3595,6 +3844,12 @@ class _Emitter:
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue:
+        if isinstance(prefix_expr, IrName):
+            prefix_name = prefix_expr.name
+            emitted_prefix = names.get(prefix_name)
+            if emitted_prefix is not None and emitted_prefix.borrowed_string_concat is not None:
+                prefix_expr = emitted_prefix.borrowed_string_concat
+                names[prefix_name] = _EmittedValue(emitted_prefix.value, emitted_prefix.type)
         if not isinstance(prefix_expr, IrStringConcat) or len(prefix_expr.parts) < 2:
             prefix = self._emit_expr(prefix_expr, names, lines)
             if not _is_string_like_type(prefix.type):

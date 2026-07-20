@@ -633,9 +633,11 @@ class AotRuntimeOracleTests(unittest.TestCase):
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
             "    name = 'xcc.aot'\n"
-            "    if not 'xcc.aot.slice'.startswith(f'{name}.'):\n"
+            "    prefix = f'{name}.'\n"
+            "    if not 'xcc.aot.slice'.startswith(prefix):\n"
             "        return 1\n"
-            "    if 'xcc.aotx.slice'.startswith(f'{name}.'):\n"
+            "    other_prefix = f'{name}.'\n"
+            "    if 'xcc.aotx.slice'.startswith(other_prefix):\n"
             "        return 2\n"
             "    empty = ''\n"
             "    if not '.slice'.startswith(f'{empty}.'):\n"

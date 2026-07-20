@@ -3174,6 +3174,80 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
         self.assertNotIn("call ptr @__xcc_aot_string_concat2", function_ir)
 
+    def test_v399_single_use_concat_assignment_is_forwarded_to_startswith(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        concat = IrStringConcat((IrName("name", IrStringType()), IrConstString(".")))
+        module = IrModule(
+            "startswith_concat_assignment.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (IrParam("text", IrStringType()), IrParam("name", IrStringType())),
+                    IrBoolType(),
+                    (
+                        IrAssign("prefix", concat),
+                        IrReturn(
+                            IrCall(
+                                "__str_startswith",
+                                (
+                                    IrName("text", IrStringType()),
+                                    IrName("prefix", IrStringType()),
+                                    IrConstInt(0, int64),
+                                ),
+                                IrBoolType(),
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        start = llvm_ir.index("define i1 @check")
+        end = llvm_ir.index("\n}", start)
+        function_ir = llvm_ir[start:end]
+
+        self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
+        self.assertNotIn("call ptr @__xcc_aot_string_concat2", function_ir)
+
+    def test_v399_keeps_multi_use_concat_assignment_materialized(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        concat = IrStringConcat((IrName("name", IrStringType()), IrConstString(".")))
+        startswith = IrCall(
+            "__str_startswith",
+            (
+                IrName("text", IrStringType()),
+                IrName("prefix", IrStringType()),
+                IrConstInt(0, int64),
+            ),
+            IrBoolType(),
+        )
+        module = IrModule(
+            "startswith_concat_multi_use.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (IrParam("text", IrStringType()), IrParam("name", IrStringType())),
+                    IrBoolType(),
+                    (
+                        IrAssign("prefix", concat),
+                        IrAssign("__expr", startswith),
+                        IrReturn(startswith),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        start = llvm_ir.index("define i1 @check")
+        end = llvm_ir.index("\n}", start)
+        function_ir = llvm_ir[start:end]
+
+        self.assertEqual(function_ir.count("call ptr @__xcc_aot_string_concat2"), 1)
+        self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
+
     def test_emits_string_startswith_tuple_prefix_intrinsic_calls(self) -> None:
         int64 = IrIntType(64, signed=True)
         module = IrModule(

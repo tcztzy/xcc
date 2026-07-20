@@ -2,6 +2,9 @@
 
 ## Current
 
+- Extended borrowed `startswith` prefixes across a pure, immediately consumed,
+  single-use local assignment. Conservative use analysis keeps multi-use,
+  self-referential, effectful, and later-observed concatenations materialized.
 - Lowered concatenated `str.startswith` prefixes as borrowed consecutive part
   comparisons. Dynamic f-string components are still evaluated once in order,
   but the native path no longer allocates their combined temporary merely to

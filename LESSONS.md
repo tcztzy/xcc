@@ -1,5 +1,10 @@
 # Lessons
 
+- A focused allocation oracle must preserve the producer/consumer separation
+  of the real program. Testing `startswith(f"{name}.")` did not cover
+  `prefix = f"{name}."; startswith(prefix)`; inspect the generated Stage 1
+  function before declaring a hot allocation removed, and forward locals only
+  after conservative single-use and purity proofs.
 - Borrowing can remove allocations without changing Python source semantics.
   When a concatenated string is consumed only by `startswith`, evaluate its
   parts once and compare them consecutively against the receiver; materializing
