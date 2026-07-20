@@ -406,6 +406,14 @@ def _expr_name_use_count(expr: IrExpr, name: str, *, borrowed_only: bool = False
             and expr.args[1].name == name
         ):
             count += 1
+        if (
+            borrowed_only
+            and expr.target == "len"
+            and len(expr.args) == 1
+            and isinstance(expr.args[0], IrName)
+            and expr.args[0].name == name
+        ):
+            count += 1
         return count
     if isinstance(expr, IrTuple):
         count = 0
@@ -552,6 +560,52 @@ def _borrowable_string_concat(expr: IrStringConcat, target: str) -> bool:
     return True
 
 
+def _statement_assigns_name(statement: IrStmt, name: str) -> bool:
+    if isinstance(statement, IrAssign):
+        return name in _for_each_targets(statement.target)
+    if isinstance(statement, IrIf):
+        if _statements_assign_name(statement.then_branch.statements, name):
+            return True
+        return statement.else_branch is not None and _statements_assign_name(
+            statement.else_branch.statements,
+            name,
+        )
+    if isinstance(statement, IrForEach):
+        return name in _for_each_targets(statement.target) or _statements_assign_name(
+            statement.body.statements,
+            name,
+        )
+    if isinstance(statement, IrWhile):
+        return _statements_assign_name(statement.body.statements, name)
+    if isinstance(statement, IrTry):
+        if (
+            _statements_assign_name(statement.body.statements, name)
+            or _statements_assign_name(statement.orelse.statements, name)
+            or _statements_assign_name(statement.finalbody.statements, name)
+        ):
+            return True
+        for handler in statement.handlers:
+            if handler.target == name or _statements_assign_name(handler.body.statements, name):
+                return True
+    return False
+
+
+def _statements_assign_name(statements: tuple[IrStmt, ...], name: str) -> bool:
+    index = 0
+    while index < len(statements):
+        if _statement_assigns_name(statements[index], name):
+            return True
+        index += 1
+    return False
+
+
+def _concat_dependencies_remain_stable(expr: IrStringConcat, statement: IrStmt) -> bool:
+    for part in expr.parts:
+        if isinstance(part, IrName) and _statement_assigns_name(statement, part.name):
+            return False
+    return True
+
+
 def _borrowed_string_concat_assignments(function: IrFunction) -> set[int]:
     assignments: set[int] = set()
     _collect_borrowed_string_concat_assignments(function.body, assignments)
@@ -589,9 +643,10 @@ def _collect_borrowed_string_concat_assignments(
             or not _borrowable_string_concat(statement.value, statement.target)
         ):
             continue
-        immediate_uses = _statement_name_use_count(statements[index + 1], statement.target)
+        consumer = statements[index + 1]
+        immediate_uses = _statement_name_use_count(consumer, statement.target)
         immediate_borrows = _statement_name_use_count(
-            statements[index + 1],
+            consumer,
             statement.target,
             borrowed_only=True,
         )
@@ -600,7 +655,12 @@ def _collect_borrowed_string_concat_assignments(
             statement.target,
             start=index + 2,
         )
-        if immediate_uses == 1 and immediate_borrows == 1 and later_uses == 0:
+        if (
+            immediate_uses > 0
+            and immediate_uses == immediate_borrows
+            and later_uses == 0
+            and _concat_dependencies_remain_stable(statement.value, consumer)
+        ):
             assignments.add(id(statement))
 
 
@@ -3360,9 +3420,18 @@ class _Emitter:
     ) -> _EmittedValue:
         if len(expr.args) != 1:
             self._error("len expects one argument")
-        value = self._emit_expr(expr.args[0], names, lines)
         if not isinstance(expr.type, IrIntType) or expr.type.bits != 64:
             self._error("len expects an int64 result")
+        if isinstance(expr.args[0], IrName):
+            emitted_value = names.get(expr.args[0].name)
+            if emitted_value is not None and emitted_value.borrowed_string_concat is not None:
+                return self._emit_borrowed_string_concat_len(
+                    emitted_value.borrowed_string_concat,
+                    expr.type,
+                    names,
+                    lines,
+                )
+        value = self._emit_expr(expr.args[0], names, lines)
         self.needs_runtime_prelude = True
         result = self._tmp("call")
         if isinstance(value.type, IrTupleType | IrDictType):
@@ -3375,6 +3444,27 @@ class _Emitter:
             lines.append(f"  {result} = call i64 @strlen(ptr {value.value})")
             return _EmittedValue(result, expr.type)
         self._error(f"Unsupported len argument type: {type(value.type).__name__}")
+
+    def _emit_borrowed_string_concat_len(
+        self,
+        concat: IrStringConcat,
+        result_type: IrIntType,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        self.needs_runtime_prelude = True
+        total = "0"
+        for part_expr in concat.parts:
+            part = self._coerce_to_string(self._emit_expr(part_expr, names, lines), lines)
+            part_length = self._tmp("concat.length.part")
+            lines.append(f"  {part_length} = call i64 @strlen(ptr {part.value})")
+            if total == "0":
+                total = part_length
+                continue
+            combined = self._tmp("concat.length")
+            lines.append(f"  {combined} = add i64 {total}, {part_length}")
+            total = combined
+        return _EmittedValue(total, result_type)
 
     def _emit_abs_call(
         self,
@@ -3845,11 +3935,9 @@ class _Emitter:
         lines: list[str],
     ) -> _EmittedValue:
         if isinstance(prefix_expr, IrName):
-            prefix_name = prefix_expr.name
-            emitted_prefix = names.get(prefix_name)
+            emitted_prefix = names.get(prefix_expr.name)
             if emitted_prefix is not None and emitted_prefix.borrowed_string_concat is not None:
                 prefix_expr = emitted_prefix.borrowed_string_concat
-                names[prefix_name] = _EmittedValue(emitted_prefix.value, emitted_prefix.type)
         if not isinstance(prefix_expr, IrStringConcat) or len(prefix_expr.parts) < 2:
             prefix = self._emit_expr(prefix_expr, names, lines)
             if not _is_string_like_type(prefix.type):

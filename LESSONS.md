@@ -1,5 +1,10 @@
 # Lessons
 
+- Rust-style borrowing is about the full use set, not simply `use_count == 1`.
+  A virtual string can safely serve both `startswith` and `len` in one control
+  statement when its dependencies stay stable; classify every consumer and
+  materialize on the first unknown/escaping use. The ownership proof must also
+  avoid recursive aggregate results in a no-GC compiler.
 - A focused allocation oracle must preserve the producer/consumer separation
   of the real program. Testing `startswith(f"{name}.")` did not cover
   `prefix = f"{name}."; startswith(prefix)`; inspect the generated Stage 1

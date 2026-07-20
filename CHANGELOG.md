@@ -2,6 +2,10 @@
 
 ## Current
 
+- Kept pure concatenated-string locals virtual across multiple borrowing uses
+  in one statement. `startswith` compares their parts, `len` sums part lengths,
+  and dependency mutation or any later/unknown use forces normal materialization;
+  the proof walker itself uses allocation-free scalar counters.
 - Extended borrowed `startswith` prefixes across a pure, immediately consumed,
   single-use local assignment. Conservative use analysis keeps multi-use,
   self-referential, effectful, and later-observed concatenations materialized.

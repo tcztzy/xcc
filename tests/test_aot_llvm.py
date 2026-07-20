@@ -3211,7 +3211,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
         self.assertNotIn("call ptr @__xcc_aot_string_concat2", function_ir)
 
-    def test_v399_keeps_multi_use_concat_assignment_materialized(self) -> None:
+    def test_v400_keeps_cross_statement_multi_use_concat_materialized(self) -> None:
         int64 = IrIntType(64, signed=True)
         concat = IrStringConcat((IrName("name", IrStringType()), IrConstString(".")))
         startswith = IrCall(
@@ -3247,6 +3247,56 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertEqual(function_ir.count("call ptr @__xcc_aot_string_concat2"), 1)
         self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
+
+    def test_v400_borrows_concat_for_startswith_and_nested_len(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        concat = IrStringConcat((IrName("name", IrStringType()), IrConstString(".")))
+        module = IrModule(
+            "startswith_concat_len.py",
+            (),
+            (
+                IrFunction(
+                    "check",
+                    (IrParam("text", IrStringType()), IrParam("name", IrStringType())),
+                    int64,
+                    (
+                        IrAssign("prefix", concat),
+                        IrIf(
+                            IrCall(
+                                "__str_startswith",
+                                (
+                                    IrName("text", IrStringType()),
+                                    IrName("prefix", IrStringType()),
+                                    IrConstInt(0, int64),
+                                ),
+                                IrBoolType(),
+                            ),
+                            IrBranch(
+                                (
+                                    IrReturn(
+                                        IrCall(
+                                            "len",
+                                            (IrName("prefix", IrStringType()),),
+                                            int64,
+                                        )
+                                    ),
+                                )
+                            ),
+                            IrBranch((IrReturn(IrConstInt(0, int64)),)),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        start = llvm_ir.index("define i64 @check")
+        end = llvm_ir.index("\n}", start)
+        function_ir = llvm_ir[start:end]
+
+        self.assertEqual(function_ir.count("call i1 @__xcc_aot_string_startswith"), 2)
+        self.assertEqual(function_ir.count("call i64 @strlen"), 3)
+        self.assertNotIn("call ptr @__xcc_aot_string_concat2", function_ir)
 
     def test_emits_string_startswith_tuple_prefix_intrinsic_calls(self) -> None:
         int64 = IrIntType(64, signed=True)
