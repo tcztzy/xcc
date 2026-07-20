@@ -1,5 +1,17 @@
 # Lessons
 
+- Borrowed return provenance and allocation effect are related but distinct
+  proofs. A pointer-shaped intrinsic result does not allocate when it aliases
+  an input element or process-stable singleton; charging it from the result type
+  alone can place a region around every lexer character lookup. Propagate only
+  argument allocations for the explicitly proven borrowed intrinsic set, and
+  keep ordinary pointer-returning intrinsics and real scratch construction on
+  the conservative owned-phase path.
+- When a bounded bootstrap stays at low RSS but makes no source-open or tool
+  progress, sample it before changing source shape. The post-B624 sample put
+  almost all CPU in owner-region promotion and capture lookup while lexing,
+  separating the remaining provenance-search cost from fixed-point dictionary
+  equality and from allocation pressure.
 - Correct structural equality can still be unusably slow on a tuple-backed
   mapping. Compiler fixed points construct deterministic mappings in matching
   order, so compare aligned keys and values first, then fall back to the full

@@ -2,6 +2,23 @@
 
 ## Current
 
+- B625 separates borrowed intrinsic results from owned allocations in phase
+  effect analysis. The post-B624 full Stage 1-to-2 run still reached its
+  900.12-second process-group watchdog after 896.91 user seconds with only
+  50,397,184-byte maximum RSS, zero swap, 409 source opens, no external tool
+  execution, and no Stage 2 artifact. A bounded five-second sample attributed
+  82.6% of 3,818 stacks to owner-graph promotion and 16.2% to capture-target
+  lookup while the compiler was still lexing. Separately, pointer-shaped
+  borrowed intrinsics such as string/tuple indexing were being counted as
+  allocations solely from their result type, giving `_PythonLexer._peek` a
+  region on every character lookup. V412 preserves a phase for actual scratch
+  allocation while propagating no-allocation through borrowed indexing and a
+  forwarding caller. Full-slice phase owners fall from 828 to 798. The retained
+  hosted Stage 1 builds in 28.14 seconds at 318,685,184-byte maximum RSS; its
+  focused borrowed-string program compiles in 0.11 seconds at 47,120,384-byte
+  maximum RSS using only `llc` and `cc`, then exits 7. No full post-B625
+  Stage 1-to-2 result is claimed.
+
 - B624 adds a semantics-preserving aligned-key fast path to typed native
   dictionary equality. Equal dictionaries built in the same deterministic order
   now compare each key/value pair once; the V410 order-independent search remains

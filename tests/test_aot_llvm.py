@@ -280,6 +280,75 @@ class AotLlvmTextTests(unittest.TestCase):
                 self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
                 self.assertIn("call void @__xcc_aot_phase_reset", body)
 
+    def test_v412_borrowed_intrinsic_results_do_not_create_owned_phases(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        string_type = IrStringType()
+        values_type = IrTupleType((string_type,))
+        borrowed = IrFunction(
+            "borrowed",
+            (IrParam("values", values_type),),
+            string_type,
+            (
+                IrReturn(
+                    IrCall(
+                        "__getitem",
+                        (IrName("values", values_type), IrConstInt(0, int64)),
+                        string_type,
+                    )
+                ),
+            ),
+        )
+        forwards = IrFunction(
+            "forwards",
+            (IrParam("values", values_type),),
+            string_type,
+            (
+                IrReturn(
+                    IrCall(
+                        "borrowed",
+                        (IrName("values", values_type),),
+                        string_type,
+                    )
+                ),
+            ),
+        )
+        allocates = IrFunction(
+            "allocates",
+            (IrParam("values", values_type),),
+            string_type,
+            (
+                IrAssign(
+                    "scratch",
+                    IrStringConcat((IrConstString("a"), IrConstString("b"))),
+                ),
+                IrReturn(
+                    IrCall(
+                        "borrowed",
+                        (IrName("values", values_type),),
+                        string_type,
+                    )
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(
+            IrModule("borrowed-intrinsic-phase.py", (), (borrowed, forwards, allocates))
+        )
+
+        for signature in (
+            "define ptr @borrowed(ptr %values)",
+            "define ptr @forwards(ptr %values)",
+        ):
+            with self.subTest(signature=signature):
+                body = llvm_ir.split(signature, 1)[1].split("\n}", 1)[0]
+                self.assertNotIn("@__xcc_aot_phase_mark", body)
+                self.assertNotIn("@__xcc_aot_phase_reset", body)
+        allocating_body = llvm_ir.split("define ptr @allocates(ptr %values)", 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", allocating_body)
+        self.assertIn("call void @__xcc_aot_phase_reset", allocating_body)
+
     def test_v407_pointer_store_captures_value_into_owner_region(self) -> None:
         int64 = IrIntType(64, signed=True)
         string_type = IrStringType()

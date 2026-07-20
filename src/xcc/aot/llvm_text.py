@@ -1384,6 +1384,8 @@ def _phase_expr_effect(
             if callee is None:
                 return False, args_allocate
             return callee[0], args_allocate or callee[1]
+        if expr.target in _PHASE_BORROWED_RETURN_INTRINSICS:
+            return True, args_allocate
         if _phase_intrinsic_is_no_capture(expr.target):
             pointer_result = isinstance(
                 expr.type,
