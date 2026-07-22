@@ -4233,6 +4233,11 @@ class _Emitter:
             return _EmittedValue(result, IrStringType())
         if isinstance(value.type, IrNoneType):
             return _EmittedValue(self._string_constant("None"), IrStringType())
+        if _is_opaque_object_type(value.type):
+            result = self._tmp("object.str")
+            self.needs_runtime_prelude = True
+            lines.append(f"  {result} = call ptr @__xcc_aot_object_str(ptr {value.value})")
+            return _EmittedValue(result, IrStringType())
         if isinstance(value.type, (IrDictType, IrRecordType, IrTupleType)):
             return _EmittedValue(value.value, IrStringType())
         self._error(f"Unsupported string conversion type: {type(value.type).__name__}")

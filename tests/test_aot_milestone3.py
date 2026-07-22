@@ -1341,6 +1341,33 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 7)
 
+    def test_v430_opaque_fstring_uses_tagged_object_str(self) -> None:
+        source = (
+            "def render(value: object) -> str:\n"
+            "    return f'{value}'\n"
+            "def entry() -> int:\n"
+            "    if render('text') != 'text':\n"
+            "        return 1\n"
+            "    if render(None) != 'None':\n"
+            "        return 2\n"
+            "    return 7 if render(3) == '3' else 3\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="opaque-fstring.py", entry="entry")
+        )
+        render_body = llvm_ir.split("define ptr @render(", 1)[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_object_str(ptr %value)", render_body)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "opaque-fstring",
+                filename="opaque-fstring.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 7)
+
     def test_v415_direct_parent_capture_defers_graph_walk_until_region_finish(self) -> None:
         llvm_ir = (
             runtime_prelude()

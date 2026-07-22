@@ -1,5 +1,19 @@
 # Lessons
 
+- Investigate wall-time regressions by separating compiler CPU from external
+  wait and by alternating adjacent revisions. A 94-second runtime-oracle run
+  was followed by a 60-second run of the identical commit with nearly unchanged
+  user CPU, while Milestone 3 showed the same 26-to-18-second split. Repeated
+  native tests create and launch many temporary binaries, so macOS executable
+  validation can add wall time without adding binder/lowerer/emitter work.
+  Compare user/system time, security-service activity, and same-revision reruns
+  before attributing that delay to a code change.
+- F-string concatenation requires a real `str()` conversion at an opaque
+  boundary. A tagged string object needs its payload without repr quotes, null
+  needs `None`, and integers/bools/other supported scalar tags need their normal
+  textual form; reinterpreting every record-shaped `ptr` as a C string turns a
+  valid optional payload into `strlen(null)`. Keep this dispatch separate from
+  typed-string and record-specific fast paths.
 - Dynamic container indexing has two representation boundaries: unbox the
   receiver before the structural operation, then box a raw result when its
   static type is opaque. Centralize both decisions in one tuple-get helper so a

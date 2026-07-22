@@ -780,6 +780,20 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="opaque-tuple-items.py",
         )
 
+    def test_opaque_fstring_matches_cpython_str(self) -> None:
+        self.assert_native_matches_cpython(
+            "def render(value: object) -> str:\n"
+            "    return f'{value}'\n"
+            "def entry() -> int:\n"
+            "    if render('text') != 'text':\n"
+            "        return 1\n"
+            "    if render(None) != 'None':\n"
+            "        return 2\n"
+            "    return 7 if render(3) == '3' else 3\n",
+            expected=7,
+            filename="opaque-fstring.py",
+        )
+
     def test_exact_owned_return_preserves_result_from_temporary_receiver(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"

@@ -487,5 +487,32 @@ tuple flow type so the proven string path remains raw. The focused ordinary
 source changes from native exit 1 to exit 7 and matches CPython; V409 continues
 to protect dynamic object-graph behavior. All 500 combined
 IR/M3/runtime-oracle tests, 173 emitter tests, and 16 status tests pass. B642
-has not yet received bounded native integration evidence; lint and type are
-green. Stage 2-to-3 and strong bootstrap remain unproven.
+has a new hosted Stage 1 in 28.69 seconds at 365,477,888-byte maximum RSS with
+zero swap. It exposes the native contract, rejects the CPython parser, links
+only `libSystem`, and uses only `llc` and `cc`. Its exact V429 ordinary source
+compiles in 0.12 seconds at 48,054,272-byte maximum RSS without Python and
+matches CPython at exit 7. The bounded Stage 1-to-2 run exits 139 after 15.03
+seconds at 365,740,032-byte maximum RSS and zero swap, with no Stage 2 artifact.
+The audit contains 3,136 source opens over the same 817 paths and no Python or
+tool execution before the crash.
+
+B643/V430 records the next representation defect. The latest crash report has
+a null read in `__xcc_aot_string_concat2`/`strlen`. The final error-record tuple
+contains an optional payload; dynamic indexing correctly returns null for
+`None`, but opaque f-string conversion passed that pointer directly to string
+concatenation. V430 introduces tagged `__xcc_aot_object_str`: null maps to
+`None`, tag-4 strings return their unquoted payload, and other supported scalar
+tags reuse object repr. Typed strings and record-specific paths remain direct.
+The focused ordinary source changes from native exit 1 to exit 7 and agrees
+with CPython for string, `None`, and integer values. All 502 combined
+IR/M3/runtime-oracle tests, 173 emitter tests, and 16 status tests pass; lint,
+type, and `git diff --check` are green. The handoff performance audit compared
+the runtime oracle at `f919853^` (62.29 seconds) with `f919853` (94.30 seconds,
+then 59.79 seconds on the identical snapshot) and the current B643 tree (61.89
+seconds). User CPU stayed near 23 seconds. Milestone 3 likewise changed from
+26.11 to 17.56 seconds while user CPU stayed at 6.8--6.9 seconds. The extra
+wall time is external executable-validation wait during repeated temporary
+native builds, not a reproduced binder/lowerer/emitter regression; typed-string
+coercion still returns before the new opaque-object dispatch. B643 has not yet
+received bounded native integration evidence. Stage 2-to-3 and strong bootstrap
+remain unproven.

@@ -2,6 +2,31 @@
 
 ## Current
 
+- B643 gives opaque f-string parts ordinary Python `str()` semantics. The first
+  bounded B642 Stage 1-to-2 run still reached final LLVM emission in 15.03
+  seconds at 365,740,032-byte maximum RSS with zero swap, then exited 139 after
+  3,136 source opens over 817 unique paths. Its crash report places a null read
+  in `__xcc_aot_string_concat2`/`strlen`. B642 correctly returned a tagged
+  object for dynamic tuple elements, including raw null for the optional error
+  payload, but `_coerce_to_string` treated every record-shaped pointer as an
+  already valid string. V430 adds `__xcc_aot_object_str`: null becomes `None`,
+  tag-4 strings return their payload without repr quotes, and the other existing
+  scalar tags reuse `__xcc_aot_object_repr`. Only opaque objects use this
+  dispatch; typed strings and record-specific paths remain unchanged. The
+  focused ordinary source changes from native exit 1 to exit 7 and agrees with
+  CPython for string, `None`, and integer values. All 502 combined
+  IR/M3/runtime-oracle tests, 173 emitter tests, and 16 status tests pass; lint,
+  type, and `git diff --check` are green. A handoff performance audit found no
+  deterministic B642/B643 regression: the runtime oracle took 62.29 seconds at
+  `f919853^`, while two runs of `f919853` took 94.30 and 59.79 seconds with
+  nearly unchanged 23-second user CPU time. The current B643 tree took 61.89
+  seconds. Milestone 3 similarly took 26.11 then 17.56 seconds with unchanged
+  6.8--6.9-second user CPU time. The slow intervals coincide with external
+  executable-validation wait while the tests repeatedly build and launch
+  temporary binaries; they do not identify a new binder/lowerer/emitter hot
+  path. B643 has not yet received bounded Stage 1-to-2 evidence, so Stage 2/
+  Stage 3 remain unproven.
+
 - B642 completes the dynamic tuple indexing representation contract exposed by
   B641. The first B641 Stage 1-to-2 run still reached final LLVM emission in
   15.15 seconds at 365,789,184-byte maximum RSS with zero swap, then exited 139
@@ -17,8 +42,9 @@
   V409 object-graph regression remains green. The focused ordinary source
   changes from native exit 1 to exit 7 and agrees with CPython. All 500 combined
   IR/M3/runtime-oracle tests, 173 emitter tests, and 16 status tests pass; lint,
-  type, and `git diff --check` are green. B642 has not yet received bounded
-  Stage 1-to-2 evidence, so Stage 2/Stage 3 remain unproven.
+  type, and `git diff --check` are green. Its first Stage 1-to-2 run exposed the
+  distinct opaque f-string defect recorded as B643; no Stage 2 artifact was
+  produced.
 
 - B641 restores the representation boundary between an opaque Python `object`
   box and a raw runtime tuple. The first bounded B640 Stage 1-to-2 run no longer
