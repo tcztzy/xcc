@@ -1368,6 +1368,33 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 7)
 
+    def test_v431_scalar_union_fstring_uses_tagged_object_str(self) -> None:
+        source = (
+            "def render(value: int | str) -> str:\n"
+            "    return f'{value}'\n"
+            "def entry() -> int:\n"
+            "    if render(0) != '0':\n"
+            "        return 1\n"
+            "    return 7 if render('text') == 'text' else 2\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="scalar-union-fstring.py", entry="entry")
+        )
+        render_body = llvm_ir.split("define ptr @render(", 1)[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_object_str(ptr %value)", render_body)
+        self.assertRegex(llvm_ir, r"store i64 2, ptr %object\d+")
+        self.assertRegex(llvm_ir, r"store i64 4, ptr %object\d+")
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "scalar-union-fstring",
+                filename="scalar-union-fstring.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 7)
+
     def test_v415_direct_parent_capture_defers_graph_walk_until_region_finish(self) -> None:
         llvm_ir = (
             runtime_prelude()

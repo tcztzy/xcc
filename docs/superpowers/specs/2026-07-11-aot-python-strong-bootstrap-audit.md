@@ -513,6 +513,36 @@ seconds). User CPU stayed near 23 seconds. Milestone 3 likewise changed from
 26.11 to 17.56 seconds while user CPU stayed at 6.8--6.9 seconds. The extra
 wall time is external executable-validation wait during repeated temporary
 native builds, not a reproduced binder/lowerer/emitter regression; typed-string
-coercion still returns before the new opaque-object dispatch. B643 has not yet
-received bounded native integration evidence. Stage 2-to-3 and strong bootstrap
-remain unproven.
+coercion still returns before the new opaque-object dispatch.
+
+The subsequent B643 artifact builds in 30.57 seconds at 342,163,456-byte
+maximum RSS, invokes only `llc` and `cc`, links only `libSystem`, has no Python
+symbols, and rejects the CPython parser. It compiles the exact V430 source in
+0.13 seconds at 48,168,960-byte maximum RSS without Python and matches CPython
+at exit 7. Static Stage 1 IR converts both dynamic `_emit_error_record` fields
+through `__xcc_aot_object_str` while retaining the typed name fast path. Its
+first bounded Stage 1-to-2 run reaches final LLVM emission in 15.33 seconds at
+366,329,856-byte maximum RSS, then exits 139 after 3,136 source opens over 817
+unique paths. It executes no tool and produces no Stage 2 artifact.
+
+B644/V431 records the distinct representation defect exposed by that run. The
+crash again has a null right operand in `__xcc_aot_string_concat2`, but the
+V430 error-record site is statically correct. An O0 rebuild reproduces the
+failure in 22.69 seconds at 365,510,656-byte maximum RSS. A diagnostic copy of
+the same LLVM module uses `llvm.returnaddress(0)` only on a null concat operand;
+the returned address maps exactly to `_Emitter._emit_runtime_tuple_get` and the
+`f"... {index}"` interpolation. Its `index: int | str` parameter previously
+used the shared pointer ABI, so integer zero crossed the call as null and the
+record-string fast path passed it directly to `strlen`.
+
+V431 classifies a union as opaque whenever it has at least two
+non-`None` alternatives and any alternative is scalar. Arguments are therefore
+tagged at call boundaries and f-string conversion reuses
+`__xcc_aot_object_str`. A union with one nullable alternative keeps its
+specialized representation; a pure record union keeps its common pointer ABI.
+Before the fix, the focused native oracle returns 1 instead of CPython's 7 and
+the generated function contains no object conversion. Both focused tests now
+pass, as do all 504 combined IR/M3/runtime-oracle tests and all 173 LLVM emitter
+tests, while all 16 status tests, lint, type, and `git diff --check` are green.
+No post-B644 Stage 1 exists yet; Stage 2-to-3 and strong bootstrap remain
+unproven.

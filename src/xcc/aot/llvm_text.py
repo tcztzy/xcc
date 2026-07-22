@@ -11864,8 +11864,7 @@ def _is_opaque_object_type(type_info: IrType) -> bool:
         return False
     scalar_parts = {"bool", "bytes", "float", "int", "str"}
     has_scalar = any(part in scalar_parts for part in non_none_parts)
-    has_pointer = any(part not in scalar_parts for part in non_none_parts)
-    return has_scalar and has_pointer
+    return has_scalar and len(non_none_parts) > 1
 
 
 def _is_nullable_record_union(

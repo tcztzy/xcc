@@ -1324,6 +1324,18 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="mixed-union-object-abi.py",
         )
 
+    def test_scalar_union_fstring_uses_tagged_object_abi(self) -> None:
+        self.assert_native_matches_cpython(
+            "def render(value: int | str) -> str:\n"
+            "    return f'{value}'\n"
+            "def entry() -> int:\n"
+            "    if render(0) != '0':\n"
+            "        return 1\n"
+            "    return 7 if render('text') == 'text' else 2\n",
+            expected=7,
+            filename="scalar-union-fstring.py",
+        )
+
     def test_fixed_tuple_literal_preserves_tagged_object_slot(self) -> None:
         self.assert_native_matches_cpython(
             "FunctionParams = tuple[tuple[str, ...] | None, bool]\n"

@@ -1,5 +1,13 @@
 # Lessons
 
+- An LLVM `ptr` is not a sufficient ABI for a heterogeneous scalar union. Raw
+  integer zero and `None` both become null, while strings/bytes use unrelated
+  pointer layouts, so later formatting or `isinstance` cannot recover the
+  source alternative. Give every multi-alternative union containing a scalar a
+  tagged-object boundary; keep the specialized nullable representation only
+  for one non-`None` alternative and the shared pointer representation only for
+  pure record unions. Test zero explicitly because positive integers can hide
+  this ambiguity as non-null pointer-shaped values.
 - Investigate wall-time regressions by separating compiler CPU from external
   wait and by alternating adjacent revisions. A 94-second runtime-oracle run
   was followed by a 60-second run of the identical commit with nearly unchanged

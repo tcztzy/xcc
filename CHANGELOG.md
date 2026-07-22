@@ -2,6 +2,29 @@
 
 ## Current
 
+- B644 gives heterogeneous scalar unions one unambiguous tagged-object ABI.
+  The first bounded B643 Stage 1-to-2 run reached final LLVM emission in 15.33
+  seconds at 366,329,856-byte maximum RSS, then exited 139 after 3,136 source
+  opens over 817 unique paths, without executing a tool or producing Stage 2.
+  The crash was another null right operand in `__xcc_aot_string_concat2`, but
+  V430's exact error-record function already converted both opaque fields.
+  An O0 rebuild reproduced the fault in 22.69 seconds at 365,510,656-byte
+  maximum RSS; a diagnostic `llvm.returnaddress(0)` mapped the direct caller to
+  `_Emitter._emit_runtime_tuple_get` and its `f"... {index}"` interpolation.
+  The `int | str` parameter previously used the shared pointer ABI: integer
+  zero crossed the call as null, and the broad record-string fast path passed
+  it directly to `strlen`. V431 classifies every union with at least two
+  non-`None` alternatives and any scalar alternative as opaque. Calls
+  therefore box each alternative with a runtime tag, while f-string conversion
+  reuses `__xcc_aot_object_str`; single nullable scalars and pure record unions
+  retain their existing specialized/shared-pointer representations. Before the
+  fix, the focused native oracle returned 1 instead of CPython's 7 and the IR
+  contained no object conversion. Both focused tests now pass, as do all 504
+  combined IR/M3/runtime-oracle tests, all 173 LLVM emitter tests, and all 16
+  status tests; lint, type, and `git diff --check` are green. A new Stage 1 and
+  bounded Stage 1-to-2 run have not yet been produced, so Stage 2/Stage 3 remain
+  unproven.
+
 - B643 gives opaque f-string parts ordinary Python `str()` semantics. The first
   bounded B642 Stage 1-to-2 run still reached final LLVM emission in 15.03
   seconds at 365,740,032-byte maximum RSS with zero swap, then exited 139 after
@@ -24,8 +47,14 @@
   6.8--6.9-second user CPU time. The slow intervals coincide with external
   executable-validation wait while the tests repeatedly build and launch
   temporary binaries; they do not identify a new binder/lowerer/emitter hot
-  path. B643 has not yet received bounded Stage 1-to-2 evidence, so Stage 2/
-  Stage 3 remain unproven.
+  path. A hosted B643 Stage 1 builds in 30.57 seconds at 342,163,456-byte
+  maximum RSS, uses only `llc` and `cc`, links only `libSystem`, has no Python
+  symbols, and rejects the CPython parser. It compiles the exact V430 source in
+  0.13 seconds at 48,168,960-byte maximum RSS without Python; the result agrees
+  with CPython at exit 7, and generated `_emit_error_record` IR converts its two
+  dynamic fields while keeping the typed name direct. Its first bounded
+  Stage 1-to-2 run exposed the distinct scalar-union defect recorded as B644;
+  no Stage 2 artifact was produced.
 
 - B642 completes the dynamic tuple indexing representation contract exposed by
   B641. The first B641 Stage 1-to-2 run still reached final LLVM emission in
