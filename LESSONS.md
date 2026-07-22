@@ -1,5 +1,23 @@
 # Lessons
 
+- A mutating container operation must not rebuild its receiver. Emitting
+  `set.update` as "empty result, rescan left, rescan right, forward back" is
+  semantically correct — the runtime oracle passes — but turns every update,
+  even `set.update(empty)`, into a full graph copy and promotion. Under a
+  fixed allocation guard, bookkeeping updates inside a hot collector then
+  exhaust the budget long after the semantic defect would have shown. Seed
+  mutating updates with the receiver storage and emit only the argument-side
+  unique phase; keep the from-empty scan for non-mutating unions. Pin the
+  emitted IR shape (no empty seed, receiver stored into the result slot)
+  alongside alias-visibility and deduplication oracles, because behavior
+  alone cannot distinguish the wasteful path from the in-place one.
+- Diagnose allocation-guard exhaustion with a `returnaddress(0)`-only
+  instrumented copy, not a live debugger. A conditional LLDB breakpoint on a
+  guard inside a hot concat/tuple path evaluates millions of hits and never
+  finishes within a 60-second budget, and `llvm.returnaddress(1)` or deeper
+  is unreliable on arm64 — a diagnostic copy using it died with signal 11.
+  The direct caller plus a caller histogram over the guard's final allocation
+  band was enough to locate the emitter defect.
 - An LLVM `ptr` is not a sufficient ABI for a heterogeneous scalar union. Raw
   integer zero and `None` both become null, while strings/bytes use unrelated
   pointer layouts, so later formatting or `isinstance` cannot recover the

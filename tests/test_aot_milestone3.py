@@ -1395,6 +1395,36 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 7)
 
+    def test_v432_empty_set_update_reuses_receiver_storage(self) -> None:
+        source = (
+            "def entry() -> int:\n"
+            "    values: set[int] = {1, 2}\n"
+            "    alias = values\n"
+            "    values.update(())\n"
+            "    if len(alias) != 2:\n"
+            "        return 1\n"
+            "    return 7 if 1 in alias and 2 in alias else 2\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="set-update-empty.py", entry="entry")
+        )
+        entry_body = llvm_ir.split("define i64 @entry(", 1)[1].split("\n}", 1)[0]
+        self.assertNotIn("%setop.empty", entry_body)
+        self.assertRegex(
+            entry_body,
+            r"store ptr %tuple\d+, ptr %setop\.resultptr\d+",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "set-update-empty",
+                filename="set-update-empty.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 7)
+
     def test_v415_direct_parent_capture_defers_graph_walk_until_region_finish(self) -> None:
         llvm_ir = (
             runtime_prelude()

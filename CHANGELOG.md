@@ -2,6 +2,54 @@
 
 ## Current
 
+- B645 removes the whole-receiver rebuild inside `set.update` emission. The
+  post-V431 Stage 1 (`build/aot/stage1-b644-7d34fa7/xcc-aot`) builds in 28.97
+  seconds at 365,494,272-byte maximum RSS, reports `xcc-aot 0.2
+  native-contract`, rejects the CPython parser with exit 2, links only
+  `libSystem` with no unresolved Python symbols, and logs only `llc`/`cc`; its
+  Stage 1-emitted `_emit_runtime_tuple_get` already converts `index` through
+  `__xcc_aot_object_str` (sources
+  `a12c1a2cee70384b248df30ac0064c6a432c120eff59c177b8ad7f3368f12407`,
+  normalized IR
+  `c9e073428e08219a723de407c245117def77f0ff1497c60137b028f016c88871`,
+  executable
+  `951690d0c192aae1cf3cb6e7470f4c34459ad81a0bf362b9fc6547c7f883d3e7`). Its
+  exact V431 oracle compiles in 0.29 seconds at 48,119,808-byte maximum RSS
+  with six `.py` opens and only `llc`/`cc` executions, and matches CPython at
+  exit 7; the generated `demo.program.render` calls
+  `__xcc_aot_object_str`. Its first bounded Stage 1-to-2 run then exits 70
+  (`allocation limit exceeded`) in 15.85 seconds at 579,633,152-byte child
+  maximum RSS: 3,139 audit records over the same 817 unique `.py` paths, two
+  EXEC records for the watchdog launching Stage 1, no `llc`/`cc`, no Stage 2
+  artifact. The guard's 536,870,912-byte budget is not bypassed; process RSS
+  includes runtime and mapping overhead. A `returnaddress(0)`-only diagnostic
+  (deeper frames are unreliable on arm64, and a conditional LLDB breakpoint
+  evaluates millions of concats) shows the guard firing at requested=40 with
+  33 bytes left at phase depth 13, directly under `__xcc_aot_tuple_new`; the
+  critical callers alternate between
+  `_Emitter._collect_tuple_object_equality_records` and
+  `__xcc_aot_tuple_concat`, whose outer `_register_tuple_object_layout` sites
+  in the 500--536 MiB band are `_Emitter._emit_tuple` (123),
+  `_Emitter._emit_dict_set_call` (30), and `_Emitter._emit_dict_setdefault_call`
+  (1), with the collector recursing at a roughly 25,664-byte stride. The
+  central root cause is `_Emitter._emit_set_binary_call`: `__set_update`
+  always started from an empty tuple, rescanned the entire left set, then the
+  right set, and forwarded the result back to the receiver. The equality
+  collector updates two bookkeeping sets per tuple leaf, so even
+  `set.update(empty)` copied and promoted the complete old graph until the
+  fixed guard ran out. V432 seeds `__set_update` with the receiver storage
+  and emits only the right-side unique phase; non-mutating `__set_union`
+  still scans left and right from an empty result, and
+  intersection/difference/difference_update paths are unchanged. Before the
+  fix the static invariant failed because the entry IR contained
+  `%setop.empty` and a full left scan, while the runtime oracle already
+  passed, confirming the defect is retention rather than semantics. The four
+  focused tests, all 506 combined IR/M3/runtime-oracle tests, all 173 LLVM
+  emitter tests, and all 16 status tests pass; lint, type, and
+  `git diff --check` are green. A new Stage 1 and bounded Stage 1-to-2 run
+  from this commit have not yet been produced, so Stage 2/Stage 3 remain
+  unproven.
+
 - B644 gives heterogeneous scalar unions one unambiguous tagged-object ABI.
   The first bounded B643 Stage 1-to-2 run reached final LLVM emission in 15.33
   seconds at 366,329,856-byte maximum RSS, then exited 139 after 3,136 source
@@ -21,9 +69,11 @@
   fix, the focused native oracle returned 1 instead of CPython's 7 and the IR
   contained no object conversion. Both focused tests now pass, as do all 504
   combined IR/M3/runtime-oracle tests, all 173 LLVM emitter tests, and all 16
-  status tests; lint, type, and `git diff --check` are green. A new Stage 1 and
-  bounded Stage 1-to-2 run have not yet been produced, so Stage 2/Stage 3 remain
-  unproven.
+  status tests; lint, type, and `git diff --check` are green. Its Stage 1 and
+  bounded Stage 1-to-2 run are recorded with B645 above: the run passed the old
+  null-concat site, then hit the allocation guard at status 70, exposing the
+  set-update retention defect recorded as B645; no Stage 2 artifact was
+  produced.
 
 - B643 gives opaque f-string parts ordinary Python `str()` semantics. The first
   bounded B642 Stage 1-to-2 run still reached final LLVM emission in 15.03

@@ -544,5 +544,56 @@ Before the fix, the focused native oracle returns 1 instead of CPython's 7 and
 the generated function contains no object conversion. Both focused tests now
 pass, as do all 504 combined IR/M3/runtime-oracle tests and all 173 LLVM emitter
 tests, while all 16 status tests, lint, type, and `git diff --check` are green.
-No post-B644 Stage 1 exists yet; Stage 2-to-3 and strong bootstrap remain
-unproven.
+
+The subsequent B644 artifact (`build/aot/stage1-b644-7d34fa7/xcc-aot`) builds
+in 28.97 seconds at 365,494,272-byte maximum RSS, reports `xcc-aot 0.2
+native-contract`, rejects the CPython parser with exit 2, links only
+`libSystem` with no unresolved Python symbols, and logs only `llc` and `cc`.
+Its hashes are sources
+`a12c1a2cee70384b248df30ac0064c6a432c120eff59c177b8ad7f3368f12407`, normalized
+IR `c9e073428e08219a723de407c245117def77f0ff1497c60137b028f016c88871`, and
+executable `951690d0c192aae1cf3cb6e7470f4c34459ad81a0bf362b9fc6547c7f883d3e7`;
+its Stage 1-emitted `_emit_runtime_tuple_get` already converts `index` through
+`__xcc_aot_object_str`. Its exact V431 oracle
+(`build/aot/b644-oracle/demo/program.py`, with `--source-root` pointing at the
+package directory `build/aot/b644-oracle/demo`) compiles in 0.29 seconds at
+48,119,808-byte maximum RSS, matches CPython at exit 7, and its audit shows six
+`.py` opens with only `llc`/`cc` execution; the generated
+`demo.program.render` calls `__xcc_aot_object_str`. Its first bounded
+Stage 1-to-2 run (`build/aot/stage2-b644-7d34fa7-60s`) then exits 70 with
+`xcc-aot: allocation limit exceeded` in 15.85 seconds at 579,633,152-byte
+child maximum RSS. The audit holds 3,139 records over the same 817 unique
+`.py` paths; both EXEC records are the watchdog launching Stage 1, no
+`llc`/`cc` runs, and no Stage 2 artifact exists. The 536,870,912-byte guard
+budget is not bypassed; process RSS additionally carries runtime and mapping
+overhead.
+
+B645/V432 records the retention defect exposed by that run. A diagnostic copy
+instrumented with `llvm.returnaddress(0)` only — deeper frame indices are
+unreliable on arm64 and killed an earlier diagnostic with signal 11, while a
+conditional LLDB breakpoint evaluates millions of concat hits and cannot
+finish within the 60-second budget — shows the guard firing at requested=40
+with 33 bytes remaining at phase depth 13, directly under
+`__xcc_aot_tuple_new`. The critical callers alternate between
+`_Emitter._collect_tuple_object_equality_records` and
+`__xcc_aot_tuple_concat`; outer `_register_tuple_object_layout` sites in the
+500--536 MiB band are `_Emitter._emit_tuple` (123), `_Emitter._emit_dict_set_call`
+(30), and `_Emitter._emit_dict_setdefault_call` (1), with the collector
+recursing at a roughly 25,664-byte stride. The central root cause is
+`_Emitter._emit_set_binary_call`: `__set_update` always allocated an empty
+tuple, rescanned the entire left set, rescanned the right set, and forwarded
+the result back to the receiver. The equality collector calls
+`.update(record_names)` on two bookkeeping sets per tuple leaf, so even an
+empty right side copied and promoted the complete old graph until the fixed
+guard ran out.
+
+V432 seeds `__set_update` with the receiver storage and emits only the
+right-side unique phase. Non-mutating `__set_union` still scans left and
+right from an empty result; intersection, difference, and difference_update
+paths are unchanged. Before the fix the static invariant fails because the
+entry IR contains `%setop.empty` and a full left scan, while the runtime
+oracle already passes — the defect is meaningless rebuild/retention, not
+semantics. The four focused tests, all 506 combined IR/M3/runtime-oracle
+tests, all 173 LLVM emitter tests, and all 16 status tests pass; lint, type,
+and `git diff --check` are green. No post-B645 Stage 1 exists yet; Stage 2,
+Stage 3, and strong bootstrap remain unproven.

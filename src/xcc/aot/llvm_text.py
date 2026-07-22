@@ -8256,11 +8256,25 @@ class _Emitter:
         item_type = expr.type.elements[0]
         self.needs_runtime_prelude = True
         result_ptr = self._tmp("setop.resultptr")
-        empty = self._tmp("setop.empty")
         lines.append(f"  {result_ptr} = alloca ptr")
-        lines.append(f"  {empty} = call ptr @__xcc_aot_tuple_new(i64 0)")
-        lines.append(f"  store ptr {empty}, ptr {result_ptr}")
-        if expr.target in {"__set_union", "__set_update"}:
+        if expr.target == "__set_update":
+            lines.append(f"  store ptr {left.value}, ptr {result_ptr}")
+        else:
+            empty = self._tmp("setop.empty")
+            lines.append(f"  {empty} = call ptr @__xcc_aot_tuple_new(i64 0)")
+            lines.append(f"  store ptr {empty}, ptr {result_ptr}")
+        if expr.target == "__set_update":
+            self._emit_set_binary_phase(
+                right,
+                None,
+                "unique",
+                item_type,
+                expr.type,
+                result_ptr,
+                names,
+                lines,
+            )
+        elif expr.target == "__set_union":
             self._emit_set_binary_phase(
                 left,
                 None,

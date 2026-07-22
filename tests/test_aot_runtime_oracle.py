@@ -2170,6 +2170,19 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="set-update.py",
         )
 
+    def test_empty_set_update_preserves_alias_without_rebuild(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: set[int] = {1, 2}\n"
+            "    alias = values\n"
+            "    values.update(())\n"
+            "    if len(alias) != 2:\n"
+            "        return 1\n"
+            "    return 7 if 1 in alias and 2 in alias else 2\n",
+            expected=7,
+            filename="set-update-empty.py",
+        )
+
     def test_set_difference_update_preserves_alias_mutation(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
