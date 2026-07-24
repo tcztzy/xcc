@@ -1,5 +1,13 @@
 # Lessons
 
+- The B645 receiver-rebuild lesson generalizes across container methods: audit
+  every mutating method lowering, not only the one that crashed. `list.extend`
+  had the same "allocate fresh, copy receiver, copy argument, forward back"
+  shape as `set.update` and survived one more bounded bootstrap round. An
+  in-place growth primitive must read the argument length before resizing and
+  reload the destination pointer after capacity registration, or
+  self-extension (`values.extend(values)`) reads freed or stale memory; pin
+  both the emitted call name and an alias/self-extension oracle.
 - A mutating container operation must not rebuild its receiver. Emitting
   `set.update` as "empty result, rescan left, rescan right, forward back" is
   semantically correct — the runtime oracle passes — but turns every update,

@@ -7732,7 +7732,7 @@ class _Emitter:
             result = self._tmp("tuple")
             self.needs_runtime_prelude = True
             lines.append(
-                f"  {result} = call ptr @__xcc_aot_tuple_concat("
+                f"  {result} = call ptr @__xcc_aot_tuple_extend("
                 f"ptr {receiver.value}, ptr {extension.value})"
             )
             lines.append(

@@ -2183,6 +2183,22 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="set-update-empty.py",
         )
 
+    def test_list_extend_preserves_alias_and_self_extension(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: list[int] = [1, 2]\n"
+            "    alias = values\n"
+            "    values.extend([3, 4])\n"
+            "    if len(alias) != 4:\n"
+            "        return 1\n"
+            "    values.extend(values)\n"
+            "    if len(alias) != 8:\n"
+            "        return 2\n"
+            "    return 7 if alias[2] == 3 and alias[4] == 1 and alias[7] == 4 else 3\n",
+            expected=7,
+            filename="list-extend.py",
+        )
+
     def test_set_difference_update_preserves_alias_mutation(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"

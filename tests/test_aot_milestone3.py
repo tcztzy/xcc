@@ -1425,6 +1425,36 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 7)
 
+    def test_v433_list_extend_grows_receiver_in_place(self) -> None:
+        source = (
+            "def entry() -> int:\n"
+            "    values: list[int] = [1, 2]\n"
+            "    alias = values\n"
+            "    values.extend([3, 4])\n"
+            "    if len(alias) != 4:\n"
+            "        return 1\n"
+            "    values.extend(values)\n"
+            "    if len(alias) != 8:\n"
+            "        return 2\n"
+            "    return 7 if alias[2] == 3 and alias[4] == 1 and alias[7] == 4 else 3\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="list-extend.py", entry="entry")
+        )
+        entry_body = llvm_ir.split("define i64 @entry(", 1)[1].split("\n}", 1)[0]
+        self.assertIn("call ptr @__xcc_aot_tuple_extend(", entry_body)
+        self.assertNotIn("call ptr @__xcc_aot_tuple_concat(", entry_body)
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "list-extend",
+                filename="list-extend.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 7)
+
     def test_v415_direct_parent_capture_defers_graph_walk_until_region_finish(self) -> None:
         llvm_ir = (
             runtime_prelude()

@@ -2,6 +2,39 @@
 
 ## Current
 
+- B646 makes `list.extend` grow the receiver storage in place. The post-V432
+  Stage 1 (`build/aot/stage1-b645-d09bf33/xcc-aot`) reports `xcc-aot 0.2
+  native-contract`, rejects the CPython parser
+  (`unknown command: --parser=cpython`), and links only `libSystem` with no
+  unresolved Python symbols; its build log records only `llc`/`cc` (sources
+  `d104f1a2b5494d9d7c40b94a1308daafa1b1baecc169ea4194979e4f554cfbb8`,
+  normalized IR
+  `552576e79cd0a1cb03affd4908d6bab1314cfa2c5cec22313803965b539465fa`,
+  executable
+  `5b1bc5d08b31a24ed37c14102425de77d27511644af756c19dcb20b7fde448c2`). Its
+  bounded Stage 1-to-2 run exits 70 (`allocation limit exceeded`) in 17.80
+  seconds at 518,324,224-byte child maximum RSS with 3,137 audit records over
+  817 unique `.py` paths, no `llc`/`cc` execution, and no Stage 2 artifact,
+  dying while reading `src/xcc/types` sources. The surviving rebuild site is
+  the `extend` arm of `_Emitter._emit_tuple_method_call`: the mutating call
+  lowered through non-mutating `__xcc_aot_tuple_concat` plus forward, so every
+  extend allocated a fresh tuple and copied the complete receiver before the
+  runtime copied the result back again. V433 adds `__xcc_aot_tuple_extend`,
+  which returns the receiver handle itself, registers geometric capacity
+  growth (doubling with a floor of four) only when the combined length needs
+  it, and `memmove`-copies only the argument items; a null receiver allocates
+  an empty tuple first, and self-extension stays safe because the argument
+  length is read before growth and the destination data pointer is reloaded
+  after capacity registration. Concatenation expressions and the singleton
+  append fallback keep `__xcc_aot_tuple_concat`. Before the fix the static
+  invariant fails because the generated entry calls `__xcc_aot_tuple_concat`;
+  after it, alias visibility and `values.extend(values)` match CPython at
+  exit 7. The two focused tests, all 508 combined IR/M3/runtime-oracle tests,
+  all 173 LLVM emitter tests, and all 16 status tests pass; lint, type, and
+  `git diff --check` are green. A new Stage 1 and bounded Stage 1-to-2 run
+  from this commit have not yet been produced, so Stage 2/Stage 3 remain
+  unproven.
+
 - B645 removes the whole-receiver rebuild inside `set.update` emission. The
   post-V431 Stage 1 (`build/aot/stage1-b644-7d34fa7/xcc-aot`) builds in 28.97
   seconds at 365,494,272-byte maximum RSS, reports `xcc-aot 0.2
@@ -46,9 +79,10 @@
   passed, confirming the defect is retention rather than semantics. The four
   focused tests, all 506 combined IR/M3/runtime-oracle tests, all 173 LLVM
   emitter tests, and all 16 status tests pass; lint, type, and
-  `git diff --check` are green. A new Stage 1 and bounded Stage 1-to-2 run
-  from this commit have not yet been produced, so Stage 2/Stage 3 remain
-  unproven.
+  `git diff --check` are green. Its Stage 1 and bounded Stage 1-to-2 run are
+  recorded with B646 above: the run passed the old set-update site, then hit
+  the allocation guard at status 70, exposing the list-extend rebuild recorded
+  as B646; no Stage 2 artifact was produced.
 
 - B644 gives heterogeneous scalar unions one unambiguous tagged-object ABI.
   The first bounded B643 Stage 1-to-2 run reached final LLVM emission in 15.33

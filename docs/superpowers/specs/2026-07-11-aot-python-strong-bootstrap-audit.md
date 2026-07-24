@@ -597,3 +597,41 @@ semantics. The four focused tests, all 506 combined IR/M3/runtime-oracle
 tests, all 173 LLVM emitter tests, and all 16 status tests pass; lint, type,
 and `git diff --check` are green. No post-B645 Stage 1 exists yet; Stage 2,
 Stage 3, and strong bootstrap remain unproven.
+
+The subsequent B645 artifact (`build/aot/stage1-b645-d09bf33/xcc-aot`) reports
+`xcc-aot 0.2 native-contract`, rejects the CPython parser
+(`unknown command: --parser=cpython`), links only `libSystem` with no
+unresolved Python symbols, and logs only `llc` and `cc`. Its hashes are
+sources `d104f1a2b5494d9d7c40b94a1308daafa1b1baecc169ea4194979e4f554cfbb8`,
+normalized IR
+`552576e79cd0a1cb03affd4908d6bab1314cfa2c5cec22313803965b539465fa`, and
+executable
+`5b1bc5d08b31a24ed37c14102425de77d27511644af756c19dcb20b7fde448c2`. Its
+bounded Stage 1-to-2 run (`build/aot/stage2-b645-d09bf33-60s`) exits 70 with
+`xcc-aot: allocation limit exceeded` in 17.80 seconds at 518,324,224-byte
+child maximum RSS. The audit holds 3,137 records over the same 817 unique
+`.py` paths, no `llc`/`cc` execution, and no Stage 2 artifact; the final
+opens sit in `src/xcc/types`, past the B645 set-update site.
+
+B646/V433 records the surviving receiver rebuild exposed by that run. The
+`extend` arm of `_Emitter._emit_tuple_method_call` lowered the mutating call
+through non-mutating `__xcc_aot_tuple_concat` plus forward: every extend
+allocated a fresh tuple, copied the complete receiver and the argument, then
+copied the result back into the receiver handle — the same shape B645
+removed from `set.update`, applied to the emitter's hottest list operation.
+
+V433 adds `__xcc_aot_tuple_extend` and points the `extend` lowering at it.
+The primitive returns the receiver handle itself, registers geometric
+capacity growth (doubling with a floor of four) only when the combined
+length exceeds the current capacity, and `memmove`-copies only the argument
+items onto the tail. A null receiver allocates an empty tuple first;
+self-extension stays safe because the argument length is read before growth
+and the destination data pointer is reloaded after capacity registration.
+Concatenation expressions and the singleton append fallback keep
+`__xcc_aot_tuple_concat`. Before the fix the static invariant fails because
+the generated entry calls `__xcc_aot_tuple_concat`; after it, alias
+visibility and `values.extend(values)` match CPython at exit 7. The two
+focused tests, all 508 combined IR/M3/runtime-oracle tests, all 173 LLVM
+emitter tests, and all 16 status tests pass; lint, type, and
+`git diff --check` are green. No post-B646 Stage 1 exists yet; Stage 2,
+Stage 3, and strong bootstrap remain unproven.
