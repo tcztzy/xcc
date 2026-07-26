@@ -1,5 +1,18 @@
 # Lessons
 
+- A "proven allocation" proof must include static provenance. An emitter can
+  prove a record's type and construction site and still hand the runtime a
+  data-segment address (constant-folded default records, module-level
+  singletons). Any fast path that dereferences `payload - header` blindly
+  must, on validation mismatch, distinguish "untracked" (fall back to the
+  conservative lookup, report not movable) from "tracked but corrupt" (fail
+  closed) — collapsing both into corruption turns every static record into a
+  crash.
+- Run the slow end-to-end gates on every round, not only the focused suites.
+  The B636 static-record crash shipped through ten backprop rounds because
+  each round ran the fast IR/M3/oracle suites while all 25 real native
+  C-compiler build tests had been failing for days. A green focused suite
+  plus an unexecuted integration gate is a false green.
 - The B645 receiver-rebuild lesson generalizes across container methods: audit
   every mutating method lowering, not only the one that crashed. `list.extend`
   had the same "allocate fresh, copy receiver, copy argument, forward back"

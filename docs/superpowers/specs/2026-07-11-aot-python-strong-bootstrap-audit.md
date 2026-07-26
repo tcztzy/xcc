@@ -635,3 +635,48 @@ focused tests, all 508 combined IR/M3/runtime-oracle tests, all 173 LLVM
 emitter tests, and all 16 status tests pass; lint, type, and
 `git diff --check` are green. No post-B646 Stage 1 exists yet; Stage 2,
 Stage 3, and strong bootstrap remain unproven.
+
+The subsequent B646 artifact (`build/aot/stage1-b646-c6f8b07/xcc-aot`) reports
+`xcc-aot 0.2 native-contract`, rejects the CPython parser with exit 2
+(`native mode rejects --parser=cpython`), links only `libSystem`, and logs
+only `llc` and `cc`. Its bounded Stage 1-to-2 run
+(`build/aot/stage2-b646-c6f8b07-60s`) exits 70 with
+`xcc-aot: allocation limit exceeded` in 17.48 seconds at 577,667,072-byte
+child maximum RSS, with the same 3,137 audit records over 817 unique `.py`
+paths, no `llc`/`cc`, and no Stage 2 artifact — the identical death point.
+A `returnaddress(0)` guard-fire diagnostic plus a live-chain dump at
+exhaustion (`build/aot/b647-alloc-diagnostic`) shows the budget is consumed
+by roughly 5.7 million live tracked allocations: about 310 MB of payload
+(134 MB at phase depth 2, 124 MB at depth 4, 40 MB at depth 6 — retained
+AST, lowering, and emission graphs committed upward by V415/V416/V418
+deferred finishes) plus about 228 MB of 40-byte ownership headers, together
+matching the 536,870,912-byte guard. The straw is the 389,610-byte
+`"\n".join(lines)` in `_Emitter._emit_function`. No single remaining
+container rebuild dominates; closing the Stage 2 gap requires reducing the
+retained allocation count or its per-allocation tracking overhead, not
+another single-site concat fix.
+
+B647/V434 records a separate regression this round's native-gate run
+exposed: since B636 (`8c88803`, bisected GOOD at `bef52b0`/B635, BAD at
+`8c88803`), every `build_native_bootstrap` C-compiler binary died with
+`xcc-aot: memory safety violation` on any input, failing all 25
+`AotBootstrapNativeBuildTests` real-build tests. V423's proven-provenance
+fast path reads the 40-byte ownership header blindly at `payload - 40`:
+`__xcc_aot_phase_promote_allocated_to` and
+`__xcc_aot_phase_capture_allocated_target` treated an allocation-magic
+mismatch as corruption and called `__xcc_aot_memory_safety_fail`. A record
+the emitter proves "allocated" can still be a static global — the crash was
+`xcc.options.normalize_options` promoting the emitter-folded static default
+`FrontendOptions` record (payload at a data-segment address) into a caller
+region.
+
+V434 keeps the blind header check as the hot path but adds a cold fallback:
+on magic mismatch the runtime consults `__xcc_aot_find_allocation`; an
+untracked payload is simply not movable (promote returns false, capture
+falls back to the generic target search), while a tracked-but-mismatched
+header still fails closed as corruption. Two prelude-level oracles pin the
+behavior (static payload promote returns false and leaves the value and
+allocation ledger intact; static owner capture agrees with the generic
+target), and the V423 static oracle now requires `find_allocation` only in
+the cold `verify_untracked` block, never on the hot path. The previously
+failing native bootstrap gates pass again.

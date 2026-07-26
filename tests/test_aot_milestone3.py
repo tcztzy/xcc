@@ -861,7 +861,9 @@ class AotMilestone3IrTests(unittest.TestCase):
             "define i1 @__xcc_aot_phase_promote_allocated_to", 1
         )[1].split("\n}", 1)[0]
         self.assertNotIn("load ptr, ptr @__xcc_aot_allocation_head", allocated_promote)
-        self.assertNotIn("@__xcc_aot_find_allocation", allocated_promote)
+        hot_path, cold_fallback = allocated_promote.split("verify_untracked:", 1)
+        self.assertNotIn("@__xcc_aot_find_allocation", hot_path)
+        self.assertIn("@__xcc_aot_find_allocation", cold_fallback.split("check_region:", 1)[0])
         llvm_ir = (
             runtime
             + "\n\ndefine i32 @main() {\n"
@@ -1424,6 +1426,71 @@ class AotMilestone3IrTests(unittest.TestCase):
             completed = subprocess.run((str(executable),), check=False)
 
         self.assertEqual(completed.returncode, 7)
+
+    def test_v434_static_payload_promote_is_not_movable(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\n@static_record = global [16 x i64] zeroinitializer\n"
+            + "\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %payload = getelementptr i8, ptr @static_record, i64 80\n"
+            + "  store i64 7, ptr %payload\n"
+            + "  %promoted = call i1 @__xcc_aot_phase_promote_allocated_to(\n"
+            + "    ptr %payload, ptr %mark)\n"
+            + "  %not_movable = xor i1 %promoted, true\n"
+            + "  %kept = load i64, ptr %payload\n"
+            + "  %value_intact = icmp eq i64 %kept, 7\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %static_ok = and i1 %not_movable, %value_intact\n"
+            + "  %ok = and i1 %static_ok, %balanced\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "static-promote-not-movable",
+                filename="static-promote-not-movable.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v434_static_owner_capture_falls_back_to_generic_target(self) -> None:
+        llvm_ir = (
+            runtime_prelude()
+            + "\n\n@static_owner = global [16 x i64] zeroinitializer\n"
+            + "\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %owner = getelementptr i8, ptr @static_owner, i64 80\n"
+            + "  %allocated_target = call ptr @__xcc_aot_phase_capture_allocated_target(\n"
+            + "    ptr %owner)\n"
+            + "  %generic_target = call ptr @__xcc_aot_phase_capture_target(ptr %owner)\n"
+            + "  %agrees = icmp eq ptr %allocated_target, %generic_target\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %ok = and i1 %agrees, %balanced\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "static-owner-capture-fallback",
+                filename="static-owner-capture-fallback.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
 
     def test_v433_list_extend_grows_receiver_in_place(self) -> None:
         source = (

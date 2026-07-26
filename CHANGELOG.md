@@ -2,6 +2,32 @@
 
 ## Current
 
+- B647 restores the native C compiler gate broken since B636. Bisect
+  (`bef52b0`/B635 good, `8c88803`/B636 bad) shows every
+  `build_native_bootstrap` binary since B636 exited 70 with
+  `xcc-aot: memory safety violation` on any input — even
+  `int main(void){return 0;}` — failing all 25
+  `AotBootstrapNativeBuildTests` real-build tests. V423's proven-provenance
+  fast path reads the ownership header blindly at `payload - 40` and treated
+  an allocation-magic mismatch as corruption; but an emitter-proven record
+  can be a static global, and the crash was `xcc.options.normalize_options`
+  promoting the emitter-folded static default `FrontendOptions` record (a
+  data-segment address) into a caller region. V434 adds a cold fallback in
+  `__xcc_aot_phase_promote_allocated_to` and
+  `__xcc_aot_phase_capture_allocated_target`: on magic mismatch consult
+  `__xcc_aot_find_allocation`; an untracked payload is not movable (promote
+  returns false, capture defers to the generic target search), while a
+  tracked-but-mismatched header still fails closed. The hot path is
+  unchanged and the V423 static oracle now permits `find_allocation` only in
+  the cold `verify_untracked` block. Two new prelude oracles pin static
+  payload promote and static owner capture. The B646 bounded Stage 1-to-2 run
+  (`build/aot/stage2-b646-c6f8b07-60s`) still exits 70 in 17.48 seconds at
+  the identical 3,137-open death point; a live-chain dump at guard fire
+  (`build/aot/b647-alloc-diagnostic`) attributes the budget to ~5.7 million
+  live tracked allocations — ~310 MB payload retained across phase depths 2/4/6
+  by deferred commits plus ~228 MB of 40-byte ownership headers — so the
+  Stage 2 gap is allocation-count/overhead, not another single concat site.
+
 - B646 makes `list.extend` grow the receiver storage in place. The post-V432
   Stage 1 (`build/aot/stage1-b645-d09bf33/xcc-aot`) reports `xcc-aot 0.2
   native-contract`, rejects the CPython parser
