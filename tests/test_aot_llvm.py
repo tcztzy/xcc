@@ -1,6 +1,8 @@
+import inspect
 import unittest
 
 from tests import _bootstrap  # noqa: F401
+import xcc.aot.llvm_text as llvm_text_module
 from xcc.aot import (
     AotError,
     IrAssign,
@@ -60,6 +62,79 @@ from xcc.aot.llvm_text import (
 
 
 class AotLlvmTextTests(unittest.TestCase):
+    def test_v446_object_phase_helpers_use_one_finite_emission(self) -> None:
+        source = inspect.getsource(
+            llvm_text_module._Emitter._emit_phase_promotion_helpers
+        )
+        self.assertNotIn("while True", source)
+        self.assertEqual(source.count("_emit_phase_object_promotion_helpers()"), 1)
+
+    def test_v445_exact_phase_helpers_are_registered_once_at_discovery(self) -> None:
+        registry_source = inspect.getsource(
+            llvm_text_module._Emitter._emit_phase_promotion_helpers
+        )
+        self.assertNotIn("emitted_exact_records", registry_source)
+        self.assertIn(
+            "_remember_phase_exact_promotion_record",
+            inspect.getsource(llvm_text_module._Emitter),
+        )
+        source = (
+            "class Payload:\n"
+            "    label: str\n"
+            "    def __init__(self, label: str) -> None:\n"
+            "        self.label = label\n"
+            "class Box:\n"
+            "    value: object | None\n"
+            "    def __init__(self) -> None:\n"
+            "        self.value = None\n"
+            "def store(box: Box, value: str) -> None:\n"
+            "    box.value = Payload(value)\n"
+        )
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="exact-helper-once.py", entry="store")
+        )
+        definitions = [
+            line
+            for line in llvm_ir.splitlines()
+            if line.startswith('define void @"__xcc_aot_phase_promote_exact:')
+        ]
+        self.assertTrue(definitions)
+        self.assertEqual(len(definitions), len(set(definitions)))
+
+    def test_v443_phase_type_keys_are_structural_and_do_not_use_repr(self) -> None:
+        type_key = getattr(llvm_text_module, "_phase_type_key", None)
+        self.assertTrue(callable(type_key))
+        assert callable(type_key)
+        types = (
+            IrStringType(),
+            IrBytesType(),
+            IrRecordType("object"),
+            IrTupleType((IrStringType(),)),
+            IrDictType(IrStringType(), IrTupleType((IrBytesType(),))),
+        )
+        self.assertEqual(len({type_key(type_info) for type_info in types}), len(types))
+        phase_source = "\n".join(
+            inspect.getsource(method)
+            for method in (
+                llvm_text_module._Emitter._emit_phase_promote_return,
+                llvm_text_module._Emitter._emit_phase_promote_value,
+                llvm_text_module._Emitter._emit_phase_capture_value,
+                llvm_text_module._Emitter._emit_phase_capture_helpers,
+                llvm_text_module._Emitter._emit_phase_promotion_helper,
+            )
+        )
+        self.assertNotIn("repr(type_info)", phase_source)
+
+    def test_v439_final_llvm_join_uses_a_terminal_sentinel(self) -> None:
+        finalize = getattr(llvm_text_module, "_finalize_llvm_lines", None)
+        self.assertTrue(callable(finalize))
+        lines = ["first  ", "", " \t"]
+
+        result = finalize(lines)
+
+        self.assertEqual(result, "first\n")
+        self.assertEqual(lines, ["first", ""])
+
     def test_routes_heap_allocations_through_bounded_runtime(self) -> None:
         int64 = IrIntType(64, signed=True)
         record_type = IrRecordType("Box")
@@ -85,6 +160,10 @@ class AotLlvmTextTests(unittest.TestCase):
         llvm_ir = emit_llvm_text(module)
 
         self.assertIn("@__xcc_aot_allocation_limit = internal constant i64 536870912", llvm_ir)
+        self.assertIn(
+            "@__xcc_aot_phase_allocation_limit = internal constant i64 2147483648",
+            llvm_ir,
+        )
         self.assertIn("define internal ptr @__xcc_aot_alloc(i64 %requested)", llvm_ir)
         self.assertIn("define internal ptr @__xcc_aot_calloc(i64 %count, i64 %item_size)", llvm_ir)
         self.assertIn("call void @_exit(i32 70)", llvm_ir)
@@ -411,7 +490,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertIn("call ptr @__xcc_aot_phase_mark()", store_body)
         self.assertIn(
-            "call void @\"__xcc_aot_phase_capture:IrRecordType(name='object | None')\"",
+            'call void @"__xcc_aot_phase_capture:record:13:object | None"',
             store_body,
         )
         self.assertIn("call void @__xcc_aot_phase_promote_object(", llvm_ir)
@@ -444,8 +523,9 @@ class AotLlvmTextTests(unittest.TestCase):
                 filename="base-phase.py",
             )
         )
+        base_key = llvm_text_module._phase_type_key(IrRecordType("Base"))
         base_helper = base_llvm.split(
-            "define void @\"__xcc_aot_phase_promote:IrRecordType(name='Base')\"",
+            f'define void @"__xcc_aot_phase_promote:{base_key}"',
             1,
         )[1].split("\n}", 1)[0]
         self.assertIn(
@@ -475,14 +555,18 @@ class AotLlvmTextTests(unittest.TestCase):
         )
 
         llvm_ir = emit_llvm_text(lower_source_to_ir(source, filename="region-owner.py"))
+        tuple_key = llvm_text_module._phase_type_key(
+            IrTupleType((IrRecordType("Payload"),))
+        )
+        record_key = llvm_text_module._phase_type_key(IrRecordType("Payload"))
         tuple_helper = llvm_ir.split(
-            'define void @"__xcc_aot_phase_promote:IrTupleType', 1
+            f'define void @"__xcc_aot_phase_promote:{tuple_key}"', 1
         )[1].split("\n}", 1)[0]
         record_helper = llvm_ir.split(
-            'define void @"__xcc_aot_phase_promote:IrRecordType(name=\'Payload\')"', 1
+            f'define void @"__xcc_aot_phase_promote:{record_key}"', 1
         )[1].split("\n}", 1)[0]
         capture_helper = llvm_ir.split(
-            'define void @"__xcc_aot_phase_capture:IrStringType()', 1
+            'define void @"__xcc_aot_phase_capture:string"', 1
         )[1].split("\n}", 1)[0]
 
         self.assertIn(
@@ -515,8 +599,12 @@ class AotLlvmTextTests(unittest.TestCase):
                 entry="read",
             )
         )
+        dict_key = llvm_text_module._phase_type_key(
+            IrDictType(IrStringType(), IrStringType())
+        )
         external_capture = global_ir.split(
-            'define void @"__xcc_aot_phase_capture:IrDictType', 1
+            f'define void @"__xcc_aot_phase_capture:{dict_key}:external-owner"',
+            1,
         )[1].split("\n}", 1)[0]
         self.assertIn(
             "call ptr @__xcc_aot_phase_capture_target(ptr %owner)",
@@ -3643,7 +3731,8 @@ class AotLlvmTextTests(unittest.TestCase):
         build_ir = llvm_ir.split("define ptr @build()", 1)[1].split("\n}", 1)[0]
         direct_ir = llvm_ir.split("define ptr @direct()", 1)[1].split("\n}", 1)[0]
 
-        self.assertIn('call void @"__xcc_aot_phase_promote:IrRecordType', build_ir)
+        result_key = llvm_text_module._phase_type_key(result_type)
+        self.assertIn(f'call void @"__xcc_aot_phase_promote:{result_key}"', build_ir)
         self.assertNotIn("@__xcc_aot_phase_capture_defer", build_ir)
         self.assertIn("@__xcc_aot_phase_capture_defer", direct_ir)
 
@@ -3720,17 +3809,19 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
         build_ir = llvm_ir.split("define ptr @build()", 1)[1].split("\n}", 1)[0]
+        result_key = llvm_text_module._phase_type_key(result_type)
+        tuple_key = llvm_text_module._phase_type_key(values_type)
         result_helper = llvm_ir.split(
-            "define void @\"__xcc_aot_phase_promote:IrRecordType(name='Result')\"",
+            f'define void @"__xcc_aot_phase_promote:{result_key}"',
             1,
         )[1].split("\n}", 1)[0]
         tuple_helper = llvm_ir.split(
-            'define void @"__xcc_aot_phase_promote:IrTupleType(elements=(IrStringType(),))"',
+            f'define void @"__xcc_aot_phase_promote:{tuple_key}"',
             1,
         )[1].split("\n}", 1)[0]
 
         begin = build_ir.index("call void @__xcc_aot_phase_promote_begin")
-        promote = build_ir.index('call void @"__xcc_aot_phase_promote:IrRecordType')
+        promote = build_ir.index(f'call void @"__xcc_aot_phase_promote:{result_key}"')
         end = build_ir.index("call void @__xcc_aot_phase_promote_end")
         self.assertLess(begin, promote)
         self.assertLess(promote, end)
@@ -5020,6 +5111,43 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call ptr @__xcc_aot_tuple_reversed(ptr %items)", llvm_ir)
         self.assertNotIn("@reversed", llvm_ir)
 
+    def test_v436_direct_reversed_loop_walks_source_storage_without_copy(self) -> None:
+        source = (
+            "def current_label(lines: list[str]) -> str:\n"
+            "    for line in reversed(lines):\n"
+            "        if line.endswith(':'):\n"
+            "            return line\n"
+            "    return 'entry'\n"
+        )
+
+        llvm_ir = emit_llvm_text(
+            lower_source_to_ir(source, filename="direct-reversed-loop.py")
+        )
+        body = llvm_ir.split("define ptr @current_label(ptr %lines)", 1)[1].split(
+            "\n}", 1
+        )[0]
+
+        self.assertNotIn("@__xcc_aot_tuple_reversed", body)
+        self.assertIn("%reverse.offset", body)
+        self.assertIn("%reverse.index", body)
+        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %lines, i64 %reverse.index", body)
+
+    def test_v437_record_work_sets_use_module_owned_canonical_names(self) -> None:
+        record_name = "".join(("Canonical", "Record"))
+        record = IrRecord(record_name, ())
+        module = IrModule(
+            "canonical-record-name.py",
+            (record,),
+            (),
+        )
+        emitter = _Emitter(module)
+        qualified_name = "".join(("package.", record_name))
+
+        resolved = emitter._known_record_type_names(IrRecordType(qualified_name))
+
+        self.assertEqual(resolved, (record_name,))
+        self.assertIs(resolved[0], record.name)
+
     def test_emits_tuple_append_method_as_tuple_concat(self) -> None:
         int64 = IrIntType(64, signed=True)
         tuple_type = IrTupleType((int64,))
@@ -5185,6 +5313,38 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertIn("call ptr @__xcc_aot_tuple_pop(ptr %values)", llvm_ir)
         self.assertNotIn("@values.pop", llvm_ir)
+
+    def test_emits_dict_remove_as_in_place_tuple_shift(self) -> None:
+        dict_type = IrDictType(IrStringType(), IrIntType(64, signed=True))
+        module = IrModule(
+            "dict_remove.py",
+            (),
+            (
+                IrFunction(
+                    "drop",
+                    (IrParam("values", dict_type),),
+                    IrNoneType(),
+                    (
+                        IrAssign(
+                            "__expr",
+                            IrCall(
+                                "__dict_remove",
+                                (IrName("values", dict_type), IrConstString("key")),
+                                dict_type,
+                            ),
+                        ),
+                        IrReturn(IrConstNone()),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        function_ir = llvm_ir[llvm_ir.index("define void @drop") :]
+
+        self.assertIn("call ptr @__xcc_aot_tuple_pop_item", function_ir)
+        self.assertNotIn("call ptr @__xcc_aot_tuple_concat", function_ir)
+        self.assertNotIn("call void @__xcc_aot_tuple_forward", function_ir)
 
     def test_emits_tuple_comprehension_with_stable_builder_append(self) -> None:
         module = lower_source_to_ir(

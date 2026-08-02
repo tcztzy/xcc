@@ -202,6 +202,8 @@ def _line_starts_bare_asm(line: str) -> bool:
 
 
 def _rewrite_enum_decl(line: str) -> tuple[str, bool]:
+    if "__enum_" not in line:
+        return line, False
     found = _find_enum_decl(line, 0)
     if found is None:
         return line, False
@@ -277,28 +279,26 @@ def _rewrite_enum_decl_close(line: str) -> str:
     return "};"
 
 
-def _split_lines(source: str) -> tuple[str, ...]:
+def _split_lines(source: str) -> list[str]:
     if not source:
-        return ()
-    lines: tuple[str, ...] = ()
-    for line in source.split("\n"):
-        lines = (*lines, line)
+        return []
+    lines = source.split("\n")
     if lines and lines[-1] == "":
-        return lines[:-1]
+        lines.pop()
     return lines
 
 
-def _split_lines_keepends(source: str) -> tuple[str, ...]:
+def _split_lines_keepends(source: str) -> list[str]:
     if not source:
-        return ()
+        return []
     raw_lines = source.split("\n")
-    lines: tuple[str, ...] = ()
+    lines: list[str] = []
     last_index = len(raw_lines) - 1
     for index, line in enumerate(raw_lines):
         if index < last_index:
-            lines = (*lines, line + "\n")
+            lines.append(line + "\n")
         elif line:
-            lines = (*lines, line)
+            lines.append(line)
     return lines
 
 
@@ -340,6 +340,8 @@ def _strip_gnu_asm_extensions(source: str) -> str:
 
 
 def _strip_inline_asm_segments(line: str) -> str:
+    if "asm" not in line:
+        return line
     result: list[str] = []
     index = 0
     while True:

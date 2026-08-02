@@ -129,7 +129,7 @@ def integer_rank(type_: Type) -> int:
         return 5
     if name in ("long long", "unsigned long long"):
         return 6
-    if name in ("__int128", "unsigned __int128"):
+    if name in ("__int128", INT128.name, "unsigned __int128", UINT128.name):
         return 7
     if name == "__evm_address":
         return 8
@@ -147,6 +147,7 @@ def is_signed_integer_type(type_: Type) -> bool:
         "long",
         "long long",
         "__int128",
+        INT128.name,
     )
 
 
@@ -169,7 +170,7 @@ def signed_range(type_: Type) -> tuple[int, int] | None:
         return (-(1 << 31), (1 << 31) - 1)
     if name in ("long", "long long"):
         return (-(1 << 63), (1 << 63) - 1)
-    if name == "__int128":
+    if name in ("__int128", INT128.name):
         return (-(1 << 127), (1 << 127) - 1)
     return None
 
@@ -180,7 +181,7 @@ def unsigned_max(type_: Type) -> int | None:
         return (1 << 32) - 1
     if name in ("unsigned long", "unsigned long long"):
         return (1 << 64) - 1
-    if name == "unsigned __int128":
+    if name in ("unsigned __int128", UINT128.name):
         return (1 << 128) - 1
     if name == "__evm_uint256":
         return (1 << 256) - 1
@@ -255,9 +256,9 @@ def _canonical_integer_type(name: str) -> Type | None:
         return LLONG
     if name == "unsigned long long":
         return ULLONG
-    if name == "__int128":
+    if name == "__int128" or name == INT128.name:
         return INT128
-    if name == "unsigned __int128":
+    if name == "unsigned __int128" or name == UINT128.name:
         return UINT128
     if name == "__evm_address":
         return EVM_ADDRESS
@@ -273,7 +274,7 @@ def _unsigned_counterpart(name: str) -> Type | None:
         return ULONG
     if name == "long long":
         return ULLONG
-    if name == "__int128":
+    if name == "__int128" or name == INT128.name:
         return UINT128
     return None
 
@@ -283,10 +284,54 @@ def is_void_pointer_type(type_: Type) -> bool:
     return pointee is not None and pointee.declarator_ops == () and pointee.name == VOID.name
 
 
+def same_type_structure(left_type: Type, right_type: Type, require_qualifiers: bool) -> bool:
+    if left_type.name != right_type.name:
+        return False
+    if require_qualifiers and left_type.qualifiers != right_type.qualifiers:
+        return False
+    left_ops = left_type.declarator_ops
+    right_ops = right_type.declarator_ops
+    if len(left_ops) != len(right_ops):
+        return False
+    for index in range(len(left_ops)):
+        left_kind, left_value = left_ops[index]
+        right_kind, right_value = right_ops[index]
+        if left_kind != right_kind:
+            return False
+        if left_kind == "ptr":
+            continue
+        if left_kind == "arr":
+            if not isinstance(left_value, int) or not isinstance(right_value, int):
+                return False
+            if left_value != right_value:
+                return False
+            continue
+        if left_kind != "fn":
+            return False
+        if not isinstance(left_value, tuple) or not isinstance(right_value, tuple):
+            return False
+        left_params, left_variadic = left_value
+        right_params, right_variadic = right_value
+        if left_variadic != right_variadic:
+            return False
+        if left_params is None or right_params is None:
+            if left_params is not None or right_params is not None:
+                return False
+            continue
+        if len(left_params) != len(right_params):
+            return False
+        for param_index in range(len(left_params)):
+            if not same_type_structure(
+                left_params[param_index],
+                right_params[param_index],
+                True,
+            ):
+                return False
+    return True
+
+
 def is_compatible_pointee_type(left_type: Type, right_type: Type) -> bool:
-    return (
-        left_type.name == right_type.name and left_type.declarator_ops == right_type.declarator_ops
-    )
+    return same_type_structure(left_type, right_type, False)
 
 
 def _merge_unique_qualifiers(
@@ -338,7 +383,7 @@ def is_pointer_conversion_compatible(target_type: Type, value_type: Type) -> boo
 
 
 def is_assignment_compatible(target_type: Type, value_type: Type) -> bool:
-    if target_type == value_type:
+    if same_type_structure(target_type, value_type, True):
         return True
     # Qualifier-only difference for non-pointer/non-array types is compatible
     # (e.g. const struct S value assigned to struct S target).

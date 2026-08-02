@@ -135,6 +135,76 @@ class PreprocessorTests(unittest.TestCase):
             "\n\nstruct native_record { int value ; } ;\n\nSELF marker ;\n",
         )
 
+    def test_no_callback_prescans_nested_macro_arguments(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define OBJECT_CAST(value) ((Object *)(value))\n"
+            "#define TYPE(value) TYPE(OBJECT_CAST(value))\n"
+            "TYPE(OBJECT_CAST(object))\n",
+            filename="argument_prescan.c",
+        )
+
+        self.assertNotIn("OBJECT_CAST", result.source)
+        self.assertIn("TYPE", result.source)
+        self.assertEqual(result.source.count("Object *"), 2)
+
+    def test_no_callback_keeps_disabled_macro_hidden_through_outer_rescan(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define OBJECT_CAST(value) ((Object *)(value))\n"
+            "#define FUNCTION(value) FUNCTION(OBJECT_CAST(value))\n"
+            "#define DECREF(value) DECREF(OBJECT_CAST(value))\n"
+            "DECREF(FUNCTION(value))\n",
+            filename="disabled_rescan.c",
+        )
+
+        self.assertNotIn("OBJECT_CAST", result.source)
+        self.assertEqual(result.source.count("FUNCTION"), 1)
+        self.assertEqual(result.source.count("DECREF"), 1)
+        self.assertEqual(result.source.count("Object *"), 2)
+        self.assertNotIn("\x1e", result.source)
+        self.assertNotIn("\x1f", result.source)
+
+    def test_no_callback_object_alias_invokes_function_macro(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define OBJECT_CAST(value) ((Object *)(value))\n"
+            "#define INCREF(value) INCREF(OBJECT_CAST(value))\n"
+            "#define INCREF_TYPE INCREF\n"
+            "INCREF_TYPE(type_object)\n",
+            filename="function_alias.c",
+        )
+
+        self.assertNotIn("INCREF_TYPE", result.source)
+        self.assertNotIn("OBJECT_CAST", result.source)
+        self.assertIn("INCREF", result.source)
+        self.assertIn("Object *", result.source)
+
+    def test_no_callback_collects_multiline_object_alias_invocation(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define ADD(left, right) ((left) + (right))\n"
+            "#define ADD_ALIAS ADD\n"
+            "int value = ADD_ALIAS(\n"
+            "  19,\n"
+            "  23);\n",
+            filename="multiline_function_alias.c",
+        )
+
+        self.assertNotIn("ADD_ALIAS", result.source)
+        self.assertNotIn("ADD(", result.source)
+        self.assertIn("19", result.source)
+        self.assertIn("23", result.source)
+
+    def test_no_callback_prescan_keeps_stringized_and_pasted_arguments_raw(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define VALUE 7\n"
+            "#define STRINGIZE(value) #value\n"
+            "#define PASTE(value) prefix_##value\n"
+            "STRINGIZE(VALUE) PASTE(VALUE)\n",
+            filename="argument_raw.c",
+        )
+
+        self.assertIn('"VALUE"', result.source)
+        self.assertIn("prefix_VALUE", result.source)
+        self.assertNotIn('"7"', result.source)
+
     def test_no_callback_variadic_function_macro_expands_and_pastes(self) -> None:
         options = FrontendOptions()
         processor = _Preprocessor(options)
@@ -157,6 +227,27 @@ class PreprocessorTests(unittest.TestCase):
         self.assertEqual(context.exception.code, "XCC-PP-0202")
         self.assertIn("enum { QOS_USER = 1, QOS_DEFAULT = 2 }", result)
         self.assertIn("typedef unsigned int qos_class_t", result)
+
+    def test_no_callback_rescans_selector_result_with_following_invocation(self) -> None:
+        options = FrontendOptions()
+        processor = _Preprocessor(options)
+        processor._init_no_callback(options)
+        for definition in (
+            "PICK(_1, _2, NAME, ...) NAME",
+            "NAMED(type, name) type name; enum",
+            "ANON(type) enum",
+            "ENUM(...) PICK(__VA_ARGS__, NAMED, ANON, )(__VA_ARGS__)",
+        ):
+            processor._handle_define_no_callback(definition)
+
+        result = processor._expand_line_no_callback(
+            "typedef ENUM(int, Answer) { ANSWER = 42 };\n",
+            _SourceLocation("selector_rescan.c", 1),
+        )
+
+        self.assertNotIn("PICK", result)
+        self.assertNotIn("NAMED", result)
+        self.assertIn("int Answer; enum", result)
 
     def test_no_callback_token_paste_does_not_stringize_rhs(self) -> None:
         options = FrontendOptions()
@@ -290,13 +381,44 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source_no_callback(
             "float minimum_float = __FLT_MIN__;\n"
             "double minimum_double = __DBL_MIN__;\n"
-            "long double minimum_long_double = __LDBL_MIN__;\n",
+            "long double minimum_long_double = __LDBL_MIN__;\n"
+            "double maximum_double = __DBL_MAX__;\n"
+            "int maximum_double_exponent = __DBL_MAX_EXP__;\n",
             filename="floating_minima.c",
         )
 
         self.assertIn("minimum_float = 1.17549435e-38F", result.source)
         self.assertIn("minimum_double = 2.2250738585072014e-308", result.source)
         self.assertIn("minimum_long_double = 3.36210314311209350626e-4932L", result.source)
+        self.assertIn("maximum_double = 1.7976931348623157e+308", result.source)
+        self.assertIn("maximum_double_exponent = 1024", result.source)
+
+    def test_no_callback_macro_boundaries_do_not_form_decrement_token(self) -> None:
+        result = preprocess_source_no_callback(
+            "#define MANTISSA 53\n"
+            "#define MINIMUM_EXPONENT -1021\n"
+            "int range = MANTISSA-MINIMUM_EXPONENT;\n",
+            filename="macro_boundaries.c",
+        )
+
+        self.assertIn("53 - - 1021", result.source)
+        self.assertNotIn("--1021", result.source)
+
+    def test_no_callback_defines_little_endian_target_macros(self) -> None:
+        result = preprocess_source_no_callback(
+            "#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__\n"
+            "int little_endian;\n"
+            "#else\n"
+            "#error Unknown endianess.\n"
+            "#endif\n"
+            "#ifdef __BIG_ENDIAN__\n"
+            "int wrong_big_endian;\n"
+            "#endif\n",
+            filename="byte_order.c",
+        )
+
+        self.assertIn("little_endian", result.source)
+        self.assertNotIn("wrong_big_endian", result.source)
 
     def test_no_callback_evaluates_feature_probe_conditions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -307,6 +429,14 @@ class PreprocessorTests(unittest.TestCase):
             processor._init_no_callback(options)
             location = _SourceLocation(str(root / "probe.c"), 1)
 
+            self.assertTrue(
+                processor._eval_condition_no_callback(
+                    '__has_include("present.h")',
+                    location,
+                    root,
+                )
+            )
+            processor._handle_define_no_callback("__has_include(header) 0")
             self.assertTrue(
                 processor._eval_condition_no_callback(
                     '__has_include("present.h")',
@@ -650,6 +780,18 @@ class PreprocessorTests(unittest.TestCase):
             filename="main.c",
         )
         self.assertIn('return "[GCC " "xcc" "]" ;', result.source)
+
+    def test_clang_identity_includes_a_string_version(self) -> None:
+        source = (
+            '#if defined(__clang__)\n#define COMPILER "[Clang " __clang_version__ "]"\n'
+            "#endif\nconst char *f(void){return COMPILER;}\n"
+        )
+
+        hosted = preprocess_source(source, filename="main.c")
+        native = preprocess_source_no_callback(source, filename="main.c")
+
+        self.assertIn('return "[Clang " "xcc 0.2" "]" ;', hosted.source)
+        self.assertIn('return "[Clang " "xcc 0.2" "]" ;', native.source)
 
     def test_strict_darwin_target_defines_darwin_macros(self) -> None:
         result = preprocess_source(
@@ -1507,6 +1649,16 @@ A(0)
         self.assertNotIn("tail * /", result.source)
         self.assertNotIn("/* comment", result.source)
 
+    def test_define_replacement_excludes_trailing_line_comment(self) -> None:
+        result = preprocess_source(
+            "#define ARRAY_LENGTH 20 // explanatory comment\n"
+            "struct Values { int items[ARRAY_LENGTH]; };\n",
+            filename="define-line-comment.c",
+        )
+
+        self.assertIn("int items [ 20 ]", result.source)
+        self.assertNotIn("explanatory comment", result.source)
+
     def test_define_continuation_survives_multiline_block_comment(self) -> None:
         result = preprocess_source(
             "#define M() do { \\\n"
@@ -2082,7 +2234,20 @@ A(0)
             result = preprocess_source(
                 source_path.read_text(encoding="utf-8"), filename=str(source_path)
             )
-        self.assertEqual(result.source, "\nint from_once;\n")
+        self.assertEqual(result.source.count("int from_once"), 1)
+
+    def test_no_callback_pragma_once_skips_second_include(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            header = root / "once.h"
+            header.write_text("#pragma once\nint from_once;\n", encoding="utf-8")
+            source_path = root / "main.c"
+            source_path.write_text('#include "once.h"\n#include "once.h"\n', encoding="utf-8")
+            result = preprocess_source_no_callback(
+                source_path.read_text(encoding="utf-8"),
+                filename=str(source_path),
+            )
+        self.assertEqual(result.source.count("int from_once"), 1)
 
     def test_pragma_once_applies_across_nested_includes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2092,7 +2257,7 @@ A(0)
             main = root / "main.c"
             main.write_text('#include "once.h"\n#include "wrapper.h"\n', encoding="utf-8")
             result = preprocess_source(main.read_text(encoding="utf-8"), filename=str(main))
-        self.assertEqual(result.source, "\nint from_once;\n")
+        self.assertEqual(result.source.count("int from_once"), 1)
 
     def test_import_skips_second_include_of_same_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3873,6 +4038,17 @@ A(0)
         source = 'asm("inst");\nint x __asm("foo") = 0;\nasm volatile(\n  "inst"\n);\n'
         stripped = _strip_gnu_asm_extensions(source)
         self.assertEqual(stripped.splitlines(), [";", "int x  = 0;", ";", "", ""])
+
+    def test_line_split_helpers_build_linear_lists(self) -> None:
+        self.assertEqual(preprocessor_text._split_lines("a\nb\n"), ["a", "b"])
+        self.assertEqual(
+            preprocessor_text._split_lines_keepends("a\nb\n"),
+            ["a\n", "b\n"],
+        )
+
+    def test_inline_asm_stripper_fast_path_preserves_plain_line(self) -> None:
+        line = "int value = left + right;\n"
+        self.assertIs(preprocessor_text._strip_inline_asm_segments(line), line)
 
     def test_strip_gnu_asm_extensions_strips_inline_statement(self) -> None:
         source = (

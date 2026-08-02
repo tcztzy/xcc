@@ -4286,7 +4286,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertEqual(
             _dict_get_result_type(IrIntType(64, signed=True)),
-            IrIntType(64, signed=True),
+            IrRecordType("int | None"),
         )
         self.assertEqual(
             _none_guard_name(_owned_parse("None is value").body[0].value),

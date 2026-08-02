@@ -144,6 +144,8 @@ class SemaTests(unittest.TestCase):
             (ULONG, 5),
             (LLONG, 6),
             (ULLONG, 6),
+            (INT128, 7),
+            (UINT128, 7),
             (Type("__int128"), 7),
             (Type("unsigned __int128"), 7),
             (EVM_ADDRESS, 8),
@@ -157,10 +159,12 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(sema_types.signed_range(LONG), (-(1 << 63), (1 << 63) - 1))
         self.assertEqual(sema_types.signed_range(LLONG), (-(1 << 63), (1 << 63) - 1))
         self.assertEqual(sema_types.signed_range(Type("__int128")), (-(1 << 127), (1 << 127) - 1))
+        self.assertEqual(sema_types.signed_range(INT128), (-(1 << 127), (1 << 127) - 1))
         self.assertIsNone(sema_types.signed_range(UINT))
         self.assertEqual(sema_types.unsigned_max(ULONG), (1 << 64) - 1)
         self.assertEqual(sema_types.unsigned_max(ULLONG), (1 << 64) - 1)
         self.assertEqual(sema_types.unsigned_max(Type("unsigned __int128")), (1 << 128) - 1)
+        self.assertEqual(sema_types.unsigned_max(UINT128), (1 << 128) - 1)
         self.assertEqual(sema_types.unsigned_max(EVM_UINT256), (1 << 256) - 1)
         self.assertEqual(sema_types.unsigned_max(EVM_ADDRESS), (1 << 160) - 1)
         self.assertIsNone(sema_types.unsigned_max(INT))
@@ -1606,6 +1610,11 @@ class SemaTests(unittest.TestCase):
         self.assertIs(func.return_type, UINT128)
         self.assertIs(func.locals["x"].type_, UINT128)
 
+    def test_uint128_t_accepts_integer_assignment(self) -> None:
+        source = "__uint128_t assign(__uint128_t value){value = 0; return value;}"
+        unit = parse(list(lex(source)), std="gnu11")
+        analyze(unit, std="gnu11")
+
     def test_uint128_t_type_helpers(self) -> None:
         analyzer = Analyzer()
         self.assertEqual(analyzer._sizeof_type(UINT128), 16)
@@ -2738,6 +2747,17 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         func_symbol = sema.functions["f"]
         self.assertEqual(func_symbol.locals["a"].type_, Type("int", 1))
+
+    def test_array_parameter_spelling_matches_function_pointer_parameter(self) -> None:
+        source = (
+            "typedef int Callback(int *values);\n"
+            "void accept(Callback *callback);\n"
+            "static int callback(int values[]){return values[0];}\n"
+            "void register_callback(void){accept(callback);}\n"
+        )
+        sema = analyze(parse(list(lex(source))))
+
+        self.assertIn("register_callback", sema.functions)
 
     def test_array_argument_decays_on_call(self) -> None:
         source = "int f(int a[4]){return a[0];} int main(){int x[4]; return f(x);}"
@@ -5646,6 +5666,14 @@ int caller(int x) {
         )
         sema = analyze(parse(list(lex(source))))
         self.assertIn("main", sema.functions)
+
+    def test_local_variable_shadows_outer_enum_constant(self) -> None:
+        source = "enum { VALUE = 1 }; int main(void){int VALUE = 2; return VALUE;}"
+
+        sema = analyze(parse(list(lex(source))))
+
+        function = sema.functions["main"]
+        self.assertIsInstance(function.locals["VALUE"], sema_symbols.VarSymbol)
 
     def test_define_scoped_enum_members_ignores_repeated_binding(self) -> None:
         unit = parse(list(lex("int main(){sizeof(enum { A }); return 0;}")))

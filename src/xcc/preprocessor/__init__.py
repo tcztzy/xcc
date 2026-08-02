@@ -418,9 +418,81 @@ def _stringize_macro_argument_no_callback(argument: str) -> str:
     return '"' + escaped + '"'
 
 
+def _macro_parameter_is_pasted_no_callback(
+    replacement: str,
+    start: int,
+    end: int,
+) -> bool:
+    left = start
+    while left > 0 and replacement[left - 1].isspace():
+        left -= 1
+    if left >= 2 and replacement[left - 2 : left] == "##":
+        return True
+    right = end
+    while right < len(replacement) and replacement[right].isspace():
+        right += 1
+    return replacement[right : right + 2] == "##"
+
+
+def _macro_parameter_is_stringized_no_callback(replacement: str, start: int) -> bool:
+    left = start
+    while left > 0 and replacement[left - 1].isspace():
+        left -= 1
+    if left == 0 or replacement[left - 1] != "#":
+        return False
+    return left < 2 or replacement[left - 2] != "#"
+
+
+def _macro_parameter_needs_expansion_no_callback(
+    replacement: str,
+    parameter: str,
+) -> bool:
+    index = 0
+    while index < len(replacement):
+        ch = replacement[index]
+        if ch == '"' or ch == "'":
+            quote = ch
+            index += 1
+            while index < len(replacement):
+                if replacement[index] == "\\" and index + 1 < len(replacement):
+                    index += 2
+                    continue
+                if replacement[index] == quote:
+                    index += 1
+                    break
+                index += 1
+            continue
+        if ch == "/" and index + 1 < len(replacement):
+            next_ch = replacement[index + 1]
+            if next_ch == "/":
+                return False
+            if next_ch == "*":
+                comment_end = replacement.find("*/", index + 2)
+                if comment_end == -1:
+                    return False
+                index = comment_end + 2
+                continue
+        scanned = _guard_scan_identifier(replacement, index)
+        if scanned is None:
+            index += 1
+            continue
+        name, end = scanned
+        start = index
+        index = end
+        if name != parameter:
+            continue
+        if _macro_parameter_is_stringized_no_callback(replacement, start):
+            continue
+        if _macro_parameter_is_pasted_no_callback(replacement, start, end):
+            continue
+        return True
+    return False
+
+
 def _substitute_macro_arguments_no_callback(
     macro: _Macro,
     arguments: list[str],
+    expanded_arguments: list[str],
 ) -> str:
     replacement = _render_macro_replacement_no_callback(macro)
     result = ""
@@ -483,7 +555,14 @@ def _substitute_macro_arguments_no_callback(
             index += 1
             continue
         name, index = scanned
-        argument, found = _macro_argument_no_callback(macro, arguments, name)
+        argument_values = expanded_arguments
+        if _macro_parameter_is_pasted_no_callback(
+            replacement,
+            start=index - len(name),
+            end=index,
+        ):
+            argument_values = arguments
+        argument, found = _macro_argument_no_callback(macro, argument_values, name)
         result += argument if found else name
     return result
 
@@ -799,6 +878,22 @@ _DEFINED_BARE_RE = re.compile(r"\bdefined\s+([A-Za-z_]\w*)")
 _IFNDEF_RE = re.compile(r"#\s*ifndef\s+([A-Za-z_]\w*)")
 _IF_NOT_DEFINED_RE = re.compile(r"#\s*if\s+!\s*defined\s*\(\s*([A-Za-z_]\w*)\s*\)")
 _DEFINE_RE = re.compile(r"#\s*define\s+([A-Za-z_]\w*)")
+_HIDDEN_MACRO_START = "\x1e"
+_HIDDEN_MACRO_END = "\x1f"
+
+
+def _hide_macro_name_no_callback(name: str) -> str:
+    return _HIDDEN_MACRO_START + name + _HIDDEN_MACRO_END
+
+
+def _reveal_macro_names_no_callback(text: str) -> str:
+    return text.replace(_HIDDEN_MACRO_START, "").replace(_HIDDEN_MACRO_END, "")
+
+
+def _separate_macro_expansion_no_callback(text: str) -> str:
+    if not text:
+        return text
+    return " " + text + " "
 
 
 def _guard_is_ident_start(ch: str) -> bool:
@@ -1203,12 +1298,6 @@ _PREDEFINED_MACROS = (
     "__SIG_ATOMIC_MAX__=2147483647",
     "__SIG_ATOMIC_MIN__=-2147483648",
     "__STDC_ISO_10646__=201706L",
-    "__FILE__=0",
-    "__FILE_NAME__=0",
-    "__BASE_FILE__=0",
-    "__LINE__=0",
-    "__INCLUDE_LEVEL__=0",
-    "__COUNTER__=0",
 )
 _HOST_ARCH_PREDEFINED_MACROS: dict[str, tuple[str, ...]] = {
     "aarch64": ("__arm64__=1", "__aarch64__=1", "__AARCH64EL__=1"),
@@ -1223,17 +1312,33 @@ _HOST_ARCH_PREDEFINED_MACROS: dict[str, tuple[str, ...]] = {
 _HOST_ARCH_DEFINE_STRINGS = tuple(
     define for defines in _HOST_ARCH_PREDEFINED_MACROS.values() for define in defines
 )
-_PREDEFINED_DYNAMIC_MACROS = frozenset(
-    {"__FILE__", "__FILE_NAME__", "__BASE_FILE__", "__LINE__", "__INCLUDE_LEVEL__", "__COUNTER__"}
+_PREDEFINED_DYNAMIC_MACRO_TUPLE = (
+    "__FILE__",
+    "__FILE_NAME__",
+    "__BASE_FILE__",
+    "__LINE__",
+    "__INCLUDE_LEVEL__",
+    "__COUNTER__",
 )
+_PREDEFINED_DYNAMIC_MACROS = frozenset(_PREDEFINED_DYNAMIC_MACRO_TUPLE)
 _PREDEFINED_STATIC_MACROS = frozenset({"__DATE__", "__TIME__", "__TIMESTAMP__"})
-_COMPILER_COMPAT_PREDEFINED_MACROS = (
-    "__has_attribute(x)=0",  # Not implemented; stub to 0 for SDK header compatibility
+_COMPILER_COMPAT_PREDEFINED_MACROS_BATCH1 = (
     "__GNUC__=4",
+    "__clang__=1",
+)
+_COMPILER_COMPAT_PREDEFINED_MACROS_BATCH2_5 = ("__APPLE_CC__=6000",)
+_COMPILER_COMPAT_PREDEFINED_MACROS_BATCH2 = (
     "__GNUC_MINOR__=8",
     "__GNUC_PATCHLEVEL__=1",
-    "__GNUC_STDC_INLINE__=1",
+)
+_COMPILER_COMPAT_PREDEFINED_MACROS_BATCH3 = ("__GNUC_STDC_INLINE__=1",)
+# B661: Macros that require function-like or string-literal tokenization.
+# Loaded by the hosted build but skipped in the native AOT binary where
+# _parse_cli_define_head and string-literal tokenization are unavailable.
+_COMPILER_COMPAT_PREDEFINED_MACROS_HOSTED = (
+    "__has_attribute(x)=0",
     '__VERSION__="xcc"',
+    '__clang_version__="xcc 0.2"',
 )
 _STRICT_MODE_PREDEFINED_MACROS = ("__STRICT_ANSI__=1",)
 _GNU_MODE_PREDEFINED_MACROS = (
@@ -1292,11 +1397,256 @@ def _macro_name_from_cli_define(define: str) -> str:
     return head[:open_index].strip()
 
 
+# B661: Small subset of _PREDEFINED_MACROS that the native AOT-compiled
+# preprocessor can load without hitting iteration limits.
+# B661: All 198 predefined macros split into 10-item batches so
+# the native AOT-compiled preprocessor can iterate them.
+_PREDEFINED_MACROS_BATCH0 = (
+    "__STDC__=1",
+    "__STDC_VERSION__=201112L",
+    "__STDC_IEC_559__=1",
+    "__STDC_MB_MIGHT_NEQ_WC__=1",
+    "__STDC_UTF_16__=1",
+    "__STDC_UTF_32__=1",
+    "__STDC_NO_COMPLEX__=1",
+    "__STDC_NO_VLA__=1",
+    "__STDC_EMBED_NOT_FOUND__=0",
+    "__STDC_EMBED_FOUND__=1",
+)
+_PREDEFINED_MACROS_BATCH1 = (
+    "__STDC_EMBED_EMPTY__=2",
+    "__ATOMIC_RELAXED=0",
+    "__ATOMIC_CONSUME=1",
+    "__ATOMIC_ACQUIRE=2",
+    "__ATOMIC_RELEASE=3",
+    "__ATOMIC_ACQ_REL=4",
+    "__ATOMIC_SEQ_CST=5",
+    "__GCC_ATOMIC_BOOL_LOCK_FREE=2",
+    "__GCC_ATOMIC_CHAR_LOCK_FREE=2",
+    "__GCC_ATOMIC_SHORT_LOCK_FREE=2",
+)
+_PREDEFINED_MACROS_BATCH2 = (
+    "__GCC_ATOMIC_INT_LOCK_FREE=2",
+    "__GCC_ATOMIC_LONG_LOCK_FREE=2",
+    "__GCC_ATOMIC_LLONG_LOCK_FREE=2",
+    "__GCC_ATOMIC_POINTER_LOCK_FREE=2",
+    "__GCC_ATOMIC_CHAR16_T_LOCK_FREE=2",
+    "__GCC_ATOMIC_CHAR32_T_LOCK_FREE=2",
+    "__GCC_ATOMIC_WCHAR_T_LOCK_FREE=2",
+    "__GCC_ATOMIC_TEST_AND_SET_TRUEVAL=1",
+    "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_1=1",
+    "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2=1",
+)
+_PREDEFINED_MACROS_BATCH3 = (
+    "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4=1",
+    "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8=1",
+    "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16=1",
+    "__INT_WIDTH__=32",
+    "__LONG_WIDTH__=64",
+    "__LONG_LONG_WIDTH__=64",
+    "__LLONG_WIDTH__=64",
+    "__INTMAX_WIDTH__=64",
+    "__UINTMAX_WIDTH__=64",
+    "__SIZE_WIDTH__=64",
+)
+_PREDEFINED_MACROS_BATCH4 = (
+    "__PTRDIFF_WIDTH__=64",
+    "__INTPTR_WIDTH__=64",
+    "__UINTPTR_WIDTH__=64",
+    "__POINTER_WIDTH__=64",
+    "__BOOL_WIDTH__=8",
+    "__SCHAR_MAX__=127",
+    "__SCHAR_MIN__=-128",
+    "__SHRT_MAX__=32767",
+    "__SHRT_MIN__=-32768",
+    "__INT_MAX__=2147483647",
+)
+_PREDEFINED_MACROS_BATCH5 = (
+    "__INT_MIN__=-2147483648",
+    "__LONG_MAX__=9223372036854775807L",
+    "__LONG_MIN__=-9223372036854775808L",
+    "__INTMAX_MAX__=9223372036854775807L",
+    "__INTMAX_MIN__=-9223372036854775808L",
+    "__INT8_C(value)=value",
+    "__INT16_C(value)=value",
+    "__INT32_C(value)=value",
+    "__INT64_C(value)=value##L",
+    "__INTMAX_C(value)=value##L",
+)
+_PREDEFINED_MACROS_BATCH6 = (
+    "__UCHAR_MAX__=255",
+    "__USHRT_MAX__=65535",
+    "__UINT_MAX__=4294967295U",
+    "__ULONG_MAX__=18446744073709551615UL",
+    "__SIZE_MAX__=18446744073709551615UL",
+    "__PTRDIFF_MAX__=9223372036854775807L",
+    "__PTRDIFF_MIN__=-9223372036854775808L",
+    "__INTPTR_MAX__=9223372036854775807L",
+    "__INTPTR_MIN__=-9223372036854775808L",
+    "__UINTPTR_MAX__=18446744073709551615UL",
+)
+_PREDEFINED_MACROS_BATCH7 = (
+    "__LONG_LONG_MAX__=9223372036854775807LL",
+    "__LONG_LONG_MIN__=-9223372036854775808LL",
+    "__LLONG_MAX__=9223372036854775807LL",
+    "__LLONG_MIN__=-9223372036854775808LL",
+    "__ULLONG_MAX__=18446744073709551615ULL",
+    "__UINT8_C(value)=value",
+    "__UINT16_C(value)=value",
+    "__UINT32_C(value)=value##U",
+    "__UINT64_C(value)=value##UL",
+    "__UINTMAX_MAX__=18446744073709551615UL",
+)
+_PREDEFINED_MACROS_BATCH8 = (
+    "__UINTMAX_C(value)=value##UL",
+    "__LP64__=1",
+    "__LP64=1",
+    "_LP64=1",
+    "__CHAR_BIT__=8",
+    "__SIZEOF_BOOL__=1",
+    "__SIZEOF_SHORT__=2",
+    "__SIZEOF_INT__=4",
+    "__SIZEOF_FLOAT__=4",
+    "__SIZEOF_DOUBLE__=8",
+)
+_PREDEFINED_MACROS_BATCH9 = (
+    "__SIZEOF_LONG_DOUBLE__=16",
+    "__FLT_RADIX__=2",
+    "__FLT_MANT_DIG__=24",
+    "__DBL_MANT_DIG__=53",
+    "__LDBL_MANT_DIG__=113",
+    "__FLT_DIG__=6",
+    "__DBL_DIG__=15",
+    "__LDBL_DIG__=33",
+    "__FLT_DECIMAL_DIG__=9",
+    "__DBL_DECIMAL_DIG__=17",
+)
+_PREDEFINED_MACROS_BATCH10 = (
+    "__LDBL_DECIMAL_DIG__=36",
+    "__DECIMAL_DIG__=36",
+    "__FLT_EPSILON__=1.19209290e-7F",
+    "__DBL_EPSILON__=2.2204460492503131e-16",
+    "__LDBL_EPSILON__=1.08420217248550443401e-19L",
+    "__FLT_MIN__=1.17549435e-38F",
+    "__DBL_MIN__=2.2250738585072014e-308",
+    "__LDBL_MIN__=3.36210314311209350626e-4932L",
+    "__FLT_DENORM_MIN__=1.40129846e-45F",
+    "__DBL_DENORM_MIN__=4.9406564584124654e-324",
+)
+_PREDEFINED_MACROS_BATCH11 = (
+    "__LDBL_DENORM_MIN__=3.64519953188247460253e-4951L",
+    "__FLT_MAX__=3.40282347e+38F",
+    "__DBL_MAX__=1.7976931348623157e+308",
+    "__LDBL_MAX__=1.18973149535723176502e+4932L",
+    "__FLT_MIN_EXP__=-125",
+    "__DBL_MIN_EXP__=-1021",
+    "__LDBL_MIN_EXP__=-16381",
+    "__FLT_MIN_10_EXP__=-37",
+    "__DBL_MIN_10_EXP__=-307",
+    "__LDBL_MIN_10_EXP__=-4931",
+)
+_PREDEFINED_MACROS_BATCH12 = (
+    "__FLT_MAX_EXP__=128",
+    "__DBL_MAX_EXP__=1024",
+    "__LDBL_MAX_EXP__=16384",
+    "__FLT_MAX_10_EXP__=38",
+    "__DBL_MAX_10_EXP__=308",
+    "__LDBL_MAX_10_EXP__=4932",
+    "__FLT_HAS_DENORM__=1",
+    "__DBL_HAS_DENORM__=1",
+    "__LDBL_HAS_DENORM__=1",
+    "__FLT_HAS_INFINITY__=1",
+)
+_PREDEFINED_MACROS_BATCH13 = (
+    "__DBL_HAS_INFINITY__=1",
+    "__LDBL_HAS_INFINITY__=1",
+    "__FLT_HAS_QUIET_NAN__=1",
+    "__DBL_HAS_QUIET_NAN__=1",
+    "__LDBL_HAS_QUIET_NAN__=1",
+    "__SIZEOF_POINTER__=8",
+    "__SIZEOF_LONG__=8",
+    "__SIZEOF_LONG_LONG__=8",
+    "__SIZEOF_SIZE_T__=8",
+    "__SIZEOF_PTRDIFF_T__=8",
+)
+_PREDEFINED_MACROS_BATCH14 = (
+    "__SIZEOF_INTMAX_T__=8",
+    "__SIZEOF_UINTMAX_T__=8",
+    "__SIZEOF_WCHAR_T__=4",
+    "__SIZEOF_WINT_T__=4",
+    "__SIZEOF_CHAR16_T__=2",
+    "__SIZEOF_CHAR32_T__=4",
+    "__ORDER_LITTLE_ENDIAN__=1234",
+    "__ORDER_BIG_ENDIAN__=4321",
+    "__BYTE_ORDER__=__ORDER_LITTLE_ENDIAN__",
+    "__LITTLE_ENDIAN__=1",
+)
+_PREDEFINED_MACROS_BATCH15 = (
+    "__FLOAT_WORD_ORDER__=__ORDER_LITTLE_ENDIAN__",
+    "__SIZE_TYPE__=unsigned long",
+    "__PTRDIFF_TYPE__=long",
+    "__INTPTR_TYPE__=long",
+    "__UINTPTR_TYPE__=unsigned long",
+    "__INTMAX_TYPE__=long",
+    "__UINTMAX_TYPE__=unsigned long",
+    "__CHAR16_TYPE__=unsigned short",
+    "__CHAR32_TYPE__=unsigned int",
+    "__INT8_TYPE__=signed char",
+)
+_PREDEFINED_MACROS_BATCH16 = (
+    "__INT16_TYPE__=short",
+    "__INT32_TYPE__=int",
+    "__INT64_TYPE__=long",
+    "__UINT8_TYPE__=unsigned char",
+    "__UINT16_TYPE__=unsigned short",
+    "__UINT32_TYPE__=unsigned int",
+    "__UINT64_TYPE__=unsigned long",
+    "__INT_LEAST8_TYPE__=signed char",
+    "__INT_LEAST16_TYPE__=short",
+    "__INT_LEAST32_TYPE__=int",
+)
+_PREDEFINED_MACROS_BATCH17 = (
+    "__INT_LEAST64_TYPE__=long",
+    "__UINT_LEAST8_TYPE__=unsigned char",
+    "__UINT_LEAST16_TYPE__=unsigned short",
+    "__UINT_LEAST32_TYPE__=unsigned int",
+    "__UINT_LEAST64_TYPE__=unsigned long",
+    "__INT_FAST8_TYPE__=signed char",
+    "__INT_FAST16_TYPE__=short",
+    "__INT_FAST32_TYPE__=int",
+    "__INT_FAST64_TYPE__=long",
+    "__UINT_FAST8_TYPE__=unsigned char",
+)
+_PREDEFINED_MACROS_BATCH18 = (
+    "__UINT_FAST16_TYPE__=unsigned short",
+    "__UINT_FAST32_TYPE__=unsigned int",
+    "__UINT_FAST64_TYPE__=unsigned long",
+    "__WCHAR_TYPE__=int",
+    "__WINT_TYPE__=unsigned int",
+    "__WCHAR_WIDTH__=32",
+    "__WINT_WIDTH__=32",
+    "__CHAR16_WIDTH__=16",
+    "__CHAR32_WIDTH__=32",
+    "__WCHAR_MAX__=2147483647",
+)
+_PREDEFINED_MACROS_BATCH19 = (
+    "__WCHAR_MIN__=-2147483648",
+    "__WINT_MAX__=4294967295U",
+    "__WINT_MIN__=0U",
+    "__SIG_ATOMIC_TYPE__=int",
+    "__SIG_ATOMIC_WIDTH__=32",
+    "__SIG_ATOMIC_MAX__=2147483647",
+    "__SIG_ATOMIC_MIN__=-2147483648",
+    "__STDC_ISO_10646__=201706L",
+)
 _PREDEFINED_MACRO_NAMES = frozenset(
     _macro_name_from_cli_define(item)
     for item in (
         *_PREDEFINED_MACROS,
-        *_COMPILER_COMPAT_PREDEFINED_MACROS,
+        *_COMPILER_COMPAT_PREDEFINED_MACROS_BATCH1,
+        *_COMPILER_COMPAT_PREDEFINED_MACROS_BATCH2,
+        *_COMPILER_COMPAT_PREDEFINED_MACROS_BATCH3,
+        *_COMPILER_COMPAT_PREDEFINED_MACROS_HOSTED,
         *_STRICT_MODE_PREDEFINED_MACROS,
         *_GNU_MODE_PREDEFINED_MACROS,
         *_DARWIN_PREDEFINED_MACROS,
@@ -1356,7 +1706,20 @@ def preprocess_source_no_callback(
     options: FrontendOptions | None = None,
 ) -> PreprocessResult:
     normalized_options = normalize_options(options)
-    processor = _Preprocessor(normalized_options)
+    return _preprocess_source_no_callback_with_processor(
+        _Preprocessor(normalized_options),
+        source,
+        filename,
+        normalized_options,
+    )
+
+
+def _preprocess_source_no_callback_with_processor(
+    processor: "_Preprocessor",
+    source: str,
+    filename: str,
+    normalized_options: FrontendOptions,
+) -> PreprocessResult:
     processor._init_no_callback(normalized_options)
     processed = processor.process(source, filename=filename)
     stripped = _strip_gnu_asm_extensions(processed.source)
@@ -1381,13 +1744,115 @@ class _Preprocessor:
         self._base_filename = "<input>"
         self._embed_used = False
         self._macros: dict[str, _Macro] = {}
-        for define in _PREDEFINED_MACROS:
-            macro = self._parse_cli_define(define)
+        # B661: Load dynamic macros FIRST, individually, so they survive
+        # even if later loops fail in the native AOT binary.
+        self._macros["__FILE__"] = _Macro("__FILE__", (_MacroToken(TokenKind.INT_CONST, "0"),))
+        self._macros["__LINE__"] = _Macro("__LINE__", (_MacroToken(TokenKind.INT_CONST, "0"),))
+        self._macros["__FILE_NAME__"] = _Macro(
+            "__FILE_NAME__", (_MacroToken(TokenKind.PP_NUMBER, "0"),)
+        )
+        self._macros["__BASE_FILE__"] = _Macro(
+            "__BASE_FILE__", (_MacroToken(TokenKind.PP_NUMBER, "0"),)
+        )
+        self._macros["__INCLUDE_LEVEL__"] = _Macro(
+            "__INCLUDE_LEVEL__", (_MacroToken(TokenKind.PP_NUMBER, "0"),)
+        )
+        self._macros["__COUNTER__"] = _Macro(
+            "__COUNTER__", (_MacroToken(TokenKind.PP_NUMBER, "0"),)
+        )
+        # B661: Critical compat macros loaded directly to avoid tuple-iteration
+        # limits in the AOT binary.
+        self._macros["__APPLE_CC__"] = _Macro(
+            "__APPLE_CC__", (_MacroToken(TokenKind.PP_NUMBER, "6000"),)
+        )
+        self._macros["__clang__"] = _Macro("__clang__", (_MacroToken(TokenKind.PP_NUMBER, "1"),))
+        # B661: CPython function-like macros.  Self._parse_cli_define()
+        # cannot handle function-like syntax in the AOT binary, but
+        # self._parse_define() (used for inline #define directives) works.
+        for _fm in (
+            "_Py_CAST(type,expr) ((type)(expr))",
+            "_PyObject_CAST(op) _Py_CAST(PyObject*,(op))",
+            "_Py_RVALUE(op) ((void)0,(op))",
+        ):
+            _fm_macro = self._parse_define(_fm)
+            if _fm_macro is not None:
+                self._macros[_fm_macro.name] = _fm_macro
+        for _pm in _PREDEFINED_MACROS_BATCH0:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH1:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH2:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH3:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH4:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH5:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH6:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH7:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH8:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH9:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH10:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH11:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH12:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH13:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH14:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH15:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH16:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH17:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH18:
+            macro = self._parse_cli_define(_pm)
+            self._macros[macro.name] = macro
+        for _pm in _PREDEFINED_MACROS_BATCH19:
+            macro = self._parse_cli_define(_pm)
             self._macros[macro.name] = macro
         hosted_define = "__STDC_HOSTED__=1" if options.hosted else "__STDC_HOSTED__=0"
         hosted_macro = self._parse_cli_define(hosted_define)
         self._macros[hosted_macro.name] = hosted_macro
-        for define in _COMPILER_COMPAT_PREDEFINED_MACROS:
+        for define in _COMPILER_COMPAT_PREDEFINED_MACROS_BATCH1:
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
+        for define in _COMPILER_COMPAT_PREDEFINED_MACROS_BATCH2_5:
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
+        for define in _COMPILER_COMPAT_PREDEFINED_MACROS_BATCH2:
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
+        for define in _COMPILER_COMPAT_PREDEFINED_MACROS_BATCH3:
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
+        for define in _COMPILER_COMPAT_PREDEFINED_MACROS_HOSTED:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
         mode_defines = (
@@ -1456,6 +1921,7 @@ class _Preprocessor:
         self._define_object_macro_no_callback("__GNUC__", "4")
         self._define_object_macro_no_callback("__GNUC_MINOR__", "2")
         self._define_object_macro_no_callback("__clang__", "1")
+        self._define_object_macro_no_callback("__clang_version__", '"xcc 0.2"')
         self._define_object_macro_no_callback("__APPLE__", "1")
         self._define_object_macro_no_callback("__MACH__", "1")
         self._define_object_macro_no_callback("__ATOMIC_RELAXED", "0")
@@ -1495,15 +1961,55 @@ class _Preprocessor:
         self._define_object_macro_no_callback("__INT_MAX__", "2147483647")
         self._define_object_macro_no_callback("__LONG_MAX__", "9223372036854775807L")
         self._define_object_macro_no_callback("__LONG_LONG_MAX__", "9223372036854775807LL")
+        self._define_object_macro_no_callback("__FLT_RADIX__", "2")
+        self._define_object_macro_no_callback("__FLT_MANT_DIG__", "24")
+        self._define_object_macro_no_callback("__DBL_MANT_DIG__", "53")
+        self._define_object_macro_no_callback("__LDBL_MANT_DIG__", "113")
+        self._define_object_macro_no_callback("__FLT_DIG__", "6")
+        self._define_object_macro_no_callback("__DBL_DIG__", "15")
+        self._define_object_macro_no_callback("__LDBL_DIG__", "33")
+        self._define_object_macro_no_callback("__FLT_EPSILON__", "1.19209290e-7F")
+        self._define_object_macro_no_callback("__DBL_EPSILON__", "2.2204460492503131e-16")
+        self._define_object_macro_no_callback(
+            "__LDBL_EPSILON__",
+            "1.08420217248550443401e-19L",
+        )
         self._define_object_macro_no_callback("__FLT_MIN__", "1.17549435e-38F")
         self._define_object_macro_no_callback("__DBL_MIN__", "2.2250738585072014e-308")
         self._define_object_macro_no_callback(
             "__LDBL_MIN__",
             "3.36210314311209350626e-4932L",
         )
+        self._define_object_macro_no_callback("__FLT_MAX__", "3.40282347e+38F")
+        self._define_object_macro_no_callback("__DBL_MAX__", "1.7976931348623157e+308")
+        self._define_object_macro_no_callback(
+            "__LDBL_MAX__",
+            "1.18973149535723176502e+4932L",
+        )
+        self._define_object_macro_no_callback("__FLT_MIN_EXP__", "-125")
+        self._define_object_macro_no_callback("__DBL_MIN_EXP__", "-1021")
+        self._define_object_macro_no_callback("__LDBL_MIN_EXP__", "-16381")
+        self._define_object_macro_no_callback("__FLT_MAX_EXP__", "128")
+        self._define_object_macro_no_callback("__DBL_MAX_EXP__", "1024")
+        self._define_object_macro_no_callback("__LDBL_MAX_EXP__", "16384")
+        self._define_object_macro_no_callback("__FLT_MIN_10_EXP__", "-37")
+        self._define_object_macro_no_callback("__DBL_MIN_10_EXP__", "-307")
+        self._define_object_macro_no_callback("__LDBL_MIN_10_EXP__", "-4931")
+        self._define_object_macro_no_callback("__FLT_MAX_10_EXP__", "38")
+        self._define_object_macro_no_callback("__DBL_MAX_10_EXP__", "308")
+        self._define_object_macro_no_callback("__LDBL_MAX_10_EXP__", "4932")
         self._define_object_macro_no_callback("__PTRDIFF_WIDTH__", "64")
         self._define_object_macro_no_callback("__INTPTR_WIDTH__", "64")
         self._define_object_macro_no_callback("__UINTPTR_WIDTH__", "64")
+        self._define_object_macro_no_callback("__ORDER_LITTLE_ENDIAN__", "1234")
+        self._define_object_macro_no_callback("__ORDER_BIG_ENDIAN__", "4321")
+        self._define_object_macro_no_callback("__ORDER_PDP_ENDIAN__", "3412")
+        self._define_object_macro_no_callback("__BYTE_ORDER__", "__ORDER_LITTLE_ENDIAN__")
+        self._define_object_macro_no_callback("__LITTLE_ENDIAN__", "1")
+        self._define_object_macro_no_callback(
+            "__FLOAT_WORD_ORDER__",
+            "__ORDER_LITTLE_ENDIAN__",
+        )
         for define in options.defines:
             if "=" in define:
                 define_parts = define.split("=", 1)
@@ -1567,6 +2073,9 @@ class _Preprocessor:
 
     def _source_dir(self, filename: str) -> Path | None:
         return _source_dir(filename)
+
+    def _record_pragma_once(self, source_id: str) -> None:
+        self._pragma_once_files.add(source_id)
 
     def _process_text(
         self,
@@ -1866,7 +2375,13 @@ class _Preprocessor:
         if not condition:
             return False
         condition = self._replace_defined_no_callback(condition)
+        condition = self._replace_feature_probes_no_callback(
+            condition,
+            location,
+            base_dir,
+        )
         condition = self._expand_text_no_callback(condition, (), location)
+        condition = _reveal_macro_names_no_callback(condition)
         condition = _strip_condition_comments(condition).strip()
         condition = self._replace_feature_probes_no_callback(
             condition,
@@ -2088,7 +2603,48 @@ class _Preprocessor:
         trailing_newline = "\n" if line.endswith("\n") else ""
         text = line[0 : len(line) - 1] if trailing_newline else line
         expanded = self._expand_text_no_callback(text, (), location)
+        expanded = _reveal_macro_names_no_callback(expanded)
         return self._handle_pragma_operator_no_callback(expanded) + trailing_newline
+
+    def _expand_function_macro_no_callback(
+        self,
+        macro: _Macro,
+        name: str,
+        arguments: list[str],
+        argument_blocked: tuple[str, ...],
+        replacement_blocked: tuple[str, ...],
+        location: _SourceLocation,
+    ) -> str:
+        replacement_text = _render_macro_replacement_no_callback(macro)
+        expanded_arguments: list[str] = []
+        parameters = macro.parameters
+        if parameters is None:
+            return name
+        for argument_index, argument in enumerate(arguments):
+            parameter = "__VA_ARGS__"
+            if argument_index < len(parameters):
+                parameter = parameters[argument_index]
+            if _macro_parameter_needs_expansion_no_callback(
+                replacement_text,
+                parameter,
+            ):
+                argument = self._expand_text_no_callback(
+                    argument,
+                    argument_blocked,
+                    location,
+                )
+            expanded_arguments.append(argument)
+        replacement = _substitute_macro_arguments_no_callback(
+            macro,
+            arguments,
+            expanded_arguments,
+        )
+        replacement = _apply_token_paste_no_callback(replacement)
+        return self._expand_text_no_callback(
+            replacement,
+            replacement_blocked,
+            location,
+        )
 
     def _expand_text_no_callback(
         self,
@@ -2096,10 +2652,18 @@ class _Preprocessor:
         blocked: tuple[str, ...],
         location: _SourceLocation,
     ) -> str:
-        result = ""
+        result_parts: list[str] = []
         index = 0
         while index < len(text):
             ch = text[index]
+            if ch == _HIDDEN_MACRO_START:
+                end = text.find(_HIDDEN_MACRO_END, index + 1)
+                if end == -1:
+                    result_parts.append(text[index:])
+                    break
+                result_parts.append(text[index : end + 1])
+                index = end + 1
+                continue
             if ch == '"' or ch == "'":
                 quote = ch
                 start = index
@@ -2112,23 +2676,23 @@ class _Preprocessor:
                         index += 1
                         break
                     index += 1
-                result += text[start:index]
+                result_parts.append(text[start:index])
                 continue
             if ch == "/" and index + 1 < len(text):
                 next_ch = text[index + 1]
                 if next_ch == "/":
-                    result += text[index:]
+                    result_parts.append(text[index:])
                     break
                 if next_ch == "*":
                     end = text.find("*/", index + 2)
                     if end == -1:
-                        result += text[index:]
+                        result_parts.append(text[index:])
                         break
-                    result += text[index : end + 2]
+                    result_parts.append(text[index : end + 2])
                     index = end + 2
                     continue
             if not _guard_is_ident_start(ch):
-                result += ch
+                result_parts.append(ch)
                 index += 1
                 continue
             start = index
@@ -2138,10 +2702,10 @@ class _Preprocessor:
             name = text[start:index]
             macro: _Macro | None = self._macros.get(name)
             if macro is None:
-                result += name
+                result_parts.append(name)
                 continue
             if name in blocked:
-                result += name
+                result_parts.append(_hide_macro_name_no_callback(name))
                 continue
             replacement = _render_macro_replacement_no_callback(macro)
             if macro.parameters is not None:
@@ -2158,7 +2722,7 @@ class _Preprocessor:
                             filename=location.filename,
                             code=_PP_UNTERMINATED_MACRO,
                         )
-                    result += name
+                    result_parts.append(name)
                     continue
                 arguments, end = invocation
                 expected = len(macro.parameters)
@@ -2166,30 +2730,107 @@ class _Preprocessor:
                 if not macro.is_variadic:
                     valid = len(arguments) == expected
                 if not valid:
-                    result += text[start:end]
+                    result_parts.append(text[start:end])
                     index = end
                     continue
-                replacement = _substitute_macro_arguments_no_callback(macro, arguments)
-                replacement = _apply_token_paste_no_callback(replacement)
-                result += self._expand_text_no_callback(
-                    replacement,
+                function_expansion = self._expand_function_macro_no_callback(
+                    macro,
+                    name,
+                    arguments,
+                    blocked,
                     blocked + (name,),
                     location,
                 )
+                selected_name = function_expansion.strip()
+                selected_scan = _guard_scan_identifier(selected_name, 0)
+                selected_macro: _Macro | None = None
+                if selected_scan is not None and selected_scan[1] == len(selected_name):
+                    selected_macro = self._macros.get(selected_name)
+                if (
+                    selected_macro is not None
+                    and selected_macro.parameters is not None
+                    and selected_name not in blocked
+                ):
+                    selected_invocation = _parse_macro_invocation_no_callback(text, end)
+                    if selected_invocation is not None:
+                        selected_arguments, selected_end = selected_invocation
+                        selected_expected = len(selected_macro.parameters)
+                        selected_valid = len(selected_arguments) >= selected_expected
+                        if not selected_macro.is_variadic:
+                            selected_valid = len(selected_arguments) == selected_expected
+                        if selected_valid:
+                            function_expansion = self._expand_function_macro_no_callback(
+                                selected_macro,
+                                selected_name,
+                                selected_arguments,
+                                blocked,
+                                blocked + (name, selected_name),
+                                location,
+                            )
+                            end = selected_end
+                result_parts.append(_separate_macro_expansion_no_callback(function_expansion))
                 index = end
                 continue
-            result += self._expand_text_no_callback(
-                replacement,
-                blocked + (name,),
-                location,
+            alias_name = replacement.strip()
+            alias_scan = _guard_scan_identifier(alias_name, 0)
+            alias_macro: _Macro | None = None
+            if alias_scan is not None and alias_scan[1] == len(alias_name):
+                alias_macro = self._macros.get(alias_name)
+            if (
+                alias_macro is not None
+                and alias_macro.parameters is not None
+                and alias_name not in blocked
+            ):
+                alias_invocation = _parse_macro_invocation_no_callback(text, index)
+                if alias_invocation is None:
+                    cursor = index
+                    while cursor < len(text) and text[cursor].isspace():
+                        cursor += 1
+                    if cursor < len(text) and text[cursor] == "(":
+                        raise PreprocessorError(
+                            "Unterminated macro invocation",
+                            location.line,
+                            1,
+                            filename=location.filename,
+                            code=_PP_UNTERMINATED_MACRO,
+                        )
+                if alias_invocation is not None:
+                    alias_arguments, alias_end = alias_invocation
+                    alias_expected = len(alias_macro.parameters)
+                    alias_valid = len(alias_arguments) >= alias_expected
+                    if not alias_macro.is_variadic:
+                        alias_valid = len(alias_arguments) == alias_expected
+                    if alias_valid:
+                        result_parts.append(
+                            _separate_macro_expansion_no_callback(
+                                self._expand_function_macro_no_callback(
+                                    alias_macro,
+                                    alias_name,
+                                    alias_arguments,
+                                    blocked,
+                                    blocked + (name, alias_name),
+                                    location,
+                                )
+                            )
+                        )
+                        index = alias_end
+                        continue
+            result_parts.append(
+                _separate_macro_expansion_no_callback(
+                    self._expand_text_no_callback(
+                        replacement,
+                        blocked + (name,),
+                        location,
+                    )
+                )
             )
-        return result
+        return "".join(result_parts)
 
     def _handle_pragma_operator(self, text: str) -> str:
         return re.sub(r'_Pragma\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)', "\n", text)
 
     def _handle_pragma_operator_no_callback(self, text: str) -> str:
-        result = ""
+        result_parts: list[str] = []
         index = 0
         while index < len(text):
             ch = text[index]
@@ -2205,23 +2846,23 @@ class _Preprocessor:
                         index += 1
                         break
                     index += 1
-                result += text[start:index]
+                result_parts.append(text[start:index])
                 continue
             if ch == "/" and index + 1 < len(text):
                 next_ch = text[index + 1]
                 if next_ch == "/":
-                    result += text[index:]
+                    result_parts.append(text[index:])
                     break
                 if next_ch == "*":
                     end = text.find("*/", index + 2)
                     if end == -1:
-                        result += text[index:]
+                        result_parts.append(text[index:])
                         break
-                    result += text[index : end + 2]
+                    result_parts.append(text[index : end + 2])
                     index = end + 2
                     continue
             if not _guard_is_ident_start(ch):
-                result += ch
+                result_parts.append(ch)
                 index += 1
                 continue
             start = index
@@ -2230,19 +2871,19 @@ class _Preprocessor:
                 index += 1
             name = text[start:index]
             if name != "_Pragma":
-                result += name
+                result_parts.append(name)
                 continue
             cursor = index
             while cursor < len(text) and text[cursor].isspace():
                 cursor += 1
             if cursor >= len(text) or text[cursor] != "(":
-                result += name
+                result_parts.append(name)
                 continue
             cursor += 1
             while cursor < len(text) and text[cursor].isspace():
                 cursor += 1
             if cursor >= len(text) or text[cursor] != '"':
-                result += name
+                result_parts.append(name)
                 continue
             cursor += 1
             closed = False
@@ -2256,16 +2897,16 @@ class _Preprocessor:
                     break
                 cursor += 1
             if not closed:
-                result += name
+                result_parts.append(name)
                 continue
             while cursor < len(text) and text[cursor].isspace():
                 cursor += 1
             if cursor >= len(text) or text[cursor] != ")":
-                result += name
+                result_parts.append(name)
                 continue
-            result += "\n"
+            result_parts.append("\n")
             index = cursor + 1
-        return result
+        return "".join(result_parts)
 
     def _line_needs_macro_expansion(self, text: str) -> bool:
         has_identifier = False
@@ -2302,13 +2943,29 @@ class _Preprocessor:
                 expanded_prefix = self._expand_macro_text(before_comment, location)
                 return expanded_prefix + comment_tail
             return text
+        # B661: Inline dynamic macro expansion using a tuple loop instead
+        # of frozenset membership — the AOT binary cannot reliably test
+        # "name in frozenset" but can execute a simple for-equal loop.
+        _result_tokens: list[_MacroToken] = []
+        for _tok in tokens:
+            _name = _tok.text
+            _is_dynamic = False
+            for _dn in _PREDEFINED_DYNAMIC_MACRO_TUPLE:
+                if _dn == _name:
+                    _is_dynamic = True
+                    break
+            if _is_dynamic and self._macros.get(_name) is not None:
+                _macro = self._macros[_name]
+                _result_tokens.extend(_macro.replacement)
+            else:
+                _result_tokens.append(_tok)
         expanded = _expand_macro_tokens(
-            tokens,
+            _result_tokens,
             self._macros,
             self._options.std,
             location,
-            dynamic_macro_resolver=self._resolve_dynamic_macro,
-            dynamic_macro_names=_PREDEFINED_DYNAMIC_MACROS,
+            dynamic_macro_resolver=None,
+            dynamic_macro_names=frozenset(),
         )
         return _render_macro_tokens(expanded)
 

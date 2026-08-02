@@ -1,3 +1,4 @@
+import inspect
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -35,6 +36,15 @@ AOT_ROOT = ROOT / "src/xcc/aot"
 
 
 class AotReachabilityTests(unittest.TestCase):
+    def test_v441_reachability_caches_sorted_names_and_uses_dict_membership(
+        self,
+    ) -> None:
+        source = inspect.getsource(render_native_reachability)
+        self.assertNotIn(".keys()", source)
+        self.assertNotIn(" & ", source)
+        self.assertEqual(source.count("sorted(functions)"), 1)
+        self.assertEqual(source.count("sorted(records)"), 1)
+
     def test_v401_reachability_materializes_each_record_once(self) -> None:
         source = (
             "class Left:\n"

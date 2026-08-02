@@ -489,6 +489,19 @@ def _aot_arg_is_object_file(arg: str) -> bool:
     return arg.endswith(".o")
 
 
+def _aot_arg_is_existing_link_input(arg: str) -> bool:
+    return arg.endswith(".o") or arg.endswith(".a") or arg.endswith(".so") or arg.endswith(".dylib")
+
+
+def _aot_existing_link_argv(argv: tuple[str, ...]) -> tuple[str, ...]:
+    result: list[str] = ["cc"]
+    index = 1
+    while index < len(argv):
+        result.append(argv[index])
+        index += 1
+    return tuple(result)
+
+
 def _aot_default_object_path(source_path: str) -> str:
     if source_path.endswith(".c"):
         return source_path[:-2] + ".o"
@@ -500,7 +513,12 @@ def _aot_link_object_path(output_path: str) -> str:
 
 
 def _aot_is_linker_flag(arg: str) -> bool:
-    return arg.startswith("-L") or arg.startswith("-l")
+    return (
+        arg.startswith("-L")
+        or arg.startswith("-F")
+        or arg.startswith("-l")
+        or arg.startswith("-Wl,")
+    )
 
 
 def _aot_link_argv(
@@ -615,6 +633,21 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
     count: int = len(argv)
     if argc < 2 or count < 2:
         return 1
+    scan_compile_only = False
+    scan_has_source = False
+    scan_has_link_input = False
+    scan_index = 1
+    while scan_index < count:
+        scan_arg = argv[scan_index]
+        if scan_arg == "-c":
+            scan_compile_only = True
+        elif _aot_arg_is_c_source(scan_arg):
+            scan_has_source = True
+        elif _aot_arg_is_existing_link_input(scan_arg):
+            scan_has_link_input = True
+        scan_index += 1
+    if not scan_compile_only and not scan_has_source and scan_has_link_input:
+        return _aot_exec_argv(_aot_existing_link_argv(argv))
     compile_only = False
     source_path = ""
     object_input = ""
@@ -652,11 +685,16 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
             defines = defines + (arg[2:],)
         elif arg.startswith("-U") and len(arg) > 2:
             undefs = undefs + (arg[2:],)
+        elif arg == "-framework":
+            index += 1
+            if index >= count:
+                return 1
+            link_flags = link_flags + (arg, argv[index])
         elif arg == "-std=c11":
             std = "c11"
         elif arg == "-std=gnu11":
             std = "gnu11"
-        elif arg in ("-O0", "-O1", "-O2", "-O3", "-Os", "-Oz", "-Wall", "-Wextra"):
+        elif arg in ("-O0", "-O1", "-O2", "-O3", "-Os", "-Oz") or arg.startswith("-W"):
             pass
         elif _aot_arg_is_c_source(arg):
             if source_path != "" or object_input != "":

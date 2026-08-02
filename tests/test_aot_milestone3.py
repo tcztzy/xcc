@@ -54,6 +54,7 @@ from xcc.aot import (
     run_native_core_smoke,
 )
 from xcc.aot.core_runtime import runtime_prelude
+from xcc.aot.llvm_text import _Emitter
 from xcc.aot.slice import (
     _expr_call_targets,
     _expr_record_names,
@@ -431,6 +432,53 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0)
 
+    def test_v438_no_match_string_replace_reuses_input_without_allocation(
+        self,
+    ) -> None:
+        runtime = runtime_prelude()
+        replace_body = runtime.split(
+            "define ptr @__xcc_aot_string_replace", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("%no_matches = icmp eq i64 %count, 0", replace_body)
+        self.assertIn(
+            "br i1 %no_matches, label %return_input, label %allocate_output",
+            replace_body,
+        )
+
+        llvm_ir = (
+            runtime
+            + '\n\n@v438_text = private constant [7 x i8] c"stable\\00"\n'
+            + '@v438_old = private constant [2 x i8] c"x\\00"\n'
+            + '@v438_new = private constant [2 x i8] c"y\\00"\n'
+            + "\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %before = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %result = call ptr @__xcc_aot_string_replace(\n"
+            + "    ptr @v438_text, ptr @v438_old, ptr @v438_new)\n"
+            + "  %after = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %same = icmp eq ptr %result, @v438_text\n"
+            + "  %uncharged = icmp eq i64 %after, %before\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %identity = and i1 %same, %uncharged\n"
+            + "  %ok = and i1 %identity, %balanced\n"
+            + "  %exit = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %exit\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "replace-no-match",
+                filename="replace-no-match.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
     def test_tuple_backing_uses_a_stable_handle_without_global_forwarding_tables(self) -> None:
         prelude = runtime_prelude()
         resolver = prelude.split(
@@ -802,9 +850,9 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  call void @__xcc_aot_phase_promote_end(ptr %middle)\n"
             + "  call void @__xcc_aot_phase_reset(ptr %inner)\n"
             + "  call void @__xcc_aot_phase_reset(ptr %middle)\n"
-            + "  %a.header = getelementptr i8, ptr %a, i64 -40\n"
-            + "  %b.header = getelementptr i8, ptr %b, i64 -40\n"
-            + "  %c.header = getelementptr i8, ptr %c, i64 -40\n"
+            + "  %a.header = getelementptr i8, ptr %a, i64 -32\n"
+            + "  %b.header = getelementptr i8, ptr %b, i64 -32\n"
+            + "  %c.header = getelementptr i8, ptr %c, i64 -32\n"
             + "  %a.next.slot = getelementptr i8, ptr %a.header, i64 8\n"
             + "  %a.next = load ptr, ptr %a.next.slot\n"
             + "  %b.next.slot = getelementptr i8, ptr %b.header, i64 8\n"
@@ -861,9 +909,14 @@ class AotMilestone3IrTests(unittest.TestCase):
             "define i1 @__xcc_aot_phase_promote_allocated_to", 1
         )[1].split("\n}", 1)[0]
         self.assertNotIn("load ptr, ptr @__xcc_aot_allocation_head", allocated_promote)
-        hot_path, cold_fallback = allocated_promote.split("verify_untracked:", 1)
-        self.assertNotIn("@__xcc_aot_find_allocation", hot_path)
-        self.assertIn("@__xcc_aot_find_allocation", cold_fallback.split("check_region:", 1)[0])
+        self.assertIn(
+            "call ptr @__xcc_aot_find_allocation(ptr %payload)",
+            allocated_promote,
+        )
+        self.assertNotIn(
+            "getelementptr i8, ptr %payload, i64 -",
+            allocated_promote,
+        )
         llvm_ir = (
             runtime
             + "\n\ndefine i32 @main() {\n"
@@ -954,13 +1007,13 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "    ptr @v424_external, ptr %mark)\n"
             + "  %other = call i1 @__xcc_aot_phase_promote_to(\n"
             + "    ptr @v424_external_2, ptr %mark)\n"
-            + "  %live.header = getelementptr i8, ptr %live, i64 -40\n"
-            + "  %magic.slot = getelementptr i8, ptr %live.header, i64 24\n"
-            + "  %saved.magic = load i64, ptr %magic.slot\n"
-            + "  store i64 0, ptr %magic.slot\n"
+            + "  %live.header = getelementptr i8, ptr %live, i64 -32\n"
+            + "  %meta.slot = getelementptr i8, ptr %live.header, i64 16\n"
+            + "  %saved.meta = load i64, ptr %meta.slot\n"
+            + "  store i64 0, ptr %meta.slot\n"
             + "  %second = call i1 @__xcc_aot_phase_promote_to(\n"
             + "    ptr @v424_external, ptr %mark)\n"
-            + "  store i64 %saved.magic, ptr %magic.slot\n"
+            + "  store i64 %saved.meta, ptr %meta.slot\n"
             + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
             + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
             + "  %first_false = xor i1 %first, true\n"
@@ -1019,13 +1072,13 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  %stale = call i1 @__xcc_aot_phase_promote_cache_contains(\n"
             + "    ptr @v425_external_a, ptr %mark)\n"
             + "  store i64 %mark.state, ptr %mark.state.slot\n"
-            + "  %live.header = getelementptr i8, ptr %live, i64 -40\n"
-            + "  %magic.slot = getelementptr i8, ptr %live.header, i64 24\n"
-            + "  %saved.magic = load i64, ptr %magic.slot\n"
-            + "  store i64 0, ptr %magic.slot\n"
+            + "  %live.header = getelementptr i8, ptr %live, i64 -32\n"
+            + "  %meta.slot = getelementptr i8, ptr %live.header, i64 16\n"
+            + "  %saved.meta = load i64, ptr %meta.slot\n"
+            + "  store i64 0, ptr %meta.slot\n"
             + "  %second_a = call i1 @__xcc_aot_phase_promote_to(\n"
             + "    ptr @v425_external_a, ptr %mark)\n"
-            + "  store i64 %saved.magic, ptr %magic.slot\n"
+            + "  store i64 %saved.meta, ptr %meta.slot\n"
             + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
             + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
             + "  %a_false = xor i1 %first_a, true\n"
@@ -1163,6 +1216,29 @@ class AotMilestone3IrTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 7)
 
+    def test_v442_opaque_loop_values_disable_iteration_reset(self) -> None:
+        module = IrModule("opaque-loop-phase.py", (), ())
+        emitter = _Emitter(module)
+        emitter.current_phase_mark = "%mark"
+        loop = IrWhile(
+            IrConstBool(True),
+            IrBranch(
+                (
+                    IrAssign(
+                        "scratch",
+                        IrStringConcat((IrConstString("left"), IrConstString("right"))),
+                    ),
+                )
+            ),
+        )
+
+        self.assertFalse(
+            emitter._while_uses_iteration_phase(
+                loop,
+                {"value": IrRecordType("object")},
+            )
+        )
+
     def test_v427_exact_boundary_forces_ancestor_capture_promotion(self) -> None:
         llvm_ir = (
             runtime_prelude()
@@ -1181,13 +1257,13 @@ class AotMilestone3IrTests(unittest.TestCase):
             + "  call void @__xcc_aot_phase_finish(ptr %inner)\n"
             + "  %after_inner = call i64 @__xcc_aot_phase_allocated_bytes()\n"
             + "  %inner_delta = sub i64 %after_inner, %baseline\n"
-            + "  %inner_reclaimed = icmp eq i64 %inner_delta, 88\n"
+            + "  %inner_reclaimed = icmp eq i64 %inner_delta, 80\n"
             + "  call void @__xcc_aot_phase_finish(ptr %outer)\n"
             + "  %stored = load i64, ptr %value\n"
             + "  %value_live = icmp eq i64 %stored, 7\n"
             + "  %after_outer = call i64 @__xcc_aot_phase_allocated_bytes()\n"
             + "  %outer_delta = sub i64 %after_outer, %baseline\n"
-            + "  %only_value_live = icmp eq i64 %outer_delta, 48\n"
+            + "  %only_value_live = icmp eq i64 %outer_delta, 40\n"
             + "  call void @__xcc_aot_free(ptr %value)\n"
             + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
             + "  %balanced = icmp eq i64 %final, %baseline\n"
@@ -1487,6 +1563,60 @@ class AotMilestone3IrTests(unittest.TestCase):
                 llvm_ir,
                 Path(tmp) / "static-owner-capture-fallback",
                 filename="static-owner-capture-fallback.ll",
+            )
+            completed = subprocess.run((str(executable),), check=False)
+
+        self.assertEqual(completed.returncode, 0)
+
+    def test_v435_compact_header_uses_exact_index_and_balanced_accounting(self) -> None:
+        runtime = runtime_prelude()
+        alloc_body = runtime.split(
+            "define internal ptr @__xcc_aot_alloc", 1
+        )[1].split("\n}", 1)[0]
+        find_body = runtime.split(
+            "define internal ptr @__xcc_aot_find_allocation", 1
+        )[1].split("\n}", 1)[0]
+        allocated_promote = runtime.split(
+            "define i1 @__xcc_aot_phase_promote_allocated_to", 1
+        )[1].split("\n}", 1)[0]
+        allocated_capture = runtime.split(
+            "define ptr @__xcc_aot_phase_capture_allocated_target", 1
+        )[1].split("\n}", 1)[0]
+        self.assertIn("%total = add i64 %size, 32", alloc_body)
+        self.assertIn("%payload = getelementptr i8, ptr %header, i64 32", alloc_body)
+        self.assertNotIn("@__xcc_aot_allocation_magic", runtime)
+        self.assertIn("%tag = lshr i64 %tracked_size, 48", find_body)
+        self.assertIn("call ptr @__xcc_aot_find_allocation(ptr %payload)", allocated_promote)
+        self.assertIn("call ptr @__xcc_aot_find_allocation(ptr %owner)", allocated_capture)
+        self.assertNotIn("getelementptr i8, ptr %payload, i64 -", allocated_promote)
+        self.assertNotIn("getelementptr i8, ptr %owner, i64 -", allocated_capture)
+
+        llvm_ir = (
+            runtime
+            + "\n\ndefine i32 @main() {\n"
+            + "entry:\n"
+            + "  %baseline = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %mark = call ptr @__xcc_aot_phase_mark()\n"
+            + "  %small = call ptr @__xcc_aot_alloc(i64 1)\n"
+            + "  %medium = call ptr @__xcc_aot_alloc(i64 63)\n"
+            + "  store i8 7, ptr %small\n"
+            + "  store i8 9, ptr %medium\n"
+            + "  %peak = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %delta = sub i64 %peak, %baseline\n"
+            + "  %compact = icmp eq i64 %delta, 168\n"
+            + "  call void @__xcc_aot_phase_reset(ptr %mark)\n"
+            + "  %final = call i64 @__xcc_aot_phase_allocated_bytes()\n"
+            + "  %balanced = icmp eq i64 %final, %baseline\n"
+            + "  %ok = and i1 %compact, %balanced\n"
+            + "  %result = select i1 %ok, i32 0, i32 1\n"
+            + "  ret i32 %result\n"
+            + "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = compile_llvm_executable(
+                llvm_ir,
+                Path(tmp) / "compact-phase-header",
+                filename="compact-phase-header.ll",
             )
             completed = subprocess.run((str(executable),), check=False)
 

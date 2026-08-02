@@ -9,9 +9,6 @@ from xcc import host_includes
 
 
 class HostIncludesTests(unittest.TestCase):
-    def setUp(self) -> None:
-        host_includes._host_system_include_dirs.cache_clear()
-
     def test_is_pathlike(self) -> None:
         self.assertFalse(host_includes._is_pathlike("macosx"))
         self.assertTrue(host_includes._is_pathlike("/SDKs/MacOSX.sdk"))
@@ -284,5 +281,44 @@ End of search list.
             patch("xcc.host_includes.sys.platform", "darwin"),
             patch.dict("os.environ", {}, clear=True),
             patch("xcc.host_includes.subprocess.run", side_effect=fail_run),
+            patch.object(Path, "is_dir", return_value=False),
         ):
             self.assertEqual(host_includes.host_system_include_dirs(), ("/usr/include",))
+
+    def test_host_system_include_dirs_darwin_uses_xcode_filesystem_fallback(self) -> None:
+        xcode_base = Path(
+            "/Applications/Xcode.app/Contents/Developer/Toolchains/"
+            "XcodeDefault.xctoolchain/usr/lib/clang"
+        )
+        clang_version = xcode_base / "21.0.0"
+        sdk_base = Path(
+            "/Applications/Xcode.app/Contents/Developer/Platforms/"
+            "MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+        )
+        existing_dirs = {xcode_base, clang_version, sdk_base}
+
+        def fail_run(*args: object, **kwargs: object) -> None:
+            raise OSError("xcrun missing")
+
+        def fake_is_dir(path: Path) -> bool:
+            return path in existing_dirs
+
+        def fake_iterdir(path: Path):
+            self.assertEqual(path, xcode_base)
+            return iter((clang_version,))
+
+        with (
+            patch("xcc.host_includes.sys.platform", "darwin"),
+            patch.dict("os.environ", {}, clear=True),
+            patch("xcc.host_includes.subprocess.run", side_effect=fail_run),
+            patch.object(Path, "is_dir", fake_is_dir),
+            patch.object(Path, "iterdir", fake_iterdir),
+        ):
+            self.assertEqual(
+                host_includes.host_system_include_dirs(),
+                (
+                    str(clang_version / "include"),
+                    str(sdk_base / "usr" / "include"),
+                    "/usr/include",
+                ),
+            )

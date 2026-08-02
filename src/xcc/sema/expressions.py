@@ -31,7 +31,7 @@ from xcc.ast import (
 from xcc.types import CHAR, INT, UINT, ULONG, USHORT, VOID, Type
 
 from .format_checking import check_printf_format
-from .symbols import EnumConstSymbol, Scope, SemaError
+from .symbols import Scope, SemaError
 
 _ATOMIC_VALUE_RETURN_BUILTINS = {
     "__atomic_load_n",
@@ -148,6 +148,9 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
             )
             self._type_map.set(expr, function_name_type)
             return function_name_type
+        if scope.lookup_enum_value(expr.name) is not None:
+            self._type_map.set(expr, INT)
+            return INT
         symbol = scope.lookup(expr.name)
         if symbol is not None:
             self._type_map.set(expr, symbol.type_)
@@ -338,10 +341,11 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
     if isinstance(expr, UpdateExpr):
         if expr.op not in {"++", "--"}:
             raise SemaError(f"Unsupported update operator: {expr.op}")
-        if isinstance(expr.operand, Identifier):
-            target_symbol = scope.lookup(expr.operand.name)
-            if isinstance(target_symbol, EnumConstSymbol):
-                raise SemaError("Assignment target is not assignable")
+        if (
+            isinstance(expr.operand, Identifier)
+            and scope.lookup_enum_value(expr.operand.name) is not None
+        ):
+            raise SemaError("Assignment target is not assignable")
         if not self._is_assignable(expr.operand):
             raise SemaError("Assignment target is not assignable")
         operand_type = self._analyze_expr(expr.operand, scope)
@@ -640,10 +644,11 @@ def analyze_expr(analyzer: object, expr: Expr, scope: Scope) -> Type:
         self._type_map.set(expr, right_type)
         return right_type
     if isinstance(expr, AssignExpr):
-        if isinstance(expr.target, Identifier):
-            target_symbol = scope.lookup(expr.target.name)
-            if isinstance(target_symbol, EnumConstSymbol):
-                raise SemaError("Assignment target is not assignable")
+        if (
+            isinstance(expr.target, Identifier)
+            and scope.lookup_enum_value(expr.target.name) is not None
+        ):
+            raise SemaError("Assignment target is not assignable")
         if not self._is_assignable(expr.target):
             raise SemaError("Assignment target is not assignable")
         target_type = self._analyze_expr(expr.target, scope)

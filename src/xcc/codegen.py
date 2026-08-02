@@ -4578,7 +4578,12 @@ class _LLVMGen:
             return self._const_union_bytes(value, value_type.name)
         if is_integer_type(value_type) and c.IsAConstantInt(value):
             raw: int = c.ConstIntGetZExtValue(value)
-            mask: int = (1 << (size * 8)) - 1
+            # Native AOT integers are i64.  Avoid shifting by 64 here: LLVM
+            # masks that shift count on the host CPU, producing a zero mask
+            # instead of Python's arbitrary-precision ``(1 << 64) - 1``.
+            mask: int = -1
+            if size < 8:
+                mask = (1 << (size * 8)) - 1
             masked: int = raw & mask
             return masked.to_bytes(size, "little")
         return None

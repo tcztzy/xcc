@@ -135,6 +135,40 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("#include <", llvm_ir)
         self.assertNotIn("call ptr @strstr(ptr %source_path", llvm_ir)
 
+    def test_native_preprocessing_uses_one_exact_transaction_region(self) -> None:
+        llvm_ir = emit_llvm_text(lower_bootstrap_entry_smoke(ROOT))
+        symbol = (
+            "define i32 @xcc.preprocessor.__init__.preprocess_source_no_callback("
+        )
+        start = llvm_ir.index(symbol)
+        end = llvm_ir.index("\n}\n", start)
+        body = llvm_ir[start:end]
+
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
+        self.assertIn("call void @__xcc_aot_phase_promote_begin", body)
+        self.assertIn(
+            'call void @"__xcc_aot_phase_promote:record:16:PreprocessResult"',
+            body,
+        )
+        self.assertIn("call void @__xcc_aot_phase_finish", body)
+        self.assertNotIn("@__xcc_aot_phase_capture_defer", body)
+
+    def test_native_macro_scanners_join_linear_fragment_lists(self) -> None:
+        llvm_ir = emit_llvm_text(lower_bootstrap_entry_smoke(ROOT))
+        for symbol in (
+            "define i32 @xcc.preprocessor.__init__._Preprocessor._expand_text_no_callback(",
+            (
+                "define ptr @xcc.preprocessor.__init__._Preprocessor."
+                "_handle_pragma_operator_no_callback("
+            ),
+        ):
+            start = llvm_ir.index(symbol)
+            end = llvm_ir.index("\n}\n", start)
+            body = llvm_ir[start:end]
+            self.assertIn("call ptr @__xcc_aot_tuple_append", body)
+            self.assertIn("call ptr @__xcc_aot_string_join", body)
+            self.assertNotIn("call ptr @__xcc_aot_string_concat2", body)
+
     def test_bootstrap_real_compiler_path_emits_llc_parseable_llvm(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():
@@ -190,6 +224,13 @@ class AotBootstrapLoweringTests(unittest.TestCase):
                 {},
             ),
             "xcc.preprocessor.__init__._Preprocessor._handle_include",
+        )
+        self.assertEqual(
+            aot_slice._rename_call_target(
+                "xcc.preprocessor.process._ProcessTextPreprocessor._record_pragma_once",
+                {},
+            ),
+            "xcc.preprocessor.__init__._Preprocessor._record_pragma_once",
         )
         self.assertEqual(
             aot_slice._rename_call_target(
@@ -516,6 +557,21 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         )
 
         llvm_ir = emit_llvm_text(module)
+
+        type_map_set_start = llvm_ir.index(
+            "define void @xcc.sema.symbols.TypeMap.set("
+        )
+        type_map_set_end = llvm_ir.index("\n}\n", type_map_set_start)
+        type_map_set_llvm = llvm_ir[type_map_set_start:type_map_set_end]
+        self.assertIn("call ptr @__xcc_aot_tuple_append", type_map_set_llvm)
+        self.assertNotIn("dictset.cond", type_map_set_llvm)
+        type_map_get_start = llvm_ir.index(
+            "define ptr @xcc.sema.symbols.TypeMap.get("
+        )
+        type_map_get_end = llvm_ir.index("\n}\n", type_map_get_start)
+        type_map_get_llvm = llvm_ir[type_map_get_start:type_map_get_end]
+        self.assertIn("%previous = sub i64 %index, 1", type_map_get_llvm)
+        self.assertIn("label %typemap.get.found", type_map_get_llvm)
 
         self.assertIn("define i32 @main(i32 %argc, ptr %argv)", llvm_ir)
         self.assertIn(
@@ -1927,7 +1983,29 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             work = Path(temp_dir)
             source = work / "main.c"
-            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+            source.write_text(
+                "#define REQUIRED_ALIGNMENT 8 // translation-phase comment\n"
+                "typedef struct Object { int kind; } Object;\n"
+                "static Object *object_type(Object *value) { return value; }\n"
+                "#define OBJECT_CAST(value) ((Object *)(value))\n"
+                "#define OBJECT_TYPE(value) object_type(OBJECT_CAST(value))\n"
+                "Object *nested(Object *value) {\n"
+                "    return OBJECT_TYPE(OBJECT_CAST(value));\n"
+                "}\n"
+                "static Object *OBJECT_FUNCTION(Object *value) { return value; }\n"
+                "#define OBJECT_FUNCTION(value) OBJECT_FUNCTION(OBJECT_CAST(value))\n"
+                "static void OBJECT_DECREF(Object *value) { (void)value; }\n"
+                "#define OBJECT_DECREF(value) OBJECT_DECREF(OBJECT_CAST(value))\n"
+                "void nested_rescan(Object *value) {\n"
+                "    OBJECT_DECREF(OBJECT_FUNCTION(value));\n"
+                "}\n"
+                "void *aligned(void *value) {\n"
+                "    void *result = __builtin_assume_aligned(value, REQUIRED_ALIGNMENT);\n"
+                "    return result;\n"
+                "}\n"
+                "int main(void){return 0;}\n",
+                encoding="utf-8",
+            )
             obj = work / "main.o"
             compile_result = subprocess.run(
                 (str(output), "-c", str(source), "-o", str(obj)),
@@ -2125,6 +2203,9 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             source = root / "has_include.c"
             obj = root / "has_include.o"
             source.write_text(
+                "#ifndef __has_include\n"
+                "#define __has_include(header) 0\n"
+                "#endif\n"
                 '#if __has_include("present.h")\n'
                 '#include "present.h"\n'
                 "#else\n"
@@ -2744,9 +2825,17 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
 
             union_source = root / "union.c"
             union_obj = root / "union.o"
+            union_exe = root / "union"
             union_source.write_text(
-                "union U { int x; long y; };\n"
-                "int main(void){return 0;}\n",
+                "union U {\n"
+                "  long long whole;\n"
+                "  struct { unsigned low; unsigned short middle; unsigned short high; };\n"
+                "};\n"
+                "union U value = { 0x00050000c0000000LL };\n"
+                "int main(void) {\n"
+                "  return value.whole == 0x00050000c0000000LL &&\n"
+                "         value.low == 0xc0000000U && value.high == 5 ? 0 : 1;\n"
+                "}\n",
                 encoding="utf-8",
             )
             union_result = subprocess.run(
@@ -2759,6 +2848,114 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.assertEqual(union_result.returncode, 0, union_result.stdout + union_result.stderr)
             self.assertEqual(union_result.stdout.strip(), "")
             self.assertTrue(union_obj.exists())
+            union_link = subprocess.run(
+                ("cc", str(union_obj), "-o", str(union_exe)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(union_link.returncode, 0, union_link.stdout + union_link.stderr)
+            union_run = subprocess.run(
+                (str(union_exe),),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(union_run.returncode, 0, union_run.stdout + union_run.stderr)
+
+            macro_source = root / "multiline_macro_alias.c"
+            macro_exe = root / "multiline_macro_alias"
+            macro_source.write_text(
+                "#define ADD(left, right) ((left) + (right))\n"
+                "#define ADD_ALIAS ADD\n"
+                "int main(void) {\n"
+                "  return ADD_ALIAS(\n"
+                "    19,\n"
+                "    23) == 42 ? 0 : 1;\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            macro_build = subprocess.run(
+                (str(executable), str(macro_source), "-o", str(macro_exe)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                macro_build.returncode,
+                0,
+                macro_build.stdout + macro_build.stderr,
+            )
+            macro_run = subprocess.run(
+                (str(macro_exe),),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(macro_run.returncode, 0, macro_run.stdout + macro_run.stderr)
+
+            selector_source = root / "selector_rescan.c"
+            selector_exe = root / "selector_rescan"
+            selector_source.write_text(
+                "#define PICK(_1, _2, NAME, ...) NAME\n"
+                "#define NAMED(type, name) type name; enum\n"
+                "#define ANON(type) enum\n"
+                "#define ENUM(...) PICK(__VA_ARGS__, NAMED, ANON, )(__VA_ARGS__)\n"
+                "typedef ENUM(int, Answer) { ANSWER = 42 };\n"
+                "int main(void) { Answer value = ANSWER; return value == 42 ? 0 : 1; }\n",
+                encoding="utf-8",
+            )
+            selector_build = subprocess.run(
+                (str(executable), str(selector_source), "-o", str(selector_exe)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                selector_build.returncode,
+                0,
+                selector_build.stdout + selector_build.stderr,
+            )
+            selector_run = subprocess.run(
+                (str(selector_exe),),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                selector_run.returncode,
+                0,
+                selector_run.stdout + selector_run.stderr,
+            )
+
+            decay_source = root / "array_parameter_decay.c"
+            decay_obj = root / "array_parameter_decay.o"
+            decay_source.write_text(
+                "typedef int Callback(int *values);\n"
+                "void accept(Callback *callback);\n"
+                "static int callback(int values[]) { return values[0]; }\n"
+                "void register_callback(void) { accept(callback); }\n",
+                encoding="utf-8",
+            )
+            decay_result = subprocess.run(
+                (str(executable), "-c", str(decay_source), "-o", str(decay_obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                decay_result.returncode,
+                0,
+                decay_result.stdout + decay_result.stderr,
+            )
+            self.assertTrue(decay_obj.exists())
 
             typedef_source = root / "typedef.c"
             typedef_obj = root / "typedef.o"

@@ -6744,6 +6744,14 @@ def _llvm_api_call_arg_type(method: str, index: int, fallback: IrType) -> IrType
 
 
 def _dict_get_result_type(value_type: IrType) -> IrType:
+    if isinstance(value_type, IrBoolType):
+        return IrRecordType("bool | None")
+    if isinstance(value_type, IrIntType):
+        return IrRecordType("int | None")
+    if isinstance(value_type, IrStringType):
+        return IrRecordType("str | None")
+    if isinstance(value_type, IrBytesType):
+        return IrRecordType("bytes | None")
     if isinstance(value_type, IrRecordType):
         if "None" in (part.strip() for part in value_type.name.split("|")):
             return value_type
@@ -7268,6 +7276,17 @@ def _global_literal_element(
             return IrConstString(value.value)
         if type(value.value) is int:
             return IrConstInt(value.value, IrIntType(64, signed=True))
+    if (
+        isinstance(value, ast.Call)
+        and isinstance(value.func, ast.Name)
+        and value.func.id == "ord"
+        and len(value.args) == 1
+        and not value.keywords
+        and isinstance(value.args[0], ast.Constant)
+        and isinstance(value.args[0].value, str)
+        and len(value.args[0].value) == 1
+    ):
+        return IrConstInt(ord(value.args[0].value), IrIntType(64, signed=True))
     if isinstance(value, (ast.List, ast.Set, ast.Tuple)):
         elements: list[IrExpr] = []
         for element in value.elts:

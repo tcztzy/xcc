@@ -200,6 +200,14 @@ def _run_native_build(
         qualified_entry,
     )
     validate_ir_module(ir_module)
+    reachability_path = output + ".reachability"
+    if not _write_native_reachability(
+        reachability_path,
+        ir_module,
+        qualified_entry,
+    ):
+        print(f"xcc-aot: cannot write native reachability: {reachability_path}")
+        return 1
     llvm_text = emit_llvm_text(ir_module)
     llvm_path = emit_llvm or output + ".ll"
     if not _write_text(llvm_path, llvm_text):
@@ -216,15 +224,6 @@ def _run_native_build(
         if not _write_text(source_manifest, manifest):
             print(f"xcc-aot: cannot write source manifest: {source_manifest}")
             return 1
-    reachability_path = output + ".reachability"
-    reachability = render_native_reachability(
-        ir_module,
-        root=qualified_entry,
-        parser="subset",
-    )
-    if not _write_text(reachability_path, reachability):
-        print(f"xcc-aot: cannot write native reachability: {reachability_path}")
-        return 1
     object_path = output + ".o"
     commands: tuple[tuple[str, ...], ...] = ()
     command: tuple[str, ...]
@@ -269,7 +268,36 @@ def _module_source_path(source_root: str, module_name: str) -> str:
     return str(root / relative)
 
 
+def _write_native_reachability(
+    path: str,
+    module: IrModule,
+    root: str,
+) -> bool:
+    reachability = render_native_reachability(
+        module,
+        root=root,
+        parser="subset",
+    )
+    return _write_text(path, reachability)
+
+
+def _llvm_is_already_normalized(llvm_text: str, source_root: str) -> bool:
+    if not llvm_text.endswith("\n") or source_root in llvm_text:
+        return False
+    index = 0
+    while index < len(llvm_text):
+        character = llvm_text[index]
+        if character in "\r\v\f":
+            return False
+        if character == "\n" and index > 0 and llvm_text[index - 1] in " \t":
+            return False
+        index += 1
+    return True
+
+
 def _normalize_llvm(llvm_text: str, source_root: str) -> str:
+    if _llvm_is_already_normalized(llvm_text, source_root):
+        return llvm_text
     normalized: list[str] = []
     for line in llvm_text.splitlines():
         stripped = line.lstrip()

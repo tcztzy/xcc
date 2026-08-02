@@ -321,8 +321,11 @@ class Analyzer:
         _VOIDP_BUILTINS = (
             "__builtin_alloca",
             "__builtin_alloca_with_align",
+            "__builtin_assume_aligned",
             "__builtin_malloc",
             "__builtin_calloc",
+            "__builtin_frame_address",
+            "__builtin_return_address",
             "__builtin_memcpy",
             "__builtin___memcpy_chk",
             "__builtin_memmove",
@@ -645,17 +648,6 @@ class Analyzer:
         self._function_signatures["__builtin_bswap64"] = FunctionSignature(
             return_type=ULLONG, params=None, is_variadic=True
         )
-        # __builtin_assume_aligned returns the same pointer type as its
-        # first argument. Register it separately with a void* signature
-        # so that void *p = __builtin_assume_aligned(q, N) type-checks.
-        self._function_signatures["__builtin_assume_aligned"] = FunctionSignature(
-            return_type=VOID_PTR, params=None, is_variadic=True
-        )
-        # __builtin_frame_address / __builtin_return_address return void*
-        for name in ("__builtin_frame_address", "__builtin_return_address"):
-            self._function_signatures[name] = FunctionSignature(
-                return_type=VOID_PTR, params=None, is_variadic=True
-            )
         for name in ("__builtin_va_start", "__builtin_va_end", "__builtin_va_copy"):
             self._function_signatures[name] = FunctionSignature(
                 return_type=VOID, params=None, is_variadic=True

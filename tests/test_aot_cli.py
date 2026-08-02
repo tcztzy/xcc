@@ -1,4 +1,5 @@
 import contextlib
+import inspect
 import io
 import json
 import tempfile
@@ -6,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import xcc.aot.cli as native_cli_module
 from xcc.aot.cli import main as native_main
 from xcc.aot.hosted_cli import hosted_main, normalize_llvm
 from xcc.aot.llvm_text import emit_llvm_text
@@ -24,6 +26,24 @@ def _run(entry, argv: tuple[str, ...]):
 
 
 class AotCliTests(unittest.TestCase):
+    def test_v444_native_reachability_is_written_in_a_bounded_subphase(self) -> None:
+        helper = getattr(native_cli_module, "_write_native_reachability", None)
+        self.assertTrue(callable(helper))
+        build_source = inspect.getsource(native_cli_module._run_native_build)
+        self.assertLess(
+            build_source.index("_write_native_reachability("),
+            build_source.index("emit_llvm_text("),
+        )
+
+    def test_v440_native_normalizer_recognizes_allocation_free_input(self) -> None:
+        predicate = getattr(native_cli_module, "_llvm_is_already_normalized", None)
+        self.assertTrue(callable(predicate))
+        assert callable(predicate)
+        self.assertTrue(predicate("define i32 @main() {\n  ret i32 0\n}\n", "src/xcc"))
+        self.assertFalse(predicate("define i32 @main() { \n}\n", "src/xcc"))
+        self.assertFalse(predicate('source_filename = "src/xcc/main.py"\n', "src/xcc"))
+        self.assertFalse(predicate("define i32 @main() {\n}\n\nextra", "src/xcc"))
+
     def test_native_cli_source_lowers_to_valid_llvm(self) -> None:
         path = ROOT / "src/xcc/aot/cli.py"
         module = lower_source_to_ir(

@@ -40,6 +40,20 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="for-break-continue.py",
         )
 
+    def test_direct_reversed_loop_matches_cpython_without_materialized_value(self) -> None:
+        self.assert_native_matches_cpython(
+            "def current_label(lines: list[str]) -> str:\n"
+            "    for line in reversed(lines):\n"
+            "        if line.endswith(':'):\n"
+            "            return line\n"
+            "    return 'entry'\n"
+            "def entry() -> int:\n"
+            "    lines = ['entry:', '  value', 'next:', '  ret']\n"
+            "    return 7 if current_label(lines) == 'next:' else 1\n",
+            expected=7,
+            filename="direct-reversed-loop.py",
+        )
+
     def test_set_add_preserves_aliases_and_uniqueness(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
@@ -2614,6 +2628,20 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "    return bits\n",
             expected=16,
             filename="global-literal-dict.py",
+        )
+
+    def test_global_ord_dict_get_distinguishes_missing_from_zero(self) -> None:
+        self.assert_native_matches_cpython(
+            "ESCAPES: dict[str, int] = {'zero': 0, '\\\\': ord('\\\\')}\n"
+            "def entry() -> int:\n"
+            "    missing = ESCAPES.get('missing')\n"
+            "    zero = ESCAPES.get('zero')\n"
+            "    slash = ESCAPES.get('\\\\')\n"
+            "    if missing is not None or zero is None or slash is None:\n"
+            "        return 1\n"
+            "    return zero + slash\n",
+            expected=92,
+            filename="global-ord-dict-get.py",
         )
 
     def test_global_literal_dict_keeps_process_stable_identity(self) -> None:

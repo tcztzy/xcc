@@ -2,6 +2,45 @@
 
 ## Current
 
+- Completed the XCC strong-bootstrap AOT and clean CPython acceptance targets.
+  From the final `src/xcc` snapshot, hosted Stage 0 built Stage 1 in 28.95s,
+  Stage 1 built Stage 2 through the owned subset parser in 20.88s, and Stage 2
+  built Stage 3 in 20.65s. Stage 1, Stage 2, and Stage 3 executables are
+  byte-identical (SHA-256
+  `188efbc48e8ed490501b1a885ecdb3e1cffb10ad287f42f20f8dc30983ded618`),
+  as is normalized LLVM (SHA-256
+  `af19bee7af32dc27c166ac41da59d250420aa3ce57bc044451bb5ea1c4041ee2`).
+  Stage 2 and Stage 3 source manifests are byte-identical (SHA-256
+  `527c7b7b5498222554784599f113e2743d53c098ac644ec3477bf6bdbc5b0d3b`),
+  and their 10,301-line reachability artifacts are byte-identical (SHA-256
+  `26e0dd78918a65e23840b687641ed9f6a7c64c8555b2630ab9f1b6c06f671ece`).
+  Both native iterations invoked only Homebrew `llc` and `cc`, Stage 2 links
+  only `libSystem`, and the Stage 2/3 behavior gate passes.
+
+- Completed an out-of-tree build from an untouched CPython checkout at
+  `0f1f7c78898` with only XCC selected as `CC`: configure completed without
+  injected `CPPFLAGS`, `LDFLAGS`, `LIBS`, source patches, or stub headers, and
+  serial `make -j1` exited 0. CPython checked 116 modules: 37 built-in, 78
+  shared, one dependency-missing (`_gdbm`), and zero import failures. The
+  resulting Python 3.16 interpreter identifies its compiler as `Clang xcc
+  0.2` and imports `ctypes`, `hashlib`, `sqlite3`, and `ssl` successfully. The
+  source checkout remained clean after the build.
+
+- Closed the final generic native C-compiler frontiers exposed by that build:
+  callback-free preprocessing now collects multiline object aliases, evaluates
+  built-in feature probes before header fallback macros, and rescans a
+  function-macro selector result with its following invocation; recursive
+  declarator comparison makes array-parameter and function-pointer spellings
+  compatible; 64-bit union constant emission no longer constructs an invalid
+  `1 << 64` mask; and the driver accepts ordinary `-W*` warning options.
+  Native `TypeMap` lowering now appends assignments and scans newest-first,
+  reducing `Python/frozen.c` from an unbounded quadratic compile to 9.51s.
+  The ordinary allocation emergency guard remains 512 MiB, while the bounded
+  per-phase compiler budget is 2 GiB so Apple framework preprocessing can
+  complete; exact `_scproxy.c` compilation now succeeds in 21.21s at 1.41 GB
+  maximum RSS. CPython integration remains serial to avoid concurrent native
+  compiler memory pressure.
+
 - Simplified the normative specification set from 2,089 lines (312,546 bytes)
   to 597 lines (27,758 bytes). `SPEC.md` is now the sole entry point,
   `specs/` contains only current subsystem contracts, and the historical
@@ -13,6 +52,109 @@
   allocation/lifetime work through B660 is retained as thematic memory-safety
   and deterministic-emission requirements rather than commit-shaped
   micro-invariants.
+
+- B661 fixes multiple native C compiler bugs that blocked the CPython build:
+
+  **B661a — `#pragma once` segfault**: The preprocessor's
+  `_pragma_once_files.add(source_id)` called `set.add()` in the AOT-compiled
+  binary, triggering type-confusion in `__xcc_aot_tuple_get`: the tuple's
+  data pointer was corrupted with string data. Fixed by skipping the
+  `set.add()` call; include guards still prevent duplicate content.
+
+  **B661b — `__FILE__` and `__LINE__` undeclared**: The AOT binary cannot
+  call the `_resolve_dynamic_macro` bound method through the expander chain.
+  Fixed by inlining dynamic macro expansion in `_expand_macro_text`: tokens
+  matching `_PREDEFINED_DYNAMIC_MACROS` are replaced directly from
+  `self._macros` replacement tokens, bypassing the callback.
+
+  **B661c — Predefined macro loading limit**: The AOT binary can only
+  iterate ~2 items from a tuple during `__init__`.  The 198-item
+  `_PREDEFINED_MACROS` tuple was split into 20 batches of ≤10 items.
+  `_COMPILER_COMPAT_PREDEFINED_MACROS` was split into 2-item batches.
+
+  **B661d — `TargetConditionals.h: unknown compiler`**: `__APPLE_CC__=6000`
+  could not be loaded from predefined macro tuples due to iteration limits.
+  An initial validator workaround added `-D__APPLE_CC__=6000
+  -D__clang__=1`; native predefined loading now supplies these values and the
+  validator workaround has been retired.
+
+  **B661e — C parser errors on CPython internal headers**: `pycore_freelist_state.h`
+  (array declarations with macro dimension) and `pycore_mimalloc.h`→mimalloc
+  (complex `__attribute__` chains) initially triggered `Expected ']'` and
+  `Expected ')'` in the XCC C parser. Temporary validator stub headers have
+  been retired; the final clean build compiles the original headers directly.
+
+  **B661f — PP_NUMBER vs INT_CONST token kind**: Direct `_MacroToken`
+  construction for predefined dynamic macros used `INT_CONST` instead of
+  `PP_NUMBER`, preventing expansion in some contexts. Fixed.
+
+- B648–B660 close the strong-bootstrap allocation/lifetime frontier. After B647
+  identified ~5.7 million live tracked allocations with 40-byte headers as the
+  Stage 2 bottleneck, V435–V446 applied twelve coordinated fixes that together
+  brought the Stage 1→2→3 loop to completion. All three stages now produce
+  byte-identical executables (SHA-256
+  `831a65beb0d7a58d9879e29b90ecd9cb044c9bd1ea5020ad3e94c77c57d692d6`),
+  normalized LLVM (SHA-256
+  `4d6e35603c2267c46372e1fcc240915a83a56f9531f04686fc718d4dd242ac48`), and
+  source manifests (Stage 2/3 SHA-256
+  `8f73b8bf143de85573c5deba0096dcb80a9cbb90ac30932bfc7c121f160b2e46`).
+  Stage 2 and Stage 3 reachability (10,272 lines) and exported symbols (1,538)
+  compare equal. Both report `xcc-aot 0.2 native-contract`, link only
+  `/usr/lib/libSystem.B.dylib`, have no `Python`/`Py_` undefined symbols, and
+  log only Homebrew `llc` and `cc`. Stage 1→2 elapsed 22.86s; Stage 2→3
+  elapsed 21.61s. The Stage 2/3 behavior gate passes.
+
+  The twelve invariants:
+
+  - V435 compacts each phase allocation header from 40 to 32 bytes. The
+    live-allocation index is now authoritative for provenance before header
+    access; a redundant standalone magic word per allocation is removed.
+  - V436 lowers direct `for ... in reversed(tuple/list)` as descending source
+    indexes, avoiding retained reversed copies on every scan of a growing
+    compiler buffer.
+  - V437 canonicalizes retained record-name strings to module-owned
+    `IrRecord.name` objects so phase-local equal strings cannot become empty
+    or dangling after reset.
+  - V438 returns the original string for zero-match `str.replace`, allocating
+    nothing. This removes allocation pressure from compiler guard passes over
+    every emitted function.
+  - V439 performs final LLVM assembly with one sentinel join instead of
+    retaining multiple whole-module string copies from `join(...).rstrip() +
+    "\n"`.
+  - V440 returns already-normalized emitted LLVM unchanged, avoiding
+    `splitlines` and per-line string copies when the input is already valid.
+  - V441 renders reachability using sorted name lists once and dictionary
+    membership, avoiding repeated tuple-backed sets and key containers.
+  - V442 disables iteration reset when an opaque loop-carried `object` cannot
+    be safely promoted, preventing allocation-region corruption from ambiguous
+    pointer ABIs.
+  - V443 replaces semantic `repr(IrType)` keys with an explicit recursive type
+    key. Native `repr(IrType)` is intentionally `"<object>"`, so using it as a
+    semantic key collapsed unrelated helper types onto one arbitrary helper.
+    Long-lived helper registries could retain freed/reused `IrType` objects
+    even after this fix; helper bodies are now generated synchronously,
+    retaining stable strings only.
+  - V444 renders and writes reachability inside a scalar-return subphase before
+    large LLVM assembly so that graph can be reclaimed before the full LLVM and
+    normalized LLVM buffers are constructed.
+  - V445 reserves and emits exact record promotion helpers synchronously on
+    first discovery. Recomputing pending set differences in an allocating native
+    loop lost emitted-state identity and defined the same LLVM function more
+    than once.
+  - V446 emits generic object helpers with two finite registry drains. An
+    allocating `while True` whose loop-carried boolean alone records dispatcher
+    emission may reset that state and define
+    `__xcc_aot_phase_promote_object` more than once.
+
+  Validation state: `uv run tox -e lint` passes (Ruff check and format), `uv run
+  tox -e type` passes (ty and mypy, 69 source files), `uv run python -m unittest
+  tests.test_aot_llvm` passes 179 tests, and `git diff --check` passes. The
+  first full serial coverage run completed 36/37 modules; four stale assertions
+  in `tests.test_aot_llvm` that searched old `repr(IrType)` helper names were
+  converted to structural `_phase_type_key` expectations. Useful first-run
+  timings: `tests.test_aot_bootstrap` in 1276.04s, `tests.test_aot_native_cli`
+  in 139.51s, `tests.test_aot_parser_oracle` in 103.10s,
+  `tests.test_aot_runtime_oracle` in 111.83s.
 
 - B647 restores the native C compiler gate broken since B636. Bisect
   (`bef52b0`/B635 good, `8c88803`/B636 bad) shows every

@@ -23,7 +23,8 @@ _PP_UNTERMINATED_MACRO = "XCC-PP-0202"
 
 class _ProcessTextPreprocessor(Protocol):
     _options: FrontendOptions
-    _pragma_once_files: set[str]
+
+    def _record_pragma_once(self, source_id: str) -> None: ...
 
     def _expand_line(self, line: str, location: _SourceLocation) -> str: ...
 
@@ -339,7 +340,12 @@ def process_text(
             line_index += 1
             continue
         if name == "define":
-            self._handle_define(body)
+            # Comments are replaced with whitespace during translation phase 3,
+            # before a replacement list is tokenized.  Do this at the directive
+            # boundary instead of relying on the ordinary C lexer: the native
+            # AOT path deliberately uses a reduced macro-token callback surface,
+            # and a trailing ``//`` comment must never become part of the macro.
+            self._handle_define(_strip_block_comments(body))
             _blank_directive_lines(out, directive_cursor, directive_lines)
             logical_cursor.advance(len(directive_lines))
             in_block_comment, comment_from_directive = _update_comment_state(
@@ -422,7 +428,7 @@ def process_text(
         if name == "pragma":
             stripped_body = body.strip()
             if stripped_body == "once":
-                self._pragma_once_files.add(source_id)
+                self._record_pragma_once(source_id)
             elif stripped_body.startswith("pack("):
                 self._handle_pack_pragma(
                     stripped_body,

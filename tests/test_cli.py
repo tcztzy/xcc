@@ -92,13 +92,76 @@ class CliTests(unittest.TestCase):
 
             with patch("xcc.cc_driver._aot_exec_argv", return_value=0) as exec_argv:
                 code = cc_driver._aot_compile_smoke_source_to_object(
-                    7,
-                    ("xcc", "-c", "-O3", "-Wall", str(source), "-o", str(output)),
+                    8,
+                    (
+                        "xcc",
+                        "-c",
+                        "-O3",
+                        "-Wall",
+                        "-Wno-unused-variable",
+                        str(source),
+                        "-o",
+                        str(output),
+                    ),
                 )
 
             self.assertEqual(code, 0)
             exec_argv.assert_called_once()
             self.assertTrue((root / "smoke.o.ll").exists())
+
+    def test_aot_smoke_compiler_delegates_existing_link_inputs_verbatim(self) -> None:
+        argv = (
+            "xcc",
+            "first.o",
+            "second.o",
+            "libsupport.a",
+            "-L/opt/support/lib",
+            "-lsupport",
+            "-framework",
+            "CoreFoundation",
+            "-o",
+            "program",
+        )
+        with patch("xcc.cc_driver._aot_exec_argv", return_value=0) as exec_argv:
+            code = cc_driver._aot_compile_smoke_source_to_object(len(argv), argv)
+
+        self.assertEqual(code, 0)
+        exec_argv.assert_called_once_with(("cc", *argv[1:]))
+
+    def test_aot_smoke_compiler_preserves_framework_flags_when_linking_source(self) -> None:
+        argv = (
+            "xcc",
+            "probe.c",
+            "-L/opt/support/lib",
+            "-ldl",
+            "-framework",
+            "CoreFoundation",
+            "-o",
+            "probe",
+        )
+        with (
+            patch(
+                "xcc.cc_driver._aot_compile_source_path_to_object",
+                return_value=True,
+            ) as compile_source,
+            patch("xcc.cc_driver._aot_exec_argv", return_value=0) as exec_argv,
+        ):
+            code = cc_driver._aot_compile_smoke_source_to_object(len(argv), argv)
+
+        self.assertEqual(code, 0)
+        compile_source.assert_called_once()
+        exec_argv.assert_called_once_with(
+            (
+                "cc",
+                "probe.o",
+                "-o",
+                "probe",
+                "-L/opt/support/lib",
+                "-ldl",
+                "-framework",
+                "CoreFoundation",
+            )
+        )
 
     def test_aot_source_to_llvm_uses_frontend_backend_under_cpython(self) -> None:
         llvm_ir = cc_driver._aot_compile_source_to_llvm_ir(

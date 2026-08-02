@@ -203,6 +203,7 @@ def main(argv: Sequence[str] | None = None, *, run_step: RunStep = run_step) -> 
         cc_path = args.native_aot_cc.resolve()
         built = build_native_bootstrap(_repo_root(), cc_path, llc=None if llc is None else str(llc))
         cc = str(built)
+
     options = BuildOptions(
         cpython_root=cpython_root,
         build_dir=build_dir,

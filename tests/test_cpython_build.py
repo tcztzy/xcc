@@ -54,6 +54,8 @@ class CPythonBuildScriptTests(unittest.TestCase):
         self.assertEqual(steps[0].command, ("/src/cpython/configure", "--with-pydebug"))
         self.assertEqual(steps[0].cwd, Path("/tmp/cpython-build"))
         self.assertEqual(steps[0].env["CC"], "xcc")
+        self.assertNotIn("CFLAGS", steps[0].env)
+        self.assertNotIn("CPPFLAGS", steps[0].env)
         self.assertEqual(steps[0].env["PYTHONPATH"], "/tmp/mypyc/lib")
         self.assertEqual(steps[0].env["XCC_LLC"], "/opt/homebrew/opt/llvm/bin/llc")
         self.assertEqual(steps[1].command, ("make", "-j4", "-k", "profile-opt"))

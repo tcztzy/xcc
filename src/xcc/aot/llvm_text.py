@@ -263,6 +263,17 @@ _ERROR_LLVM_TYPE = "%__xcc_aot_error"
 _ERROR_LLVM_DECLARATION = "%__xcc_aot_error = type { ptr, ptr, ptr, i32, i32, i32, i32, ptr }"
 
 
+def _finalize_llvm_lines(lines: list[str]) -> str:
+    while lines:
+        final = lines[-1].rstrip()
+        if final:
+            lines[-1] = final
+            break
+        lines.pop()
+    lines.append("")
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class _EmittedValue:
     value: str
@@ -893,8 +904,34 @@ _PHASE_SPECIAL_EMITTER_FUNCTIONS = frozenset(
         "xcc.preprocessor.__init__._Preprocessor._handle_pragma_operator",
         "xcc.preprocessor.__init__._Preprocessor._handle_undef",
         "xcc.preprocessor.__init__._Preprocessor._should_collect_function_macro_continuation",
+        "xcc.sema.symbols.TypeMap.get",
+        "xcc.sema.symbols.TypeMap.set",
         "xcc.sema.type_helpers._aot_integer_type_summary",
         "xcc.types.Type.__str__",
+    }
+)
+
+_PHASE_NO_CAPTURE_SPECIAL_EMITTER_FUNCTIONS = frozenset(
+    {
+        "xcc.preprocessor.__init__._Preprocessor._expand_line",
+        "xcc.preprocessor.__init__._Preprocessor._expand_macro_text",
+        "xcc.preprocessor.__init__._Preprocessor._handle_define",
+        "xcc.preprocessor.__init__._Preprocessor._handle_pragma_operator",
+        "xcc.preprocessor.__init__._Preprocessor._handle_undef",
+        ("xcc.preprocessor.__init__._Preprocessor._should_collect_function_macro_continuation"),
+    }
+)
+
+_PHASE_PREPROCESSOR_SHARED_REGION_FUNCTIONS = frozenset(
+    {
+        "xcc.preprocessor.__init__._Preprocessor._handle_include",
+        "xcc.preprocessor.__init__._Preprocessor._parse_line_directive",
+        "xcc.preprocessor.__init__._Preprocessor._process_forced_include",
+        "xcc.preprocessor.__init__._Preprocessor._process_macro_include",
+        "xcc.preprocessor.__init__._Preprocessor._process_text",
+        "xcc.preprocessor.__init__._Preprocessor.process",
+        "xcc.preprocessor.__init__._preprocess_source_no_callback_with_processor",
+        "xcc.preprocessor.process.process_text",
     }
 )
 
@@ -925,6 +962,35 @@ def _phase_pointer_type(type_info: IrType) -> bool:
         type_info,
         (IrBytesType, IrDictType, IrRecordType, IrStringType, IrTupleType),
     )
+
+
+def _phase_type_key(type_info: IrType) -> str:
+    if isinstance(type_info, IrIntType):
+        sign = "s" if type_info.signed else "u"
+        return f"int:{type_info.bits}:{sign}"
+    if isinstance(type_info, IrStringType):
+        return "string"
+    if isinstance(type_info, IrBytesType):
+        return "bytes"
+    if isinstance(type_info, IrFloatType):
+        return "float"
+    if isinstance(type_info, IrRecordType):
+        return f"record:{len(type_info.name)}:{type_info.name}"
+    if isinstance(type_info, IrBoolType):
+        return "bool"
+    if isinstance(type_info, IrNoneType):
+        return "none"
+    if isinstance(type_info, IrTupleType):
+        parts: list[str] = []
+        for element in type_info.elements:
+            key = _phase_type_key(element)
+            parts.append(f"{len(key)}:{key}")
+        return f"tuple:{len(parts)}:" + "".join(parts)
+    if isinstance(type_info, IrDictType):
+        key = _phase_type_key(type_info.key)
+        value = _phase_type_key(type_info.value)
+        return f"dict:{len(key)}:{key}{len(value)}:{value}"
+    raise ValueError("Unsupported phase IR type")
 
 
 def _phase_expr_is_borrowed(
@@ -1543,6 +1609,12 @@ def _phase_expr_effect(
             if callee is None:
                 return False, args_allocate
             return callee[0], args_allocate or callee[1]
+        if expr.target in _PHASE_NO_CAPTURE_SPECIAL_EMITTER_FUNCTIONS:
+            pointer_result = isinstance(
+                expr.type,
+                (IrBytesType, IrDictType, IrRecordType, IrStringType, IrTupleType),
+            )
+            return True, args_allocate or pointer_result
         if expr.target in _PHASE_BORROWED_RETURN_INTRINSICS:
             return True, args_allocate
         if _phase_intrinsic_is_no_capture(expr.target):
@@ -1869,6 +1941,8 @@ def _function_uses_owned_phase(
     borrowed_return_functions: frozenset[str],
     owned_return_functions: frozenset[str],
 ) -> bool:
+    if function.name in _PHASE_PREPROCESSOR_SHARED_REGION_FUNCTIONS:
+        return False
     scalar_return = isinstance(
         function.return_type,
         (IrBoolType, IrFloatType, IrIntType, IrNoneType),
@@ -1892,6 +1966,7 @@ class _Emitter:
     def __init__(self, module: IrModule) -> None:
         self.module = module
         self.records = {record.name: record for record in module.records}
+        self.canonical_record_names = {record.name: record.name for record in module.records}
         self.phase_record_descendants = _phase_record_descendant_map(self.records)
         self.phase_promotable_records = _phase_promotable_record_names(
             self.records, self.phase_record_descendants
@@ -1936,11 +2011,13 @@ class _Emitter:
         self.current_phase_mark: str | None = None
         self.current_phase_promotes_return = False
         self.current_phase_exact_return = False
-        self.phase_promote_types: dict[str, IrType] = {}
-        self.phase_capture_types: dict[str, tuple[IrType, bool]] = {}
+        self.phase_promote_type_keys: list[str] = []
+        self.phase_promotion_helpers: list[str] = []
+        self.phase_capture_type_keys: list[str] = []
+        self.phase_capture_helpers: list[str] = []
         self.needs_phase_object_promotion_helpers = False
         self.phase_object_promotion_records: set[str] = set()
-        self.phase_exact_promotion_records: set[str] = set()
+        self.phase_exact_promotion_records: list[str] = []
         self.failure_scopes: list[_FailureScope] = []
         self.caught_status_stack: list[str] = []
         self.record_equality_records: set[str] = set()
@@ -1992,7 +2069,7 @@ class _Emitter:
         lines.extend(tagged_object_equality_helpers)
         if main is not None:
             lines.append(main)
-        return "\n".join(lines).rstrip() + "\n"
+        return _finalize_llvm_lines(lines)
 
     def _emit_record(self, record: IrRecord) -> str:
         fields = ", ".join(self._storage_llvm_type(field.type) for field in record.fields)
@@ -2050,6 +2127,10 @@ class _Emitter:
             "_should_collect_function_macro_continuation"
         ):
             return self._emit_preprocessor_no_macro_continuation_function(function)
+        if function.name == "xcc.sema.symbols.TypeMap.get":
+            return self._emit_type_map_get_function(function)
+        if function.name == "xcc.sema.symbols.TypeMap.set":
+            return self._emit_type_map_set_function(function)
         if function.name == "xcc.sema.type_helpers._aot_integer_type_summary":
             return self._emit_core_constant_string_function(
                 function,
@@ -2103,8 +2184,18 @@ class _Emitter:
             function
         )
         self.current_phase_mark = None
-        self.current_phase_promotes_return = function.name in self.phase_owned_return_functions
-        self.current_phase_exact_return = function.name in self.phase_exact_return_functions
+        uses_owned_phase = _function_uses_owned_phase(
+            function,
+            self.phase_function_summaries,
+            self.phase_borrowed_return_functions,
+            self.phase_owned_return_functions,
+        )
+        self.current_phase_promotes_return = (
+            uses_owned_phase and function.name in self.phase_owned_return_functions
+        )
+        self.current_phase_exact_return = (
+            uses_owned_phase and function.name in self.phase_exact_return_functions
+        )
         self.iteration_phase_marks = []
         self.failure_scopes = []
         self.caught_status_stack = []
@@ -2113,12 +2204,7 @@ class _Emitter:
             for param in function.params
         }
         try:
-            if _function_uses_owned_phase(
-                function,
-                self.phase_function_summaries,
-                self.phase_borrowed_return_functions,
-                self.phase_owned_return_functions,
-            ):
+            if uses_owned_phase:
                 self.needs_runtime_prelude = True
                 self.current_phase_mark = self._tmp("phase.mark")
                 lines.append(f"  {self.current_phase_mark} = call ptr @__xcc_aot_phase_mark()")
@@ -2334,8 +2420,8 @@ class _Emitter:
             return
         if self.current_phase_mark is None:
             self._error("Phase-promoted return requires an active phase mark")
-        key = repr(return_type)
-        self.phase_promote_types[key] = return_type
+        key = _phase_type_key(return_type)
+        self._remember_phase_promote_type(return_type)
         helper = _llvm_symbol("__xcc_aot_phase_promote:" + key)
         if self.current_phase_exact_return:
             lines.append(
@@ -2373,8 +2459,8 @@ class _Emitter:
             return
         if not _phase_pointer_type(type_info):
             return
-        key = repr(type_info)
-        self.phase_promote_types[key] = type_info
+        key = _phase_type_key(type_info)
+        self._remember_phase_promote_type(type_info)
         helper = _llvm_symbol("__xcc_aot_phase_promote:" + key)
         lines.append(f"  call void {helper}(ptr {value}, ptr {target})")
 
@@ -2395,87 +2481,105 @@ class _Emitter:
             self.phase_promotable_records,
         ):
             return
-        key = repr(type_info)
+        key = _phase_type_key(type_info)
         if not owner_is_allocated:
             key += ":external-owner"
-        self.phase_capture_types[key] = (type_info, owner_is_allocated)
+        self._remember_phase_capture_type(type_info, owner_is_allocated)
         if _phase_pointer_type(type_info):
-            self.phase_promote_types[repr(type_info)] = type_info
+            self._remember_phase_promote_type(type_info)
         helper = _llvm_symbol("__xcc_aot_phase_capture:" + key)
         self.needs_runtime_prelude = True
         lines.append(f"  call void {helper}(ptr {owner}, ptr {value})")
 
+    def _remember_phase_promote_type(self, type_info: IrType) -> None:
+        key = _phase_type_key(type_info)
+        if key in self.phase_promote_type_keys:
+            return
+        self.phase_promote_type_keys.append(key)
+        helper = self._emit_phase_promotion_helper(type_info)
+        self.phase_promotion_helpers.append(helper)
+
+    def _remember_phase_capture_type(
+        self,
+        type_info: IrType,
+        owner_is_allocated: bool,
+    ) -> None:
+        key = _phase_type_key(type_info)
+        if not owner_is_allocated:
+            key += ":external-owner"
+        if key in self.phase_capture_type_keys:
+            return
+        self.phase_capture_type_keys.append(key)
+        helper = self._emit_phase_capture_helper(key, type_info, owner_is_allocated)
+        self.phase_capture_helpers.append(helper)
+
     def _emit_phase_promotion_helpers(self) -> list[str]:
         helpers: list[str] = []
-        emitted: set[str] = set()
-        emitted_exact_records: set[str] = set()
-        emitted_object_helpers = False
-        while True:
-            pending = sorted(key for key in self.phase_promote_types if key not in emitted)
-            if pending:
-                key = pending[0]
-                emitted.add(key)
-                helpers.append(self._emit_phase_promotion_helper(self.phase_promote_types[key]))
-                continue
-            pending_exact_records = sorted(
-                self.phase_exact_promotion_records - emitted_exact_records
-            )
-            if pending_exact_records:
-                record_name = pending_exact_records[0]
-                emitted_exact_records.add(record_name)
-                helpers.append(
-                    self._emit_phase_record_promotion_helper(
-                        _phase_exact_record_promotion_symbol(record_name),
-                        record_name,
-                    )
-                )
-                continue
-            if self.needs_phase_object_promotion_helpers and not emitted_object_helpers:
-                emitted_object_helpers = True
-                helpers.extend(self._emit_phase_object_promotion_helpers())
-                continue
-            return helpers
+        helper_index = 0
+        while helper_index < len(self.phase_promotion_helpers):
+            helpers.append(self.phase_promotion_helpers[helper_index])
+            helper_index += 1
+        if self.needs_phase_object_promotion_helpers:
+            helpers.extend(self._emit_phase_object_promotion_helpers())
+        while helper_index < len(self.phase_promotion_helpers):
+            helpers.append(self.phase_promotion_helpers[helper_index])
+            helper_index += 1
+        return helpers
+
+    def _remember_phase_exact_promotion_record(self, record_name: str) -> None:
+        if record_name in self.phase_exact_promotion_records:
+            return
+        self.phase_exact_promotion_records.append(record_name)
+        helper = self._emit_phase_record_promotion_helper(
+            _phase_exact_record_promotion_symbol(record_name),
+            record_name,
+        )
+        self.phase_promotion_helpers.append(helper)
 
     def _emit_phase_capture_helpers(self) -> list[str]:
-        helpers: list[str] = []
-        for key in sorted(self.phase_capture_types):
-            type_info, owner_is_allocated = self.phase_capture_types[key]
-            helper = _llvm_symbol("__xcc_aot_phase_capture:" + key)
-            capture_target = (
-                "@__xcc_aot_phase_capture_allocated_target"
-                if owner_is_allocated
-                else "@__xcc_aot_phase_capture_target"
+        return list(self.phase_capture_helpers)
+
+    def _emit_phase_capture_helper(
+        self,
+        key: str,
+        type_info: IrType,
+        owner_is_allocated: bool,
+    ) -> str:
+        helper = _llvm_symbol("__xcc_aot_phase_capture:" + key)
+        capture_target = (
+            "@__xcc_aot_phase_capture_allocated_target"
+            if owner_is_allocated
+            else "@__xcc_aot_phase_capture_target"
+        )
+        lines = [
+            f"define void {helper}(ptr %owner, ptr %value) {{",
+            "entry:",
+            f"  %target = call ptr {capture_target}(ptr %owner)",
+            "  %needed = icmp ne ptr %target, null",
+            "  br i1 %needed, label %promote, label %done",
+            "promote:",
+            "  %deferred = call i1 @__xcc_aot_phase_capture_defer(ptr %target)",
+            "  br i1 %deferred, label %done, label %transfer",
+            "transfer:",
+            "  call void @__xcc_aot_phase_promote_begin(ptr %target)",
+        ]
+        if isinstance(type_info, IrFloatType):
+            lines.append(
+                "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)"
             )
-            lines = [
-                f"define void {helper}(ptr %owner, ptr %value) {{",
-                "entry:",
-                f"  %target = call ptr {capture_target}(ptr %owner)",
-                "  %needed = icmp ne ptr %target, null",
-                "  br i1 %needed, label %promote, label %done",
-                "promote:",
-                "  %deferred = call i1 @__xcc_aot_phase_capture_defer(ptr %target)",
-                "  br i1 %deferred, label %done, label %transfer",
-                "transfer:",
-                "  call void @__xcc_aot_phase_promote_begin(ptr %target)",
-            ]
-            if isinstance(type_info, IrFloatType):
-                lines.append(
-                    "  %promoted = call i1 @__xcc_aot_phase_promote_to(ptr %value, ptr %target)"
-                )
-            else:
-                target = _llvm_symbol("__xcc_aot_phase_promote:" + repr(type_info))
-                lines.append(f"  call void {target}(ptr %value, ptr %target)")
-            lines.extend(
-                (
-                    "  call void @__xcc_aot_phase_promote_end(ptr %target)",
-                    "  br label %done",
-                    "done:",
-                    "  ret void",
-                    "}",
-                )
+        else:
+            target = _llvm_symbol("__xcc_aot_phase_promote:" + _phase_type_key(type_info))
+            lines.append(f"  call void {target}(ptr %value, ptr %target)")
+        lines.extend(
+            (
+                "  call void @__xcc_aot_phase_promote_end(ptr %target)",
+                "  br label %done",
+                "done:",
+                "  ret void",
+                "}",
             )
-            helpers.append("\n".join(lines))
-        return helpers
+        )
+        return "\n".join(lines)
 
     def _emit_phase_object_promotion_helpers(self) -> list[str]:
         object_lines = [
@@ -2613,7 +2717,7 @@ class _Emitter:
             )
         record_lines.append("  ]")
         for index, record_name in enumerate(record_names):
-            self.phase_exact_promotion_records.add(record_name)
+            self._remember_phase_exact_promotion_record(record_name)
             target = _phase_exact_record_promotion_symbol(record_name)
             record_lines.extend(
                 (
@@ -2635,7 +2739,7 @@ class _Emitter:
         return ["\n".join(object_lines), "\n".join(tuple_lines), "\n".join(record_lines)]
 
     def _emit_phase_promotion_helper(self, type_info: IrType) -> str:
-        helper = _llvm_symbol("__xcc_aot_phase_promote:" + repr(type_info))
+        helper = _llvm_symbol("__xcc_aot_phase_promote:" + _phase_type_key(type_info))
         if isinstance(type_info, IrStringType | IrBytesType):
             return (
                 f"define void {helper}(ptr %value, ptr %target) {{\n"
@@ -2746,7 +2850,7 @@ class _Emitter:
             lines.append(f"    i64 {self.record_type_ids[record_name]}, label %record.{index}")
         lines.append("  ]")
         for index, record_name in enumerate(record_names):
-            self.phase_exact_promotion_records.add(record_name)
+            self._remember_phase_exact_promotion_record(record_name)
             target = _phase_exact_record_promotion_symbol(record_name)
             lines.extend(
                 (
@@ -3484,6 +3588,15 @@ class _Emitter:
         else:
             iterable_expr = statement.iterable
             start_expr = None
+        reversed_call = (
+            iterable_expr
+            if isinstance(iterable_expr, IrCall) and iterable_expr.target == "reversed"
+            else None
+        )
+        if reversed_call is not None:
+            if len(reversed_call.args) != 1:
+                self._error("reversed expects one argument")
+            iterable_expr = reversed_call.args[0]
         iterable = self._emit_expr(iterable_expr, names, lines)
         enumerate_start: _EmittedValue | None = None
         if start_expr is not None:
@@ -3543,6 +3656,12 @@ class _Emitter:
             lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
         condition = self._tmp("forcond")
         lines.append(f"  {condition} = icmp ult i64 {index}, {length}")
+        item_index = index
+        if reversed_call is not None:
+            reverse_offset = self._tmp("reverse.offset")
+            item_index = self._tmp("reverse.index")
+            lines.append(f"  {reverse_offset} = sub i64 {length}, {index}")
+            lines.append(f"  {item_index} = sub i64 {reverse_offset}, 1")
         condition_source = _current_label(lines)
         lines.append(f"  br i1 {condition}, label %{body_label}, label %{end_label}")
         lines.append(f"{body_label}:")
@@ -3550,7 +3669,7 @@ class _Emitter:
         if string_iterable or bytes_iterable:
             pointer = self._tmp("byteitemptr")
             byte = self._tmp("byteitem")
-            lines.append(f"  {pointer} = getelementptr i8, ptr {byte_data}, i64 {index}")
+            lines.append(f"  {pointer} = getelementptr i8, ptr {byte_data}, i64 {item_index}")
             lines.append(f"  {byte} = load i8, ptr {pointer}")
             if string_iterable:
                 character = self._tmp("charitem")
@@ -3599,7 +3718,9 @@ class _Emitter:
                 if _is_opaque_object_type(item_type)
                 else "__xcc_aot_tuple_get"
             )
-            lines.append(f"  {item} = call ptr @{item_getter}(ptr {iterable.value}, i64 {index})")
+            lines.append(
+                f"  {item} = call ptr @{item_getter}(ptr {iterable.value}, i64 {item_index})"
+            )
             if enumerate_call is not None:
                 if enumerate_start is None:
                     self._error("Malformed __enumerate loop")
@@ -3862,6 +3983,8 @@ class _Emitter:
         loop_types: dict[str, IrType],
     ) -> bool:
         if self.current_phase_mark is None:
+            return False
+        if any(_is_opaque_object_type(type_info) for type_info in loop_types.values()):
             return False
         if any(
             _phase_pointer_type(type_info)
@@ -6646,18 +6769,13 @@ class _Emitter:
         if not isinstance(target.type, IrDictType):
             self._error("__dict_remove expects a dictionary receiver")
         self.needs_runtime_prelude = True
-        result_ptr = self._tmp("dictremove.resultptr")
         index_ptr = self._tmp("dictremove.indexptr")
-        empty = self._tmp("dictremove.empty")
         cond_label = self._label("dictremove.cond")
         body_label = self._label("dictremove.body")
-        append_label = self._label("dictremove.append")
+        found_label = self._label("dictremove.found")
         next_label = self._label("dictremove.next")
         end_label = self._label("dictremove.end")
-        lines.append(f"  {result_ptr} = alloca ptr")
         lines.append(f"  {index_ptr} = alloca i64")
-        lines.append(f"  {empty} = call ptr @__xcc_aot_tuple_new(i64 0)")
-        lines.append(f"  store ptr {empty}, ptr {result_ptr}")
         lines.append(f"  store i64 0, ptr {index_ptr}")
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{cond_label}:")
@@ -6673,28 +6791,19 @@ class _Emitter:
         lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_get(ptr {target.value}, i64 {index})")
         candidate = self._emit_runtime_tuple_get(pair, 0, target.type.key, lines)
         matches = self._emit_equality_compare(key, candidate, negate=False, lines=lines)
-        lines.append(f"  br i1 {matches.value}, label %{next_label}, label %{append_label}")
-        lines.append(f"{append_label}:")
-        current = self._tmp("dictremove.current")
-        singleton = self._tmp("dictremove.singleton")
-        appended = self._tmp("dictremove.appended")
-        lines.append(f"  {current} = load ptr, ptr {result_ptr}")
-        lines.append(f"  {singleton} = call ptr @__xcc_aot_tuple_new(i64 1)")
-        lines.append(f"  call void @__xcc_aot_tuple_set(ptr {singleton}, i64 0, ptr {pair})")
+        lines.append(f"  br i1 {matches.value}, label %{found_label}, label %{next_label}")
+        lines.append(f"{found_label}:")
+        removed = self._tmp("dictremove.removed")
         lines.append(
-            f"  {appended} = call ptr @__xcc_aot_tuple_concat(ptr {current}, ptr {singleton})"
+            f"  {removed} = call ptr @__xcc_aot_tuple_pop_item(ptr {target.value}, i64 {index})"
         )
-        lines.append(f"  store ptr {appended}, ptr {result_ptr}")
-        lines.append(f"  br label %{next_label}")
+        lines.append(f"  br label %{end_label}")
         lines.append(f"{next_label}:")
         next_index = self._tmp("dictremove.next")
         lines.append(f"  {next_index} = add i64 {index}, 1")
         lines.append(f"  store i64 {next_index}, ptr {index_ptr}")
         lines.append(f"  br label %{cond_label}")
         lines.append(f"{end_label}:")
-        result = self._tmp("dictremove")
-        lines.append(f"  {result} = load ptr, ptr {result_ptr}")
-        lines.append(f"  call void @__xcc_aot_tuple_forward(ptr {target.value}, ptr {result})")
         return _EmittedValue(target.value, target.type)
 
     def _emit_dict_comprehension_call(
@@ -10052,10 +10161,11 @@ class _Emitter:
             if part == "None":
                 continue
             name = part if part in self.records else part.rsplit(".", 1)[-1]
-            if name not in self.records:
+            canonical_name = self.canonical_record_names.get(name)
+            if canonical_name is None:
                 return ()
-            if name not in names:
-                names.append(name)
+            if canonical_name not in names:
+                names.append(canonical_name)
         return tuple(names)
 
     def _concrete_record_type_names(self, type_info: IrType) -> tuple[str, ...]:
@@ -11240,6 +11350,95 @@ class _Emitter:
                 "}",
             )
         )
+
+    def _emit_type_map_get_function(self, function: IrFunction) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if (
+            len(function.params) != 2
+            or not isinstance(function.params[0].type, IrRecordType)
+            or function.params[0].type.name != "TypeMap"
+            or not isinstance(function.return_type, IrRecordType)
+            or function.return_type.name not in {"Type", "Type | None"}
+        ):
+            self._error("TypeMap.get leaf expects (TypeMap, Expr) -> Type | None")
+        map_index = self._field_index("TypeMap", "_map")
+        self_name = function.params[0].name
+        node_name = function.params[1].name
+        symbol = _llvm_symbol(function.name)
+        return "\n".join(
+            (
+                f"define ptr {symbol}(ptr %{self_name}, ptr %{node_name}) {{",
+                "entry:",
+                f"  %map.field = getelementptr inbounds %TypeMap, ptr %{self_name}, "
+                f"i32 0, i32 {map_index}",
+                "  %map = load ptr, ptr %map.field",
+                "  %length = call i64 @__xcc_aot_tuple_len(ptr %map)",
+                "  %index.ptr = alloca i64",
+                "  store i64 %length, ptr %index.ptr",
+                "  br label %typemap.get.cond",
+                "typemap.get.cond:",
+                "  %index = load i64, ptr %index.ptr",
+                "  %empty = icmp eq i64 %index, 0",
+                "  br i1 %empty, label %typemap.get.missing, label %typemap.get.body",
+                "typemap.get.body:",
+                "  %previous = sub i64 %index, 1",
+                "  store i64 %previous, ptr %index.ptr",
+                "  %pair = call ptr @__xcc_aot_tuple_get(ptr %map, i64 %previous)",
+                "  %key = call ptr @__xcc_aot_tuple_get(ptr %pair, i64 0)",
+                f"  %match = icmp eq ptr %key, %{node_name}",
+                "  br i1 %match, label %typemap.get.found, label %typemap.get.cond",
+                "typemap.get.found:",
+                "  %value = call ptr @__xcc_aot_tuple_get(ptr %pair, i64 1)",
+                "  ret ptr %value",
+                "typemap.get.missing:",
+                "  ret ptr null",
+                "}",
+            )
+        )
+
+    def _emit_type_map_set_function(self, function: IrFunction) -> str:
+        self.index = 0
+        self.needs_runtime_prelude = True
+        if (
+            len(function.params) != 3
+            or not isinstance(function.params[0].type, IrRecordType)
+            or function.params[0].type.name != "TypeMap"
+            or not isinstance(function.params[2].type, IrRecordType)
+            or function.params[2].type.name != "Type"
+            or not isinstance(function.return_type, IrNoneType)
+        ):
+            self._error("TypeMap.set leaf expects (TypeMap, Expr, Type) -> None")
+        map_index = self._field_index("TypeMap", "_map")
+        map_type = self.records["TypeMap"].fields[map_index].type
+        if not isinstance(map_type, IrDictType):
+            self._error("TypeMap._map must remain a dictionary")
+        pair_type = IrTupleType((map_type.key, map_type.value))
+        self_name = function.params[0].name
+        node_name = function.params[1].name
+        type_name = function.params[2].name
+        symbol = _llvm_symbol(function.name)
+        lines = [
+            f"define void {symbol}(ptr %{self_name}, ptr %{node_name}, ptr %{type_name}) {{",
+            "entry:",
+            f"  %map.field = getelementptr inbounds %TypeMap, ptr %{self_name}, "
+            f"i32 0, i32 {map_index}",
+            "  %map = load ptr, ptr %map.field",
+            "  %pair = call ptr @__xcc_aot_tuple_new(i64 2)",
+            f"  call void @__xcc_aot_tuple_set(ptr %pair, i64 0, ptr %{node_name})",
+            f"  call void @__xcc_aot_tuple_set(ptr %pair, i64 1, ptr %{type_name})",
+        ]
+        self._register_tuple_object_layout("%pair", pair_type, lines)
+        self._emit_phase_capture_value("%map", "%pair", pair_type, True, lines)
+        lines.extend(
+            (
+                "  %appended = call ptr @__xcc_aot_tuple_append(ptr %map, ptr %pair)",
+                "  store ptr %appended, ptr %map.field",
+                "  ret void",
+                "}",
+            )
+        )
+        return "\n".join(lines)
 
     def _emit_core_type_str_function(self, function: IrFunction) -> str:
         self.index = 0

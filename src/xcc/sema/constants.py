@@ -249,6 +249,9 @@ def eval_int_constant_expr(analyzer: "Analyzer", expr: Expr, scope: Scope) -> in
         analyzer._analyze_expr(expr.left, scope)
         return analyzer._eval_int_constant_expr(expr.right, scope)
     if isinstance(expr, Identifier):
+        enum_value = scope.lookup_enum_value(expr.name)
+        if enum_value is not None:
+            return enum_value
         symbol = scope.lookup(expr.name)
         if isinstance(symbol, EnumConstSymbol):
             return symbol.value

@@ -1772,9 +1772,99 @@
   not only from accepted CLI option names. Emit one deterministic tool record per
   invocation and assert both the positive `llc`/assembler/linker set and the
   negative Python-executable gate on hosted and native builds.
+- Allocation-count and header overhead can dominate retained payload even after
+  every individual concat/rebuild site is fixed. B647's live-chain dump showed
+  ~5.7M live allocations: ~310 MB payload plus ~228 MB of 40-byte headers. The
+  solution was not one more allocation site fix but compacting headers from 40 to
+  32 bytes (V435) plus eleven semantic changes that together removed millions of
+  retained temporaries. Measure header cost directly before chasing the next
+  individual allocation.
+- Diagnostic `repr()` is not a semantic identity. Native record repr is
+  intentionally `"<object>"`, so using `repr(IrType)` as a promotion/capture
+  helper key collapsed unrelated strings, bytes, tuples, dictionaries, and
+  records onto one arbitrary helper (V443). Always define an explicit recursive
+  structural key for type identity; never depend on Python repr for correctness.
+- Long-lived registries that key by type identity can retain freed/reused objects
+  even after the key collision is fixed. Generate helper bodies synchronously on
+  first discovery and retain only stable strings; do not cache `IrType` objects
+  across reset boundaries (V443 follow-up, V445).
+- Native loop-carried control state can be silently reclaimed when it crosses an
+  allocating reset boundary. An allocating `while True` whose sole
+  emission-tracking state is a loop-carried boolean may have that boolean reset
+  by the iteration region, causing duplicate LLVM function definitions (V446).
+  Use finite registry drains with explicit pre/post conditions instead of
+  unbounded loops with carried state.
+- Release large intermediate render graphs before assembling the next large
+  product. V444 renders and writes reachability inside a scalar-return subphase
+  before large LLVM text assembly; after the write, the rendered text and its
+  line graph are reclaimed. Constructing them after and in the same lifetime as
+  the full LLVM and normalized LLVM buffers would retain both simultaneously.
+- Immutable no-op operations should reuse their input. Zero-match `str.replace`
+  (V438) now returns the original string pointer; already-normalized emitted LLVM
+  (V440) returns unchanged. In a no-GC bootstrap, allocating a complete copy for
+  a no-op rewrite turns a semantic identity check into allocation pressure.
+- Direct reversed iteration should not materialize a copy. `for ... in
+  reversed(tuple_or_list)` can walk existing storage from `len - 1` down to zero
+  without allocating (V436). When the loop scans a growing compiler buffer on
+  every iteration, the retained reversed copy amplifies allocation pressure
+  needlessly.
+- Final text assembly should use one sentinel join, not join-then-strip-then-
+  append. V439 replaces `join(...).rstrip() + "\n"` with a single join plus
+  trailing newline sentinel, retaining one output buffer instead of two or three
+  full-size copies.
+- Reachability rendering should materialize sorted orders once and use dictionary
+  membership, not rebuild tuple-backed sets at every intersection (V441).
+  Repeated `dict.keys()` containers and set constructions turn an O(n) filter
+  pass into quadratic retained allocation.
+- Canonicalize retained string identities to module-owned objects before entering
+  long-lived sets (V437). A phase-local equal string that becomes empty or
+  dangling after reset silently corrupts emitter equality/promotion work sets.
+- Bisect crashes by narrowing the input, not the compiler. The CPython build
+  segfault on Parser/pegen.c looked like a codegen bug at first (deep-research
+  blamed switch lowering and compound literals), but a 30-line bisection traced
+  the crash through include chains to a single line: `#pragma once`. The fault
+  address `0x6474732d00552d00` = ASCII `"dts-\\0U-"` was the smoking gun:
+  string data being dereferenced as a pointer — classic type confusion, not a
+  codegen defect. The minimal reproducer was 2 lines. (B661)
 - A specification stops being useful when it becomes a second changelog.
   Stable goals, interfaces, forbidden behavior, and acceptance gates belong in
   specs; completed tasks and bug narratives belong in Git history and the
   changelog, while reusable reasoning belongs here. Collapse
   implementation-shaped micro-invariants into thematic contracts and let
   focused tests retain the exact regression detail.
+- A private append-only semantic map can be both simpler and asymptotically
+  safer than emulating a mutable dictionary in a tuple-backed native runtime.
+  If all reads and writes are encapsulated, append `(key, value)` in O(1) and
+  scan backward so the newest assignment wins. Scanning forward to replace an
+  existing entry made semantic analysis of large generated C units quadratic;
+  `Python/frozen.c` was the integration case that exposed it.
+- Preprocessor feature-test operators have language-level precedence over
+  compatibility fallback macros. System headers commonly define
+  `__has_include(x)` as `0` when a compiler lacks the operator; a compiler that
+  expands that fallback before recognizing its built-in probe silently takes
+  the wrong SDK branch. Evaluate built-in probes first, then macro-expand, and
+  retain a second probe pass for operators introduced by macros.
+- Function-like macro replacement is rescanned together with the remaining
+  preprocessing-token sequence. A selector such as `GET_MACRO(...)(...)` can
+  expand first to another function-macro name, whose argument list comes from
+  tokens following the selector invocation. Expanding the replacement in
+  isolation leaves SDK declaration helpers such as `__CF_NAMED_ENUM`
+  unexpanded even though simpler aliases pass.
+- Do not depend on host dataclass equality for native compiler type identity.
+  Compare declarator structure recursively—base name, qualifiers, pointer and
+  array operators, bounds, function prototype/variadic state, and parameter
+  types—so equivalent array-parameter and pointer-parameter spellings remain
+  compatible after AOT lowering.
+- Allocation guards need separate budgets for ordinary execution and bounded
+  compiler phases. Keep a conservative process-wide emergency limit, but size
+  a phase budget from the largest real translation unit and reset it at proven
+  phase boundaries. On macOS, serialize high-memory native compilations: two
+  individually bounded compiler processes can still exceed host capacity when
+  `make` runs them concurrently.
+- Never form a full-width integer mask as `(1 << width) - 1` when `width` may
+  equal the representation width. For a 64-bit destination, use the all-ones
+  value directly; construct the shifted mask only for narrower widths.
+- Strong-bootstrap evidence belongs to an exact final source snapshot. A
+  formatter-only change still changes source manifests and can alter emitted
+  bytes, so run formatting and type cleanup before the final Stage 0→1→2→3
+  loop, then hash and compare the artifacts produced by that final loop.

@@ -84,6 +84,7 @@ class SemaUnit:
 class Scope:
     def __init__(self, parent: "Scope | None" = None) -> None:
         self._symbols: dict[str, VarSymbol | EnumConstSymbol] = {}
+        self._enum_values: dict[str, int] = {}
         self._typedefs: dict[str, Type] = {}
         self._record_tags: dict[str, str] = {}
         self._parent = parent
@@ -150,6 +151,8 @@ class Scope:
                 return
             raise SemaError(f"Duplicate declaration: {symbol.name}")
         self._symbols[symbol.name] = symbol
+        if isinstance(symbol, EnumConstSymbol):
+            self._enum_values[symbol.name] = symbol.value
 
     def define_file_scope(self, symbol: VarSymbol) -> None:
         """Define a file-scope symbol, merging tentative definitions per C11 6.9.2.
@@ -218,6 +221,17 @@ class Scope:
             symbol = scope._symbols.get(name)
             if symbol is not None:
                 return symbol
+            scope = scope._parent
+        return None
+
+    def lookup_enum_value(self, name: str) -> int | None:
+        scope: Scope | None = self
+        while scope is not None:
+            symbol = scope._symbols.get(name)
+            if symbol is not None:
+                if name in scope._enum_values:
+                    return scope._enum_values[name]
+                return None
             scope = scope._parent
         return None
 

@@ -83,6 +83,8 @@ _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.preprocessor.__init__._Preprocessor._handle_pragma_operator",
     "xcc.preprocessor.__init__._Preprocessor._should_collect_function_macro_continuation",
     "xcc.preprocessor.__init__._Preprocessor._handle_undef",
+    "xcc.sema.symbols.TypeMap.get",
+    "xcc.sema.symbols.TypeMap.set",
     "xcc.sema.type_helpers._aot_integer_type_summary",
     "xcc.types.Type.__str__",
 }
@@ -299,6 +301,9 @@ _PROTOCOL_METHOD_TARGETS = {
     "xcc.preprocessor.process._ProcessTextPreprocessor._parse_line_directive": (
         "xcc.preprocessor.__init__._Preprocessor._parse_line_directive"
     ),
+    "xcc.preprocessor.process._ProcessTextPreprocessor._record_pragma_once": (
+        "xcc.preprocessor.__init__._Preprocessor._record_pragma_once"
+    ),
     "xcc.preprocessor.process._ProcessTextPreprocessor._handle_pack_pragma": (
         "xcc.preprocessor.__init__._Preprocessor._handle_pack_pragma"
     ),
@@ -405,29 +410,42 @@ def render_native_reachability(
             )
         )
     records = {record.name: record for record in module.records}
+    ordered_function_names = sorted(functions)
+    ordered_record_names = sorted(records)
     lines = [
         "format=xcc-aot-native-reachability-v1",
         f"parser={parser}",
         "native_call_graph=true",
         f"root={root}",
     ]
-    for name in sorted(functions):
+    for name in ordered_function_names:
         reason = "root" if name == root else "reachable-call"
         lines.append(f"function={name};reason={reason}")
-    for caller in sorted(functions):
-        targets = set(_function_call_targets(functions[caller])) & functions.keys()
+    for caller in ordered_function_names:
+        targets: set[str] = set()
+        for target in _function_call_targets(functions[caller]):
+            if target in functions:
+                targets.add(target)
         for target in sorted(targets):
             lines.append(f"edge=function:{caller}->function:{target};reason=call")
-    for name in sorted(records):
+    for name in ordered_record_names:
         lines.append(f"record={name};reason=reachable-type")
-    for function_name in sorted(functions):
-        used_records = set(_function_record_names(functions[function_name])) & records.keys()
+    for function_name in ordered_function_names:
+        used_records: set[str] = set()
+        for record_name in _function_record_names(functions[function_name]):
+            if record_name in records:
+                used_records.add(record_name)
         for record_name in sorted(used_records):
             lines.append(f"edge=function:{function_name}->record:{record_name};reason=type-use")
-    for record_name in sorted(records):
-        related: set[str] = set(records[record_name].bases) & records.keys()
+    for record_name in ordered_record_names:
+        related: set[str] = set()
+        for target in records[record_name].bases:
+            if target in records:
+                related.add(target)
         for field in records[record_name].fields:
-            related.update(set(_type_record_names(field.type)) & records.keys())
+            for target in _type_record_names(field.type):
+                if target in records:
+                    related.add(target)
         for target in sorted(related):
             lines.append(f"edge=record:{record_name}->record:{target};reason=layout")
     return "\n".join(lines) + "\n"
