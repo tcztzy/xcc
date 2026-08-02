@@ -1,30 +1,22 @@
-# Specs
+# Current Specifications
 
-Project specifications are split by ownership boundary instead of living in one
-large root file.
+This directory contains only XCC's current, normative subsystem contracts.
+Start at [`../SPEC.md`](../SPEC.md) for project-wide rules and the ownership
+map.
 
-## Files
+## Structure
 
-- `compiler.md` keeps shared C frontend, semantic, and compiler-wide
-  constraints only.
-- `driver.md` owns shared target-selection/default rules.
-- `target-llvm.md` owns the LLVM target.
-- `target-aarch64-apple-darwin.md` owns the Darwin AArch64 target.
-- `target-x86_64-linux-gnu.md` owns the Linux x86_64 target.
-- `target-evm.md` owns the Ethereum Virtual Machine bytecode target.
+- `compiler.md`: shared C frontend, semantics, and validation.
+- `driver.md`: target selection and CC-style actions.
+- `target-*.md`: one contract per concrete output target.
+- `aot-python.md`: the Python subset compiler and strong-bootstrap proof.
 
-## Conventions
+## What Belongs Here
 
-- Use `§G`, `§C`, `§I`, `§V`, `§T`, and `§B` sections when a spec needs the
-  full goal/constraint/interface/invariant/task/bug shape.
-- Add or update one `target-<name>.md` per concrete target.
-- Reserve `target-<name>.md` filenames for concrete targets only.
-- Do not create `targets.md`; concrete targets each get their own
-  `target-<name>.md`.
-- Keep shared target-selection/default rules in `driver.md`.
-- Keep concrete target behavior out of `compiler.md`; each target owns its own
-  `target-<name>.md`.
-- Keep status changes in `CHANGELOG.md`.
-- Keep reusable bug lessons in `LESSONS.md`.
-- Avoid duplicating long invariant lists across specs; reference the owning
-  spec instead.
+Keep stable requirements, supported interfaces, forbidden behavior, and
+acceptance gates. Prefer thematic bullets and small tables over numbered
+micro-invariants.
+
+Do not add task or bug ledgers. Record current status in `CHANGELOG.md`,
+reusable lessons in `LESSONS.md`, and temporary implementation plans under
+`docs/`. Historical documents are context, not a second source of truth.

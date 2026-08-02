@@ -1,686 +1,136 @@
-# XCC AOT Python Strong Bootstrap Spec
+# AOT Python and Strong-Bootstrap Contract
 
-## §G GOAL
-Compile the documented XCC-Python subset from ordinary `.py` source to native
-machine code, keep the same source runnable on CPython 3.11+, and close a strong
-bootstrap loop in which native Stage 1 builds Stage 2 and native Stage 2 builds
-Stage 3 without CPython, libpython, `ast.parse`, or pre-generated AST/IR as a
-required runtime input.
+## Goal
 
-## §C CONSTRAINTS
-- Source syntax ! strict CPython 3.11 subset; custom syntax ⊥.
-- Marker decorators, AOT pragmas, comment directives, and annotation directives ⊥.
-- Width aliases such as `int32`, `int64`, `uint64`, and `usize` ! ordinary
+XCC compiles a documented CPython-3.11-compatible Python subset from ordinary
+`.py` source to native machine code. The same source remains runnable on
+CPython. A strong bootstrap is complete only when native Stage 1 builds native
+Stage 2 and native Stage 2 builds native Stage 3 from repository source, without
+CPython, libpython, a CPython AST, or pre-generated AST/IR as a required input.
+
+## Source Contract
+
+- Accepted syntax is a strict CPython 3.11 subset. Custom syntax, marker
+  decorators, AOT pragmas, comment directives, and annotation directives are
+  forbidden.
+- Width names such as `int32`, `int64`, `uint64`, and `usize` remain ordinary
   Python-visible annotations or aliases with valid CPython behavior.
-- Runtime source dependencies = Python standard library only under CPython;
-  produced native stages ! depend on neither CPython nor libpython.
-- Stage 0 may use CPython `ast.parse` through a hosted adapter.
-- Stage 1/2/3 source parsing ! use the project-owned XCC-Python lexer/parser and
-  project-owned AST model.
-- Checked-in AST, serialized IR, generated LLVM, and generated code may be
-  caches or diagnostics; sole bootstrap input ⊥.
-- Allowed native build tools = configured LLVM `llc`, system assembler, system
-  linker, and platform C runtime.
-- AOT runtime/binder/lowerer bugs ! fixed in AOT-owned code for constructs in
-  the accepted subset; rewriting compiler core source to dodge them ⊥.
-- A non-AOT source rewrite is allowed only after the construct is explicitly
-  excluded from the subset and CPython behavior is preserved with an oracle.
-- Existing C compiler and target specs remain separate; native C compilation
-  and CPython `configure && make` are integration gates, not bootstrap proof.
-- GPL-derived sources/tests ⊥.
-- Handoff after code edit ! `uv run tox -e lint` & `uv run tox -e type`.
+- Stage 0 may use `ast.parse` through the hosted adapter. Native stages parse
+  source with the project-owned lexer, parser, and immutable AST.
+- A supported construct is implemented in the AOT binder, lowerer, emitter, or
+  runtime. Rewriting compiler source merely to avoid an AOT bug is forbidden.
+- A source rewrite outside `src/xcc/aot` requires an explicit subset decision,
+  CPython oracle, and native oracle or a documented missing gate.
+- Runtime source dependencies are Python-standard-library-only under CPython.
+  Native stages have no CPython or libpython dependency.
 
-## §I INTERFACES
-- Stage 0 = CPython runs `xcc.aot` and may use the CPython AST adapter to build
-  native `build/aot/stage1/xcc-aot`.
-- Stage 1 = first native AOT compiler; reads repository `.py` files and builds
-  `build/aot/stage2/xcc-aot` with the project-owned subset frontend.
-- Stage 2 = native compiler built by Stage 1; reads the same `.py` source set and
-  builds `build/aot/stage3/xcc-aot`.
-- Stage 3 = stability witness built by Stage 2; compared with Stage 2 by
-  normalized LLVM, exported symbols, and behavior fixtures.
-- planned cmd: `uv run python -m xcc.aot build --parser=cpython --source-root
-  src/xcc --entry xcc.aot.cli:main --output build/aot/stage1/xcc-aot`.
-- planned cmd: `build/aot/stage1/xcc-aot build --parser=subset --no-cache
-  --source-root src/xcc --entry xcc.aot.cli:main --output
-  build/aot/stage2/xcc-aot`.
-- planned cmd: `build/aot/stage2/xcc-aot build --parser=subset --no-cache
-  --source-root src/xcc --entry xcc.aot.cli:main --output
-  build/aot/stage3/xcc-aot`.
-- file: `src/xcc/aot/py_ast.py` -> immutable project-owned subset AST.
-- planned file: `src/xcc/aot/py_lexer.py` -> project-owned subset lexer.
-- planned file: `src/xcc/aot/py_parser.py` -> project-owned subset parser.
-- file: `src/xcc/aot/cpython_ast_adapter.py` -> Stage 0-only CPython AST
-  adapter to the project-owned AST.
-- file: `src/xcc/aot/source_contract.py` -> source snapshot, dependency order,
-  parser/cache policy, and canonical manifest contract.
-- file: `src/xcc/aot/cli.py` -> subset-compatible native CLI root;
-  `src/xcc/aot/hosted_cli.py` and `src/xcc/aot/__main__.py` -> Stage 0 process
-  adapter exposing the same build options.
-- file: `src/xcc/aot/binder.py` -> type and symbol binding over project-owned AST.
-- file: `src/xcc/aot/ir.py` -> target-independent AOT IR.
-- file: `src/xcc/aot/lower.py` -> typed AST to AOT IR.
-- file: `src/xcc/aot/llvm_text.py` -> deterministic textual LLVM emission.
-- file: `src/xcc/aot/core_runtime.py` -> native subset runtime.
-- file: `docs/superpowers/specs/2026-07-11-aot-python-strong-bootstrap-audit.md`
-  -> current gap and source-change ledger.
-- file: `docs/superpowers/specs/2026-07-11-aot-python-source-change-ledger.md`
-  -> Milestone 1 hunk-level non-AOT source inventory and oracle status.
-- file: `docs/superpowers/specs/2026-06-26-aot-python-design.md` -> architecture.
-- file: `docs/superpowers/plans/2026-07-06-aot-python-self-hosting.md` -> execution plan.
+## Stages and CLI
 
-## §V INVARIANTS
-V367: Native AOT `raise` without a matching lowered handler ! propagate a
-fallible status/result across calls and reach a nonzero CLI exit; returning a
-type-default value onto a success path ⊥.
-V368: AOT runtime value semantics for supported objects ! match CPython-visible
-behavior; pointer identity for `Path`, tuple, string, or dict key equality ⊥.
-V369: Strong bootstrap chain ! Stage0(CPython)->Stage1(native)->Stage2(native)->Stage3(native).
-V370: Stage 1/2/3 Python source parse ! project-owned lexer/parser -> project-owned AST; `ast.parse` and CPython AST objects ⊥ reachable.
-V371: Stage 1/2 build/link dependency closure ! no libpython, Python C API symbol, Python executable, or Python module loading.
-V372: Stage 1 and Stage 2 ! actually open/read the declared repository `.py` inputs during `--no-cache` builds.
-V373: Checked-in AST/IR/generated code ! optional cache only; deleting cache still permits Stage 1->2 and Stage 2->3.
-V374: Source contract ! CPython 3.11-valid syntax, no marker decorator/pragma/directive, width types remain ordinary annotations/aliases.
-V375: Supported `for`/`break`/tuple/dict/index/`try` semantics ! implemented in binder/lowerer/runtime; source-shape avoidance ⊥ substitute.
-V376: Native compile reachability gate ! includes subset lexer/parser, binder, lowerer, IR emitter, runtime boundary, and native CLI in the emitted call graph.
-V377: Stage 2 and Stage 3 ! equivalent normalized LLVM, exported symbols, and specified behavior fixtures; unexplained drift ⊥.
-V378: Native external process allowlist = `llc`, assembler, linker; any Python executable ⊥.
-V379: CPython reference path ! imports/runs on CPython 3.11+ and passes full Python tests plus lint/type gates.
-V380: Fallible AOT ABI ! explicit status/result/error object, handler type dispatch, cross-call propagation, and CLI-only process exit.
-V381: Native C compiler smoke and CPython `configure && make` ! final secondary gates only; neither proves V369-V380.
-V382: Every non-`src/xcc/aot` source change for AOT ! ledger reason + subset decision + CPython oracle + native oracle or explicit missing-gate status.
-V383: All-source admission ! syntax/type preflight only; it cannot satisfy V376 or any strong-bootstrap stage gate.
-V384: Bootstrap outputs ! deterministic module ordering, source manifest, normalized IR, and reproducible diagnostics.
-V385: Native compiler resource safety ! allocation lifetimes and peak memory are
-bounded; an input or parallel gate must fail through a controlled diagnostic
-before exhausting host memory or starving the OS watchdog.
-V386: Tuple-backed runtime identity ! one stable handle owns length, capacity,
-element storage, and object-layout metadata; growth may replace only the owned
-element buffer, and process-global forwarding/capacity/layout tables ⊥.
-V387: Unique tuple rebinding ! native lowering may mutate a stable tuple handle
-only when intraprocedural ownership analysis proves that the value was freshly
-allocated, remains single-owned across every branch/loop backedge, and has not
-escaped through an alias, call, store, or return; otherwise concat must allocate
-a distinct tuple preserving CPython-visible value and identity semantics.
-V388: Phase arena provenance ! allocations made inside a compiler-inserted phase
-carry validated ownership headers in a nested mark stack, and reset frees exactly
-the allocations newer than its mark; ordinary allocations retain the low-overhead
-bounded path, and reset ⊥ until borrow analysis proves no phase pointer escapes.
-V389: Allocation metadata ! dereferenced only after an exact payload identity is
-found by walking the runtime-owned live chain; phase marks ! stable LIFO sentinels,
-and an unknown pointer, non-top reset, or corrupt chain ! controlled memory-safety
-diagnostic before any unvalidated prefix read or out-of-order release.
-V390: Compiler-inserted owned phases ! derived solely from fixed-point IR effect
-and no-capture summaries, with no source marker; only allocating functions with a
-scalar/`None` result may own a phase and every return path resets it, while pointer
-results, fallible paths, unknown/special calls, and unproved field/container writes
-⊥ phase insertion.
-V391: Runtime calls classified no-capture ! retain no phase-owned pointer after
-return; raw-address caches and implicit global retention ⊥, and mutating intrinsics
-or C APIs remain outside the no-capture set until a stronger effect proof exists.
-V392: Native single-byte string construction from indexing, iteration, or `chr`
-! return an immutable process-stable cached value without heap allocation; a
-character scan's retained allocation must not grow with the number of lookups.
-V393: Per-module lowerer context ! retain module-local maps plus immutable shared
-fallback maps with local-first lookup; copying complete project class, function,
-alias, annotation, or constant maps into every retained lowerer ⊥, and a local
-annotation without a local string-container constant ! hide that shared constant.
-V394: Slice-global annotation and literal discovery ! construct each module's
-local table once, derive the shared first-definition view from those same values,
-and pass both views to retained lowerers; reconstructing equivalent IR constants
-during lowerer preparation ⊥.
-V395: Recursive IR metadata walks ! borrow one caller-owned mutable accumulator
-through the full tree and normalize one result at the root; allocating sorted
-tuple results and replacement sets at every child node ⊥.
-V396: Module-level literal containers ! one lazily initialized process-stable,
-heap-backed handle per binding; repeated reads ! allocation-stable identity and
-mutations ! alias-visible, while non-growable static backing used with mutable
-tuple/list/dict/set operations ⊥.
-V397: A compiler-created sequence-comprehension builder ! one fresh stable,
-heap-backed handle whose loop iterations append boxed values directly; a set
-builder ! test membership before append, while singleton construction followed
-by full-container concatenation on each iteration ⊥.
-V398: A default verification gate that can execute native AOT programs ! one
-worker until bounded lifetimes are proven; environment-default or implicit CPU-
-count parallelism ⊥, while an explicit operator-selected parallel mode remains
-available outside the accepted strong-bootstrap gate.
-V399: `str.startswith` with an unobservable concatenated prefix ! evaluate its
-parts once from left to right and compare them at checked, monotonically
-advanced offsets without materializing the combined string; offset overflow !
-a nonmatching saturated position, while allocating the full temporary prefix ⊥.
-V400: A pure concatenated-string local ! remain virtual when every read is an
-immediate-statement borrowing consumer (`str.startswith` prefix or `len`) and
-none of its named dependencies can be rebound there; a later, effectful,
-self-referential, unknown, or escaping read ! materialize the ordinary string,
-and recursive use analysis ! scalar counters without tuple/slice temporaries.
+| Stage | Producer | Parser | Required result |
+| --- | --- | --- | --- |
+| 0 | CPython | hosted CPython adapter allowed | native Stage 1 |
+| 1 | native Stage 1 | project subset parser | native Stage 2 |
+| 2 | native Stage 2 | project subset parser | native Stage 3 |
+| 3 | native Stage 3 | project subset parser | stability witness |
 
-V401: Reachability ! each record is materialized at most once per slice;
-subsequent steps may request only records not already materialized, while
-re-lowering every discovered record after every reachable function ⊥.
-V402: Record-name projection within one lowerer ! cache both positive and
-negative answers by the original name; qualified-name fallback ! find the last
-separator without materializing a split tuple, while repeating class-table
-probes or `rsplit` allocations for the same name ⊥.
-V403: A pointer-returning function may own a nested phase only when a fixed-point
-provenance analysis proves every pointer return borrows from a parameter, static
-value, field of a borrowed value, or another proven borrowed return; resetting
-that phase ! preserve the returned pointer, while a fresh, captured, unknown,
-or path-ambiguous result remains on the conservative heap/arena path. A
-scalar-to-pointer coercion is never a borrowed return; it may enter only the
-separate owned-result proof below.
-V404: A fresh pointer result may leave a compiler-owned nested phase only when
-its complete reachable graph has a statically known string/bytes, tuple, dict,
-or record layout. Each exact current-phase allocation in that graph ! move
-without changing address to immediately before the current mark, so the callee
-reset reclaims unreturned temporaries and the parent reset later reclaims the
-transferred result. Null, static, untracked, or already-older allocations ! no
-move; unknown/dynamic layouts, capturing effects, and fallible error-result
-graphs remain on the conservative path. Promoted allocations ! remain valid for
-exact-chain `realloc`/`free` after the outermost phase has reset.
-V405: Promotion membership ! inspect only the allocation-list segment from the
-current head through the top phase mark, validating each node and stopping at
-that mark. A pointer from a parent region, global tracked storage, static data,
-or an untracked allocator ! rejected without scanning older lifetime segments;
-whole-process lookup followed by ancestry recovery ⊥ because rejection cost
-would grow with all previously promoted results.
-V406: An owned phase that propagates an unhandled fallible status ! remove only
-its top LIFO mark and merge the complete allocation segment into its immediate
-parent lifetime, preserving an arbitrarily shaped error graph without tracing
-it; successful return ! transfer only the statically known result graph and
-reset the remaining phase. Commit of a missing, stale, or non-top mark ⊥. A
-fallible function may own a phase only when a greatest-fixed-point effect proof
-finds no unknown capture or mutation; unproven functions remain conservative.
-V407: A statically traversable pointer graph written into an existing record
-field or stable sequence ! live at least as long as its owner. The active owner
-region ! resolve once per top-mark/owner pair: a current-region owner needs no
-move, an ancestor allocation selects the separating mark, and an untracked or
-global owner selects the oldest active mark. Each newly reachable allocation !
-move before that target without changing address; grown sequence backing storage
-obeys the same barrier. Mark/reset/commit ! invalidate the target cache, while
-unknown object layouts remain outside the owned-phase proof.
-V408: Typed dictionary insertion/update, set insertion/update, and sequence
-slice replacement ! apply V407 to every newly retained key/value/item graph
-before mutating the stable owner. Lazy module containers ! apply the barrier
-against their static slot, selecting the oldest active mark so the first
-initialization survives every enclosing reset. Pure comprehension/set builders
-and removal/pop operations ! remain separately proven nonretaining; classifying
-all mutators as generic no-capture or admitting a dynamic `object` payload ⊥.
-V409: An opaque `object` value retained by an owner ! promote its tracked tag box
-and dispatch the payload by the native object tag. Scalar payloads need no
-child move; string/bytes/complex pointers, registered tuple/dict layouts, and
-the exact record types actually boxed by the module ! recursively move into
-the owner region. A missing layout, unknown tag, or unknown record id ⊥ rather
-than silently retaining a dangling graph. A static base or union record !
-dispatch by runtime record id to a deduplicated exact-layout walker; calling the
-same static dispatcher for an exact base id ⊥ because an actual base instance
-would recurse. A built-in `super().__init__` whose emitter evaluates and
-discards its arguments ! may reclaim those arguments in the local phase without
-relabeling the intrinsic as generically no-capture.
-V410: Equality between two typed dictionaries ! first accept identical handles,
-then compare lengths and, independently of insertion order, require every left
-key to match a right key under its typed equality and both values to match under
-their typed equality. `!=` ! negate that structural result. Comparing only the
-stable-handle pointers ⊥ because separately constructed equal dictionaries must
-compare equal and a content fixed point otherwise cannot converge.
-V411: Typed dictionary equality may ! compare same-index keys and values first
-and advance in O(n) when the insertion orders align. If an aligned key differs,
-it ! fall back to the V410 order-independent key search for that left entry.
-Treating insertion order as equality-significant or returning false at the
-first aligned-key mismatch ⊥.
-V412: A pointer-shaped result from an explicitly proven borrowed-return
-intrinsic ! inherit only its argument allocation effects; the result type alone
-must not create an owned phase. A forwarding function ! inherit the same
-no-allocation result, while any real local allocation ! retain mark/reset.
-Applying this rule to an intrinsic without borrowed provenance ⊥.
-V413: An owner-region cache entry with a non-null target mark ! remain valid
-across descendant mark/reset or commit pairs until that exact target exits. A
-null target ! invalidate when a child mark enters because the new mark becomes
-the separating boundary. Exiting the cached target or retaining a possibly
-freed current-region owner ! invalidate before pointer reuse; treating every
-call-depth change as an owner-lifetime change ⊥.
-V414: `tuple`, `list`, `set`, or `frozenset` applied to `enumerate(values)` !
-materialize a homogeneous sequence whose element type is `(int, item-type)`;
-`reversed` and ordinary for-target unpacking ! preserve that pair type and
-Python order. Reusing the direct-for enumerate pair marker as though it were
-already a sequence, or degrading the wrapped item to opaque `object` ⊥.
-V415: A typed capture whose owner target is exactly the current phase mark and
-whose mark has an immediate parent ! defer recursive graph promotion and mark
-the complete current region for transfer. Successful phase finish ! remove the
-mark in O(1), merge every callee allocation into the parent, and leave eventual
-reclamation to that parent; later promotion into the deferred mark ! stop
-without walking the graph. A deeper ancestor target ! retain exact V407 typed
-promotion, and an outermost/global target with no parent ⊥ deferred transfer.
-V416: A V404-proven fresh pointer result leaving a phase that has an enclosing
-parent region ! mark the complete callee region for V415 transfer and skip the
-typed result-graph walk; normal successful finish ! commit that segment into
-the enclosing lifetime. A borrowed, ambiguous, or incompletely typed result ⊥
-this rule. An outermost owned result with no parent ! retain exact V404 graph
-promotion and reset, reclaiming scratch while preserving only the result.
-V417: Owner-region lookup may ! retain exactly two fixed MRU owner/target
-entries so alternating container and enclosing-record barriers do not evict one
-another. Both entries ! independently obey V413 invalidation: a null target
-dies when a child mark enters, a non-null target survives descendants until
-that exact mark exits, and a possibly freed current-region owner cannot remain
-valid. An allocation-sized or unbounded owner registry ⊥.
-V418: A V407 capture targeting an ancestor mark that itself has a parent !
-validate the complete current-to-target LIFO mark chain, mark every member for
-deferred transfer, and skip recursive graph promotion. Each later successful
-finish ! commit its segment into the next parent until the captured value
-reaches the owner's lifetime; active caller marks must not be removed early.
-An invalid/non-ancestor target or an outermost target with no parent ⊥ this
-path and ! retain exact promotion/fail-closed behavior.
-V419: A runtime read-only cache may retain a non-owning pointer only while its
-owner allocation remains live. Every allocator path that can release or resize
-that exact payload ! invalidate the weak entry before `free`/`realloc`, including
-phase reset through the common drop boundary; static/process-lived pointers may
-remain cached. A cached pointer must not extend an owner's region lifetime, and
-reuse after drop, resize, or address recycling ⊥. Recomputing an immutable
-string length after each cache miss ! preserve Python negative-start slicing.
-V420: Whole-region transfer for an owned pointer return ! require the region's
-temporary owner graph to be capable of retaining that result type. If an owned
-call is made on a freshly constructed record whose recursively container-shaped
-fields cannot contain the call's result, that receiver is disjoint scratch and
-the enclosing owned return ! use exact typed graph promotion followed by local
-reset. Treating an unrelated parser/lexer/work object as part of the returned
-graph ⊥; a receiver field that can retain the result remains on the deferred
-fast path because the result may legitimately share its owner lifetime.
-V421: Exact graph promotion ! visit record fields and tuple elements in reverse
-construction order, matching the newest-first allocation chain. A top-level
-typed promotion ! open one non-nested move session whose insertion cursor moves
-older on every successful transfer, so the resulting list retains a stable
-oldest-to-newest order and a later boundary can use the same newest-first walk.
-Reversing traversal while inserting every node immediately before the target ⊥
-because it merely moves the quadratic scan to the next lifetime boundary;
-mismatched or nested move sessions ⊥. Reachability and Python-visible order
-remain unchanged.
-V422: Generated ordinary-string length observations and runtime slicing ! use a
-bounded two-entry MRU of immutable `(pointer, length)` weak borrows. A secondary
-hit ! swap into the primary slot, so one long source remains cached while
-arbitrary one-character values alternate with it. Every tracked or untracked
-release/resize of either exact payload ! invalidate that slot before memory
-reuse, promoting the surviving secondary entry when the primary dies. An
-unbounded address registry, a stale entry after drop/realloc, or direct repeated
-`strlen` from generated `len`, truthiness, indexing, membership, or iteration ⊥.
+Hosted builds use `python -m xcc.aot build`; native builds use `xcc-aot build`.
+Builds declare `--source-root`, `--entry`, `--output`, and `--parser`. Native
+mode accepts only `--parser=subset`; strong-bootstrap builds use `--no-cache`.
 
-## §T TASKS
-id|status|task|cites
-T1|x|freeze current hosted Stage 0 and split the large worktree into bisectable logical commits|V379,V382,V384
-T2|x|define strong-bootstrap source contract, project-owned AST, and hosted/native AOT CLI|V369,V374,I.cmd
-T3|x|implement project-owned subset lexer/parser and CPython-AST oracle adapter|V370,V372,V373
-T4|x|implement explicit exception/status ABI and required native runtime semantics|V367,V368,V375,V380
-T5|x|make `xcc.aot` parser/binder/lowerer/emitter/CLI native-reachable|V376,V383
-T6|x|build Stage 1 from Stage 0 and verify native dependency closure|V369,V371,V378
-T7|x|build Stage 2 from `.py` with Stage 1 and no Python process/cache dependency|V369,V370,V371,V372,V373,V378
-T8|x|build Stage 3 with Stage 2 and prove normalized IR/symbol/behavior stability|V369,V377,V384
-T9|~|run CPython compatibility, native C compiler, CPython build, lint, type, and full tests|V379,V381
+The native external-process allowlist is the configured LLVM `llc`, system
+assembler, system linker, and platform C runtime. Launching Python or loading a
+Python module is forbidden.
 
-## §B BUGS
-id|date|cause|fix
-B268|2026-07-11|native AOT lowered nested frontend `raise` to a type-default return, so errors could report success or continue into null dereference|V367,V380
-B269|2026-07-11|native AOT used object identity where supported `Path` value equality was required, so `#include_next` could revisit the same root|V368
-B270|2026-07-11|bootstrap acceptance was rooted at the native C driver and all-source hosted admission while `xcc.aot` was absent from native reachability and depended on `ast.parse`|V369,V370,V376,V381,V383
-B271|2026-07-11|the malformed source-to-LLVM leaf regression asserted the obsolete two-argument ABI after the helper gained include, define, undefine, and language inputs|V384
-B272|2026-07-11|four direct codegen helper tests retained the old `_compare` call shape after null-pointer-constant evidence became explicit ABI inputs|V384
-B273|2026-07-11|all-source admission treated the reflective CPython AST adapter as a native candidate because Stage 0-only modules had no explicit production boundary|V370,V383
-B274|2026-07-11|the initial CLI artifact test assumed emitted LLVM began with a `ModuleID` comment instead of checking the stable entry symbols|V384
-B275|2026-07-11|the AOT CLI used ordinary one-argument `print`, but statement lowering did not connect that supported source form to the existing `IrPrint` emitter/runtime path|V374,V376
-B276|2026-07-11|the hosted CLI emitted the Python entry function as `main`, colliding with the generated C process wrapper symbol|V376,V384
-B277|2026-07-11|source resolution discarded its decoded source/owned AST, so the CLI reread and reparsed an entry after hashing it and could compile a different snapshot than the manifest|V372,V384
-B278|2026-07-11|owned AST metadata required hosted `object.__setattr__`, frozen nodes contained mutable lists, and common rendering fell back to CPython-generated text|V370,V384
-B279|2026-07-11|the CPython-free string-annotation recognizer drifted from the accepted grammar by accepting numeric `Literal`, rejecting grouped union/empty tuple forms, and mishandling escaped quotes|V374,V379
-B280|2026-07-11|the native CLI entry briefly called an omitted helper and then compared an inferred i64 loop index with `argc:int32`, producing unresolved or invalid LLVM in the real build|V376,V384
-B281|2026-07-11|LLVM normalization replaced the source-root text globally and could alter semantic string constants rather than metadata only|V377,V384
-B282|2026-07-11|source closure scanned only top-level imports, omitted parent package initializers, silently ignored unknown externals, and allowed a subset manifest to include hosted-only modules|V370,V372,V384
-B283|2026-07-11|native-candidate admission rejected the owned AST's ordinary `dataclass(frozen=True, kw_only=True)` declaration because the decorator subset allowed only `frozen`|V370,V374
-B284|2026-07-11|the secondary native C bootstrap preloaded every module into a flat short-name class table, so `xcc.aot.py_ast.FunctionDef` displaced `xcc.ast.FunctionDef` and lost `is_variadic`|V376,V381,V383
-B285|2026-07-11|the first owned lexer emitted `NEWLINE` end spans after advancing to the next physical line instead of at the end of the newline token|V370,V384
-B286|2026-07-11|the owned lexer treated the empty EOF sentinel as a member of character-class strings, accepting a trailing line-continuation backslash and taking incorrect numeric/string EOF branches|V370,V384
-B287|2026-07-11|the first owned parser routed tuple/set display elements through non-star expression branches, rejecting active `(*items, ...)` and `{item, *items}` displays|V370,V374
-B288|2026-07-11|the owned numeric decoder tested for exponent letters before radix prefixes, so valid hexadecimal integers containing `e`/`E` were sent to decimal float conversion|V370,V374,V384
-B289|2026-07-11|the owned statement dispatcher treated the soft keyword `match` as reserved and rejected an ordinary active assignment to a variable named `match`|V370,V374
-B290|2026-07-11|the owned parser discarded grouping-delimiter extents, so enclosing expressions and statements ended at the inner node instead of the closing parenthesis|V370,V384
-B291|2026-07-11|formatted-string children used each token's span instead of CPython's full adjacent-string expression span|V370,V384
-B292|2026-07-11|a generator expression used as the sole call argument omitted the call parentheses from its span|V370,V384
-B293|2026-07-11|an open-ended slice selected its lower bound as the span end and omitted the consumed colon|V370,V384
-B294|2026-07-11|owned tuple nodes ended at their final element and omitted a trailing comma from the CPython-compatible source span|V370,V384
-B295|2026-07-11|grouping extent lookup selected the oldest record, so nested parentheses propagated the inner opening delimiter to enclosing nodes|V370,V384
-B296|2026-07-11|the common `module.parse_source` boundary retained a function-local CPython adapter import, so static subset dependency closure still reached the hosted parser|V370,V376
-B297|2026-07-11|the owned numeric decoder annotated its heterogeneous literal result with `complex`, which is intentionally outside the binder's declared annotation subset, preventing the parser from admitting itself|V370,V374,V383
-B298|2026-07-11|switching the common parse boundary to the owned parser dropped the public `invalid syntax` diagnostic prefix expected by the CPython-compatible API|V379,V384
-B299|2026-07-11|the first status-ABI LLVM test asserted a nonexistent dot in generated string symbols and omitted the required varargs function type from `dprintf` call syntax|V380,V384
-B300|2026-07-11|the first uncaught-error wrapper named both its error-record alloca and a basic block `%error`, so `llc` rejected the otherwise structurally correct status ABI|V380,V384
-B301|2026-07-11|the LLVM private-helper regression still called the removed temporary `_emit_status_return` path after status/error records replaced type-default raise returns|V380,V384
-B302|2026-07-11|fallibility pre-analysis raised a raw `AssertionError` for deliberately malformed IR before the LLVM validator could emit its stable `XCC-AOT-LLVM-0001` diagnostic|V380,V384
-B303|2026-07-11|bootstrap slice call rewriting and dependency scans omitted the new `IrTry` variant and discarded `IrRaise` span/payload data|V376,V380,V384
-B304|2026-07-11|the new slice raise-call scan reused a branch-local `targets` name already inferred as `list[str]`, violating the tuple return contract under mypy|V379,V384
-B305|2026-07-11|the initial status/slice additions left import ordering and one fallibility predicate line outside the repository's ruff format contract|V379,V384
-B306|2026-07-11|eight lowerer regressions encoded the temporary handler whitelist and `try -> IrIf(True)` flattening instead of the required structured status/handler IR|V375,V380,V384
-B307|2026-07-11|the structured-handler implementation inserted `IrTry` after `IrTuple` in two source import blocks, violating deterministic ruff ordering|V379,V384
-B308|2026-07-11|the first handler ancestry helper duplicated and was overwritten by the emitter's existing `_record_extends` method with a different signature|V380,V384
-B309|2026-07-11|the typed-error payload fixture omitted the subset-required `__init__ -> None` annotation and retained the pre-payload `IrRaise` expectation|V374,V380,V384
-B310|2026-07-11|tuple literal lowering passed the container `IrTupleType` as each element's expected type, rejecting integer tuples used by ordinary `for` and negative-index code|V375,V384
-B311|2026-07-11|only empty dict literals had a tuple-backed lowering path, so supported nonempty `dict[K, V]` initialization failed before membership or mutation semantics ran|V375,V384
-B312|2026-07-11|the bytes-size constructor allocated embedded NUL bytes but string-style `len` used `strlen`, reporting every `bytes(n)` value as length zero|V368,V375
-B313|2026-07-11|Path equality compared pointer representations, so separately materialized but equal parent/path values compared unequal|V368,V375
-B314|2026-07-11|tuple equality and nested tuple membership compared allocation pointers instead of recursively comparing CPython-visible element values|V368,V375
-B315|2026-07-11|string `__getitem__` applied a signed negative index directly to the data pointer instead of normalizing it against the string length|V368,V375
-B316|2026-07-11|dict membership reused tuple membership and compared the needle with each key/value pair object rather than with the pair's key|V368,V375
-B317|2026-07-11|the first bytes-header patch matched the string zero-buffer allocator's similar prologue, leaving `%total` undefined there and `%data` undefined in `int.to_bytes`|V368,V384
-B318|2026-07-11|introducing a distinct dict IR type left method dispatch and Parser singleton-scope construction guarded by the obsolete tuple type, rejecting supported `get`/`items`/`setdefault` calls and dropping initial dict scopes|V368,V375,V384
-B319|2026-07-11|the first length-aware bytes object allocated no trailing zero beyond its logical payload, so exporting its data pointer to C string APIs could read past the allocation|V368,V376,V384
-B320|2026-07-11|IR regressions still asserted the obsolete tuple-backed-dict and string-backed-bytes type identities after those values gained distinct semantic types|V384
-B321|2026-07-11|the distinct bytes expression variant was imported but omitted from bootstrap slice call-target exhaustiveness, while adjacent imports and type predicates missed lint normalization|V376,V379,V384
-B322|2026-07-12|the quarantined record-member parser rewrote ordinary `while True`/`break` into a loop flag even after native lowering and runtime behavior supported the accepted control flow|V375,V382,V384
-B323|2026-07-12|the distinct bytes representation implemented indexing and length but omitted bytes slicing, `ljust`, and optional-bytes narrowing, so the real bootstrap stopped at `_const_from_bytes`|V368,V375,V376
-B324|2026-07-12|the Milestone 3 uncaught-error oracle still expected diagnostics on stdout after the status ABI moved the sole process-boundary diagnostic to stderr|V380,V384
-B325|2026-07-12|the first complete `py311` run exposed a pre-existing C parser rejection of overloadable function declarations with parenthesized function-pointer parameters|V379
-B326|2026-07-12|the first complete `py311` run exposed a pre-existing C parser diagnostic drift where an unsupported `?` unary operator reached integer-literal parsing|V379
-B327|2026-07-12|the bytes runtime gained a distinct object ABI but the native process wrapper still rejected bytes-valued entry results instead of writing their length-aware payload|V368,V375,V384
-B328|2026-07-12|the length-aware bytes main-wrapper write call exceeded the repository's 100-column lint contract|V379,V384
-B329|2026-07-12|full-slice lowering narrowed `bytes | None` names to bytes in IR, but the emitter retained the pre-guard union type and rejected an ABI-compatible bytes slice operand|V368,V375,V384
-B330|2026-07-12|value-producing boolean lowering merged tuple operands but not dict operands, so `typed_dict or {}` inherited an enclosing integer fallback and the real bootstrap emitter rejected a dict value as `int`|V375,V384
-B331|2026-07-12|record construction aligned call operands directly with stored fields, so custom exception constructors that accepted an unstored message shifted every typed payload field and made status-error emission ill-typed|V380,V384
-B332|2026-07-12|the real bootstrap emitter regression retained the pre-status two-argument entry-call assertion after the process wrapper gained explicit result and error out-parameters|V380,V384
-B333|2026-07-12|native-reachability assertions hard-coded pre-status helper return types, so correctly fallible preprocessor symbols appeared absent after transitive status analysis changed their ABI|V376,V380,V384
-B334|2026-07-12|the return-type-agnostic bootstrap assertion located a helper's first call site instead of its later definition, so body-shape checks inspected the caller after status propagation introduced that call|V380,V384
-B335|2026-07-12|the constructor-field binding guard exceeded the repository's 100-column lint contract|V379,V384
-B336|2026-07-12|the first manual wrap of the constructor-field guard passed line length but not the repository's canonical ruff formatter layout|V379,V384
-B337|2026-07-12|the bootstrap test named `llc_parseable` only wrote LLVM text and never invoked `llc`, allowing malformed pointer arithmetic to pass its advertised gate|V376,V384
-B338|2026-07-12|bytes concatenation and repetition lowered through generic integer `IrBinary`, emitting invalid `add ptr`/`mul ptr` in the real codegen closure|V368,V375,V384
-B339|2026-07-12|after bytes gained a distinct object ABI, `str.encode()` retained its old C-string identity lowering, producing a mixed string/bytes concat in the real codegen closure|V368,V375,V384
-B340|2026-07-12|bytes `for` iteration reused tuple length/get semantics and exposed each element as a pointer, so integer shifts in the real codegen closure emitted `shl i64 ptr`|V368,V375,V384
-B341|2026-07-12|a legacy source-to-LLVM wrapper emitter bypassed its structured `IrTry` and hard-coded a pre-status direct call to a fallible helper, returning null into the native file writer|V376,V380,V384
-B342|2026-07-12|the source-to-LLVM wrapper remained a bodyless native-emitted leaf after its legacy emitter was removed, replacing its ordinary Python `try/except` body with `ret null`|V376,V380,V384
-B343|2026-07-12|`raise exception_factory()` used the factory's textual call target as the runtime error tag instead of its declared exception-record return type, bypassing matching typed handlers|V375,V380,V384
-B344|2026-07-12|the first factory-aware raise patch unconditionally lowered every exception constructor as an ordinary call, rejecting supported built-in `ValueError(...)` raises before their status boundary|V380,V384
-B345|2026-07-12|the bootstrap CLI converted a caught compile error to result code 2 while preserving its error record, but the process wrapper printed diagnostics only for nonzero ABI status and silently discarded the message|V367,V380,V384
-B346|2026-07-12|conditional-expression lowering narrowed only the true branch, so `current() if token is None else token` retained `Token | None` in the else branch and blocked factory-method reachability|V375,V384
-B347|2026-07-12|LLVM loop exits reused the condition-header value after `break`, discarding assignments from the current iteration and making an anonymous-record typedef appear incomplete|V375,V384
-B348|2026-07-12|an optional-receiver regression still expected `Type | None` in the `x is None` conditional-expression else arm after B346 correctly narrowed that arm to `Type`|V375,V384
-B349|2026-07-12|a legacy malformed-leaf regression retained the removed source-to-LLVM special emitter's private signature contract after the wrapper moved to generic status-aware emission|V376,V380,V384
-B350|2026-07-12|the bytes-concatenation runtime addition exceeded the repository's 100-column lint contract in one emitted `memcpy` line|V379,V384
-B351|2026-07-12|new bytes/status/loop-exit emitter lines passed length checks but not the repository's canonical ruff formatter layout|V379,V384
-B352|2026-07-12|the bootstrap entry integration test retained a pre-status two-argument smoke-compiler definition assertion after fallibility analysis added result/error out-parameters|V380,V384
-B353|2026-07-12|adjacent bootstrap integration assertions still expected direct bool/pointer returns from three now-fallible source compilation helpers instead of status/result/error calls|V380,V384
-B354|2026-07-12|the V368 `include_next` native probe retained an `expectedFailure` marker after path value semantics made the full compile/object oracle pass|V368,V384
-B355|2026-07-14|binder field inference dropped homogeneous list literals assigned in `__init__`, so the owned lexer lost `self.indents` before native call-graph lowering|V376
-B356|2026-07-14|cross-module function signatures retained imported project type qualifiers such as `ast.Module`, but lowerer record lookup recognized only unqualified class names|V376
-B357|2026-07-14|binder constructor-field inference ignored local assignments and imported function return signatures, so `self.tokens = lex_python(...)` lost its tuple element type before native lowering|V376
-B358|2026-07-14|lowerer treated module-qualified project classes such as `ast.Name` as instance fields, blocking both native `isinstance` checks and owned-AST constructors|V376
-B359|2026-07-14|lowerer had no value representation for zero-argument record constructors stored in global dicts, so the owned parser could not call the operator class selected by token text|V376
-B360|2026-07-14|`isinstance(items[index], Record)` did not narrow the stable subscript slot, so assigning that slot to a local erased the concrete record fields used by the owned parser|V376
-B361|2026-07-14|AOT record layouts omitted inherited dataclass fields and constructor keyword-only metadata, so owned AST subclasses could neither store nor read the common `span` prefix|V376
-B362|2026-07-14|binder and lowerer omitted annotated `*args` from function signatures, leaving the owned parser's `_children(*values)` body unbound and its callers ABI-incompatible|V376
-B363|2026-07-14|native object lowering treated the built-in `Ellipsis` singleton as an unknown name, preventing the owned parser from constructing `Constant(...)` for `...` source|V376
-B364|2026-07-14|native `isinstance` accepted only a partial built-in type-marker set and could not narrow bytes-valued unions used by owned string-literal parsing|V376
-B365|2026-07-14|statement lowering applied only the first `isinstance` narrowing in an `and` chain, so later guarded values retained their base record type in the owned parser|V376
-B366|2026-07-14|the native string subset omitted `str.rfind`, blocking source-position calculation in the owned parser despite an existing forward-search path|V376
-B367|2026-07-14|the native string subset omitted `str.count`, blocking line-number calculation from the owned parser's source prefix|V376
-B368|2026-07-14|the owned numeric decoder's ordinary two-argument `complex` construction had no native opaque-value representation, even though complex annotations remain outside the bootstrap subset|V376
-B369|2026-07-14|AOT lowering incorrectly modeled `for ch in str` with bytes semantics and bound `ch` as an integer, blocking ordinary string methods in the owned integer decoder|V376
-B370|2026-07-14|tuple-backed mutable containers omitted `list.clear`, blocking positional-parameter state reset in the owned parser|V376
-B371|2026-07-14|native lowering omitted `any`/`all` over generator predicates, blocking the owned parser's default-parameter ordering check|V376
-B372|2026-07-14|slice class-table preanalysis omitted current-module import aliases, so inferred constructor fields diverged from the later lowered constructor ABI|V376
-B373|2026-07-14|loop and branch phis collapsed `bool | None` to `bool`, making native identity/equality unable to distinguish `None` from `False` in the owned string parser|V376
-B374|2026-07-14|guard fallthrough analysis recognized only syntactic `raise`/`return`, so calls annotated `NoReturn` failed to propagate `isinstance` narrowing in the owned parser|V376
-B375|2026-07-14|native `bytes` construction accepted only an integer size and rejected tuple-backed integer iterables used by the owned bytes-literal decoder|V376
-B376|2026-07-14|the LLVM emitter accepted only a single-string `str.endswith` suffix even though lowering preserved the ordinary tuple-of-strings form used by the owned numeric decoder|V376
-B377|2026-07-14|tuple-backed runtime storage could box integers, booleans, and pointers but not floating-point values, so the owned numeric decoder could not return a float through its opaque result ABI|V368,V376
-B378|2026-07-14|native equality dispatch omitted two floating-point operands and fell through to pointer comparison, preventing typed float containers from preserving CPython-visible equality|V368,V376
-B379|2026-07-14|negative `isinstance` guard refinement required a function exit and ignored `continue`, so a loop path that could reach later statements retained the base record layout in the owned binder|V375,V376
-B380|2026-07-14|the native string predicate subset omitted `str.isidentifier`, blocking dotted project-type validation in the owned binder|V368,V376
-B381|2026-07-14|the native string subset implemented only left-to-right `split`, so bounded `str.rsplit` could not preserve the qualified-name leaf used by the owned binder|V368,V376
-B382|2026-07-14|the native string predicate subset omitted `str.isupper`, blocking the owned binder's structural project-type reference check|V368,V376
-B383|2026-07-14|exact `object` values used untagged pointer guesses, so the owned AST renderer could neither implement dynamic `repr` nor distinguish primitive types across native call and field boundaries|V368,V376
-B384|2026-07-14|the native lowerer accepted builtin type markers as values but omitted `type(value)`, so exact runtime type identity such as `type(value) is int` could not preserve CPython's `bool`/`int` distinction in the owned binder|V368,V376
-B385|2026-07-14|record narrowing compared qualified union members such as `ast.expr` directly with the unqualified class table, so a valid `isinstance(value, ast.Name)` branch retained the base union and rejected subclass fields in the owned binder|V376
-B386|2026-07-14|boolean `and` propagated positive None narrowing only while evaluating the condition and not into the true branch, so nested optional fields guarded by the owned binder remained optional inside the guarded body|V375,V376
-B387|2026-07-14|the syntax and binder subset admitted dictionary comprehensions but IR lowering handled only list/generator placeholders, blocking the owned binder's copy of imported function return types|V375,V376
-B388|2026-07-14|the object-boxing update made tuple storage inspect `.elements` unconditionally even though dictionary literals also use `IrTuple` with `IrDictType`, regressing native emission of every nonempty dict literal|V368,V375
-B389|2026-07-14|binder inference typed every `and`/`or` expression as `bool`, so `optional_dict or {}` corrupted the inferred record field layout even though Python boolean operators return an operand value|V375,V376
-B390|2026-07-14|tuple assignment required the number of static tuple type entries to equal the target arity, so homogeneous variable-length tuples could neither preserve element types nor reach native unpacking in the owned annotation checker|V375,V376
-B391|2026-07-14|global literal collection covered string containers but not read-only literal maps, so `_WIDTH_ALIASES.get(...)` was typed from an unrelated fallback and had no native value in the owned type module|V368,V376
-B392|2026-07-14|exact `type(value) is T` comparison reached native tags but did not narrow `value` in the true branch, so the owned binder could not store a guarded AST constant into its typed integer map|V375,V376
-B393|2026-07-14|identity comparison sent a tagged `object` and native `bool` through raw pointer comparison, so owned AST checks such as `constant.value is True` could not preserve the bool singleton or distinguish integer `1`|V368,V376
-B394|2026-07-14|LLVM `for` emission recognized only the one-entry variadic tuple encoding as homogeneous, diverging from lowerer's equal-element rule and decoding ordinary `(1, 2)` slots as tagged objects after B383|V368,V375,V376
-B395|2026-07-14|the first NoReturn-aware lowerer guard used an assignment expression even though assignment expressions are outside the frozen bootstrap subset, so the owned parser could not admit the lowerer itself|V374,V376
-B396|2026-07-14|typed dictionaries supported item assignment, lookup, and iteration but not `dict.update`, blocking the lowerer and emitter's ordinary map merges before their native roots could be emitted|V368,V375,V376
-B397|2026-07-14|typed dictionaries had no mutating `pop(key, default)` path, so the lowerer's ordinary removal of shadowed global container constants stopped native reachability|V368,V375,V376
-B398|2026-07-14|record construction used positional field order whenever any stored field was not a direct `__init__` parameter, misaligning valid constructors that ignore parameters or normalize optional containers before storing them|V368,V376
-B399|2026-07-14|statement lowering accepted annotated assignments only for local names and rejected ordinary `self.field: T = value` assignments used by AOT compiler constructors|V374,V375,V376
-B400|2026-07-14|cross-module type aliases were collected for annotation parsing but `_aot_type_to_ir_type` did not expand them, so lowerer methods returning the ordinary `IrType` union alias were rejected as unknown types|V374,V376
-B401|2026-07-14|local assignment inference merged numeric and string binary operations but not tuple concatenation, so an unannotated concat inherited the enclosing function return type and its loop elements became opaque objects|V368,V375,V376
-B402|2026-07-14|ordinary PEP 604 unions used as the second argument to `isinstance` reached generic integer bitwise-or lowering instead of the native type-marker path, blocking union checks in the lowerer itself|V374,V376
-B403|2026-07-14|the accepted statically resolved call subset omitted `sorted` over tuple/dict-backed values, including a static key and reverse order, so deterministic AOT compiler ordering stopped native lowerer reachability|V368,V375,V376
-B404|2026-07-14|the first native `sorted` oracle compared CPython's list result with tuple literals, so its reference branch reported a false semantic failure before native execution|V379,V384
-B405|2026-07-14|None-guard fallthrough refinement recognized function exits but not `continue`, so a loop path after `if value is None: continue` retained the optional record and rejected valid field access|V375,V376
-B406|2026-07-14|the first optional-record `continue` oracle instantiated an annotated plain class as though it were a dataclass, so CPython correctly rejected the fixture before the narrowing check|V379,V384
-B407|2026-07-14|attribute lowering resolved a union receiver to the sole property method found across its variants, calling that property for variants that instead stored a field; unions with multiple property implementations were rejected outright|V368,V375,V376
-B408|2026-07-14|`any`/`all` generator lowering accepted only a name target and did not reuse supported fixed-arity `for` unpacking, rejecting ordinary pair predicates in the lowerer itself|V375,V376
-B409|2026-07-14|the first lowerer-root reachability gate asserted a nonexistent `_Lowerer.lower` method instead of the real `lower_function` and `lower_record` call edges|V376,V384
-B410|2026-07-14|list/generator comprehensions were lowered to empty placeholder calls, and set comprehensions were not lowered, so their value/filter semantics and nested compiler call edges were absent from native IR|V375,V376
-B411|2026-07-14|record method/property resolution checked only the concrete class and not its declared base chain, so inherited AST location properties disappeared from concrete and union receivers in the lowerer|V368,V375,V376
-B412|2026-07-14|annotation conversion expanded only exact aliases and left aliases nested inside a union opaque, so `Alias | None` could not be narrowed to one of the alias's concrete record variants|V374,V375,V376
-B413|2026-07-14|nonempty dict literals required an enclosing `dict[K, V]` expected type even when all key/value types were statically inferable, rejecting ordinary inline literals such as `{...}.get(key)` in the lowerer|V368,V375,V376
-B414|2026-07-14|typed dict lowering implemented only one-argument `get` and always initialized misses with a type default, rejecting and semantically omitting Python's explicit `get(key, default)` form|V368,V375,V376
-B415|2026-07-14|bitwise set/frozenset union, intersection, and symmetric difference were routed through integer operators, so typed recursion guards and native set value semantics could not be lowered|V368,V375,V376
-B416|2026-07-14|local expression inference had no list/set/tuple literal case, so an unannotated set union inherited the enclosing return fallback even after typed set operators were implemented|V375,V376
-B417|2026-07-14|enumerate target binding and emitted target-slot parsing handled only flat tuple unpacking, rejecting nested fixed-arity targets used inside a dict comprehension|V375,V376
-B418|2026-07-14|comprehension emission treated lowered `__enumerate` as an unresolved external call because enumerate item/start handling existed only inside statement `for` emission|V375,V376
-B419|2026-07-14|the native string subset implemented lowercase conversion and uppercase predicates but omitted ordinary `str.upper`, blocking class-name normalization in the lowerer|V368,V376
-B420|2026-07-14|positive `is not None` refinement unwrapped optional records and strings but not optional-bool attributes, so `AotType.signed: bool | None` remained record-typed when the lowerer constructed `IrIntType.signed: bool`|V375,V376
-B421|2026-07-14|storing a concrete bool into an optional-bool field reused raw pointer boxing, encoding `False` as null and collapsing it with `None` instead of preserving the native three-state optional-bool representation|V368,V375,V376
-B422|2026-07-14|field emission loaded a positively narrowed optional-bool attribute directly as `i1` from its declared pointer slot, interpreting the native `False` tag as true instead of decoding the three-state representation|V368,V375,V376
-B423|2026-07-14|binder `__init__` field inference handled homogeneous list literals but not comprehension values or imported-record attributes, so `_Emitter.functions` and related native call-graph state disappeared before emitter-root lowering|V375,V376
-B424|2026-07-14|local conditional-expression inference did not merge an empty tuple-backed container arm with a typed nonempty arm, so `_Emitter._emit_fallible_main` inferred `[] if ... else [str]` from its enclosing string return fallback and rejected `append`|V375,V376
-B425|2026-07-14|fallthrough narrowing handled `if not isinstance(x, T): exit` but not the complementary `if isinstance(x, T): exit` form, leaving the emitter's `_HandlerScope | _FinallyScope` value ambiguous before a `_FinallyScope.body` access|V375,V376
-B426|2026-07-14|binder type-alias collection required the literal first character to be uppercase, so ordinary private aliases such as `_FailureScope = _HandlerScope | _FinallyScope` were left as opaque record names and could not participate in union narrowing|V374,V375,V376
-B427|2026-07-14|statement lowering applied positive `isinstance` refinement only to the `if` body and did not apply the complementary type to its `else`/`elif` branch, so emitter code distinguishing `IrDictType` from `IrTupleType` could not access tuple fields|V375,V376
-B428|2026-07-14|false-branch `isinstance` refinement leaked past an `if`/`elif` chain even when both true and false paths continued, replacing the original union with the final complement and corrupting later emitter type dispatch|V375,V376
-B429|2026-07-14|native lowering implemented only the two-positional-argument integer form of `min`/`max`, rejecting the ordinary nonempty iterable/generator reduction used to size dynamic record allocations in the emitter|V375,V376
-B430|2026-07-14|sequence/set comprehension lowering required exactly one generator, rejecting ordinary nested `for` clauses such as the emitter's flattened builtin-tag set and preventing their nested-loop value semantics from reaching native code|V375,V376
-B431|2026-07-14|global literal-container collection accepted nested integer literals but not references to earlier scalar constants, so the emitter's `_OBJECT_BUILTIN_TAGS` map had no native value and its ordinary `dict.get` call became unreachable|V368,V376
-B432|2026-07-14|nested global tuple literals were always assigned fixed-arity types, so dictionary values containing homogeneous tuples of different lengths were deemed heterogeneous and the emitter's builtin-tag map was discarded|V368,V375,V376
-B433|2026-07-14|mutating `update` dispatch handled typed dictionaries but not tuple-backed sets, so the emitter could not accumulate descendant record IDs even though native set union/value deduplication already existed|V368,V375,V376
-B434|2026-07-14|generic builtin-call lowering propagated `bool(...)`'s enclosing result type into its operand, so truth-testing a set intersection in an optional-bool function tried to lower the set operation as an integer/record result|V368,V375,V376
-B435|2026-07-14|dictionary comprehension lowering and emission still required exactly one generator after sequence comprehensions gained nested loops, rejecting the emitter's ordinary two-clause loop-carried-value map|V375,V376
-B436|2026-07-14|one-argument tuple-backed container constructors lowered by forwarding their iterable but local inference discarded that iterable's element type, so `frozenset(values) & names` in fallibility analysis was misrouted to integer bitwise lowering|V375,V376
-B437|2026-07-14|binary lowering allowed an inferred integer result to override the enclosing expected type but not an inferred tuple-backed set result, so set operations under `len(...)` or a truth-test retained empty-tuple/bool context instead of their operand element type|V368,V375,V376
-B438|2026-07-14|tuple-literal inference treated a starred iterable as one opaque element instead of merging its item type, so a homogeneous fixed prefix plus dynamic suffix became an object-valued fixed tuple and lost record fields during iteration|V368,V375,V376
-B439|2026-07-14|`any`/`all` generator lowering and emission encoded exactly one generator pair, rejecting nested generator clauses used by fallibility analysis even though nested comprehension loops were otherwise native-reachable|V368,V375,V376
-B440|2026-07-14|rooted slice discovery traversed record-constructor arguments but omitted the constructed class's `__init__` method, so `emit_llvm_text` reached `_Emitter.emit` while silently pruning initialization and its fallibility-analysis edge|V376,V384
-B441|2026-07-14|lowering preserved arbitrary positional iterables accepted by `zip`, but LLVM emission hard-coded exactly two inputs, rejecting ordinary three-way strict zips in the emitter itself|V368,V375,V376
-B442|2026-07-14|tuple repetition lowering required an enclosing tuple expected type while unannotated assignment inference recognized only numeric multiplication, so compiler locals such as `types * len(targets)` inherited a `None` function fallback and emitted invalid `mul void`|V368,V375,V376
-B443|2026-07-14|record construction mapped explicit `__init__` parameters directly into stored fields and defaulted every computed field without executing the initializer, so native `_Emitter(module)` had empty function/record/fallibility tables despite an apparently reachable `__init__` symbol|V368,V376,V380,V384
-B444|2026-07-14|global literal-map collection normalized nonempty homogeneous nested tuples but could not merge an empty tuple with the same variadic item type from sibling values, dropping the emitter's LLVM C-API signature table and misresolving `.get` as an optional-record method|V368,V375,V376
-B445|2026-07-14|global tuple-backed constant collection ignored one-argument `frozenset`/`set` constructors and starred references to earlier global containers, so the emitter's builtin-value marker set became an opaque null membership operand|V368,V375,V376
-B446|2026-07-14|annotation conversion collapsed only optional tuple-backed unions and left ABI-equivalent unions such as `tuple[T, ...] | list[T]` opaque, so loop unpacking erased nested dictionary values before method dispatch|V368,V375,V376
-B447|2026-07-14|zero-argument `super()` calls were admitted as generic externals, emitting unresolved `super` and `super().__init__` symbols instead of statically dispatching project bases or honoring the native status/error boundary for builtin exception bases|V368,V375,V376,V380
-B448|2026-07-14|LLVM branch-name merging propagated a local assigned on only one of multiple fallthrough paths, later forming dead phis whose incoming values did not dominate the advertised predecessor block|V375,V376,V384
-B449|2026-07-14|lowerer used `NoReturn` annotations for guard refinement but emitted ordinary project calls, so status-aware LLVM still created a reachable success continuation after functions such as `_Emitter._error` and polluted definite-assignment/phi control flow|V367,V375,V376,V380
-B450|2026-07-14|the native `xcc.aot.cli` contract stopped after option validation and never opened source, ran the owned compile pipeline, wrote LLVM, or invoked the allowed native tools|V372,V376,V378
-B451|2026-07-14|an independently compiled Python entry named `main` and its generated C process wrapper were both emitted as `@main`, producing an invalid duplicate LLVM definition|V376,V384
-B452|2026-07-14|generic LLVM functions emitted a source parameter named `%entry` in the same local namespace as the mandatory `entry:` basic block label, making an otherwise valid native CLI function unparsable by `llc`|V376,V384
-B453|2026-07-14|local expression inference recognized tuple repetition but not ordinary string/bytes repetition, so a parser comparison such as `text[slice] == quote * 3` emitted an invalid pointer multiplication|V368,V375,V376
-B454|2026-07-14|native lowering implemented `ord` as an integer intrinsic but assignment inference left its result opaque, so integer arithmetic inside a conditional expression mixed pointer and integer values in the owned parser|V368,V375,V376
-B455|2026-07-14|the subset reachability artifact explicitly reported `native_call_graph=false` and listed only module imports, so it had no reason edges proving the CLI-to-parser/binder/lowerer/emitter closure|V376,V383,V384
-B456|2026-07-14|the native compile pipeline passed freshly lowered IR directly to LLVM emission without an explicit symbol-table validator, allowing duplicate definitions or a missing entry to fail only in downstream tools|V376,V384
-B457|2026-07-14|cross-module method resolution saw both a short import alias and the canonical project symbol for inherited AST properties, deemed the suffix ambiguous, and emitted an undefined bare `AST.col_offset` call|V375,V376
-B458|2026-07-14|binary lowering applied string/bytes/float special cases before inferred operand types could override an enclosing opaque object-field context, leaving narrowed string concatenation as an unresolved generic `__add` call|V368,V375,V376
-B459|2026-07-14|boxing a nullable record union as opaque `object` allocated a record-tag wrapper even when the source value was `None`, so native `isinstance` dereferenced a null record payload and crashed the owned parser's `_children` helper|V368,V375,V376,V384
-B460|2026-07-14|fallthrough branch merging overwrote an incoming nullable record type with the concrete type assigned only on one branch, so later object boxing again treated the joined null pointer as a non-nullable record|V368,V375,V376,V384
-B461|2026-07-14|the first B460 join repair restored every divergent incoming type, preserving an optional set after its assignment chain and sending the emitter's own set intersection through integer binary lowering in the complete CLI root|V375,V376,V384
-B462|2026-07-14|global tuples of `ast.<Type>` markers were not collected for `isinstance`, so `_UNSUPPORTED_NODES` remained one opaque marker and native lowering reduced `isinstance(node, _UNSUPPORTED_NODES)` to `node is not None`|V374,V375,V376,V384
-B463|2026-07-14|the first B462 collector also admitted dictionaries whose values were `ast.<Type>` constructors, shadowing the dedicated record-constructor map and turning the parser's `operator_type()` dispatch into an unsupported dynamic call|V375,V376,V384
-B464|2026-07-14|the sliced record walker ignored `isinstance` marker names because their IR values had opaque `object` type, so all 12 expanded unsupported-node records were omitted and LLVM again reduced the check to pointer non-nullness|V376,V383,V384
-B465|2026-07-14|LLVM emitted both conditional-expression arms eagerly and selected only after evaluation, so the binder's unselected `owner + '.' + name` arm called `strlen(NULL)` when `owner` was `None`|V368,V375,V376,V384
-B466|2026-07-14|three emitter regressions encoded the old eager-ifexp `select` shape, so they rejected the required lazy branch/phi CFG even after CPython/native behavior matched|V379,V384
-B467|2026-07-14|local container inference had no `JoinedStr` case, so an unannotated list initialized with an f-string stored its first element as a tagged opaque object instead of a native string|V368,V375,V376
-B468|2026-07-14|tuple-backed list/set/dict mutations returned a replacement allocation and rebound only the callee local, so `.append()` and related mutations were invisible to callers that held the original Python container object|V368,V375,V376,V384
-B469|2026-07-14|subscript-assignment item inference recognized tuple-backed sequences but not `IrDictType`, so a direct integer value in `dict[str, int]` assignment inherited the enclosing `None` return fallback and was rejected|V375,V376
-B470|2026-07-15|named-slice class discovery kept the first deterministic module owner for a short class name but the refinement pass unconditionally replaced its metadata with a later same-named class, so the hosted `xcc.aot.cli` source closure paired `xcc.aot.py_ast.FunctionDef` ownership with `xcc.ast.FunctionDef` fields and rejected `statement.args`|V376,V383,V384
-B471|2026-07-15|nullable-record branch preservation recognized only the declared base name itself, so assigning a concrete subclass narrowed away `None` and opaque boxing produced a record-tagged null payload that crashed the native owned parser on f-strings|V368,V375,V376,V384
-B472|2026-07-15|LLVM `for` emission disabled string/bytes element decoding whenever the iterable was wrapped by `enumerate`, so native binder annotation scans treated raw string storage as tuple slots and passed packed bytes to `strcmp`|V368,V375,V376
-B473|2026-07-15|one-argument `dict(existing)` lowering returned the mutable tuple-backed source object instead of an independent shallow snapshot, so branch-environment copies in the native lowerer leaked later mutations across control-flow paths|V368,V375,V376,V384
-B474|2026-07-15|fallthrough branch merging let the final branch's concrete record type overwrite a local assigned different record variants on both paths, so shared union attributes were read with the wrong record layout|V368,V375,V376,V384
-B475|2026-07-15|`type(value).__name__` returned a record union's static annotation text instead of the runtime member class name, so the native lowerer constructed invalid comparison call targets from `cmpop` values|V368,V375,V376,V384
-B476|2026-07-15|assignment inference recognized function calls but not project record constructors, so record-valued dictionary comprehensions were typed as `dict[K, object]` and boxed compiler-internal values before lookup|V368,V375,V376,V384
-B477|2026-07-15|conditional-expression inference erased `None` from string, bytes, and project-record arms, so a later truth test treated a nullable native pointer as definitely non-null and called `strlen(NULL)` in the emitter itself|V368,V375,V376,V384
-B478|2026-07-15|one-argument `int(text)` lowering used boolean truthiness for every operand, so the native lowerer parsed the visible `int32` alias width from `"32"` as `1` and emitted an incompatible return type|V368,V375,V376,V384
-B479|2026-07-15|native equality compared independently allocated frozen dataclass records by pointer, so structurally identical compiler IR types compared unequal inside the emitter|V368,V375,V376,V384
-B480|2026-07-15|unannotated value-producing boolean operations inherited the enclosing function return fallback when operand types differed, so `optional_string or fallback` inside a void emitter method discarded the selected string as `None` and generated `%None` branch labels|V368,V375,V376,V384
-B481|2026-07-15|the native AOT CLI lowered only its entry module with `include_functions={entry}`, so imported project calls remained unqualified and undefined instead of reaching the owned-parser dependency closure and named slice|V369,V372,V376,V384
-B482|2026-07-15|named-slice import rewriting recognized project functions only when their module began with `xcc.`, so the source contract's arbitrary package roots retained bare undefined calls and pruned their dependency functions|V374,V376,V384
-B483|2026-07-15|annotation lowering recognized `Path` for parameters and locals but record-field conversion did not, so the now-reachable `AotSliceInput.path` field stopped the native compiler closure|V368,V376,V384
-B484|2026-07-15|tuple-backed dictionaries implemented `items()` but not `keys()`, so a supported set intersection against `dict_keys` lost its container type and was rejected as a non-integer bitwise operation in the native reachability renderer|V368,V375,V376,V384
-B485|2026-07-15|set binary operators were lowered but their equivalent `difference`/`intersection`/`union`/`symmetric_difference` methods were not, and dictionary arguments were not exposed as key iterables, blocking named-slice record discovery|V368,V375,V376,V384
-B486|2026-07-15|tuple-backed dictionaries exposed `items()` and newly `keys()` but still lacked `values()`, so the named-slice result assembly could not return its deterministic record collection|V368,V375,V376,V384
-B487|2026-07-15|source closure discovered static imports nested inside functions, but named-slice alias rewriting scanned only module-level statements and the lowerer rejected the nested import instead of treating it as a compile-time binding|V370,V372,V376,V384
-B488|2026-07-15|tuple-backed list `pop` only built a replacement container for discarded-result statements, so indexed `item = values.pop(0)` neither inferred the item type nor provided Python's returned-element and visible in-place mutation semantics|V368,V375,V376,V384
-B489|2026-07-15|subscript assignment accepted only scalar indices, so ordinary list slice insertion/replacement was sent through expression lowering as an unsupported `Slice` and could not preserve mutation through aliases|V368,V375,V376,V384
-B490|2026-07-15|tuple-backed lists omitted `remove(value)`, so the native subset source resolver could not delete the selected pending module with value equality and alias-visible mutation|V368,V375,V376,V384
-B491|2026-07-15|integer unary-invert lowering existed only when an integer expected type was already known, but assignment inference omitted `~`, so bitwise locals inside the string-returning owned SHA-256 function inherited a string fallback and broke outer `&` lowering|V368,V375,V376,V384
-B492|2026-07-15|bytes subscripting always produced `int64` even under an explicit width annotation, so assembling a `uint32` word from four bytes kept an i64 expression that could not be returned through the i32 ABI|V368,V374,V376,V384
-B493|2026-07-15|assignment inference recognized string and tuple `+` but not bytes `+`, so an unannotated padded-message local inside the string-returning owned SHA-256 function inherited the enclosing string fallback and sent bytes through string concatenation|V368,V375,V376,V384
-B494|2026-07-15|integer binary emission printed both operands at the result width without adapting differently annotated operands, so a `uint32` shift by ordinary `int` produced invalid LLVM with an i64 count in an i32 instruction|V368,V374,V376,V384
-B495|2026-07-15|tuple-backed sets omitted `discard(value)`, so the native subset dependency resolver could not remove the current module while preserving Python's alias-visible mutation and missing-value no-op semantics|V368,V375,V376,V384
-B496|2026-07-16|the named slice discarded each source unit's owned parsed snapshot, reparsed every module for each metadata pass, and reparsed an entire module again for every reachable function, making the true compiler closure impractically slow and reopening source/AST drift after source resolution|V372,V373,V376,V384
-B497|2026-07-16|order-comparison lowering admitted tuple operands, but LLVM emission implemented only scalar integer/string ordering, so the source contract's deterministic SCC selection could not compare `tuple[str, ...]` lexicographically|V368,V375,V376,V384
-B498|2026-07-16|the source-contract error helper always raised but was annotated as returning `None`, so native control flow retained an impossible successful error branch and treated `_module_path.path` as potentially undefined after its `if`/`elif` selection|V367,V375,V376,V380,V384
-B499|2026-07-16|`typing.assert_never` was admitted as an ordinary external call, leaving undefined `@assert_never` in Stage 1 LLVM instead of terminating control flow through the explicit AssertionError status ABI|V367,V374,V376,V380,V384
-B500|2026-07-16|tuple-backed `list.append` copied the entire container and added a globally scanned alias node for every item, making native tokenization quadratic and spending over fifteen minutes inside `tuple_get -> tuple_resolve` before one large compiler module finished lexing|V368,V375,V376,V384
-B501|2026-07-16|string subscripting called `strlen` unconditionally before selecting between positive and negative index normalization, making the owned lexer's positive `_peek` loop quadratic in source length even after list append became amortized|V368,V375,V376,V384
-B502|2026-07-16|string `startswith(prefix, start)` recomputed `strlen(text)` for every candidate operator at every lexer position, so native parsing remained quadratic in source length after positive subscripting was fixed|V368,V375,V376,V384
-B503|2026-07-16|tuple-backed container alias resolution scanned one process-global forwarding list, so unrelated mutations accumulated across the compiler and made every later tuple/list read linear in all prior container growths|V368,V375,V376,V384
-B504|2026-07-16|multi-generator comprehension lowering collapsed every generator's filters into one innermost predicate, so an outer guard ran only after the next generator iterable had already been evaluated and allowed guarded null dereferences or other side effects|V368,V375,V376,V384
-B505|2026-07-16|`dict.setdefault(key, default)` lowering discarded the evaluated default and emitted a lookup only, so missing keys were never inserted and native class-table discovery silently returned an empty mapping|V368,V375,V376,V384
-B506|2026-07-16|bucketed tuple alias forwarding prepended a duplicate node whenever the same old container pointer was mutated again, so one hot list polluted its bucket and made colliding unrelated container reads linear in all prior appends|V368,V375,V376,V384
-B507|2026-07-16|the tuple alias bucket index used only low pointer bits, but the macOS allocator repeats those bits across same-size allocation regions, so distinct compiler containers still collapsed into long collision chains|V368,V375,V376,V384
-B508|2026-07-16|even with mixed pointer bits, 4096 alias buckets were too few for the native compiler's accumulated transient containers, leaving long average chains because forwarding metadata intentionally outlives each Python-level temporary|V368,V375,V376,V384
-B509|2026-07-16|tuple-backed list capacity metadata remained in one process-global linked list, so every append scanned all capacities ever registered by unrelated compiler containers and made native source parsing effectively quadratic after alias lookup was fixed|V368,V375,V376,V384
-B510|2026-07-16|tuple/list read slicing retained only constant integer bounds in IR, silently converted dynamic bounds to omitted sentinels, and conflated explicit negative bounds with omitted bounds, so native constructor lowering sliced positional fields at the wrong length and read null AST nodes|V368,V374,V375,V376,V384
-B511|2026-07-16|for-loop phi construction excluded variables initialized to `None`, so a scalar assigned before `break` was discarded; later `is None` guards became constant true and valid zero could not be distinguished from absence without the tagged-object ABI|V368,V374,V375,V376,V380,V384
-B512|2026-07-16|the XOR-fold pointer hash mapped patterned page-aligned large-container addresses from the macOS allocator into a few alias buckets (observed chain length 76 with only 284507 of 1048576 buckets occupied), making binder tuple lookup linear despite ample table capacity|V368,V375,V376,V384
-B513|2026-07-16|attribute lowering trusted an analyzer-provided result type before checking whether the receiver was a record union, so `IrExpr.type` used the first union member's field offset and read `IrCall.args` as its type instead of dispatching by the actual record tag|V368,V375,V376,V384
-B514|2026-07-16|the first union-attribute dispatch repair recomputed the broad merged result type and discarded an `isinstance`-proven attribute-result narrowing, so guarded `IrType.elements` access widened back to the full type union and failed lowering|V375,V376,V384
-B515|2026-07-16|formatted-value lowering silently discarded the owned AST format specifier, so native `f"{byte:02X}"` rendered decimal `10` as LLVM text `\\10`, which LLVM interpreted as hexadecimal byte `0x10` instead of CPython's `0x0A`; the bootstrap subset now admits static integer `02X`/`02x` and rejects other specs explicitly|V368,V374,V375,V376,V384
-B516|2026-07-16|one-argument `frozenset`/`set`/`tuple`/`list` construction returned an `IrDictType` operand unchanged instead of iterating its keys, so `frozenset(source_cache)` contained the dict representation rather than module names and native named-slice import qualification pruned every cross-module call|V368,V375,V376,V384
-B517|2026-07-16|tuple-backed `set.update` accepted only tuple operands and reused pure `__set_union`, so a dict argument was rejected instead of iterating keys and successful updates rebound only the current local rather than forwarding the replacement to existing aliases|V368,V375,V376,V384
-B518|2026-07-16|optional integers were lowered as bare `i64`, so native `int | None` fields conflated a valid zero with absence; in particular every column-zero owned AST node made `AST.col_offset` raise `AttributeError` during Stage 2 lowering even though the subset parser had preserved its source span|V368,V374,V375,V376,V380,V384
-B519|2026-07-16|integer unary `-` and `~` required an already-unwrapped integer expected type, so preserving a function's correct `int | None` return ABI made an ordinary negative integer result unsupported instead of computing it as `int64` and boxing it at the return boundary|V368,V374,V375,V376,V384
-B520|2026-07-16|value-producing `or` selected an unwrapped integer result for `optional_int or 0` but reused the original optional value in its truthy arm, so LLVM emission tried to store the tagged `int | None` pointer as `i64` instead of applying the truthy guard's integer narrowing|V368,V374,V375,V376,V384
-B521|2026-07-16|assigning a definitely present scalar into an optional local immediately replaced its flow type with the declared optional storage type, so a same-branch call passed a tagged `int | None` pointer to an `int` parameter; scalar/optional joins and tuple slots also needed to restore or encode the optional ABI at their merge boundaries|V368,V374,V375,V376,V384
-B522|2026-07-16|project-record resolution applied suffix matching to a qualified top-level union, so `PyToken | xcc.aot.py_ast.AST` was truncated at the final dot and misclassified as the single `AST` record; native common-field access then read `PyToken.kind` at AST field offset zero as though it were `span`|V368,V374,V375,V376,V384
-B523|2026-07-16|set literals and comprehensions reused the tuple-backed runtime representation, but equality also reused order-sensitive tuple comparison; the native emitter therefore considered the same set unequal when comprehension iteration order differed from literal order, blocking its own optional-scalar type predicate|V368,V375,V376,V384
-B524|2026-07-16|named-slice record discovery retained records mentioned by reachable functions but did not close over their direct bases or record-valued fields; pruning the abstract `excepthandler` base made the native emitter omit `ExceptHandler` from `AST` descendant dispatch, so owned-parser `value.span` returned null and crashed while parsing `try`|V368,V375,V376,V384
-B525|2026-07-16|tuple-backed container alias resolution followed every forwarding hop with a recursive native call; the full Stage 2 layout closure produced a valid chain deep enough to exhaust the process stack inside `__xcc_aot_tuple_resolve` instead of resolving the current container value|V368,V375,V376,V384
-B526|2026-07-16|generic LLVM emission left fixed-size `alloca` instructions at their expression sites inside `for`/`while` bodies, so every native iteration permanently lowered the stack pointer until function return; the full Stage 2 class/method scan exhausted its stack before an otherwise ordinary tuple read|V368,V375,V376,V384
-B527|2026-07-16|native lowering replaced module-level string and container constants with IR literals but left ordinary immutable `bool`/`int` literal bindings as storage-less global names; formatting `_OBJECT_TAG_RECORD` while Stage 1 emitted Stage 2 therefore concatenated a null pointer instead of the CPython value `8`; the bootstrap subset admits module-level bool/int literals, signed integer literals, and simple aliases as compile-time values|V368,V374,V375,V376,V384
-B528|2026-07-16|the B524 record-closure work wrapped `sorted(missing_records)` in a redundant `list`, violating the repository's C413 lint gate even though the resulting mutable list semantics were already supplied by `sorted`|V379,V384
-B529|2026-07-16|assigned project-function alias discovery passed `module_names or ()` to a set-typed boundary, introducing an empty-tuple branch that the static type gate correctly rejected; the boundary requires a normalized immutable set fallback|V379,V384
-B530|2026-07-16|recent optional-scalar, set-equality, and iterative tuple-resolution repairs were individually syntax-valid but retained noncanonical line wrapping and quote selection in three AOT core files, failing the repository's formatter gate|V379,V384
-B531|2026-07-16|the growing generic lowerer reused branch-local names such as `result_type` and `value_type` across unrelated paths in the same Python function scope; mypy bound the first narrow assignment and rejected later valid IR-type unions even though runtime control flow kept the branches disjoint|V379,V384
-B532|2026-07-16|conditional-expression assignment inference joined equal, empty-container, and optional branch types but did not preserve a broad record union when the other branch was one of its members; `_emit_for_each` therefore lowered `enumerate_call.args[1] if ... else IrConstInt(...)` with its enclosing `None` fallback, made `start_expr` null, and rejected a valid native `enumerate` loop as malformed|V368,V374,V375,V376,V384
-B533|2026-07-16|named-slice class analysis, lowering analysis, reachable-function lowering, and missing-record closure independently rebuilt each module's alias-expanded copy of the full function-signature table, then `lower_analysis_to_ir` recopied the merged class/function/alias/global context for every reachable function or record; the no-GC native tuple-backed dictionary runtime retained both layers until Stage 2 reached a 49.5 GiB peak footprint and macOS repeatedly killed it before LLVM emission|V368,V372,V373,V376,V384
-B534|2026-07-17|native `str.join` appended every separator and item with `__xcc_aot_string_concat2`, recopied the complete accumulated prefix at each step, and retained every intermediate allocation in the no-GC runtime; top-level LLVM emission therefore assembled its roughly 10.8 MB line sequence quadratically and Stage 2 was killed before the CLI could write LLVM|V368,V376,V384
-B535|2026-07-17|tuple-backed native `set.add` unconditionally concatenated a singleton instead of preserving set uniqueness; repeated external-declaration registration therefore emitted duplicate LLVM `declare` lines (`strtod` twice, `strstr` five times, and `abort` twice), and `llc` rejected Stage 2 before object emission|V368,V375,V376,V384
-B536|2026-07-17|the B535 set-add emitter manually split two LLVM instruction f-strings across adjacent literals even though the repository formatter canonicalizes each instruction as one line, so the focused semantic oracles passed while the lint formatting gate failed|V379,V384
-B537|2026-07-17|native string membership compared only the first byte of a string needle instead of searching for the complete substring; `_hoist_allocas_to_entry` therefore treated every indented LLVM instruction as matching `" = alloca "`, moved all instructions ahead of their basic-block labels, and made `llc` reject even a small Stage 1 output after B535 removed the earlier duplicate-declaration blocker|V368,V375,V376,V384
-B538|2026-07-18|boxing a typed tuple as opaque `object` preserved the tuple pointer but discarded its element-storage layout; after `isinstance(value, tuple)` narrowed the box, generic iteration decoded raw record slots as tagged object boxes, so `py_parser._children` rejected a valid `ImportFrom` as not `AST`, `ast.walk` missed function-local project imports, native call renaming left `parse_subset_source` unqualified, and `llc` rejected Stage 2|V368,V375,V376,V384
-B539|2026-07-18|the Milestone 8 plan named `scripts/aot_bootstrap_gate.py` and invoked its `compare-behavior` command, but the file was never implemented; normalized-IR and symbol equality therefore had no executable compiler/runtime fixture gate and could not prove Stage 2/3 behavior equivalence|V377,V384
-B540|2026-07-18|the new bootstrap behavior gate placed `pathlib` after module-form standard-library imports instead of using the repository's canonical import order, so its semantic fixture passed while the focused lint gate failed|V379,V384
-B541|2026-07-18|AOT branch merging restored the incoming optional type on the negative arm of `if value is None` even when the positive arm assigned the same concrete non-None type; the fallthrough value therefore remained `int | None`, and the legacy native C bootstrap slice could not emit `_LLVMGen._type_to_llvm`'s integer return|V375,V376,V379,V384
-B542|2026-07-18|fallthrough type merging retained the last branch when a branch-local optional scalar met its concrete member, while LLVM name merging required identical storage types; the pair either unboxed a possible null or produced no phi/name, and nested optional replacement in `_LLVMGen._member_ptr` reached `Unknown LLVM name: struct_ptr`|V375,V376,V379,V384
-B543|2026-07-18|Milestones 3-8 changed canonical IR and LLVM forms for tagged objects, tuple-backed mutation, union access, global constant folding, constructors, comprehensions, and newly admitted dict/enumerate syntax, but 29 legacy exact-shape assertions still encoded the pre-bootstrap forms; focused native oracles stayed green while the first Milestone 9 isolated full-module gate failed|V375,V376,V379,V384
-B544|2026-07-18|project import discovery treated an omitted module-name set as an empty allowlist and rejected a package before checking its represented `.__init__` module; imported frontend/codegen calls stayed unqualified, package-owned preprocessor functions were pruned from the native slice, and emitted LLVM referenced undefined `@analyze`|V376,V379,V384
-B545|2026-07-18|after package reachability was restored, the no-callback native preprocessor path lowered the hosted `_Preprocessor.__init__` body and reached unsupported wall-clock/environment setup before immediately replacing its state through `_init_no_callback`; the protocol-owned native subset had not declared the constructor as a bodyless allocation leaf while retaining the real no-callback initializer|V376,V379,V384
-B546|2026-07-18|assert lowering applied only `isinstance` narrowings, so `assert record.optional_field is not None` left later attribute reads nullable; the native sema slice passed `int | None` into an `int` parameter and the emitter rejected the unsafe record-to-integer ABI coercion|V375,V376,V379,V384
-B547|2026-07-18|value-producing `or` reused generic conditional-expression IR, so a non-name left operand was emitted once for the condition and again for the truthy result while a truthy optional scalar call remained boxed when the result required its concrete member; the dedicated value-or IR now preserves single evaluation, short-circuiting, and truthy-path unboxing|V375,V376,V379,V384
-B548|2026-07-18|for/while flow typing replaced a pre-loop `None` local with the loop body's concrete scalar type even though the loop may execute zero times, while loop phi emission represented the join as opaque object; the zero-iteration path therefore left null in the phi and a later optional-scalar store unconditionally read an object payload at address 8, crashing the native C compiler in `Analyzer.__init__`|V368,V374,V375,V376,V379,V384
-B549|2026-07-18|typed tuple element layouts were registered only when the whole tuple was boxed as opaque object, and alias-visible tuple mutations did not copy that metadata to replacement allocations; direct passage through a union of tuple types therefore made generic iteration treat raw `RecordMemberInfo` pointers as object boxes and reject valid anonymous typedef members|V368,V375,V376,V384
-B550|2026-07-18|equality between `int | None` and concrete `int` fell through to the generic pointer-vs-integer comparison, so a present boxed zero was compared by allocation address instead of payload; native null-pointer-constant analysis consequently rejected valid C pointer initialization with `0`|V368,V374,V375,V376,V384
-B551|2026-07-18|the first B550 optional-integer equality guard used a multiline boolean expression whose parentheses did not match the repository formatter's canonical layout, so focused semantic oracles passed while the lint format gate failed|V379,V384
-B552|2026-07-18|mixed unions containing scalar members alongside record- or tuple-backed members used the raw pointer ABI instead of tagged objects; an integer array bound in `int | ArrayDecl | FunctionDeclarator` was therefore reboxed with a record tag and native `resolve_array_bound` dereferenced the encoded integer address while processing system headers; the first fix tagged pure pointer-backed unions too and broke typed-tuple mutation, while four LLVM text oracles still required the obsolete encoded-scalar ABI, so the predicate was restricted to scalar-plus-pointer unions and the stale oracles now require scalar tags and explicit tuple-payload extraction|V368,V374,V375,V376,V384
-B553|2026-07-18|the AOT global-scalar collector accepted only literal integers, unary signs, and aliases, so `_MAX_ARRAY_OBJECT_BYTES = (1 << 31) - 1` lowered as `None`; native `_ensure_array_size_limit` passed a null limit and then compared every positive array size against zero, rejecting valid system-header arrays, while the hosted CPython oracle folded the expression normally|V368,V374,V375,V376,V384
-B554|2026-07-18|the lowerer derived a loop's post-state only from fallthrough `body_names`, so an assignment in a terminating `break` branch left the post-loop name typed as its pre-loop `None`; independently, loop-exit phis converted normal backedges with predecessor-aware `_if_phi_value` but converted `break` predecessors with `_value_for_result_type` and no instruction block, so the concrete integer could neither be boxed on the break edge nor narrowed from the optional result for later use|V374,V375,V376,V384
-B555|2026-07-18|optional-bool identity comparison computed valid tags for concrete `bool`, `None`, and `bool | None` values but used them only when one operand still had the union type; after flow narrowing proved `if value is None: value = False` leaves a concrete bool, a redundant bool-vs-None identity check fell through to unsupported pointer comparison instead of comparing tag 1/2 with tag 0|V374,V375,V376,V384
-B556|2026-07-18|the first complete Milestone 9 suite found four stale test contracts: an AArch64 unresolved-operand edge reused an enum identifier already cached by an earlier assertion, the Milestone 3 oracle expected `int | None` parameters to erase `None`, the missing-record helper call omitted its required function-type map, and a manual C AST integer literal used an integer instead of its source lexeme; the oracles now use a genuinely missing identifier, preserve the optional type, follow the current helper API, and construct a valid literal before checking the intended unary diagnostic|V374,V379,V384
-B557|2026-07-18|a project exception subclass with no explicit `__init__` routed inherited `Exception(*args)` operands through generic record-field construction, so `ChildError('bad')` was rejected when its typed payload had no fields; the inherited builtin constructor now leaves the payload default-initialized while the status/error ABI preserves the first argument as its message|V374,V375,V380,V384
-B558|2026-07-18|the native subset omitted two-argument `next(generator, default)`, so Stage 0 could not lower the emitter's ordinary first-matching optional-scalar selection; a dedicated generator IR/LLVM path now evaluates the iterable and default in call order, scans and filters lazily, stops at the first match, and returns the default only on exhaustion|V368,V374,V375,V376,V384
-B559|2026-07-18|the native CLI independent-source fixture declared `demo.program` under a source root that lacked the source-contract-required package `__init__.py`; after B558 exposed the test body, both hosted and native compilers correctly rejected the malformed root, so the fixture now constructs the package it claims to compile|V372,V374,V379,V384
-B560|2026-07-18|named-slice import discovery rejected `from package import submodule as alias` before checking whether that exact submodule was represented in the slice whenever the parent package module itself was omitted; `ast.unparse` therefore stayed unqualified even though owned `xcc.aot.py_ast.unparse` and its signature were present, blocking binder/lowerer native reachability|V370,V376,V379,V384
-B561|2026-07-18|the C parser's complex function-declarator path consumed a return-type pointer but did not consume following GNU declaration attributes, so `char * __attribute__((overloadable)) test(double)` treated `__attribute__` as the function name and its nested parentheses as a parameter type; declarator parsing now propagates overloadable attributes across pointer, direct-name, and parenthesized declarator positions|V374,V379,V381,V384
-B562|2026-07-18|the project-wide 100.00% coverage ratchet still described the pre-AOT 25,250-statement baseline after the strong-bootstrap branch added roughly 34.7k source lines, including native-only execution paths that CPython coverage cannot observe; the complete 37-module CPython suite passed but its fresh isolated combine measured 94.760910%, so the gate now records the honest 94.76% current baseline without omitting AOT modules or adding synthetic coverage exclusions|V379,V384
-B563|2026-07-18|fixed-length tuple literal lowering used declared element types while lowering children but then replaced the container's declared ABI with its inferred element types; `TypeOp` construction consequently stored a raw `FunctionParams` tuple in an `object` slot, and native `Type.callable_signature` read tuple length `2` as an object tag instead of tag `9`, aborting CPython configure's valid declared-function probe|V368,V374,V375,V376,V381,V384
-B564|2026-07-18|the no-callback preprocessor parser stored every source-level object-like macro with an empty replacement tuple, so native preprocessing deleted `_STRUCT_ARM_EXCEPTION_STATE` instead of expanding it to `struct __darwin_arm_exception_state`; the first CPython size probes then reached a bare `{` in the SDK header and failed before semantic analysis|V379,V381,V382,V384
-B565|2026-07-18|the no-callback preprocessor expanded object-like macros only once, so the SDK alias `_STRUCT_MCONTEXT -> _STRUCT_MCONTEXT64 -> struct __darwin_mcontext64` stopped at its intermediate identifier and native parsing rejected a valid ucontext member; recursive object-macro expansion now suppresses active names to preserve self-referential macro termination|V379,V381,V382,V384
-B566|2026-07-18|record constructor lowering synthesized a value solely from the field annotation when an argument was omitted and discarded the class body's explicit default expression; `_Macro(name, replacement)` therefore initialized `parameters: tuple[str, ...] | None = None` as an empty tuple, classified an object-like macro as function-like, and deleted its invocation in native preprocessing|V368,V374,V375,V376,V384
-B567|2026-07-18|the no-callback object-macro scanner expanded identifiers inside comments and string/character literals; the SDK comment `/* Codes for SIGILL */` consequently became a nested comment containing SIGILL's replacement, left a stray `*/` token, and made native parsing fail before the following declarations|V379,V381,V382,V384
-B568|2026-07-18|the no-callback conditional evaluator treated any defined macro as true without expanding its integer replacement and understood no comparison, shift, bitwise, or arithmetic operators; both branches of the Darwin byte-order test were therefore false, deleting every bit-field from anonymous wait-status records and surfacing later as an invalid empty-record sema error|V379,V381,V382,V384
-B569|2026-07-18|the owned parser admitted every active integer augmented-assignment operator, and the IR/emitter already represented the corresponding binary operations, but statement lowering accepted only `+=`, `-=`, and `*=`; ordinary bitwise and shift updates in the native conditional evaluator therefore stopped bootstrap reachability at `AugAssign`|V374,V375,V376,V384
-B570|2026-07-18|the accepted subset included ordinary arithmetic but had no lowering or emitter path for the side-effect-once integer builtin `abs`; the native conditional evaluator's signed division helper therefore stopped bootstrap reachability before its preprocessor oracle could run|V368,V374,V375,V376,V384
-B571|2026-07-18|the new strict no-callback integer evaluator exposed standard function-style feature probes that the former false-by-default conditional shortcut had silently discarded; `Availability.h` uses `__has_include(...)`, so the native path now resolves quoted/angled include probes (including `include_next`) and conservatively evaluates other known feature probes instead of feeding their punctuation to the integer tokenizer|V379,V381,V382,V384
-B572|2026-07-18|the no-callback evaluator stripped comments before object-macro expansion only, so Darwin byte-order replacements such as `1234 /* LSB first */` reintroduced comment punctuation after that pass and the valid equality expression failed tokenization; expanded conditional text now passes through the same comment normalization before integer parsing|V379,V381,V382,V384
-B573|2026-07-18|the no-callback `#undef` handler validated the macro name but never removed it; SDK cleanup macros therefore remained defined across repeated standard-header inclusion, changing later conditional declarations and contributing false header failures or native crashes during CPython configure|V379,V381,V382,V384
-B574|2026-07-18|protocol-call rewriting changed `_StatementParser._parse_compound_stmt` to the concrete `Parser` target only after lowering, while omitted-argument expansion used the protocol's narrower zero-argument signature; native LLVM therefore shifted status-ABI output pointers into the concrete method's two optional inputs, and nested compound parsing iterated a result slot containing `1` until `strcmp` crashed; protocol calls must adopt the concrete target signature before lowering|V374,V375,V376,V381,V384
-B575|2026-07-18|record equality recursively compared tuple fields, but an `object`-ABI slot such as `TypeOp`'s `int | FunctionParams` value fell through to pointer identity; two separately boxed integer-zero pointer operators were therefore unequal in native sema even though their tags and payloads matched, making compatible repeated `va_list` typedefs fail only in native CPython header probes; tagged scalar boxes require value equality after tag dispatch|V368,V375,V376,V381,V384
-B576|2026-07-19|the no-callback preprocessor represented every function-like macro as an empty one-argument placeholder and discarded its invocation; once replacements were retained, the same path also treated the second `#` of `##` as stringize and failed to signal an unterminated multi-line invocation to the process collector, so Darwin's `__POSIX_C_DEPRECATED` produced invalid pasted text and `__QOS_ENUM` remained unexpanded; the native subset must preserve parameters/replacements, parse nested and variadic arguments, distinguish stringize from token paste, recursively rescan replacements, and request continuation lines|V379,V381,V382,V384
-B577|2026-07-19|tagged `object` equality compared scalar boxes by value but still compared tuple payloads by pointer identity; `Type.declarator_ops` stores function parameters as a nested tuple in an `int | FunctionParams` object slot, so separately constructed but structurally identical callback types compared unequal only in native sema and CPython configure rejected the valid third argument to `pthread_create`; tagged tuples must recursively compare layout-tagged elements and dispatch nested records by value|V368,V375,V376,V381,V384
-B578|2026-07-19|the hosted preprocessor consumed `_Pragma` operators after macro expansion, but the native no-callback line-expansion path returned expanded text directly; a macro-generated Darwin availability pragma therefore reached the C parser as an unknown declaration in the `sys/event.h` configure probe; the no-callback subset must lexically consume valid `_Pragma(string-literal)` operators while leaving occurrences inside comments and literals inert|V379,V381,V382,V384
-B579|2026-07-19|the C lexer classified GCC/Clang `__signed` and `__signed__` keyword aliases as identifiers, and declaration/cast lookahead vocabularies had no canonical alias path; Darwin's arm `_types.h` therefore rejected its valid `typedef __signed char __int8_t`; both aliases must be recognized in file/block/type-name contexts and canonicalized to the existing `signed` type semantics|V374,V379,V381,V384
-B580|2026-07-19|the no-callback conditional normalizer recognized Clang's `__has_*` operators but not `__building_module(...)`; the unknown function-style probe made `#if !defined(offsetof) || (__has_feature(modules) && !__building_module(...))` fail as a whole, so native `<stddef.h>` omitted its valid `offsetof` macro and CPython configure reported alignment 0 before aborting on `size_t`; the native subset must conservatively normalize the module-build probe while preserving ordinary boolean evaluation|V379,V381,V382,V384
-B581|2026-07-19|LLVM C pointer arguments accepted any pointer-backed AOT value without inspecting optional-scalar representation; `_LLVMGen._switch_info` stores its default basic block in an `int | None` tuple slot, so native tuple retrieval passed the optional box address to `LLVMBuildBr` instead of the contained block handle and a valid C `switch/default` crashed the native compiler; LLVM pointer coercion must branch on presence, unbox a present integer payload, convert it to a pointer, and map `None` to null|V368,V375,V376,V381,V384
-B582|2026-07-19|tuple-concat inference treated two different one-element homogeneous tuple layouts as a fixed two-element tuple; sema's inferred-array `new_ops = (("arr", inferred),) + tail` therefore kept the left raw integer layout instead of the right declared `TypeOp` union layout, stored array length `2` as address `0x2`, and made native `_emit_global_var` crash while compiling CPython's float-word-order probe; homogeneous tuple concat must recursively select the compatible wider union layout so literal elements are boxed before storage|V368,V374,V375,V376,V381,V384
-B583|2026-07-19|the native C driver subset rejected every otherwise-unhandled option before reading a source file, while CPython's generated Makefile unconditionally passed `-O3 -Wall`; all first-wave translation units therefore exited 1 without reaching the frontend even though the hosted driver accepted the command; the native boundary must accept the standard optimization-level and aggregate warning flags as semantically inert compatibility options while continuing to reject unknown flags|V379,V381,V382,V384
-B584|2026-07-19|the no-callback preprocessor initializer exposed compiler type spellings and pointer widths but omitted the integer width/limit macros used by Clang's `<limits.h>`; `UCHAR_MAX` consequently expanded through unknown `__SCHAR_MAX__` as `1`, so CPython's valid `#if UCHAR_MAX != 255` guard raised before the first translation unit reached parsing; the native subset must define the target's character bit width, integer widths, and signed maxima consistently with its declared AArch64 LP64 data model|V379,V381,V382,V384
-B585|2026-07-19|the no-callback preprocessor omitted Clang/GCC's six integer `__ATOMIC_*` memory-order macros; `<stdatomic.h>` therefore left `memory_order_relaxed = __ATOMIC_RELAXED` as an identifier expression, and sema rejected the valid enum while compiling CPython's first translation unit; the native subset must expose the conventional zero-through-five memory-order constants without implying support for otherwise unavailable atomic operations|V379,V381,V382,V384
-B586|2026-07-19|module-global literal collection preserved dictionary literals but ignored ordinary `dict(existing_mapping)` construction; `BASE_TYPE_ALIGNMENTS = dict(BASE_TYPE_SIZES)` therefore vanished from the native constant environment, every primitive natural-alignment lookup returned `None`, and CPython's valid explicitly aligned `_aligner` member failed sema; the AOT subset must materialize a fresh dictionary constant with the source mapping's entries and layout|V368,V374,V375,V376,V384
-B587|2026-07-19|the no-callback preprocessor seeded target integer limits but omitted the compiler floating minima already exposed by the hosted path; Darwin `<math.h>` therefore left `__FLT_MIN__`, `__DBL_MIN__`, and `__LDBL_MIN__` as undeclared identifiers in valid inline normalization helpers while compiling CPython's first translation unit; the native subset must define the three target-consistent minimum normal values without adding floating builtins or rewriting system headers|V379,V381,V382,V384
-B588|2026-07-19|record-constructor default lowering recognized scalar and container globals but ignored an annotated global record such as `EnumConstSymbol.type_ = INT`; native construction therefore synthesized `Type(name="")`, made every enum constant appear non-scalar, and rejected even a minimal valid enum return/comparison; a matching annotated global record default must remain an `IrName` so the emitter materializes the canonical record constant|V368,V374,V375,V376,V384
-B589|2026-07-19|the native AOT runtime retained allocations for the lifetime of each compiler process while the Milestone 9 plan and CPython build helper allowed eight native compilers concurrently; two runs reached 6.5-19.5 GiB resident memory per process, saturated the macOS compressor, and ended in watchdog kernel panics; native-backed integration must remain serial until stable container handles, bounded phase lifetimes, and a controlled OOM path satisfy the resource-safety invariant|V379,V381,V382,V385
-B590|2026-07-19|every generated heap allocation called libc `malloc`/`calloc` directly, so an ownership leak or malformed dynamic size had no process-local containment and could consume host memory until the OS watchdog panicked; all generated allocations must route through one overflow-checked runtime boundary with a conservative cumulative hard limit and deterministic emergency diagnostic while the stronger Arena/drop ABI remains incomplete|V368,V376,V380,V384,V385
-B591|2026-07-19|tuple-backed mutable containers represented identity with replaceable inline payload pointers, so alias preservation required permanent process-global forwarding, capacity, and object-layout tables while each growth retained obsolete payloads and metadata; every tuple/list/dict/set value now uses one fixed-size stable handle with an overflow-checked resizable element buffer and in-handle layout metadata, and mutating operations return the original handle|V368,V375,V376,V384,V385,V386
-B592|2026-07-20|native lowering compiled `_split_lines_keepends` rebinding `lines = (*lines, item)` as immutable full-tuple copy on every iteration, while the no-GC runtime retained every obsolete version; the real `<math.h>` probe therefore created 1,705,370 tuples totaling 520,135,680 bytes, with one concat site responsible for 419,553,168 bytes, and hit the 512 MiB guard; conservative intraprocedural ownership/liveness analysis now lowers only fresh, single-owner homogeneous tuple rebinding to stable-handle append with geometric backing growth, while any alias or escape keeps copy semantics|V368,V375,V376,V384,V385,V386,V387
-B593|2026-07-20|making every allocation arena-addressable with a 32-byte ownership header raised the real `<math.h>` maximum RSS from about 182 MiB to 361 MiB and the `include_next` probe to about 426 MiB, leaving too little distance from the 512 MiB containment boundary; ownership headers and the doubly linked reclamation chain must be enabled only inside explicit nested phases, while ordinary bounded allocations keep their prior layout and phase reset validates/reclaims only its marked segment|V376,V384,V385,V388
-B594|2026-07-20|the first dynamic-phase draft treated the global `phase_active` bit as proof that every pointer passed to `realloc` carried a phase header, so growing an ordinary pre-phase allocation read 32 bytes before its allocation and a mark represented by a movable allocation header could become stale across nested reallocations; exact live-chain membership now establishes provenance before metadata access, and dedicated LIFO sentinel nodes keep marks stable and reject out-of-order reset before release|V376,V384,V385,V388,V389
-B595|2026-07-20|two LLVM regressions asserted exact generated temporary suffixes for record allocations and a method receiver, so inserting a valid phase-mark temporary shifted later suffixes and failed the oracle despite preserving unique SSA names and behavior; the tests now assert distinct heap names and the semantic method-call shape without binding unrelated temporary numbering|V384,V390
-B596|2026-07-20|the runtime `str.startswith` helper cached its last text pointer and length in process-global slots, so classifying the call as no-capture allowed a phase reset to free the text while the cache retained its address, enabling stale-length reads if malloc reused that address; the address cache was removed, length is measured per call, and runtime no-capture classification now forbids hidden pointer retention|V368,V376,V385,V390,V391
-B597|2026-07-20|the fixed-point phase-summary helper annotated the fallible-function set as mutable `set[str]` even though the status analysis intentionally returns `frozenset[str]`; runtime tests passed, but the required type gate rejected the overly narrow internal contract, which now accepts the actual immutable set shape|V379,V384,V390
-B598|2026-07-20|the compiler-derived ownership analysis used ordinary alias-visible `set.difference_update`, but the native subset implemented only pure set difference and `set.update`; Stage 0 therefore rejected its own current emitter before producing Stage 1. Homogeneous tuple-backed sets now lower difference-update as a stable-handle mutation, preserve aliases through buffer forwarding, and remain excluded from phase no-capture classification|V368,V375,V376,V384,V390,V391
-B599|2026-07-20|tuple-backed list slice assignment allocated prefix, suffix, and two concatenation results before copying the result into its stable handle, while none of those temporary containers could be reclaimed outside an owned phase; native `py_ast.walk` repeatedly inserted children at the worklist front until Stage 1 exhausted the 512 MiB budget inside `tuple_set_slice`. Contiguous slice assignment now normalizes bounds, grows the stable buffer geometrically, shifts overlapping suffix storage with `memmove`, copies replacement storage overlap-safely, and updates length in place, including self-replacement and alias-visible mutation|V368,V375,V376,V385,V386
-B600|2026-07-20|native dictionary insertion built a singleton tuple, concatenated the entire existing dictionary, and copied the result back into its stable handle; `_slice_method_signature_table` performs two `setdefault` insertions per discovered method, so Stage 1 exhausted the 512 MiB budget after source resolution while retaining obsolete dictionary copies. `dict.setdefault` and subscript assignment now allocate only the persistent key/value pair and append it directly to the stable dictionary handle with geometric capacity growth|V368,V375,V376,V385,V386
-B601|2026-07-20|named-slice signature, class-table, alias, and lowering passes each requested a complete `AotAnalysis` for every module even though the first three consumed only compact declaration metadata; the no-GC native runtime retained those discarded binder generations until Stage 1 exhausted the 512 MiB budget during the second class pass. Signature and class discovery now use dedicated binder queries, subset summaries are cached once, aliases reuse the sole final lowering analysis, and the compact results are required to equal full binding over the complete bootstrap source set|V376,V384,V385
-B602|2026-07-20|the owned Python lexer performs repeated character lookahead through ordinary `source[index]`, but native string subscripting allocated a new two-byte heap string for every lookup; parsing the 65-module source closure therefore retained 475,542,425 bytes before subset summaries began and left no safe budget for lowering. Single-byte results from string indexing, iteration, and `chr` now share a process-stable 256-entry runtime cache whose repeated use does not change allocation accounting|V368,V376,V385,V392
-B603|2026-07-20|tuple-backed `set.add` checked uniqueness but still built a singleton, concatenated the complete set, and forwarded the replacement into its stable handle; lowerer preparation repeatedly collects module globals into sets, so Stage 1 reached the 512 MiB boundary in `_collect_global_names` after final analysis completed. A unique item now appends directly to the original stable set handle with geometric buffer growth, while duplicates remain no-ops and aliases observe the mutation|V368,V375,V385,V386
-B604|2026-07-20|`_prepare_analysis_lowerer` copied the complete project class, function, alias, annotation, and constant maps into each of 65 retained module lowerers; after B603 reached final analysis safely, Stage 1 exhausted the fixed 512 MiB budget in the first `dict_copy` for this retained context. Lowerers now retain their existing module-local maps and immutable shared fallbacks separately, resolve local definitions first, lazily convert referenced global annotations, and preserve local annotation shadowing without cloning shared maps|V376,V384,V385,V393
-B605|2026-07-20|slice-global string-container discovery constructed every module's literal IR while building the shared table, then `_prepare_analysis_lowerer` reconstructed the same local literal IR for each retained lowerer; after B604 removed project-map copies, Stage 1 reached the 512 MiB boundary in the second `_global_literal_element` pass. Slice discovery now creates shared and per-module annotation/string/scalar/container views together, shared entries reference the already-built local values, and prepared lowerers borrow those module tables without repeating literal construction|V376,V384,V385,V393,V394
-B606|2026-07-20|record reachability recursively returned a freshly sorted tuple from every type, expression, statement, and branch node, while each parent rebuilt a set from those results; scanning a deeply nested lowered compiler function therefore retained the entire history of temporary tuples until Stage 1 reached the 512 MiB boundary in `_statement_record_names`. The walker now borrows one root-owned set through all recursive calls and creates a single sorted tuple only at the public root boundary|V376,V384,V385,V395
-B607|2026-07-20|call-target reachability used the same value-returning recursive shape as the former record walker, concatenating freshly allocated child tuples at every expression and statement; after B606 completed record discovery, Stage 1 reached the 512 MiB boundary in `_expr_call_targets`. The call walker now appends into one borrowed root-owned list, preserving traversal order and duplicate calls, and materializes one tuple only at the public query boundary|V376,V384,V385,V395
-B608|2026-07-20|each read of a module-level literal container emitted a fresh runtime tuple graph; `_rename_call_target` therefore rebuilt the 76-entry `_PROTOCOL_METHOD_TARGETS` dictionary, including every pair tuple, on every call and Stage 1 reached the 512 MiB boundary at the first tuple allocation in that function. Global container reads now use a binding-keyed lazy LLVM slot whose first access creates one normal heap-backed stable handle and whose later accesses reuse it, preserving alias-visible mutation without unsafe non-growable static backing|V368,V376,V384,V385,V386,V396
-B609|2026-07-20|eager tuple/list/set comprehension lowering created a singleton tuple for every produced value, concatenated the complete result built so far, and stored the replacement handle; lowerer tuple/list/set literals use `tuple(generator)`, so Stage 1 retained the quadratic history until Stage 2 reached the fixed 512 MiB boundary inside `_Lowerer._lower_expr`. A fresh comprehension builder now boxes each value and appends it directly to its stable heap-backed handle, with the existing membership guard preserving set deduplication before mutation|V368,V375,V376,V384,V385,V386,V397
-B610|2026-07-20|post-reboot panic evidence confirmed seven concurrent `xcc-b588-enum-constant` compiler processes at roughly 6-18 GiB RSS each when the compressor was exhausted, while the ordinary tox test runner still defaulted to one worker per CPU and therefore contradicted the B589 serial native-integration rule. The runner now defaults to one worker and both tox test commands pass `--jobs 1` explicitly so environment overrides cannot silently parallelize the accepted gate; explicit `--jobs auto` remains available only as an operator choice outside that gate, and the AOT Python subset is unchanged. The CPython oracle is `tests.test_run_tests`; the native oracle is the focused allocation-limit executable, which exits 70 before requesting an over-budget allocation|V379,V381,V382,V385,V398
-B611|2026-07-20|after B609 removed comprehension copies, the controlled Stage 1-to-2 run still reached the 512 MiB boundary; LLDB stopped in `string_concat2` at `_rename_call_target + 13372`, and disassembly mapped it to `target.startswith(f"{local_name}.")`, which rebuilt a temporary prefix for every nonmatching entry of every rename-map scan. The emitter now recognizes an `IrStringConcat` used solely as a `startswith` prefix, evaluates and coerces each part once, compares consecutive parts at overflow-saturated offsets, and never allocates the combined string; focused LLVM and CPython/native f-string-prefix oracles preserve the visible result|V368,V376,V384,V385,V399
-B612|2026-07-20|the first V399 oracle placed `IrStringConcat` directly in the `startswith` argument, but real `_rename_call_target` IR assigned the f-string to `prefix` first, so the post-B611 Stage 1 still emitted the hot concat and static acceptance caught five remaining calls. Conservative block-local use analysis now forwards only a pure concat assignment whose immediately following statement borrows it exactly once as a `startswith` prefix and whose remaining block has zero reads; multi-use, self-referential, effectful, or nonlocal values retain materialization, and the focused oracle now covers the real assignment shape|V368,V376,V384,V385,V399
-B613|2026-07-20|post-B612 Stage 1 still emitted five `_rename_call_target` concatenations because the matching branch also reads `len(prefix)`, so the correct virtual value has two nonescaping consumers inside the same `if`; single-use analysis conservatively rejected it. Pure concat locals now remain virtual when all reads in the immediate statement are `startswith`/`len` borrows and their named parts are not rebound, `len` sums part lengths without materialization, cross-statement or unknown uses retain the ordinary string, and the recursive proof uses scalar counters and indexed suffix scans rather than recreating the V395 tuple/slice allocation pattern. The real Stage 1 function falls from five to four concat calls|V368,V376,V384,V385,V395,V399,V400
-B614|2026-07-20|`_lower_named_slice_from_roots` re-lowered every known record for every reached function; the discarded duplicate IR remained allocated. It now requests only records not already materialized, and V401 verifies each record is included once|V376,V384,V385,V401
-B615|2026-07-20|after B614, the bounded Stage 1-to-2 run still exited at the 512 MiB allocation guard; LLDB stopped in `__xcc_aot_tuple_new` called by `_Lowerer._project_record_name`, where `name.rsplit(".", 1)[-1]` materialized a tuple for every repeated type projection. Each lowerer now caches positive and negative projections by original name and uses `rfind` plus one suffix slice only on the first qualified miss; V402 verifies repeated inputs do not repeat class-table probes|V376,V384,V385,V402
-B616|2026-07-20|the post-B615 Stage 1-to-2 run still exhausted the fixed allocation budget because generated Stage 1 inserted only 38 IR-owned phases and none covered the source/parser/binder/slice/lowerer pipeline; the phase gate treated every pointer return as escaping even when lookup and cursor helpers returned only storage borrowed from an input or static value. A fixed-point return-provenance proof now admits no-capture borrowed returns as phase owners, preserves the borrowed pointer across reset, and leaves fresh, ambiguous, or scalar results boxed by the return ABI conservative|V376,V384,V385,V390,V403
-B617|2026-07-20|the post-B616 bounded Stage 1-to-2 run still exited 70 at the unchanged 512 MiB allocation guard after 59.84 seconds, before any tool execution or Stage 2 artifact; static Stage 1 IR contained about 12,347 direct allocation calls while 57 phase owners covered only 150, and fresh typed result graphs still had to escape every callee phase for the process lifetime. The runtime can now splice an exact current-phase allocation immediately before its mark, and the emitter recursively transfers only statically promotable string/bytes, tuple, dict, and record result graphs before reset; nested V404 native oracles prove that unreturned temporaries die in the callee, the result survives in the parent, the parent later reclaims it, and post-reset `realloc`/`free` preserve accounting|V368,V376,V384,V385,V388,V390,V404
-B618|2026-07-20|the first post-B617 Stage 1-to-2 run no longer approached the allocation guard (169,164,800-byte maximum RSS, zero swap) but consumed 298.93 user seconds until the 300.21-second process-group watchdog boundary and still produced no Stage 2. `__xcc_aot_phase_promote` determined current-region ownership by first scanning the complete long-lived allocation chain and then walking ancestry back toward the mark, so rejecting an older/borrowed result child grew with all prior promoted storage. Promotion now searches and validates only `allocation_head -> current_mark`, where the mark itself proves that older lifetimes are out of scope; V405 verifies structural absence of global lookup, rejects a parent allocation from an inner phase, preserves both values, and reclaims them at their owning resets|V376,V384,V385,V388,V404,V405
-B619|2026-07-20|the bounded post-B618 Stage 1-to-2 run exited 70 at the unchanged 512 MiB allocation guard after 280.90 seconds (279.63 user), with 597,753,856-byte maximum RSS, 3,137 source opens, no external tool execution, and no Stage 2 artifact. The ownership proof excluded all 471 fallible functions because resetting a callee phase could invalidate an arbitrary error-result graph; their successful-path temporaries therefore accumulated even when the function had no capturing effect. Failure propagation now commits the complete current region into its parent by removing only the validated top mark, while success still promotes the typed result graph and resets. A conservative greatest-fixed-point effect proof admits only capture-free fallible functions; the full slice gains 12 fallible owners but still excludes lower/slice/binder, so this is the failure-lifetime foundation rather than evidence that Stage 2 is bounded. V406 covers native parent reclamation, preserved failure storage, non-LIFO rejection, and emitted commit/reset control flow|V368,V376,V384,V385,V388,V390,V404,V406
-B620|2026-07-20|B619 could assign owned phases to only 144 of 851 full-slice functions and 12 of 471 fallible functions because every mutation was conservatively treated as an unbounded capture; the slice contains 343 nonlocal field assignments whose value graphs are all statically promotable and 1,252 sequence `append` calls. A cached owner-region lookup now selects the exact separating mark, typed barriers move string/bytes/tuple/dict/record graphs across record-field, sequence-item, append/add/extend stores, and tuple growth moves backing storage to the same lifetime. Current-region owners require no move, ancestor owners retain values until their own reset, and untracked/global owners select the oldest active mark. V407 CPython/native oracles cover nested grandparent capture, string list assignment, record field assignment, and zero-capacity append growth. The hosted full slice grows to 270 owners and 71 fallible owners (271 marks, 145 failure commits, 1,733 capture calls), but lower/slice/binder entry functions remain excluded, so no Stage 1-to-2 claim is made|V368,V376,V384,V385,V388,V390,V404,V406,V407
-B621|2026-07-20|post-B620 Stage 0 produced a native-contract Stage 1 in 27.68 seconds with 343,474,176-byte maximum RSS and zero swap; its tool log contains only `llc` and `cc`, it depends only on `libSystem`, has no Python symbols, and rejects the CPython parser. Static ownership still excluded typed dict/set/global-container operations even though their emitted stable-handle mutations now have an exact owner-lifetime target. V408 applies typed barriers to dict assignment/default/update, set add/update, slice replacement, and first lazy-global initialization, while pure builders and removal-only operations retain a distinct nonretaining proof. Focused CPython/native oracles preserve all stored values after callee reset. Full-slice ownership rises from 270 to 731 functions and from 71 to 381 fallible functions; `_Lowerer.lower_function` and `lower_analysis_to_ir` become owners, while `_lower_named_slice_from_roots` remains excluded by parse/analyze/bind error-construction chains. A watchdog-bounded hosted full emission completes in 31.13 seconds with 311,164,928-byte maximum RSS and zero swap; no Stage 1-to-2 run or boundedness claim is made|V368,V376,V384,V385,V388,V390,V404,V406,V407,V408
-B622|2026-07-20|B621 still excluded the named-slice root because parser error construction appends records containing `Constant.value: object`, and the ownership proof rejected every dynamic payload even though the native ABI already carries an exact tag; built-in `super().__init__` argument evaluation was also conservatively treated as capture although its emitter discards the results. V409 promotes tagged object boxes and their pointer, registered tuple/dict, or precisely boxed record payloads into the owner region, fails closed on unknown layouts/tags, keeps record dispatch limited to types actually boxed, and treats only this emitted super-initializer shape as region-safe. Static base/union promotion dispatches by runtime id into deduplicated exact-layout walkers so an actual base instance cannot recursively re-enter its own dispatcher and subclasses retain inherited fields. The `Path` string-pointer and `Enum` member-pointer aliases share the same shallow-promotion rule in analysis and code generation. CPython/native oracles preserve string, tuple, actual-base, and subclass object graphs across callee reset. The 862-function full slice gains 828 owners and 469 fallible owners; parser, analyzer, binder, named-slice, and lowerer roots are covered. A retained hosted Stage 1 build completes in 27.99 seconds with 321,060,864-byte maximum RSS and zero swap. Its tiny native CLI reaches emitter effect analysis and exposes the separate pre-existing pointer-only dict equality blocker; no Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V390,V404,V406,V407,V408,V409
-B623|2026-07-20|after B622 the representative native CLI exited 70 at the unchanged allocation guard even for `return 7`. An allocation-fail stack stopped in `_phase_function_summaries -> _phase_block_effect -> _merge_phase_effects -> tuple_new`; generated LLVM showed `updated == summaries` for `dict[str, tuple[bool, bool]]` lowered to pointer identity, so the greatest fixed point could never accept a freshly allocated mapping with equal contents. V410 emits order-independent typed dictionary equality by length, key search, and recursive key/value equality, with `!=` negating the structural result. CPython/native oracles distinguish equal dictionaries built in different orders from unequal values and key sets. A retained Stage 1 builds in 28.05 seconds with 323,108,864-byte maximum RSS and zero swap, links only `libSystem`, and exposes no Python symbols. It compiles the tiny source in 0.62 seconds with 35,405,824-byte maximum RSS and zero swap, invokes only `llc` and `cc`, and the result exits 7. No Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V390,V404,V406,V407,V408,V409,V410
-B624|2026-07-20|the B623 full AOT suite passed 973 tests in 508.10 seconds, but the first audited full Stage 1-to-2 run reached the verified 900.20-second process-group watchdog after 897.10 user seconds with only 67,059,712-byte maximum RSS, zero swap, 409 source opens, no external tool execution, and no Stage 2/LLVM/tool-log artifact. The allocation guard did not fire. The full slice has 864 effect-analysis functions: capture safety converges in one pass, while allocation propagation changes 780, 45, 6, then 0 summaries over four passes. V410's order-independent tuple-backed dict equality restarted its right-key search for every left key even though these fixed-point dictionaries have aligned deterministic order, causing 1,494,720 unnecessary same-order key comparisons before accounting for tuple-backed construction and lookup. V411 first compares aligned keys/values once and falls back to the full V410 search only on key mismatch, preserving Python equality for different insertion orders. The focused CPython/native fallback oracle, 215 LLVM/M3 tests, and all five native CLI gates pass; no post-B624 Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V390,V404,V406,V407,V408,V409,V410,V411
-B625|2026-07-20|the first post-B624 full Stage 1-to-2 run reached the verified 900.12-second process-group watchdog after 896.91 user seconds with 50,397,184-byte maximum RSS, zero swap, 409 source opens, no external tool execution, and no Stage 2/LLVM/tool-log artifact. A separate bounded five-second sample collected 3,818 stacks while Stage 1 was still lexing: 3,152 (82.6%) stopped in `__xcc_aot_phase_promote_to` and 619 (16.2%) in `__xcc_aot_phase_capture_target`, proving that region provenance lookup, not fixed-point dictionary equality or memory pressure, dominates the remaining run. Independently, phase effect analysis counted every no-capture pointer result as an allocation even when the existing borrowed-return proof established that `__getitem` and related intrinsics alias input or process-stable storage; `_PythonLexer._peek` therefore opened a region for every character. V412 charges borrowed-return intrinsics only for argument allocations and propagates that fact through borrowers, while genuine scratch allocation remains conservative. Full-slice phase ownership falls from 828 to 798 functions and `_peek` becomes `(safe, no allocation)`. The focused CPython/native borrowed-string oracle exits 7; retained hosted Stage 1 construction takes 28.14 seconds with 318,685,184-byte maximum RSS, and its native compile takes 0.11 seconds with 47,120,384-byte maximum RSS using only `llc` and `cc`. 216 LLVM/M3 tests, all five native CLI gates, lint, and type pass; no full post-B625 Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V390,V403,V404,V406,V407,V408,V409,V410,V411,V412
-B626|2026-07-21|the B625 runtime keyed its single owner-region cache by both top mark and owner and cleared it on every mark/reset/commit, even though entering and leaving a descendant cannot change a non-null ancestor boundary for the same owner; repeated nested lexer stores therefore rescanned the allocation chain. V413 preserves a cached non-null target across descendant phases, invalidates a null current-region result when a child mark enters, and invalidates when the exact target exits. A native poison oracle corrupts the newest scan node after priming the cache, proves a nested same-owner query still returns the ancestor target without scanning, restores the header, and balances all reclamation; repeated nested list appends agree under CPython and native execution. In matched five-second samples, `capture_target` top frames fall from 619/3,818 (16.2%) to 423/3,825 (11.1%), while `promote_to` becomes 3,348/3,825 (87.5%) and remains the dominant blocker. The 15.16-second diagnostic uses 8,650,752-byte maximum RSS, opens 299 source paths, executes no tool, and produces no Stage 2 artifact. Retained hosted Stage 1 construction takes 27.89 seconds with 324,009,984-byte maximum RSS; its focused native compile uses only `llc` and `cc` and exits 7. 218 LLVM/M3 tests, lint, and type pass; no full post-B626 Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V390,V404,V405,V406,V407,V408,V409,V410,V411,V412,V413
-B627|2026-07-21|an attempted newest-first promotion walk reduced `lex_python` return-graph promotion from 1,819 to 251 frames in a matched frame-pointer sample, but the same token graph then cost 1,900 frames when `_PythonParser.__init__` captured it across the next region; the two-boundary total rose from about 2,530 to 2,660, so the traversal-order change was rejected and is not retained. That ordinary-Python experiment exposed a separate supported-language gap: direct `for ... in enumerate(values)` represents its item as one `(int, item)` pair for the loop emitter, while `tuple(enumerate(values))` forwarded that marker without materializing a sequence; `reversed` then hid the enumerate special case and tuple-target binding degraded `field` to opaque `object`. V414 lowers non-dictionary enumerate container constructors through the existing typed tuple/set comprehension builder, producing a homogeneous sequence of pairs that survives `reversed` and ordinary unpacking. Focused IR plus CPython/native behavior oracles pass. The final retained hosted Stage 1 builds in 28.18 seconds with 322,879,488-byte maximum RSS; it compiles the focused source in 0.64 seconds with 47,022,080-byte maximum RSS, invokes only `llc` and `cc`, and the result exits 7. 479 IR/LLVM/M3 tests, lint, and type pass; graph provenance remains the Stage 1-to-2 blocker and no Stage 2 result is claimed|V368,V372,V375,V376,V384,V385,V404,V407,V409,V412,V413,V414
-B628|2026-07-21|matched samples showed that traversal order only shifted the same token graph between `lex_python` return promotion and `_PythonParser.__init__` owner capture because every direct-parent store still recursively moved each reachable allocation before resetting the callee. V415 marks a capture whose target is the current mark and whose mark has a parent as a deferred region transfer: generated typed barriers skip the graph walk, later promotion into that mark stops immediately, and successful finish commits the complete callee segment into the parent in O(1). Deeper ancestor captures retain exact typed promotion and an outermost/global target cannot defer. Native runtime and generated-source oracles prove marker-only finish cost, stored-value survival, eventual parent reclamation, and CPython parity. 221 LLVM/M3 tests, lint, and type pass; a hosted Stage 1 builds in 28.27 seconds with 324,698,112-byte maximum RSS and zero swap. It compiles the focused capture source in 0.86 seconds with 47,415,296-byte maximum RSS, invokes only `llc` and `cc`, and matches CPython with exit 7; Stage 1 links only `libSystem`, has no Python symbols, and rejects the CPython parser. In matched frame-pointer samples, the parser-constructor capture after `lex_python` falls from 1,292 to one frame and the same five-second window advances into 1,853 module-parser frames; the remaining 1,488-frame lexer return promotion is the next lifetime boundary. The 15-second watchdog records 299 source opens, no tool execution, and no Stage 2 artifact. No Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V389,V404,V405,V406,V407,V413,V415
-B629|2026-07-21|after B628 reduced `_PythonParser.__init__` token capture from 1,292 frames to one, the matched sample still spent 1,488 frames recursively promoting the fresh token tuple out of `lex_python`; V404 always traced an owned return graph before reset even when a parent mark already provided its exact enclosing lifetime. V416 applies the V415 deferred-region primitive to V404-proven owned returns with a parent: the typed graph walk is skipped and successful finish commits the complete callee segment into the enclosing region. Borrowed or ambiguous returns remain unchanged, while an outermost owned return without a parent still performs exact promotion and reset so scratch dies and only the result survives. Native runtime and generated tuple-return oracles cover both paths and match CPython. 223 LLVM/M3 tests, lint, and type pass; a hosted Stage 1 builds in 28.57 seconds with 329,875,456-byte maximum RSS and zero swap. It compiles the focused return source in 0.74 seconds with 47,349,760-byte maximum RSS using only `llc` and `cc`, and matches CPython with exit 7; Stage 1 has no Python dependency or symbol. Two offset frame-pointer samples no longer contain the `lex_python` return-promotion branch. The later window instead spends 1,803/3,825 frames in lexer owner-target lookup and 745/3,825 in local promotion. The 17-second watchdog records 409 source opens, no tool execution, and no Stage 2 artifact. No Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V389,V390,V403,V404,V405,V406,V415,V416
-B630|2026-07-21|post-B629 frame samples spent up to 1,803/3,825 frames in `__xcc_aot_phase_capture_target`; generated `_PythonLexer._emit_from` alternates the token-container owner and lexer-record owner, so the single V413 entry evicted the other stable target at every barrier. V417 shifts a valid primary entry into one fixed secondary MRU slot on a distinct miss and applies the same null-target, exact-mark-exit, and pointer-reuse invalidation independently to both slots; it remains constant-space and does not introduce an allocation registry. A native poison oracle primes both owners, corrupts the newest scan node, and proves both alternating nested queries hit cache before restoring the header and balancing reclamation; alternating list/record writes match CPython natively. 225 LLVM/M3 tests, lint, and type pass; a hosted Stage 1 builds in 28.13 seconds with 330,760,192-byte maximum RSS and zero swap. It compiles the focused alternating-owner source in 0.75 seconds with 47,595,520-byte maximum RSS using only `llc` and `cc`, and matches CPython with exit 7; no Python dependency is present. In the matched 8--13-second sample, `capture_target` falls below the five-frame top-stack threshold while exact ancestor promotion becomes the next hotspot at 1,809/3,829 frames. The 17-second watchdog records 409 source opens, no tool execution, and no Stage 2 artifact. No Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V389,V407,V413,V415,V417
-B631|2026-07-21|after B630 removed alternating owner lookup, the matched lexer sample spent 1,809/3,829 frames recursively promoting token graphs from `_emit_from` across an intervening lexer phase; V415 deferred only a target equal to the current mark, so a valid ancestor target still walked every reachable allocation. V418 validates the complete current-to-target LIFO mark chain, marks every member deferred, and lets normal returns commit each segment upward in order until the captured value reaches the owner's lifetime; it never removes an active caller mark early. An outermost target whose parent is null rejects deferral and retains exact promotion so scratch cannot leak into process lifetime. A native accounting oracle proves two nested finishes remove only their 40-byte marks, preserve the stored value, and leave complete reclamation to the owner region; existing nested CPython/native captures remain equal. 226 LLVM/M3 tests, lint, and type pass; a hosted Stage 1 builds in 28.40 seconds with 326,778,880-byte maximum RSS and zero swap. It compiles the focused nested-capture source in 0.75 seconds with 47,448,064-byte maximum RSS using only `llc` and `cc`, and matches CPython with exit 7; no Python dependency is present. In the matched 8--13-second sample, both `capture_target` and `promote_to` fall below the five-frame top-stack threshold while actual lexer `startswith` work leads at 1,281/3,861 frames. The 17-second watchdog records 409 source opens, no tool execution, and no Stage 2 artifact. No Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V389,V404,V405,V406,V407,V413,V415,V418
-B632|2026-07-21|after B631 removed owner lookup and promotion from the matched lexer window, 1,281/3,861 sampled frames remained in `_lex_operator -> str.startswith -> strlen`; the ordinary operator loop tests up to 24 prefixes at the same source index, and measuring the complete immutable source on every test made source-set lexing approximately quadratic. The former raw-address length cache was unsafe under B596 because it survived phase reset, but measuring every call discarded the performance invariant. V419 restores one non-owning length entry whose lifetime is tied to the allocation boundary: both tracked/untracked `realloc` paths and the common phase `free` path invalidate the exact payload before reuse, so it never extends the source region and static pointers remain safe. The shared known-length helper also normalizes negative starts as `max(len + start, 0)` instead of the prior incorrect clamp to zero. A native poison oracle proves reset and resize invalidation before address reuse; long-loop and negative-start behavior match CPython. 226 LLVM/M3 tests, 162 runtime CPython/native oracles, lint, and type pass. A hosted Stage 1 builds in 28.61 seconds with 360,808,448-byte maximum RSS and zero swap. It compiles the focused source in 0.64 seconds with 47,366,144-byte maximum RSS using only `llc` and `cc`, and matches CPython with exit 7; Stage 1 links only `libSystem`, has no Python symbols, and rejects the CPython parser. The pre-fix 60.22-second single-process watchdog reached only the `xcc/lexer.py` source-set read, with 1,621 opens, no external tool or Stage 2 artifact, zero swap, and 526,024,704-byte maximum RSS. No Stage 1-to-2 result is claimed|V368,V376,V384,V385,V390,V391,V419
-B633|2026-07-21|the post-B632 single-process probe removed the lexer-time stall but exited 70 at the unchanged 512 MiB guard after 43.98 seconds, with 583,811,072-byte maximum RSS, zero swap, 2,005 source opens, and no tool or Stage 2 artifact. The 65-unit closure contains 2,958,482 source bytes, 501,794 lexer tokens, and 478,099 AST nodes. `AotModule` retains only filename/source/tree, yet generated `parse_subset_source` still applied B629 whole-region deferral, so the transient `_PythonParser` and its token graph were merged into the source-set lifetime rather than reclaimed after exact result escape. V420 detects an owned call on a freshly constructed receiver whose recursively container-shaped fields cannot retain the result type and forces exact typed return promotion plus local reset; receiver fields that may contain the result preserve the deferred path. A synthetic LLVM oracle distinguishes both decisions, and a CPython/native result-from-temporary oracle exits 7. 227 LLVM/M3 tests, 163 runtime CPython/native oracles, lint, and type pass. A retained hosted Stage 1 builds in 28.65 seconds with 361,447,424-byte maximum RSS and zero swap; its generated `parse_subset_source` uses exact promotion/reset while `lex_python` retains valid deferral. It compiles the focused source in 0.66 seconds with 47,546,368-byte maximum RSS using only `llc` and `cc`, matches CPython with exit 7, links only `libSystem`, has no Python symbols, and rejects the CPython parser. No post-B633 Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V390,V404,V416,V420
-B634|2026-07-21|the first post-B633 single-process probe reached the verified 60.13-second process-group watchdog with 59.75 user seconds, 166,690,816-byte maximum RSS, zero swap, 409 source opens, and no tool or Stage 2 artifact. The 417 MB peak-RSS drop from B632 confirms that V420 reclaims parser/token scratch, but generated exact graph helpers still visited record fields and homogeneous tuples oldest-first while `__xcc_aot_allocation_head` is newest-first, repeatedly scanning the remaining AST/token chain. The rejected B627 reverse-walk experiment reduced one promotion but inserted every moved node directly before the target, reversing the retained list and moving the same cost to the next boundary. V421 wraps each top-level typed move in a checked begin/end session, advances an insertion cursor toward older nodes, and visits record/tuple children newest-first; this preserves a stable oldest-to-newest retained list across repeated exact boundaries without changing graph reachability or Python order. A generated-LLVM oracle locks the scoped reverse walk, and a native runtime oracle moves three allocations newest-first across two boundaries, proves their A-to-B-to-C list order and values survive, then balances the allocation ledger. 229 LLVM/M3 tests, 163 runtime CPython/native oracles, lint, and type pass. A retained hosted Stage 1 builds in 28.60 seconds with 337,313,792-byte maximum RSS and zero swap; generated `parse_subset_source` uses scoped exact promotion while `lex_python` keeps valid deferral. It compiles the focused source in 0.11 seconds with 47,693,824-byte maximum RSS using only `llc` and `cc`, matches CPython with exit 7, launches no Python process, links only `libSystem`, has no Python symbols, and rejects the CPython parser. No post-B634 Stage 1-to-2 result is claimed|V368,V376,V384,V385,V388,V390,V404,V416,V420,V421
-B635|2026-07-21|the post-B634 single-process probe again reached the 60.14-second watchdog with 166,641,664-byte maximum RSS, zero swap, 409 source opens, and no tool or Stage 2 artifact, falsifying exact-promotion order as the dominant cost in that window. A bounded 8--13-second native sample then recorded 3,826 stacks: 1,947 stopped in `_PythonLexer._peek -> strlen`, 472 in `_PythonLexer._at_end -> strlen`, 125 in `__xcc_aot_string_slice -> strlen`, and 1,243 in `__xcc_aot_phase_promote_to`. B632's lifetime-safe weak length cache served only `startswith`; generated ordinary `len(str)`, truthiness, string iteration/indexing/membership, and runtime slicing still repeatedly measured the complete immutable source. V422 generalizes the same exact-payload lifetime proof to a bounded two-entry MRU, so a long source survives arbitrary single-byte alternation while both free/realloc paths invalidate either slot before address reuse. Generated LLVM proves string length observations use the cache, a native poison/lifetime oracle proves MRU order and primary-drop promotion, and a repeated-length plus single-byte CPython/native oracle exits 7. 231 LLVM/M3 tests, 164 runtime CPython/native oracles, lint, and type pass. A retained hosted Stage 1 builds in 28.69 seconds with 336,707,584-byte maximum RSS and zero swap; generated `_peek` and `_at_end` contain no raw `strlen`. It compiles the focused source in 0.11 seconds with 47,644,672-byte maximum RSS using only `llc` and `cc`, matches CPython with exit 7, launches no Python process, links only `libSystem`, has no Python symbols, and rejects the CPython parser. No post-B635 Stage 1-to-2 result is claimed|V368,V376,V384,V385,V390,V391,V419,V422
+## Proof Obligations
+
+- Stage 1 and Stage 2 open and parse the declared repository `.py` source set.
+  Deleting cached AST, IR, LLVM, or generated code must not break the build.
+- The emitted reachability closure includes the subset lexer/parser, binder,
+  lowerer, IR, emitter, runtime boundary, and native CLI.
+- Native binaries contain no Python C-API dependency and no unresolved
+  Python/libpython symbols.
+- Stage 2 and Stage 3 agree on normalized LLVM, exported symbols, source
+  manifest, and specified behavior fixtures. Unexplained drift fails the gate.
+- Module ordering, manifests, normalized LLVM, diagnostics, and tool logs are
+  deterministic.
+- A native C compiler smoke and a CPython `configure && make` build are
+  secondary integration gates; neither substitutes for the stage proof.
+
+## Python Value and Error Semantics
+
+- Supported operations match CPython-visible value, equality, mutation, alias,
+  iteration, exception, and formatting behavior. Pointer identity is not value
+  equality.
+- Fallible calls carry an explicit status/result/error representation through
+  handlers and call boundaries. An unhandled error reaches a nonzero CLI exit;
+  it never becomes a successful type-default value.
+- Tuple/list/set/dict values use stable owning handles. Growth may replace owned
+  backing storage without changing the handle. Mutating operations update the
+  receiver in place and preserve alias visibility, including self-extension.
+- Heterogeneous scalar unions and opaque objects use an explicit tagged
+  boundary. Container receivers are unboxed before structural access and
+  opaque results are boxed before crossing the boundary. Raw pointer shape is
+  never used as a substitute for a runtime type.
+- String, tuple, dict, record, `enumerate`, `reversed`, indexing, and f-string
+  paths preserve Python order and conversion behavior.
+
+## Native Memory Contract
+
+- Native compilation has bounded allocation growth and peak memory. Resource
+  exhaustion fails with a controlled diagnostic before the host or watchdog is
+  starved.
+- Compiler-owned allocation phases are inserted only from fixed-point
+  allocation, escape, capture, and return-provenance analyses. Unknown,
+  fallible, capturing, or opaque paths remain conservative.
+- Phases form a validated LIFO region stack. Reset frees only the current
+  region; commit transfers its complete segment to its parent; exact promotion
+  and capture move only validated reachable graphs without changing payload
+  addresses.
+- Allocation identity is checked in a bounded exact live index before ownership
+  metadata is read. Static or otherwise untracked pointers are treated as
+  nonmovable; tracked metadata corruption fails closed.
+- Allocation metadata remains bounded at 32 bytes per tracked allocation.
+  Allocation, reallocation, free, reset, and commit keep the live index and
+  ownership depth consistent.
+- Every retained pointer outlives its owner. Container writes apply an ownership
+  barrier; weak caches are bounded and invalidated before release, resize, mark
+  exit, or address reuse.
+- Loop iteration regions are used only when every carried and captured value has
+  a precise promotable representation. Opaque loop-carried objects disable
+  iteration reset.
+- Successful fresh pointer returns preserve only the proven result graph or
+  safely transfer the complete region to a parent. Unhandled fallible results
+  commit their error graph rather than tracing it incompletely.
+
+## Deterministic and Bounded Emission
+
+- Semantic helper identity uses an explicit structural key over IR types;
+  diagnostic `repr()` is never a semantic key.
+- Record names retained by long-lived work sets are canonical module-owned
+  names.
+- Promotion and object helpers are reserved once and emitted through finite
+  registry drains. The output must not contain duplicate helper definitions.
+- Reachability and LLVM rendering avoid repeated whole-collection copies.
+  Already-normalized immutable text is reused, no-op string replacement reuses
+  its input, and final LLVM assembly retains only one whole-module output
+  buffer.
+- Large intermediate render graphs are released before the final LLVM and
+  normalized LLVM buffers are assembled.
+
+## Implementation Boundaries
+
+| Area | Path |
+| --- | --- |
+| Project AST, lexer, parser, CPython adapter | `src/xcc/aot/py_ast.py`, `py_lexer.py`, `py_parser.py`, `cpython_ast_adapter.py` |
+| Source manifest and dependency order | `src/xcc/aot/source_contract.py` |
+| Native and hosted CLI | `src/xcc/aot/cli.py`, `hosted_cli.py`, `__main__.py` |
+| Binding and IR lowering | `src/xcc/aot/binder.py`, `ir.py`, `lower.py` |
+| Deterministic LLVM text | `src/xcc/aot/llvm_text.py` |
+| Native runtime | `src/xcc/aot/core_runtime.py` |
+
+## Acceptance
+
+Changes run focused hosted and native oracles, stage behavior gates, lint, and
+type checks. Memory or reachability changes also run the relevant bounded native
+build. A strong-bootstrap claim requires the full Stage 0 → 1 → 2 → 3 chain and
+all proof obligations above.

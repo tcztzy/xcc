@@ -1772,3 +1772,9 @@
   not only from accepted CLI option names. Emit one deterministic tool record per
   invocation and assert both the positive `llc`/assembler/linker set and the
   negative Python-executable gate on hosted and native builds.
+- A specification stops being useful when it becomes a second changelog.
+  Stable goals, interfaces, forbidden behavior, and acceptance gates belong in
+  specs; completed tasks and bug narratives belong in Git history and the
+  changelog, while reusable reasoning belongs here. Collapse
+  implementation-shaped micro-invariants into thematic contracts and let
+  focused tests retain the exact regression detail.

@@ -2,6 +2,18 @@
 
 ## Current
 
+- Simplified the normative specification set from 2,089 lines (312,546 bytes)
+  to 597 lines (27,758 bytes). `SPEC.md` is now the sole entry point,
+  `specs/` contains only current subsystem contracts, and the historical
+  `docs/superpowers/` plans and audits (9,936 lines, 614,346 bytes) have been
+  removed; they remain recoverable from Git history. Completed task tables,
+  bug timelines, numbered implementation-history ledgers, and duplicate
+  indexes no longer compete as sources of truth. Current status belongs in
+  this changelog and reusable reasoning in `LESSONS.md`. The AOT
+  allocation/lifetime work through B660 is retained as thematic memory-safety
+  and deterministic-emission requirements rather than commit-shaped
+  micro-invariants.
+
 - B647 restores the native C compiler gate broken since B636. Bisect
   (`bef52b0`/B635 good, `8c88803`/B636 bad) shows every
   `build_native_bootstrap` binary since B636 exited 70 with
