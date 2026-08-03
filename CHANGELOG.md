@@ -2,6 +2,39 @@
 
 ## Current
 
+- Profiled the native AOT compiler with macOS `sample` while it compiled the
+  real CPython `Objects/listobject.c`, then removed the three largest avoidable
+  linear-lookup costs. The original 6,904-sample profile attributed 32.34% to
+  repeated preprocessor text expansion, 22.19% to `strcmp`, 5.92% to
+  `TypeMap.get`, and 5.62% to parser typedef lookup. A bounded validated cache
+  now serves string-key dictionaries, identity-keyed `TypeMap` entries, and
+  parser string-scope membership. Monotonic container state tokens make
+  negative hits mutation- and ABA-safe; positive hits revalidate the live
+  tuple slot, and string cache entries retain an owned key copy. In alternating
+  three-run measurements on the same CPython source and flags, median wall time
+  fell from 8.29s to 5.09s, a 38.6% reduction (1.63x throughput). The final
+  profile contains 4,450 samples: `_expand_text_no_callback` and
+  `Parser._lookup_typedef` no longer appear as material leaf hotspots. All 468
+  LLVM lowering, native runtime-oracle, and AOT bootstrap tests pass, and the
+  optimized native compiler still produces the CPython object successfully.
+  A clean strong-bootstrap replay completed hosted Stage 1 in 30.52s, Stage
+  1→2 in 17.72s, and Stage 2→3 in 17.55s. All three executables and normalized
+  LLVM outputs are byte-identical; Stage 2/3 manifests and reachability outputs
+  are byte-identical, and the behavior gate passes. A final native compiler
+  rebuilt after formatting produced valid Mach-O ARM64 objects from CPython's
+  `Objects/listobject.c`, `Objects/dictobject.c`, `Python/compile.c`,
+  `Parser/parser.c`, and `Modules/_json.c`. The repository-wide `py311`
+  coverage gate was also run: all AOT modules passed after updating one stale
+  linear-dictionary IR assertion. The overall gate remains red in the current
+  mainline's ordinary frontend/preprocessor/CLI option-output expectations and
+  its coverage-ratchet assertion (`94.76` expected versus `94.65` configured),
+  none of which are modified by this AOT optimization.
+  Finally, the optimized native compiler completed a fresh out-of-tree
+  `configure` and serial `make -j1` of the clean CPython checkout at
+  `0f1f7c788987`: `make` exited 0 after checking all 116 configured modules
+  (37 built-in, 78 shared, one dependency-missing `_gdbm`, and zero import
+  failures). The CPython source checkout remained clean.
+
 - Completed the XCC strong-bootstrap AOT and clean CPython acceptance targets.
   From the final `src/xcc` snapshot, hosted Stage 0 built Stage 1 in 28.95s,
   Stage 1 built Stage 2 through the owned subset parser in 20.88s, and Stage 2

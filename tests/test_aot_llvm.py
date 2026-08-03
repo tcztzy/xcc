@@ -4727,7 +4727,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call i64 @__xcc_aot_string_len(ptr %haystack)", llvm_ir)
         self.assertNotIn("@__cmp_NotIn", llvm_ir)
 
-    def test_emits_dict_get_as_tuple_pair_scan(self) -> None:
+    def test_emits_string_dict_get_through_validated_hash_cache(self) -> None:
         int64 = IrIntType(64, signed=True)
         dict_type = IrDictType(IrStringType(), int64)
         module = IrModule(
@@ -4753,9 +4753,11 @@ class AotLlvmTextTests(unittest.TestCase):
 
         llvm_ir = emit_llvm_text(module)
 
-        self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %values)", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %values", llvm_ir)
-        self.assertIn("call i32 @strcmp", llvm_ir)
+        function_ir = llvm_ir.split("define i64 @lookup", 1)[1].split("\n}", 1)[0]
+
+        self.assertIn("call i64 @__xcc_aot_string_dict_find_index", function_ir)
+        self.assertNotIn("dictget.cond", function_ir)
+        self.assertIn("define i64 @__xcc_aot_string_dict_find_index", llvm_ir)
         self.assertNotIn("@__dict_get", llvm_ir)
 
     def test_emits_dict_items_as_tuple_identity(self) -> None:
@@ -5193,6 +5195,8 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("setadd.keep", llvm_ir)
         self.assertIn("setadd.append", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_tuple_append(ptr %values", llvm_ir)
+        self.assertIn("call void @__xcc_aot_dict_bump_state", llvm_ir)
+        self.assertIn("call void @__xcc_aot_string_tuple_note_index", llvm_ir)
         self.assertNotIn("call ptr @__xcc_aot_tuple_concat(ptr %values", llvm_ir)
         self.assertNotIn("call void @__xcc_aot_tuple_forward(ptr %values", llvm_ir)
         self.assertNotIn("@__set_add", llvm_ir)

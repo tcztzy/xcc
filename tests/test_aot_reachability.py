@@ -752,7 +752,8 @@ class AotReachabilityTests(unittest.TestCase):
 
         llvm_text = emit_llvm_text(module)
         self.assertIn("dictcomp.cond", llvm_text)
-        self.assertIn("dictset.cond", llvm_text)
+        self.assertIn("@__xcc_aot_string_dict_find_index", llvm_text)
+        self.assertNotIn("dictset.cond", llvm_text)
 
     def test_v376_homogeneous_tuple_assignment_preserves_element_types(self) -> None:
         module = lower_source_to_ir(

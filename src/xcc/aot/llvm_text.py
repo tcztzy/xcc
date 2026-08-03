@@ -6386,6 +6386,38 @@ class _Emitter:
         key_type, value_type = dict_value.type.key, dict_value.type.value
         key = self._emit_expr(expr.args[1], names, lines)
         self.needs_runtime_prelude = True
+        if isinstance(key_type, IrStringType):
+            result_type = self._llvm_type(expr.type)
+            initial_value = self._default_value(expr.type)
+            if len(expr.args) == 3:
+                default = self._emit_expr(expr.args[2], names, lines)
+                initial_value = self._value_for_result_type(default, expr.type, lines)
+            result_ptr = self._tmp("dictget.ptr")
+            index = self._tmp("dictget.index")
+            found = self._tmp("dictget.found")
+            found_label = self._label("dictget.found")
+            end_label = self._label("dictget.end")
+            lines.append(f"  {result_ptr} = alloca {result_type}")
+            lines.append(f"  store {result_type} {initial_value}, ptr {result_ptr}")
+            lines.append(
+                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
+                f"ptr {dict_value.value}, ptr {key.value})"
+            )
+            lines.append(f"  {found} = icmp sge i64 {index}, 0")
+            lines.append(f"  br i1 {found}, label %{found_label}, label %{end_label}")
+            lines.append(f"{found_label}:")
+            raw_pair = self._tmp("dictget.pair")
+            lines.append(
+                f"  {raw_pair} = call ptr @__xcc_aot_tuple_get(ptr {dict_value.value}, i64 {index})"
+            )
+            value = self._emit_runtime_tuple_get(raw_pair, 1, value_type, lines)
+            result_value = self._value_for_result_type(value, expr.type, lines)
+            lines.append(f"  store {result_type} {result_value}, ptr {result_ptr}")
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{end_label}:")
+            result = self._tmp("dictget")
+            lines.append(f"  {result} = load {result_type}, ptr {result_ptr}")
+            return _EmittedValue(result, expr.type)
         result_ptr = self._tmp("dictget.ptr")
         index_ptr = self._tmp("dictget.index")
         cond_label = self._label("dictget.cond")
@@ -6465,6 +6497,74 @@ class _Emitter:
         key = self._emit_expr(expr.args[1], names, lines)
         default = self._emit_expr(expr.args[2], names, lines)
         self.needs_runtime_prelude = True
+        if isinstance(key_type, IrStringType):
+            result_ptr = self._tmp("dictdefault.resultptr")
+            index = self._tmp("dictdefault.index")
+            found = self._tmp("dictdefault.found")
+            found_label = self._label("dictdefault.found")
+            insert_label = self._label("dictdefault.insert")
+            end_label = self._label("dictdefault.end")
+            result_type = self._llvm_type(expr.type)
+            default_result = self._value_for_result_type(default, expr.type, lines)
+            lines.append(f"  {result_ptr} = alloca {result_type}")
+            lines.append(
+                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
+                f"ptr {dict_value.value}, ptr {key.value})"
+            )
+            lines.append(f"  {found} = icmp sge i64 {index}, 0")
+            lines.append(f"  br i1 {found}, label %{found_label}, label %{insert_label}")
+            lines.append(f"{found_label}:")
+            existing_pair = self._tmp("dictdefault.pair")
+            lines.append(
+                f"  {existing_pair} = call ptr @__xcc_aot_tuple_get("
+                f"ptr {dict_value.value}, i64 {index})"
+            )
+            existing = self._emit_runtime_tuple_get(existing_pair, 1, value_type, lines)
+            existing_result = self._value_for_result_type(existing, expr.type, lines)
+            lines.append(f"  store {result_type} {existing_result}, ptr {result_ptr}")
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{insert_label}:")
+            length = self._tmp("dictdefault.len")
+            pair = self._tmp("dictdefault.pair")
+            appended = self._tmp("dictdefault.appended")
+            coerced_key = _EmittedValue(
+                self._value_for_result_type(key, key_type, lines),
+                key_type,
+            )
+            coerced_default = _EmittedValue(
+                self._value_for_result_type(default, value_type, lines),
+                value_type,
+            )
+            key_box = self._box_to_runtime_ptr(coerced_key, lines)
+            default_box = self._box_to_runtime_ptr(coerced_default, lines)
+            lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {dict_value.value})")
+            lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
+            lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
+            lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {default_box})")
+            pair_type = IrTupleType((key_type, value_type))
+            self._register_tuple_object_layout(pair, pair_type, lines)
+            self._emit_phase_capture_value(
+                dict_value.value,
+                pair,
+                pair_type,
+                True,
+                lines,
+            )
+            lines.append(
+                f"  {appended} = call ptr @__xcc_aot_tuple_append("
+                f"ptr {dict_value.value}, ptr {pair})"
+            )
+            lines.append(f"  call void @__xcc_aot_dict_bump_state(ptr {dict_value.value})")
+            lines.append(
+                f"  call void @__xcc_aot_string_dict_note_index("
+                f"ptr {dict_value.value}, ptr {key.value}, i64 {length})"
+            )
+            lines.append(f"  store {result_type} {default_result}, ptr {result_ptr}")
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{end_label}:")
+            result = self._tmp("dictdefault")
+            lines.append(f"  {result} = load {result_type}, ptr {result_ptr}")
+            return _EmittedValue(result, expr.type)
         result_ptr = self._tmp("dictdefault.resultptr")
         index_ptr = self._tmp("dictdefault.indexptr")
         cond_label = self._label("dictdefault.cond")
@@ -6557,6 +6657,74 @@ class _Emitter:
         key = self._emit_expr(expr.args[1], names, lines)
         value = self._emit_expr(expr.args[2], names, lines)
         self.needs_runtime_prelude = True
+        if isinstance(key_type, IrStringType):
+            index = self._tmp("dictset.index")
+            found = self._tmp("dictset.found")
+            found_label = self._label("dictset.found")
+            append_label = self._label("dictset.append")
+            end_label = self._label("dictset.end")
+            lines.append(
+                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
+                f"ptr {dict_value.value}, ptr {key.value})"
+            )
+            lines.append(f"  {found} = icmp sge i64 {index}, 0")
+            lines.append(f"  br i1 {found}, label %{found_label}, label %{append_label}")
+            lines.append(f"{found_label}:")
+            raw_pair = self._tmp("dictset.pair")
+            lines.append(
+                f"  {raw_pair} = call ptr @__xcc_aot_tuple_get(ptr {dict_value.value}, i64 {index})"
+            )
+            coerced_value = _EmittedValue(
+                self._value_for_result_type(value, value_type, lines),
+                value_type,
+            )
+            value_box = self._box_to_runtime_ptr(coerced_value, lines)
+            self._emit_phase_capture_value(raw_pair, value_box, value_type, True, lines)
+            lines.append(
+                f"  call void @__xcc_aot_tuple_set(ptr {raw_pair}, i64 1, ptr {value_box})"
+            )
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{append_label}:")
+            length = self._tmp("dictset.len")
+            pair = self._tmp("dictset.pair")
+            appended = self._tmp("dictset.appended")
+            coerced_key = _EmittedValue(
+                self._value_for_result_type(key, key_type, lines),
+                key_type,
+            )
+            key_box = self._box_to_runtime_ptr(coerced_key, lines)
+            coerced_append_value = _EmittedValue(
+                self._value_for_result_type(value, value_type, lines),
+                value_type,
+            )
+            append_value_box = self._box_to_runtime_ptr(coerced_append_value, lines)
+            lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {dict_value.value})")
+            lines.append(f"  {pair} = call ptr @__xcc_aot_tuple_new(i64 2)")
+            lines.append(f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 0, ptr {key_box})")
+            lines.append(
+                f"  call void @__xcc_aot_tuple_set(ptr {pair}, i64 1, ptr {append_value_box})"
+            )
+            pair_type = IrTupleType((key_type, value_type))
+            self._register_tuple_object_layout(pair, pair_type, lines)
+            self._emit_phase_capture_value(
+                dict_value.value,
+                pair,
+                pair_type,
+                True,
+                lines,
+            )
+            lines.append(
+                f"  {appended} = call ptr @__xcc_aot_tuple_append("
+                f"ptr {dict_value.value}, ptr {pair})"
+            )
+            lines.append(f"  call void @__xcc_aot_dict_bump_state(ptr {dict_value.value})")
+            lines.append(
+                f"  call void @__xcc_aot_string_dict_note_index("
+                f"ptr {dict_value.value}, ptr {key.value}, i64 {length})"
+            )
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{end_label}:")
+            return _EmittedValue(dict_value.value, expr.type)
         result_ptr = self._tmp("dictset.ptr")
         index_ptr = self._tmp("dictset.index")
         cond_label = self._label("dictset.cond")
@@ -6769,6 +6937,26 @@ class _Emitter:
         if not isinstance(target.type, IrDictType):
             self._error("__dict_remove expects a dictionary receiver")
         self.needs_runtime_prelude = True
+        if isinstance(target.type.key, IrStringType):
+            index = self._tmp("dictremove.index")
+            found = self._tmp("dictremove.found")
+            found_label = self._label("dictremove.found")
+            end_label = self._label("dictremove.end")
+            lines.append(
+                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
+                f"ptr {target.value}, ptr {key.value})"
+            )
+            lines.append(f"  {found} = icmp sge i64 {index}, 0")
+            lines.append(f"  br i1 {found}, label %{found_label}, label %{end_label}")
+            lines.append(f"{found_label}:")
+            removed = self._tmp("dictremove.removed")
+            lines.append(
+                f"  {removed} = call ptr @__xcc_aot_tuple_pop_item(ptr {target.value}, i64 {index})"
+            )
+            lines.append(f"  call void @__xcc_aot_dict_bump_state(ptr {target.value})")
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{end_label}:")
+            return _EmittedValue(target.value, target.type)
         index_ptr = self._tmp("dictremove.indexptr")
         cond_label = self._label("dictremove.cond")
         body_label = self._label("dictremove.body")
@@ -8493,11 +8681,21 @@ class _Emitter:
         lines.append(f"{append_label}:")
         appended = self._tmp("setadd.appended")
         boxed_item = self._box_to_runtime_ptr(item, lines)
+        append_index = None
+        if isinstance(item.type, IrStringType):
+            append_index = self._tmp("setadd.index")
+            lines.append(f"  {append_index} = call i64 @__xcc_aot_tuple_len(ptr {receiver.value})")
         self._emit_phase_capture_value(receiver.value, boxed_item, item.type, True, lines)
         lines.append(
             f"  {appended} = call ptr @__xcc_aot_tuple_append("
             f"ptr {receiver.value}, ptr {boxed_item})"
         )
+        if append_index is not None:
+            lines.append(f"  call void @__xcc_aot_dict_bump_state(ptr {appended})")
+            lines.append(
+                f"  call void @__xcc_aot_string_tuple_note_index("
+                f"ptr {appended}, ptr {boxed_item}, i64 {append_index})"
+            )
         lines.append(f"  br label %{end_label}")
         lines.append(f"{end_label}:")
         return _EmittedValue(receiver.value, expr.type)
@@ -8883,6 +9081,27 @@ class _Emitter:
         needle = self._emit_expr(needle_expr, names, lines)
         haystack = self._emit_expr(haystack_expr, names, lines)
         item_type = _homogeneous_tuple_element_type(haystack.type) or IrRecordType("object")
+        parser_scope_lookup = self.current_function is not None and self.current_function.name in {
+            "xcc.parser.__init__.Parser._lookup_ordinary_type",
+            "xcc.parser.__init__.Parser._lookup_ordinary_value",
+            "xcc.parser.__init__.Parser._lookup_typedef",
+        }
+        if (
+            parser_scope_lookup
+            and isinstance(needle.type, IrStringType)
+            and isinstance(item_type, IrStringType)
+        ):
+            index = self._tmp("stringcontains.index")
+            present = self._tmp("stringcontains")
+            lines.append(
+                f"  {index} = call i64 @__xcc_aot_string_tuple_find_index("
+                f"ptr {haystack.value}, ptr {needle.value})"
+            )
+            lines.append(f"  {present} = icmp sge i64 {index}, 0")
+            membership = _EmittedValue(present, IrBoolType())
+            if negate:
+                return self._emit_bool_not(membership, lines)
+            return membership
         result_ptr = self._tmp("contains.ptr")
         index_ptr = self._tmp("contains.index")
         cond_label = self._label("contains.cond")
@@ -8941,6 +9160,20 @@ class _Emitter:
         self.needs_runtime_prelude = True
         needle = self._emit_expr(needle_expr, names, lines)
         haystack = self._emit_expr(haystack_expr, names, lines)
+        if isinstance(haystack_expr.type.key, IrStringType) and isinstance(
+            needle.type, IrStringType
+        ):
+            index = self._tmp("dictcontains.index")
+            present = self._tmp("dictcontains")
+            lines.append(
+                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
+                f"ptr {haystack.value}, ptr {needle.value})"
+            )
+            lines.append(f"  {present} = icmp sge i64 {index}, 0")
+            membership = _EmittedValue(present, IrBoolType())
+            if negate:
+                return self._emit_bool_not(membership, lines)
+            return membership
         result_ptr = self._tmp("dictcontains.ptr")
         index_ptr = self._tmp("dictcontains.index")
         cond_label = self._label("dictcontains.cond")
@@ -11373,22 +11606,14 @@ class _Emitter:
                 f"  %map.field = getelementptr inbounds %TypeMap, ptr %{self_name}, "
                 f"i32 0, i32 {map_index}",
                 "  %map = load ptr, ptr %map.field",
-                "  %length = call i64 @__xcc_aot_tuple_len(ptr %map)",
-                "  %index.ptr = alloca i64",
-                "  store i64 %length, ptr %index.ptr",
-                "  br label %typemap.get.cond",
-                "typemap.get.cond:",
-                "  %index = load i64, ptr %index.ptr",
-                "  %empty = icmp eq i64 %index, 0",
-                "  br i1 %empty, label %typemap.get.missing, label %typemap.get.body",
-                "typemap.get.body:",
-                "  %previous = sub i64 %index, 1",
-                "  store i64 %previous, ptr %index.ptr",
-                "  %pair = call ptr @__xcc_aot_tuple_get(ptr %map, i64 %previous)",
-                "  %key = call ptr @__xcc_aot_tuple_get(ptr %pair, i64 0)",
-                f"  %match = icmp eq ptr %key, %{node_name}",
-                "  br i1 %match, label %typemap.get.found, label %typemap.get.cond",
+                (
+                    "  %index = call i64 @__xcc_aot_identity_dict_find_index("
+                    f"ptr %map, ptr %{node_name})"
+                ),
+                "  %missing = icmp slt i64 %index, 0",
+                "  br i1 %missing, label %typemap.get.missing, label %typemap.get.found",
                 "typemap.get.found:",
+                "  %pair = call ptr @__xcc_aot_tuple_get(ptr %map, i64 %index)",
                 "  %value = call ptr @__xcc_aot_tuple_get(ptr %pair, i64 1)",
                 "  ret ptr %value",
                 "typemap.get.missing:",
@@ -11424,6 +11649,7 @@ class _Emitter:
             f"  %map.field = getelementptr inbounds %TypeMap, ptr %{self_name}, "
             f"i32 0, i32 {map_index}",
             "  %map = load ptr, ptr %map.field",
+            "  %index = call i64 @__xcc_aot_tuple_len(ptr %map)",
             "  %pair = call ptr @__xcc_aot_tuple_new(i64 2)",
             f"  call void @__xcc_aot_tuple_set(ptr %pair, i64 0, ptr %{node_name})",
             f"  call void @__xcc_aot_tuple_set(ptr %pair, i64 1, ptr %{type_name})",
@@ -11434,6 +11660,11 @@ class _Emitter:
             (
                 "  %appended = call ptr @__xcc_aot_tuple_append(ptr %map, ptr %pair)",
                 "  store ptr %appended, ptr %map.field",
+                "  call void @__xcc_aot_dict_bump_state(ptr %appended)",
+                (
+                    "  call void @__xcc_aot_identity_dict_note_index("
+                    f"ptr %appended, ptr %{node_name}, i64 %index)"
+                ),
                 "  ret void",
                 "}",
             )

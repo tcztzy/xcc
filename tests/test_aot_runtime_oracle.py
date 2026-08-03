@@ -511,6 +511,27 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="dict-pop.py",
         )
 
+    def test_string_dict_cache_tracks_negative_insert_update_and_remove(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: dict[str, int] = {'alpha': 1, 'beta': 2}\n"
+            "    total = 0\n"
+            "    for _ in range(128):\n"
+            "        total += values.get('missing', 3)\n"
+            "        total += values.get('alpha', 0)\n"
+            "    values['missing'] = 7\n"
+            "    values['alpha'] = 11\n"
+            "    if values.get('missing', 0) != 7 or values.get('alpha', 0) != 11:\n"
+            "        return 1\n"
+            "    values.pop('missing', None)\n"
+            "    if values.get('missing', 5) != 5 or 'missing' in values:\n"
+            "        return 2\n"
+            "    values['gamma'] = total\n"
+            "    return 0 if values['gamma'] == 512 else 3\n",
+            expected=0,
+            filename="string-dict-cache-mutations.py",
+        )
+
     def test_constructor_maps_normalized_optional_field_by_parameter(self) -> None:
         self.assert_native_matches_cpython(
             "class Box:\n"

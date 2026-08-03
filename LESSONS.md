@@ -1,5 +1,14 @@
 # Lessons
 
+- Profile an AOT compiler as a native process before assuming Python dispatch,
+  the GIL, or LLVM is the bottleneck. On a real CPython translation unit,
+  `sample` showed repeated tuple-backed dictionary/set scans and `strcmp`, while
+  separately timing `llc` showed only a small tail. Cache semantics matter more
+  than the hash function: a negative lookup requires both an owned value key and
+  a mutation generation, while a positive lookup must revalidate the current
+  slot before trusting its index. Re-profile after each cache because removing
+  one scan changes the ranking; alternating adjacent binaries distinguishes the
+  resulting CPU reduction from macOS process-launch and scheduling noise.
 - A "proven allocation" proof must include static provenance. An emitter can
   prove a record's type and construction site and still hand the runtime a
   data-segment address (constant-folded default records, module-level

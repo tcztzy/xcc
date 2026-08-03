@@ -570,8 +570,18 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         )
         type_map_get_end = llvm_ir.index("\n}\n", type_map_get_start)
         type_map_get_llvm = llvm_ir[type_map_get_start:type_map_get_end]
-        self.assertIn("%previous = sub i64 %index, 1", type_map_get_llvm)
+        self.assertIn("@__xcc_aot_identity_dict_find_index", type_map_get_llvm)
         self.assertIn("label %typemap.get.found", type_map_get_llvm)
+        self.assertNotIn("typemap.get.cond", type_map_get_llvm)
+        self.assertIn("@__xcc_aot_dict_bump_state", type_map_set_llvm)
+        self.assertIn("@__xcc_aot_identity_dict_note_index", type_map_set_llvm)
+        typedef_lookup_start = llvm_ir.index(
+            "define ptr @xcc.parser.__init__.Parser._lookup_typedef("
+        )
+        typedef_lookup_end = llvm_ir.index("\n}\n", typedef_lookup_start)
+        typedef_lookup_llvm = llvm_ir[typedef_lookup_start:typedef_lookup_end]
+        self.assertIn("@__xcc_aot_string_tuple_find_index", typedef_lookup_llvm)
+        self.assertNotIn("contains.cond", typedef_lookup_llvm)
 
         self.assertIn("define i32 @main(i32 %argc, ptr %argv)", llvm_ir)
         self.assertIn(
