@@ -1,4 +1,5 @@
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
@@ -52,6 +53,17 @@ class FrontendResult:
         return tokens
 
 
+@dataclass
+class AotFrontendTimings:
+    preprocessing_ns: int = 0
+    parser_ns: int = 0
+    sema_ns: int = 0
+
+
+def _aot_monotonic_ns() -> int:
+    return time.monotonic_ns()
+
+
 def _map_diagnostic_location(
     pp_line_map: tuple[tuple[str, int], ...],
     line: int | None,
@@ -77,21 +89,37 @@ def _aot_compile_source_unchecked(
     source: str,
     filename: str,
     options: FrontendOptions,
+    timings: AotFrontendTimings | None = None,
 ) -> FrontendResult:
     normalized_options: FrontendOptions = normalize_options(options)
-    pp_result: PreprocessResult = preprocess_source(
-        source,
-        filename=filename,
-        options=normalized_options,
-    )
-    tokens: list[Token] = lex(pp_result.source)
-    unit: TranslationUnit = parse(tokens, std=normalized_options.std)
-    sema: SemaUnit = analyze(
-        unit,
-        std=normalized_options.std,
-        excess_init_ok=pp_result.embed_used,
-        pack_changes=pp_result.pack_changes,
-    )
+    preprocessing_start = _aot_monotonic_ns() if timings is not None else 0
+    try:
+        pp_result: PreprocessResult = preprocess_source(
+            source,
+            filename=filename,
+            options=normalized_options,
+        )
+    finally:
+        if timings is not None:
+            timings.preprocessing_ns = _aot_monotonic_ns() - preprocessing_start
+    parser_start = _aot_monotonic_ns() if timings is not None else 0
+    try:
+        tokens: list[Token] = lex(pp_result.source)
+        unit: TranslationUnit = parse(tokens, std=normalized_options.std)
+    finally:
+        if timings is not None:
+            timings.parser_ns = _aot_monotonic_ns() - parser_start
+    sema_start = _aot_monotonic_ns() if timings is not None else 0
+    try:
+        sema: SemaUnit = analyze(
+            unit,
+            std=normalized_options.std,
+            excess_init_ok=pp_result.embed_used,
+            pack_changes=pp_result.pack_changes,
+        )
+    finally:
+        if timings is not None:
+            timings.sema_ns = _aot_monotonic_ns() - sema_start
     return FrontendResult(
         filename,
         source,

@@ -35,6 +35,7 @@ ALLOWED_STDLIB_ROOTS = frozenset(
         "subprocess",
         "sys",
         "tempfile",
+        "time",
         "typing",
     }
 )

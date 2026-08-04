@@ -136,10 +136,12 @@ def build_native_bootstrap(
     *,
     llc: str | None = None,
     cc: str = "cc",
+    debug: bool = False,
+    profile: bool = False,
 ) -> Path:
     plan_bootstrap_entry(root)
     module = lower_bootstrap_entry_smoke(root)
-    llvm_ir = emit_llvm_text(module)
+    llvm_ir = emit_llvm_text(module, debug or profile)
     return compile_llvm_executable(
         llvm_ir,
         output,
@@ -148,6 +150,8 @@ def build_native_bootstrap(
         linker=cc,
         extra_link_args=_llvm_c_link_args(llc),
         diagnostic_code="XCC-AOT-BOOTSTRAP-0003",
+        debug=debug,
+        profile=profile,
     )
 
 

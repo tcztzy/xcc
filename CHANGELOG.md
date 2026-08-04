@@ -2,6 +2,40 @@
 
 ## Current
 
+- Added opt-in native AOT debug/profile builds with source-level LLVM metadata
+  (`DIFile`, `DICompileUnit`, `DISubprogram`, and statement `DILocation`),
+  DWARF v4, `uwtable`, target frame pointers, and runtime `.eh_frame` unwind
+  records. The default build remains free of debug metadata, absolute source
+  paths, and additional `llc` options. macOS `dwarfdump`, `llvm-dwarfdump`,
+  disassembly, `atos`, and an eight-second real `sample` run while compiling
+  CPython `Objects/listobject.c` all resolved complete nested native stacks to
+  XCC function names, files, and lines. A cross-target ELF integration test
+  checks the Linux `perf` contract: `.debug_info`, `.debug_line`, `.eh_frame`,
+  FDEs, and an x86-64 `RBP` prologue. Added opt-in monotonic
+  `xcc.compile-timing.v1` JSON for preprocessing, parser, sema, codegen, `llc`,
+  total duration, phase failure status, and explicit output paths; disabled
+  timing does not call the clock. Hosted `cProfile` compatibility is tested
+  separately from native profiling, without synthetic Python runtime events.
+  On real CPython `listobject.c`, default/profile/debug/timing-on outputs were
+  byte-identical; profile/debug retired 7.02%/7.30% more instructions than the
+  default frame-pointer-free compiler, timing added 0.16% over profile, and
+  debug metadata increased the executable/object sizes by 15.11%/17.91%.
+  Detailed commands, noisy wall-clock measurements, and the macOS-versus-Linux
+  runtime verification boundary are recorded in
+  `docs/aot-native-profiling.md`. A final strong-bootstrap replay from this
+  source snapshot passed the Stage 2/3 behavior gate: all three native
+  executables are byte-identical (SHA-256
+  `5d5f5a62d3b18ce241040b10d99353c0606259917a2d188df4d6bb0bd1f52a5a`),
+  as are normalized LLVM outputs (SHA-256
+  `ca7c11522c466a62c3fd441446203f8ba3add3445e415af41ed9878c3067a8ad`),
+  Stage 2/3 source manifests, and reachability artifacts. Finally, the
+  profile/debug native compiler completed a clean out-of-tree configure and
+  serial `make -j1` of CPython `0f1f7c788987`; CPython checked 116 modules (37
+  built-in, 78 shared, one dependency-missing `_gdbm`, and zero failed on
+  import). The resulting interpreter reports `Clang xcc 0.2` and independently
+  imports and exercises `ctypes`, `hashlib`, `sqlite3`, and `ssl`; the CPython
+  source checkout remained clean.
+
 - Profiled the native AOT compiler with macOS `sample` while it compiled the
   real CPython `Objects/listobject.c`, then removed the three largest avoidable
   linear-lookup costs. The original 6,904-sample profile attributed 32.34% to

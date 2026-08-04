@@ -1,5 +1,22 @@
 # Lessons
 
+- Native profiling and Python profiling are different observability contracts.
+  `cProfile` is valid while compiler semantics execute under CPython, but an
+  AOT-lowered compiler must be measured with `sample`, Instruments, or `perf`.
+  Synthesizing Python runtime events inside the native binary would profile the
+  emulation rather than the machine-code work.
+- Source-level DWARF alone is not a stack-unwind guarantee. Attach
+  `DISubprogram`/`DILocation` metadata, mark every definition `uwtable`, request
+  target frame pointers and runtime DWARF unwind emission, then verify all
+  three layers: object sections/FDEs, the actual prologue, and a live profiler
+  call graph. On Mach-O, forcing `.debug_frame` is not a substitute for the
+  runtime `.eh_frame` used by stack walkers.
+- Keep instrumentation truly opt-in at its first observable boundary. A
+  disabled phase timer should not even read the clock; an enabled timer needs a
+  monotonic source, a versioned fixed phase order, explicit failure states, and
+  a nonzero compile result when its requested output cannot be written. Compare
+  emitted object hashes across modes so observability changes do not silently
+  become semantic changes.
 - Profile an AOT compiler as a native process before assuming Python dispatch,
   the GIL, or LLVM is the bottleneck. On a real CPython translation unit,
   `sample` showed repeated tuple-backed dictionary/set scans and `strcmp`, while

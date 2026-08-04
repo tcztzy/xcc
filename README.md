@@ -156,6 +156,8 @@ behavior change is not progress here.
   `uv run tox -e cpython-build -- /path/to/cpython`
   This gate rebuilds the mypyc import tree first and then uses it through
   `PYTHONPATH` while CPython runs `CC=xcc`.
+- Native AOT profiling, DWARF debugging, Linux `perf`, and phase timing:
+  [`docs/aot-native-profiling.md`](docs/aot-native-profiling.md)
 - Validation: `uv run python scripts/validate_compiler.py`
 - Lint: `uv run tox -e lint`
 - Type check: `uv run tox -e type`

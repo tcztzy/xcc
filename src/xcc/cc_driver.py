@@ -12,9 +12,11 @@ from typing import Literal, TextIO
 from xcc.codegen import generate_llvm_ir
 from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import (
+    AotFrontendTimings,
     FrontendError,
     FrontendResult,
     _aot_compile_source_unchecked,
+    _aot_monotonic_ns,
     compile_path,
     compile_source,
     read_source,
@@ -481,6 +483,76 @@ def _aot_smoke_llc_argv(llvm_path: str, object_path: str) -> tuple[str, ...]:
     )
 
 
+def _aot_render_timing_json(
+    success: bool,
+    failed_stage: str,
+    total_ns: int,
+    preprocessing_ns: int,
+    parser_ns: int,
+    sema_ns: int,
+    codegen_ns: int,
+    llc_ns: int,
+) -> str:
+    preprocessing_status = "ok"
+    parser_status = "ok"
+    sema_status = "ok"
+    codegen_status = "ok"
+    llc_status = "ok"
+    if failed_stage == "preprocessing":
+        preprocessing_status = "error"
+        parser_status = "not_run"
+        sema_status = "not_run"
+        codegen_status = "not_run"
+        llc_status = "not_run"
+    elif failed_stage == "parser":
+        parser_status = "error"
+        sema_status = "not_run"
+        codegen_status = "not_run"
+        llc_status = "not_run"
+    elif failed_stage == "sema":
+        sema_status = "error"
+        codegen_status = "not_run"
+        llc_status = "not_run"
+    elif failed_stage == "codegen":
+        codegen_status = "error"
+        llc_status = "not_run"
+    elif failed_stage == "llc":
+        llc_status = "error"
+    success_text = "true" if success else "false"
+    failed_stage_text = "null" if failed_stage == "" else '"' + failed_stage + '"'
+    return (
+        '{"schema":"xcc.compile-timing.v1","clock":"monotonic",'
+        '"unit":"nanoseconds","success":'
+        + success_text
+        + ',"failed_stage":'
+        + failed_stage_text
+        + ',"total_ns":'
+        + str(total_ns)
+        + ',"phases":{'
+        + '"preprocessing":{"duration_ns":'
+        + str(preprocessing_ns)
+        + ',"status":"'
+        + preprocessing_status
+        + '"},"parser":{"duration_ns":'
+        + str(parser_ns)
+        + ',"status":"'
+        + parser_status
+        + '"},"sema":{"duration_ns":'
+        + str(sema_ns)
+        + ',"status":"'
+        + sema_status
+        + '"},"codegen":{"duration_ns":'
+        + str(codegen_ns)
+        + ',"status":"'
+        + codegen_status
+        + '"},"llc":{"duration_ns":'
+        + str(llc_ns)
+        + ',"status":"'
+        + llc_status
+        + '"}}}\n'
+    )
+
+
 def _aot_arg_is_c_source(arg: str) -> bool:
     return arg.endswith(".c")
 
@@ -572,6 +644,73 @@ def _aot_compile_source_to_llvm_ir_unchecked(
     return generate_llvm_ir(result)
 
 
+def _aot_compile_source_to_llvm_ir_timed(
+    source_path: str,
+    source_text: str,
+    include_dirs: tuple[str, ...],
+    defines: tuple[str, ...],
+    undefs: tuple[str, ...],
+    std: str,
+) -> tuple[str, int, int, int, int, str]:
+    options = FrontendOptions(
+        std="gnu11" if std == "gnu11" else "c11",
+        include_dirs=include_dirs,
+        system_include_dirs=_aot_default_system_include_dirs(),
+        defines=defines,
+        undefs=undefs,
+    )
+    timings = AotFrontendTimings()
+    try:
+        result = _aot_compile_source_unchecked(
+            source_text,
+            source_path,
+            options,
+            timings,
+        )
+    except PreprocessorError:
+        return "", timings.preprocessing_ns, 0, 0, 0, "preprocessing"
+    except (LexerError, ParserError):
+        return (
+            "",
+            timings.preprocessing_ns,
+            timings.parser_ns,
+            0,
+            0,
+            "parser",
+        )
+    except SemaError:
+        return (
+            "",
+            timings.preprocessing_ns,
+            timings.parser_ns,
+            timings.sema_ns,
+            0,
+            "sema",
+        )
+    codegen_start = _aot_monotonic_ns()
+    try:
+        llvm_text = generate_llvm_ir(result)
+    except CodegenError:
+        codegen_ns = _aot_monotonic_ns() - codegen_start
+        return (
+            "",
+            timings.preprocessing_ns,
+            timings.parser_ns,
+            timings.sema_ns,
+            codegen_ns,
+            "codegen",
+        )
+    codegen_ns = _aot_monotonic_ns() - codegen_start
+    return (
+        llvm_text,
+        timings.preprocessing_ns,
+        timings.parser_ns,
+        timings.sema_ns,
+        codegen_ns,
+        "",
+    )
+
+
 def _aot_compile_source_to_llvm_ir(
     source_path: str,
     source_text: str,
@@ -610,23 +749,96 @@ def _aot_compile_source_path_to_object(
     defines: tuple[str, ...],
     undefs: tuple[str, ...],
     std: str,
+    timing_path: str = "",
 ) -> bool:
     source_text: str = _aot_read_text_file(source_path)
-    llvm_text: str = _aot_compile_source_to_llvm_ir(
-        source_path,
-        source_text,
-        include_dirs,
-        defines,
-        undefs,
-        std,
-    )
+    timing_start = 0
+    preprocessing_ns = 0
+    parser_ns = 0
+    sema_ns = 0
+    codegen_ns = 0
+    failed_stage = ""
+    if timing_path:
+        timing_start = _aot_monotonic_ns()
+        (
+            llvm_text,
+            preprocessing_ns,
+            parser_ns,
+            sema_ns,
+            codegen_ns,
+            failed_stage,
+        ) = _aot_compile_source_to_llvm_ir_timed(
+            source_path,
+            source_text,
+            include_dirs,
+            defines,
+            undefs,
+            std,
+        )
+    else:
+        llvm_text = _aot_compile_source_to_llvm_ir(
+            source_path,
+            source_text,
+            include_dirs,
+            defines,
+            undefs,
+            std,
+        )
     llvm_path: str = _aot_smoke_llvm_path(object_path)
     if llvm_text == "":
+        if timing_path and not _aot_write_text_file(
+            timing_path,
+            _aot_render_timing_json(
+                False,
+                failed_stage or "codegen",
+                _aot_monotonic_ns() - timing_start,
+                preprocessing_ns,
+                parser_ns,
+                sema_ns,
+                codegen_ns,
+                0,
+            ),
+        ):
+            return False
         return False
+    write_start = _aot_monotonic_ns() if timing_path else 0
     if not _aot_write_text_file(llvm_path, llvm_text):
+        if timing_path:
+            codegen_ns += _aot_monotonic_ns() - write_start
+            _aot_write_text_file(
+                timing_path,
+                _aot_render_timing_json(
+                    False,
+                    "codegen",
+                    _aot_monotonic_ns() - timing_start,
+                    preprocessing_ns,
+                    parser_ns,
+                    sema_ns,
+                    codegen_ns,
+                    0,
+                ),
+            )
         return False
+    if timing_path:
+        codegen_ns += _aot_monotonic_ns() - write_start
     llc_argv: tuple[str, ...] = _aot_smoke_llc_argv(llvm_path, object_path)
-    return _aot_exec_argv(llc_argv) == 0
+    llc_start = _aot_monotonic_ns() if timing_path else 0
+    llc_status = _aot_exec_argv(llc_argv)
+    if not timing_path:
+        return llc_status == 0
+    llc_ns = _aot_monotonic_ns() - llc_start
+    success = llc_status == 0
+    timing_text = _aot_render_timing_json(
+        success,
+        "" if success else "llc",
+        _aot_monotonic_ns() - timing_start,
+        preprocessing_ns,
+        parser_ns,
+        sema_ns,
+        codegen_ns,
+        llc_ns,
+    )
+    return _aot_write_text_file(timing_path, timing_text) and success
 
 
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
@@ -636,16 +848,25 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
     scan_compile_only = False
     scan_has_source = False
     scan_has_link_input = False
+    scan_has_timing = False
     scan_index = 1
     while scan_index < count:
         scan_arg = argv[scan_index]
-        if scan_arg == "-c":
+        if scan_arg == "--timing-json":
+            scan_has_timing = True
+            scan_index += 2
+            continue
+        if scan_arg.startswith("--timing-json="):
+            scan_has_timing = True
+        elif scan_arg == "-c":
             scan_compile_only = True
         elif _aot_arg_is_c_source(scan_arg):
             scan_has_source = True
         elif _aot_arg_is_existing_link_input(scan_arg):
             scan_has_link_input = True
         scan_index += 1
+    if scan_has_timing and not scan_has_source:
+        return 1
     if not scan_compile_only and not scan_has_source and scan_has_link_input:
         return _aot_exec_argv(_aot_existing_link_argv(argv))
     compile_only = False
@@ -657,6 +878,7 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
     defines: tuple[str, ...] = ()
     undefs: tuple[str, ...] = ()
     std = "c11"
+    timing_path = ""
     index = 1
     while index < count:
         arg: str = argv[index]
@@ -690,6 +912,17 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
             if index >= count:
                 return 1
             link_flags = link_flags + (arg, argv[index])
+        elif arg == "--timing-json":
+            index += 1
+            if index >= count or timing_path != "":
+                return 1
+            timing_path = argv[index]
+        elif arg.startswith("--timing-json="):
+            if timing_path != "":
+                return 1
+            timing_path = arg.split("=", 1)[1]
+            if timing_path == "":
+                return 1
         elif arg == "-std=c11":
             std = "c11"
         elif arg == "-std=gnu11":
@@ -722,6 +955,7 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
             defines,
             undefs,
             std,
+            timing_path,
         ):
             return 0
         return 1
@@ -739,6 +973,7 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
         defines,
         undefs,
         std,
+        timing_path,
     ):
         return 1
     link_argv = _aot_link_argv(object_path, executable_path, link_flags)

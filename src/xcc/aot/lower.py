@@ -526,8 +526,16 @@ class _Lowerer:
         function_name = _lowered_function_name(node.name, owner)
         params, names = self._lower_params(node, owner)
         return_type = self._annotation_to_ir_type(node.returns)
+        source_span = _ir_source_span(node)
         if bodyless or _is_ellipsis_body(node.body):
-            return IrFunction(function_name, params, return_type, ())
+            return IrFunction(
+                function_name,
+                params,
+                return_type,
+                (),
+                self.filename,
+                source_span,
+            )
         previous_callable_param_targets = self.callable_param_targets
         previous_owner = self.current_owner
         self.callable_param_targets = self._callable_param_default_targets(node)
@@ -539,7 +547,14 @@ class _Lowerer:
         finally:
             self.callable_param_targets = previous_callable_param_targets
             self.current_owner = previous_owner
-        return IrFunction(function_name, params, return_type, body)
+        return IrFunction(
+            function_name,
+            params,
+            return_type,
+            body,
+            self.filename,
+            source_span,
+        )
 
     def _lower_params(
         self,
@@ -623,6 +638,15 @@ class _Lowerer:
         return None
 
     def _lower_statement(
+        self,
+        statement: ast.stmt,
+        names: dict[str, IrType],
+        return_type: IrType,
+    ) -> IrStmt:
+        lowered = self._lower_statement_without_span(statement, names, return_type)
+        return _with_statement_span(lowered, _ir_source_span(statement))
+
+    def _lower_statement_without_span(
         self,
         statement: ast.stmt,
         names: dict[str, IrType],
@@ -7501,6 +7525,40 @@ def _except_handler_names(handler: ast.ExceptHandler) -> tuple[str, ...]:
     if isinstance(handler.type, ast.Tuple):
         return tuple(ast.unparse(item) for item in handler.type.elts)
     return (ast.unparse(handler.type),)
+
+
+def _with_statement_span(statement: IrStmt, span: IrSourceSpan) -> IrStmt:
+    if isinstance(statement, IrAssign):
+        return IrAssign(statement.target, statement.value, span)
+    if isinstance(statement, IrSetItem):
+        return IrSetItem(statement.target, statement.index, statement.value, span)
+    if isinstance(statement, IrReturn):
+        return IrReturn(statement.value, span)
+    if isinstance(statement, IrIf):
+        return IrIf(statement.condition, statement.then_branch, statement.else_branch, span)
+    if isinstance(statement, IrForEach):
+        return IrForEach(statement.target, statement.iterable, statement.body, span)
+    if isinstance(statement, IrWhile):
+        return IrWhile(statement.condition, statement.body, span)
+    if isinstance(statement, IrBreak):
+        return IrBreak(span)
+    if isinstance(statement, IrContinue):
+        return IrContinue(span)
+    if isinstance(statement, IrPrint):
+        return IrPrint(statement.value, span)
+    if isinstance(statement, IrRaise):
+        return IrRaise(statement.exception, statement.message, span, statement.payload)
+    if isinstance(statement, IrReraise):
+        return IrReraise(span)
+    if isinstance(statement, IrTry):
+        return IrTry(
+            statement.body,
+            statement.handlers,
+            statement.orelse,
+            statement.finalbody,
+            span,
+        )
+    raise AssertionError("unsupported IR statement")
 
 
 def _ir_source_span(node: ast.AST) -> IrSourceSpan:

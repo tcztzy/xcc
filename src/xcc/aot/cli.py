@@ -78,17 +78,23 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
     emit_normalized_ir = ""
     source_manifest = ""
     tool_log = ""
+    debug = False
+    profile = False
     llc = "/opt/homebrew/opt/llvm/bin/llc"
     assembler = ""
     linker = "cc"
     index = 2
     while index < argc:
         argument = argv[index]
-        if argument == "--no-cache":
+        if argument in ("--debug", "--no-cache", "--profile"):
             if argument in seen_options:
                 print(f"xcc-aot: duplicate option: {argument}")
                 return 2
             seen_options += (argument,)
+            if argument == "--debug":
+                debug = True
+            elif argument == "--profile":
+                profile = True
             index += 1
             continue
         option = argument
@@ -158,6 +164,8 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
         assembler,
         linker,
         "--no-cache" in seen_options,
+        debug,
+        profile,
     )
 
 
@@ -173,6 +181,8 @@ def _run_native_build(
     assembler: str,
     linker: str,
     no_cache: bool,
+    debug: bool,
+    profile: bool,
 ) -> int32:
     if entry.count(":") != 1:
         print(f"xcc-aot: invalid entry: {entry}")
@@ -208,7 +218,7 @@ def _run_native_build(
     ):
         print(f"xcc-aot: cannot write native reachability: {reachability_path}")
         return 1
-    llvm_text = emit_llvm_text(ir_module)
+    llvm_text = emit_llvm_text(ir_module, debug or profile)
     llvm_path = emit_llvm or output + ".ll"
     if not _write_text(llvm_path, llvm_text):
         print(f"xcc-aot: cannot write LLVM: {llvm_path}")
@@ -227,9 +237,16 @@ def _run_native_build(
     object_path = output + ".o"
     commands: tuple[tuple[str, ...], ...] = ()
     command: tuple[str, ...]
+    llc_options: tuple[str, ...] = ()
+    if debug or profile:
+        llc_options = (
+            "--frame-pointer=all",
+            "--emit-dwarf-unwind=always",
+            "--dwarf-version=4",
+        )
     if assembler:
         assembly_path = output + ".s"
-        command = (llc, "-filetype=asm", llvm_path, "-o", assembly_path)
+        command = (llc,) + llc_options + ("-filetype=asm", llvm_path, "-o", assembly_path)
         commands += (command,)
         if _run_tool(command) != 0:
             print("xcc-aot: llc failed")
@@ -240,7 +257,7 @@ def _run_native_build(
             print("xcc-aot: assembler failed")
             return 1
     else:
-        command = (llc, "-filetype=obj", llvm_path, "-o", object_path)
+        command = (llc,) + llc_options + ("-filetype=obj", llvm_path, "-o", object_path)
         commands += (command,)
         if _run_tool(command) != 0:
             print("xcc-aot: llc failed")

@@ -887,6 +887,7 @@ _PHASE_NO_CAPTURE_INTRINSICS = frozenset(
 _PHASE_SPECIAL_EMITTER_FUNCTIONS = frozenset(
     {
         "xcc.cc_driver._aot_exec_argv",
+        "xcc.frontend._aot_monotonic_ns",
         "xcc.cc_driver._aot_read_text_file",
         "xcc.cc_driver._aot_write_text_file",
         "xcc.codegen._llvm_print_module_to_string",
@@ -1957,14 +1958,15 @@ def _function_uses_owned_phase(
     return summary is not None and summary[0] and summary[1]
 
 
-def emit_llvm_text(module: IrModule) -> str:
-    emitter = _Emitter(module)
+def emit_llvm_text(module: IrModule, debug: bool = False) -> str:
+    emitter = _Emitter(module, debug=debug)
     return emitter.emit()
 
 
 class _Emitter:
-    def __init__(self, module: IrModule) -> None:
+    def __init__(self, module: IrModule, *, debug: bool = False) -> None:
         self.module = module
+        self.debug = debug
         self.records = {record.name: record for record in module.records}
         self.canonical_record_names = {record.name: record.name for record in module.records}
         self.phase_record_descendants = _phase_record_descendant_map(self.records)
@@ -2023,15 +2025,22 @@ class _Emitter:
         self.record_equality_records: set[str] = set()
         self.tuple_object_equality_records: set[str] = set()
         self.needs_tagged_object_equality_helpers = False
+        self.debug_metadata_index = 0
+        self.debug_metadata: list[str] = []
+        self.debug_files: dict[str, tuple[int, int]] = {}
+        self.debug_compile_units: list[int] = []
+        self.debug_subroutine_type: int | None = None
 
     def emit(self) -> str:
         declarations = [self._emit_record(record) for record in self.module.records]
-        functions = [
-            guard_allocation_calls(self._emit_function(function))
-            for function in self.module.functions
-        ]
+        functions = []
+        for function in self.module.functions:
+            emitted = guard_allocation_calls(self._emit_function(function))
+            functions.append(self._add_function_debug(emitted, function))
         raw_main = self._emit_main()
         main = None if raw_main is None else guard_allocation_calls(raw_main)
+        if main is not None and self.module.entry is not None:
+            main = self._add_function_debug(main, self.functions[self.module.entry], name="main")
         phase_promotion_helpers = self._emit_phase_promotion_helpers()
         phase_capture_helpers = self._emit_phase_capture_helpers()
         record_equality_helpers = [
@@ -2069,7 +2078,123 @@ class _Emitter:
         lines.extend(tagged_object_equality_helpers)
         if main is not None:
             lines.append(main)
-        return _finalize_llvm_lines(lines)
+        if self.debug:
+            lines.extend(self._emit_debug_metadata())
+        llvm_text = _finalize_llvm_lines(lines)
+        if self.debug:
+            return _enable_unwind_tables(llvm_text)
+        return llvm_text
+
+    def _new_debug_metadata(self, text: str) -> int:
+        metadata_id = self.debug_metadata_index
+        self.debug_metadata_index += 1
+        self.debug_metadata.append(f"!{metadata_id} = {text}")
+        return metadata_id
+
+    def _debug_file(self, filename: str) -> tuple[int, int]:
+        cached = self.debug_files.get(filename)
+        if cached is not None:
+            return cached
+        normalized = filename.replace("\\", "/")
+        if "/" in normalized:
+            directory, basename = normalized.rsplit("/", 1)
+            if not directory:
+                directory = "/"
+        else:
+            directory = ""
+            basename = normalized
+        file_id = self._new_debug_metadata(
+            '!DIFile(filename: "'
+            + _escape_debug_string(basename)
+            + '", directory: "'
+            + _escape_debug_string(directory)
+            + '")'
+        )
+        compile_unit_id = self._new_debug_metadata(
+            "distinct !DICompileUnit(language: DW_LANG_Python, "
+            f'file: !{file_id}, producer: "xcc-aot 0.2", isOptimized: false, '
+            "runtimeVersion: 0, emissionKind: FullDebug)"
+        )
+        result = (file_id, compile_unit_id)
+        self.debug_files[filename] = result
+        self.debug_compile_units.append(compile_unit_id)
+        return result
+
+    def _add_function_debug(
+        self,
+        llvm_text: str,
+        function: IrFunction,
+        *,
+        name: str | None = None,
+    ) -> str:
+        if not self.debug:
+            return llvm_text
+        filename = function.source_filename or self.module.filename
+        file_id, compile_unit_id = self._debug_file(filename)
+        if self.debug_subroutine_type is None:
+            self.debug_subroutine_type = self._new_debug_metadata("!DISubroutineType(types: !{})")
+        line = function.source_span.line or 1
+        column = function.source_span.column
+        if column is None:
+            column = 0
+        linkage_name = name or function.name
+        subprogram_id = self._new_debug_metadata(
+            'distinct !DISubprogram(name: "'
+            + _escape_debug_string(linkage_name)
+            + '", linkageName: "'
+            + _escape_debug_string(linkage_name)
+            + f'", scope: !{file_id}, file: !{file_id}, line: {line}, '
+            f"type: !{self.debug_subroutine_type}, scopeLine: {line}, "
+            "spFlags: DISPFlagDefinition, "
+            f"unit: !{compile_unit_id})"
+        )
+        location_id = self._new_debug_metadata(
+            f"!DILocation(line: {line}, column: {column + 1}, scope: !{subprogram_id})"
+        )
+        locations: dict[tuple[int, int], int] = {}
+        lines = llvm_text.splitlines()
+        in_function_header = False
+        for index, llvm_line in enumerate(lines):
+            if llvm_line.startswith("define "):
+                in_function_header = True
+            if in_function_header and llvm_line.endswith("{"):
+                lines[index] = llvm_line[:-1].rstrip() + f" !dbg !{subprogram_id} {{"
+                in_function_header = False
+                continue
+            marker_start = llvm_line.find("!__xcc_aot_loc_")
+            if marker_start >= 0:
+                marker_end = llvm_line.find("__", marker_start + len("!__xcc_aot_loc_"))
+                if marker_end >= 0:
+                    marker = llvm_line[marker_start + 1 : marker_end + 2]
+                    coordinates = marker.removeprefix("__xcc_aot_loc_").removesuffix("__")
+                    source_line_text, source_column_text = coordinates.split("_", 1)
+                    key = (int(source_line_text), int(source_column_text))
+                    source_location_id = locations.get(key)
+                    if source_location_id is None:
+                        source_location_id = self._new_debug_metadata(
+                            f"!DILocation(line: {key[0]}, column: {key[1]}, "
+                            f"scope: !{subprogram_id})"
+                        )
+                        locations[key] = source_location_id
+                    lines[index] = llvm_line.replace(
+                        "!" + marker,
+                        f"!{source_location_id}",
+                    )
+                    continue
+            if _debuggable_llvm_instruction(llvm_line):
+                lines[index] = llvm_line + f", !dbg !{location_id}"
+        return "\n".join(lines)
+
+    def _emit_debug_metadata(self) -> list[str]:
+        dwarf_flag = self._new_debug_metadata('!{i32 2, !"Dwarf Version", i32 4}')
+        debug_flag = self._new_debug_metadata('!{i32 2, !"Debug Info Version", i32 3}')
+        compile_units = ", ".join(f"!{item}" for item in self.debug_compile_units)
+        return [
+            "",
+            f"!llvm.dbg.cu = !{{{compile_units}}}",
+            f"!llvm.module.flags = !{{!{dwarf_flag}, !{debug_flag}}}",
+            *self.debug_metadata,
+        ]
 
     def _emit_record(self, record: IrRecord) -> str:
         fields = ", ".join(self._storage_llvm_type(field.type) for field in record.fields)
@@ -2080,6 +2205,8 @@ class _Emitter:
             return self._emit_generic_function(function, fallible=True)
         if function.name == "xcc.cc_driver._aot_exec_argv":
             return self._emit_aot_exec_argv_function(function)
+        if function.name == "xcc.frontend._aot_monotonic_ns":
+            return self._emit_aot_monotonic_ns_function(function)
         if function.name == "xcc.cc_driver._aot_read_text_file":
             return self._emit_aot_read_text_file_function(function)
         if function.name == "xcc.cc_driver._aot_write_text_file":
@@ -2234,6 +2361,25 @@ class _Emitter:
         return "\n".join(lines)
 
     def _emit_statement(
+        self,
+        statement: IrStmt,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+        return_type: IrType,
+    ) -> None:
+        start = len(lines)
+        self._emit_statement_without_debug(statement, names, lines, return_type)
+        if not self.debug or statement.span.line is None:
+            return
+        column = statement.span.column
+        if column is None:
+            column = 0
+        marker = f"__xcc_aot_loc_{statement.span.line}_{column + 1}__"
+        for index in range(start, len(lines)):
+            if _debuggable_llvm_instruction(lines[index]):
+                lines[index] = lines[index] + f", !dbg !{marker}"
+
+    def _emit_statement_without_debug(
         self,
         statement: IrStmt,
         names: dict[str, _EmittedValue],
@@ -11214,6 +11360,32 @@ class _Emitter:
             )
         )
 
+    def _emit_aot_monotonic_ns_function(self, function: IrFunction) -> str:
+        self.index = 0
+        if (
+            function.params
+            or not isinstance(function.return_type, IrIntType)
+            or function.return_type.bits != 64
+        ):
+            self._error("AOT monotonic clock helper expects () -> int")
+        self.extra_declarations.add("declare i32 @clock_gettime(i32, ptr)")
+        return "\n".join(
+            (
+                f"define i64 {_llvm_symbol(function.name)}() {{",
+                "entry:",
+                "  %clock = alloca [2 x i64]",
+                "  %clock.status = call i32 @clock_gettime(i32 4, ptr %clock)",
+                "  %clock.sec.ptr = getelementptr inbounds [2 x i64], ptr %clock, i32 0, i32 0",
+                "  %clock.nsec.ptr = getelementptr inbounds [2 x i64], ptr %clock, i32 0, i32 1",
+                "  %clock.sec = load i64, ptr %clock.sec.ptr",
+                "  %clock.nsec = load i64, ptr %clock.nsec.ptr",
+                "  %clock.sec.ns = mul i64 %clock.sec, 1000000000",
+                "  %clock.result = add i64 %clock.sec.ns, %clock.nsec",
+                "  ret i64 %clock.result",
+                "}",
+            )
+        )
+
     def _emit_aot_write_text_file_function(self, function: IrFunction) -> str:
         self.index = 0
         self.needs_runtime_prelude = True
@@ -12251,6 +12423,53 @@ class _Emitter:
 
 def _escape_c_string(value: str) -> str:
     return _escape_bytes(value.encode("utf-8"))
+
+
+def _escape_debug_string(value: str) -> str:
+    return _escape_bytes(value.encode("utf-8"))
+
+
+def _debuggable_llvm_instruction(line: str) -> bool:
+    if not line.startswith("  ") or line.startswith("    ") or "!dbg" in line:
+        return False
+    stripped = line.strip()
+    starts_instruction = stripped.startswith(
+        (
+            "%",
+            "br ",
+            "call ",
+            "fence ",
+            "ret ",
+            "store ",
+            "switch ",
+            "unreachable",
+        )
+    )
+    if not starts_instruction or stripped.endswith((",", "[", "(")):
+        return False
+    return (
+        stripped.count("(") == stripped.count(")")
+        and stripped.count("[") == stripped.count("]")
+        and stripped.count("{") == stripped.count("}")
+    )
+
+
+def _enable_unwind_tables(llvm_text: str) -> str:
+    lines: list[str] = []
+    in_function_header = False
+    for line in llvm_text.splitlines():
+        if line.startswith("define "):
+            in_function_header = True
+        if in_function_header and line.endswith("{") and " uwtable" not in line:
+            debug_index = line.find(" !dbg !")
+            if debug_index >= 0:
+                line = line[:debug_index] + " uwtable" + line[debug_index:]
+            else:
+                line = line[:-1].rstrip() + " uwtable {"
+        if in_function_header and line.endswith("{"):
+            in_function_header = False
+        lines.append(line)
+    return "\n".join(lines) + "\n"
 
 
 def _escape_bytes(value: bytes) -> str:

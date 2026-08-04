@@ -65,6 +65,7 @@ from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
 
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.cc_driver._aot_exec_argv",
+    "xcc.frontend._aot_monotonic_ns",
     "xcc.cc_driver._aot_read_text_file",
     "xcc.cc_driver._aot_write_text_file",
     "xcc.codegen._llvm_print_module_to_string",
@@ -551,6 +552,8 @@ def _lower_core_slice_all(paths: tuple[Path, ...]) -> IrModule:
                     function.params,
                     function.return_type,
                     _rename_statement_calls(function.body, rename_map),
+                    function.source_filename,
+                    function.source_span,
                 )
             )
     return IrModule("<core-slice>", tuple(records), tuple(functions))
@@ -700,6 +703,8 @@ def _lower_named_slice_from_roots(
                 function.params,
                 function.return_type,
                 _rename_statement_calls(function.body, rename_map),
+                function.source_filename,
+                function.source_span,
             )
             functions[full_name] = lowered
             if lowered.name in _NATIVE_EMITTED_LEAF_FUNCTIONS:
@@ -1490,15 +1495,20 @@ def _rename_statement_calls(
 
 def _rename_statement_call(statement: IrStmt, rename_map: dict[str, str]) -> IrStmt:
     if isinstance(statement, IrAssign):
-        return IrAssign(statement.target, _rename_expr_call(statement.value, rename_map))
+        return IrAssign(
+            statement.target,
+            _rename_expr_call(statement.value, rename_map),
+            statement.span,
+        )
     if isinstance(statement, IrSetItem):
         return IrSetItem(
             _rename_expr_call(statement.target, rename_map),
             _rename_expr_call(statement.index, rename_map),
             _rename_expr_call(statement.value, rename_map),
+            statement.span,
         )
     if isinstance(statement, IrReturn):
-        return IrReturn(_rename_expr_call(statement.value, rename_map))
+        return IrReturn(_rename_expr_call(statement.value, rename_map), statement.span)
     if isinstance(statement, IrIf):
         return IrIf(
             _rename_expr_call(statement.condition, rename_map),
@@ -1508,22 +1518,25 @@ def _rename_statement_call(statement: IrStmt, rename_map: dict[str, str]) -> IrS
                 if statement.else_branch is not None
                 else None
             ),
+            statement.span,
         )
     if isinstance(statement, IrForEach):
         return IrForEach(
             statement.target,
             _rename_expr_call(statement.iterable, rename_map),
             _rename_branch_calls(statement.body, rename_map),
+            statement.span,
         )
     if isinstance(statement, IrWhile):
         return IrWhile(
             _rename_expr_call(statement.condition, rename_map),
             _rename_branch_calls(statement.body, rename_map),
+            statement.span,
         )
     if isinstance(statement, (IrBreak, IrContinue)):
         return statement
     if isinstance(statement, IrPrint):
-        return IrPrint(_rename_expr_call(statement.value, rename_map))
+        return IrPrint(_rename_expr_call(statement.value, rename_map), statement.span)
     if isinstance(statement, IrRaise):
         return IrRaise(
             statement.exception,
@@ -1550,6 +1563,7 @@ def _rename_statement_call(statement: IrStmt, rename_map: dict[str, str]) -> IrS
             ),
             _rename_branch_calls(statement.orelse, rename_map),
             _rename_branch_calls(statement.finalbody, rename_map),
+            statement.span,
         )
     assert_never(statement)
 

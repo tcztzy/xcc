@@ -62,6 +62,52 @@ from xcc.aot.llvm_text import (
 
 
 class AotLlvmTextTests(unittest.TestCase):
+    def test_debug_metadata_is_opt_in_and_tracks_function_and_statement_lines(self) -> None:
+        source = (
+            "def helper(value: int) -> int:\n"
+            "    adjusted = value + 1\n"
+            "    return adjusted\n"
+            "def answer() -> int:\n"
+            "    return helper(2)\n"
+        )
+        module = lower_source_to_ir(
+            source,
+            filename="/tmp/xcc-debug/pkg/compiler.py",
+            entry="answer",
+        )
+
+        plain = emit_llvm_text(module)
+        debug = emit_llvm_text(module, debug=True)
+
+        self.assertNotIn("!DIFile", plain)
+        self.assertNotIn("!dbg", plain)
+        self.assertIn('!DIFile(filename: "compiler.py", directory: "/tmp/xcc-debug/pkg")', debug)
+        self.assertIn("distinct !DICompileUnit(language: DW_LANG_Python", debug)
+        self.assertIn('distinct !DISubprogram(name: "helper"', debug)
+        self.assertRegex(debug, r"!DILocation\(line: 2, column: 5, scope: !\d+\)")
+        self.assertRegex(debug, r"!DILocation\(line: 3, column: 5, scope: !\d+\)")
+        self.assertIn(" uwtable !dbg !", debug)
+
+    def test_debug_unwind_attribute_covers_multiline_runtime_definitions(self) -> None:
+        source = (
+            "def answer(values: tuple[str, ...]) -> int:\n"
+            "    return len(values)\n"
+        )
+        module = lower_source_to_ir(source, filename="runtime-lines.py", entry="answer")
+        lines = emit_llvm_text(module, debug=True).splitlines()
+        headers: list[str] = []
+        collecting: list[str] = []
+        for line in lines:
+            if line.startswith("define "):
+                collecting = [line]
+            elif collecting:
+                collecting.append(line)
+            if collecting and line.endswith("{"):
+                headers.append(" ".join(collecting))
+                collecting = []
+        self.assertTrue(headers)
+        self.assertTrue(all(" uwtable" in header for header in headers))
+
     def test_v446_object_phase_helpers_use_one_finite_emission(self) -> None:
         source = inspect.getsource(
             llvm_text_module._Emitter._emit_phase_promotion_helpers

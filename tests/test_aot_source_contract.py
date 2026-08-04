@@ -79,10 +79,10 @@ class AotSourceContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "pkg"
             root.mkdir()
-            (root / "__init__.py").write_text("import json\n", encoding="utf-8")
+            (root / "__init__.py").write_text("import json\nimport time\n", encoding="utf-8")
 
             source_set = resolve_source_set(root, "pkg", HOSTED_BACKEND)
-            self.assertEqual(source_set.units[0].external_dependencies, ("json",))
+            self.assertEqual(source_set.units[0].external_dependencies, ("json", "time"))
 
             (root / "bad.py").write_text("import third_party\n", encoding="utf-8")
             with self.assertRaises(AotError) as ctx:

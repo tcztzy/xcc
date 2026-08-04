@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, cast
 
 
@@ -243,6 +243,7 @@ IrExpr = (
 class IrAssign:
     target: str
     value: IrExpr
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -250,11 +251,13 @@ class IrSetItem:
     target: IrExpr
     index: IrExpr
     value: IrExpr
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
 class IrReturn:
     value: IrExpr
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -267,6 +270,7 @@ class IrIf:
     condition: IrExpr
     then_branch: IrBranch
     else_branch: IrBranch | None = None
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -274,40 +278,43 @@ class IrForEach:
     target: str
     iterable: IrExpr
     body: IrBranch
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
 class IrWhile:
     condition: IrExpr
     body: IrBranch
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
 class IrBreak:
-    pass
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
 class IrContinue:
-    pass
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
 class IrPrint:
     value: IrExpr
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
 class IrRaise:
     exception: str
     message: IrExpr
-    span: IrSourceSpan = IrSourceSpan()
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
     payload: IrExpr | None = None
 
 
 @dataclass(frozen=True)
 class IrReraise:
-    span: IrSourceSpan = IrSourceSpan()
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -323,6 +330,7 @@ class IrTry:
     handlers: tuple[IrExceptHandler, ...] = ()
     orelse: IrBranch = IrBranch(())
     finalbody: IrBranch = IrBranch(())
+    span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 IrStmt = (
@@ -347,6 +355,8 @@ class IrFunction:
     params: tuple[IrParam, ...]
     return_type: IrType
     body: tuple[IrStmt, ...]
+    source_filename: str = field(default="", compare=False)
+    source_span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -370,6 +380,8 @@ def qualify_ir_entry(module: IrModule, qualified_name: str) -> IrModule:
                     function.params,
                     function.return_type,
                     function.body,
+                    function.source_filename,
+                    function.source_span,
                 )
             )
             found = True

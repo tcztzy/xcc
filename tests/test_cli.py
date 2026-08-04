@@ -1,4 +1,6 @@
+import cProfile
 import io
+import json
 import os
 import subprocess
 import tempfile
@@ -9,6 +11,8 @@ from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 from xcc import cc_driver, main
+from xcc.codegen import generate_llvm_ir
+from xcc.frontend import compile_source
 
 
 class CliTests(unittest.TestCase):
@@ -82,6 +86,154 @@ class CliTests(unittest.TestCase):
             self.assertIn(f'source_filename = "{source}"', llvm_ir)
             self.assertIn("define i32 @main()", llvm_ir)
             self.assertIn("ret i32 0", llvm_ir)
+
+    def test_native_aot_timing_json_has_stable_success_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "timed.c"
+            output = root / "timed.o"
+            timing = root / "timing.json"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+
+            with patch("xcc.cc_driver._aot_exec_argv", return_value=0):
+                code = cc_driver._aot_compile_smoke_source_to_object(
+                    6,
+                    (
+                        "xcc",
+                        "-c",
+                        str(source),
+                        "-o",
+                        str(output),
+                        f"--timing-json={timing}",
+                    ),
+                )
+
+            payload = json.loads(timing.read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["schema"], "xcc.compile-timing.v1")
+        self.assertEqual((payload["clock"], payload["unit"]), ("monotonic", "nanoseconds"))
+        self.assertTrue(payload["success"])
+        self.assertIsNone(payload["failed_stage"])
+        self.assertGreaterEqual(payload["total_ns"], 0)
+        self.assertEqual(
+            tuple(payload["phases"]),
+            ("preprocessing", "parser", "sema", "codegen", "llc"),
+        )
+        for phase in payload["phases"].values():
+            self.assertGreaterEqual(phase["duration_ns"], 0)
+            self.assertEqual(phase["status"], "ok")
+
+    def test_native_aot_timing_json_records_parser_and_llc_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            parser_source = root / "parser-error.c"
+            parser_timing = root / "parser-error.json"
+            parser_source.write_text("int main(\n", encoding="utf-8")
+            parser_code = cc_driver._aot_compile_smoke_source_to_object(
+                4,
+                ("xcc", "-c", str(parser_source), f"--timing-json={parser_timing}"),
+            )
+            parser_payload = json.loads(parser_timing.read_text(encoding="utf-8"))
+
+            llc_source = root / "llc-error.c"
+            llc_timing = root / "llc-error.json"
+            llc_source.write_text("int value;\n", encoding="utf-8")
+            with patch("xcc.cc_driver._aot_exec_argv", return_value=9):
+                llc_code = cc_driver._aot_compile_smoke_source_to_object(
+                    4,
+                    ("xcc", "-c", str(llc_source), f"--timing-json={llc_timing}"),
+                )
+            llc_payload = json.loads(llc_timing.read_text(encoding="utf-8"))
+
+        self.assertEqual(parser_code, 1)
+        self.assertFalse(parser_payload["success"])
+        self.assertEqual(parser_payload["failed_stage"], "parser")
+        self.assertEqual(parser_payload["phases"]["parser"]["status"], "error")
+        self.assertEqual(parser_payload["phases"]["sema"]["status"], "not_run")
+        self.assertEqual(llc_code, 1)
+        self.assertEqual(llc_payload["failed_stage"], "llc")
+        self.assertEqual(llc_payload["phases"]["llc"]["status"], "error")
+
+    def test_native_aot_timing_is_zero_intrusion_when_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "plain.c"
+            output = root / "plain.o"
+            source.write_text("int value;\n", encoding="utf-8")
+            with (
+                patch(
+                    "xcc.cc_driver._aot_monotonic_ns",
+                    side_effect=AssertionError("driver clock reached"),
+                ),
+                patch(
+                    "xcc.frontend._aot_monotonic_ns",
+                    side_effect=AssertionError("frontend clock reached"),
+                ),
+                patch("xcc.cc_driver._aot_exec_argv", return_value=0),
+            ):
+                result = cc_driver._aot_compile_source_path_to_object(
+                    str(source),
+                    str(output),
+                    (),
+                    (),
+                    (),
+                    "c11",
+                )
+
+        self.assertTrue(result)
+
+    def test_hosted_python_cprofile_observes_frontend_semantic_phases(self) -> None:
+        profiler = cProfile.Profile()
+        llvm_ir = profiler.runcall(
+            lambda: generate_llvm_ir(
+                compile_source("int answer(void){return 42;}\n", filename="profiled.c")
+            )
+        )
+        function_names = {
+            getattr(entry.code, "co_name", "") for entry in profiler.getstats()
+        }
+
+        self.assertIn("define i32 @answer()", llvm_ir)
+        for function_name in (
+            "compile_source",
+            "preprocess_source",
+            "parse",
+            "analyze",
+            "generate_llvm_ir",
+        ):
+            self.assertIn(function_name, function_names)
+
+    def test_native_aot_timing_output_failure_fails_the_compile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "timed.c"
+            output = root / "timed.o"
+            timing = root / "missing" / "timing.json"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+
+            with (
+                patch("xcc.cc_driver._aot_exec_argv", return_value=0),
+                patch(
+                    "xcc.cc_driver._aot_write_text_file",
+                    side_effect=(True, False),
+                ) as write_text,
+            ):
+                code = cc_driver._aot_compile_smoke_source_to_object(
+                    6,
+                    (
+                        "xcc",
+                        "-c",
+                        str(source),
+                        "-o",
+                        str(output),
+                        f"--timing-json={timing}",
+                    ),
+                )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(write_text.call_count, 2)
+        self.assertEqual(write_text.call_args_list[-1].args[0], str(timing))
 
     def test_aot_smoke_compiler_accepts_build_flags_under_cpython(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -41,6 +41,8 @@ class BuildOptions:
     llc: str | None
     assembler: str | None
     linker: str
+    debug: bool
+    profile: bool
 
 
 def hosted_main(argc: int32, argv: tuple[str, ...]) -> int32:
@@ -93,6 +95,8 @@ def _hosted_main(argc: int32, argv: tuple[str, ...]) -> int32:
 def _parse_build_options(arguments: tuple[str, ...]) -> BuildOptions:
     values: dict[str, str] = {}
     no_cache = False
+    debug = False
+    profile = False
     index = 0
     value_names = {
         "--assembler",
@@ -109,10 +113,22 @@ def _parse_build_options(arguments: tuple[str, ...]) -> BuildOptions:
     }
     while index < len(arguments):
         argument = arguments[index]
-        if argument == "--no-cache":
-            if no_cache:
-                raise ValueError("duplicate option: --no-cache")
-            no_cache = True
+        if argument in {"--debug", "--no-cache", "--profile"}:
+            already_set = (
+                no_cache
+                if argument == "--no-cache"
+                else debug
+                if argument == "--debug"
+                else profile
+            )
+            if already_set:
+                raise ValueError(f"duplicate option: {argument}")
+            if argument == "--no-cache":
+                no_cache = True
+            elif argument == "--debug":
+                debug = True
+            else:
+                profile = True
             index += 1
             continue
         name = argument
@@ -159,6 +175,8 @@ def _parse_build_options(arguments: tuple[str, ...]) -> BuildOptions:
         values.get("--llc"),
         values.get("--assembler"),
         values.get("--linker", "cc"),
+        debug,
+        profile,
     )
 
 
@@ -237,7 +255,7 @@ def _run_hosted_build(options: BuildOptions) -> None:
     )
     ir_module = replace(ir_module, entry=qualified_entry)
     validate_ir_module(ir_module)
-    llvm_text = emit_llvm_text(ir_module)
+    llvm_text = emit_llvm_text(ir_module, options.debug or options.profile)
     if options.emit_llvm is not None:
         _write_text(options.emit_llvm, llvm_text)
     if options.emit_normalized_ir is not None:
@@ -266,6 +284,8 @@ def _run_hosted_build(options: BuildOptions) -> None:
         assembler=options.assembler,
         linker=options.linker,
         tool_log=options.tool_log,
+        debug=options.debug,
+        profile=options.profile,
     )
 
 

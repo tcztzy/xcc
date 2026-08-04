@@ -104,6 +104,8 @@ def compile_llvm_executable(
     extra_link_args: tuple[str, ...] = (),
     diagnostic_code: str = "XCC-AOT-NATIVE-0001",
     tool_log: Path | None = None,
+    debug: bool = False,
+    profile: bool = False,
 ) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     ll_path = output.parent / f"{output.name}.ll"
@@ -113,8 +115,16 @@ def compile_llvm_executable(
     llc_path = llc or os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
     commands: list[tuple[str, ...]] = []
     command: tuple[str, ...]
+    llc_options = _native_llc_options(debug=debug, profile=profile)
     if assembler is None:
-        command = (llc_path, "-filetype=obj", str(ll_path), "-o", str(obj_path))
+        command = (
+            llc_path,
+            *llc_options,
+            "-filetype=obj",
+            str(ll_path),
+            "-o",
+            str(obj_path),
+        )
         commands.append(command)
         _run_tool(
             command,
@@ -122,7 +132,14 @@ def compile_llvm_executable(
             diagnostic_code=diagnostic_code,
         )
     else:
-        command = (llc_path, "-filetype=asm", str(ll_path), "-o", str(assembly_path))
+        command = (
+            llc_path,
+            *llc_options,
+            "-filetype=asm",
+            str(ll_path),
+            "-o",
+            str(assembly_path),
+        )
         commands.append(command)
         _run_tool(
             command,
@@ -147,6 +164,16 @@ def compile_llvm_executable(
         tool_log.parent.mkdir(parents=True, exist_ok=True)
         tool_log.write_text(_render_tool_log(tuple(commands)), encoding="utf-8")
     return output
+
+
+def _native_llc_options(*, debug: bool, profile: bool) -> tuple[str, ...]:
+    if not debug and not profile:
+        return ()
+    return (
+        "--frame-pointer=all",
+        "--emit-dwarf-unwind=always",
+        "--dwarf-version=4",
+    )
 
 
 def _render_tool_log(commands: tuple[tuple[str, ...], ...]) -> str:
