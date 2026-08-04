@@ -207,7 +207,7 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertIn("@__xcc_aot_allocation_limit = internal constant i64 536870912", llvm_ir)
         self.assertIn(
-            "@__xcc_aot_phase_allocation_limit = internal constant i64 2147483648",
+            "@__xcc_aot_phase_allocation_limit = internal constant i64 4294967296",
             llvm_ir,
         )
         self.assertIn("define internal ptr @__xcc_aot_alloc(i64 %requested)", llvm_ir)

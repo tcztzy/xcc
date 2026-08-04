@@ -96,7 +96,11 @@ def runtime_prelude() -> str:
             ),
             "@__xcc_aot_allocated_bytes = internal global i64 0",
             "@__xcc_aot_allocation_limit = internal constant i64 536870912",
-            "@__xcc_aot_phase_allocation_limit = internal constant i64 2147483648",
+            # Large generated translation units (for example tables embedded as
+            # byte arrays) can legitimately retain more than 2 GiB while one
+            # compiler phase is active.  Keep the unscoped 512 MiB guard above,
+            # but give the reclaimable phase arena enough headroom for them.
+            "@__xcc_aot_phase_allocation_limit = internal constant i64 4294967296",
             "@__xcc_aot_allocation_head = internal global ptr null",
             "@__xcc_aot_phase_allocation_buckets = internal global [262144 x ptr] zeroinitializer",
             "@__xcc_aot_allocation_tag = internal constant i64 56945",

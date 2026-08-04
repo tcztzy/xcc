@@ -112,6 +112,8 @@ class _StatementParser(Protocol):
         types: dict[str, TypeSpec] | None = None,
     ) -> None: ...
 
+    def _record_current_source_location(self) -> None: ...
+
     def _skip_decl_attributes(self) -> bool: ...
 
     def _skip_extension_markers(self) -> None: ...
@@ -295,6 +297,7 @@ def parse_for_stmt(parser: _StatementParser) -> ForStmt:
             p._advance()
             init = None
         elif p._is_declaration_start():
+            p._record_current_source_location()
             init = p._parse_decl_stmt()
         else:
             init = p._parse_expression()

@@ -3,6 +3,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -73,6 +74,7 @@ class CliTests(unittest.TestCase):
                 [
                     (
                         "/opt/homebrew/opt/llvm/bin/llc",
+                        "-O0",
                         "-filetype=obj",
                         str(output) + ".ll",
                         "-o",
@@ -86,6 +88,66 @@ class CliTests(unittest.TestCase):
             self.assertIn(f'source_filename = "{source}"', llvm_ir)
             self.assertIn("define i32 @main()", llvm_ir)
             self.assertIn("ret i32 0", llvm_ir)
+
+    def test_native_aot_debug_c_compile_emits_metadata_and_stack_options(self) -> None:
+        commands: list[tuple[str, ...]] = []
+
+        def fake_run(command: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess:
+            commands.append(tuple(command))
+            if command[0] == "/opt/homebrew/opt/llvm/bin/llc":
+                Path(command[-1]).write_bytes(b"object")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "debug.c"
+            output = root / "debug.o"
+            source.write_text(
+                "int answer(void) {\n  return 42;\n}\n",
+                encoding="utf-8",
+            )
+
+            with patch("subprocess.run", fake_run):
+                code = cc_driver._aot_compile_smoke_source_to_object(
+                    6,
+                    ("xcc", "-g", "-c", str(source), "-o", str(output)),
+                )
+
+            llvm_ir = (root / "debug.o.ll").read_text(encoding="utf-8")
+
+        self.assertEqual(code, 0)
+        llc_command = next(
+            command for command in commands if command[0] == "/opt/homebrew/opt/llvm/bin/llc"
+        )
+        for option in (
+            "-O0",
+            "--frame-pointer=all",
+            "--emit-dwarf-unwind=always",
+            "--dwarf-version=4",
+        ):
+            self.assertIn(option, llc_command)
+        self.assertIn("!DICompileUnit(language: DW_LANG_C11", llvm_ir)
+        self.assertRegex(llvm_ir, r'DISubprogram\(name: "answer".*line: 1')
+        self.assertRegex(llvm_ir, r"DILocation\(line: 2, column: [1-9]")
+
+    def test_native_aot_debug_link_runs_dsymutil_and_propagates_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "debug.c"
+            output = root / "debug"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+            with (
+                patch("xcc.cc_driver._aot_compile_source_path_to_object", return_value=True),
+                patch("xcc.cc_driver._aot_exec_argv", side_effect=(0, 7)) as execute,
+            ):
+                code = cc_driver._aot_compile_smoke_source_to_object(
+                    5,
+                    ("xcc", "-g", str(source), "-o", str(output)),
+                )
+
+        self.assertEqual(code, 7)
+        self.assertEqual(execute.call_count, 2)
+        self.assertEqual(execute.call_args_list[-1].args[0], ("/usr/bin/dsymutil", str(output)))
 
     def test_native_aot_timing_json_has_stable_success_schema(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -729,6 +791,111 @@ class CliTests(unittest.TestCase):
         llc_cmd = self._llc_compile_cmds(run, llc_path)[0]
         self.assertIn("-O0", llc_cmd)
         self.assertLess(llc_cmd.index("-O0"), llc_cmd.index("-filetype=obj"))
+
+    def test_debug_driver_flags_control_metadata_frame_and_unwind_options(self) -> None:
+        debug = cc_driver._parse_driver_config(["-g", "-c", "sample.c", "-o", "sample.o"])
+        self.assertTrue(debug.debug_info)
+        self.assertTrue(debug.frame_pointer)
+        self.assertTrue(debug.unwind_tables)
+        command = cc_driver._llvm_object_argv(
+            debug,
+            "/tool/llc",
+            Path("sample.ll"),
+            Path("sample.o"),
+        )
+        for option in (
+            "-O0",
+            "--frame-pointer=all",
+            "--emit-dwarf-unwind=always",
+            "--dwarf-version=4",
+        ):
+            self.assertIn(option, command)
+
+        disabled = cc_driver._parse_driver_config(["-g", "-g0", "-c", "sample.c"])
+        self.assertFalse(disabled.debug_info)
+        self.assertFalse(disabled.frame_pointer)
+        self.assertFalse(disabled.unwind_tables)
+        frame_only = cc_driver._parse_driver_config(["-fno-omit-frame-pointer", "-c", "sample.c"])
+        self.assertFalse(frame_only.debug_info)
+        self.assertTrue(frame_only.frame_pointer)
+        self.assertFalse(frame_only.unwind_tables)
+
+    def test_main_debug_compile_requests_debug_ir_and_native_stack_options(self) -> None:
+        generated_options: list[dict[str, object]] = []
+
+        def fake_generate(result, **kwargs):
+            generated_options.append(kwargs)
+            return "define i32 @main() { ret i32 0 }\n"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            llc_path = str(root / "llvm-llc")
+            source = root / "sample.c"
+            output = root / "sample.o"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+            with (
+                patch.dict("os.environ", {"XCC_LLC": llc_path}, clear=False),
+                patch("xcc.codegen.generate_llvm_ir", side_effect=fake_generate),
+                patch(
+                    "xcc.cc_driver.subprocess.run",
+                    side_effect=self._fake_llvm_llc_run(llc_path),
+                ) as run,
+            ):
+                code, stdout, stderr = self._run_main(
+                    ["-g", "-nostdinc", "-c", str(source), "-o", str(output)]
+                )
+
+        self.assertEqual((code, stdout, stderr), (0, "", ""))
+        self.assertEqual(
+            generated_options,
+            [{"debug": True, "target_triple": "arm64-apple-macosx11.0.0"}],
+        )
+        llc_command = self._llc_compile_cmds(run, llc_path)[0]
+        for option in (
+            "--frame-pointer=all",
+            "--emit-dwarf-unwind=always",
+            "--dwarf-version=4",
+        ):
+            self.assertIn(option, llc_command)
+
+    @unittest.skipUnless(sys.platform == "darwin", "dSYM generation is macOS-specific")
+    def test_main_debug_link_runs_dsymutil_before_temporary_object_cleanup(self) -> None:
+        commands: list[tuple[str, ...]] = []
+        object_exists_at_dsymutil: list[bool] = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            llc_path = str(root / "llvm-llc")
+            source = root / "sample.c"
+            output = root / "sample"
+            source.write_text("int main(void){return 0;}\n", encoding="utf-8")
+
+            def fake_run(command, **kwargs):
+                command = tuple(command)
+                commands.append(command)
+                if command[0] == llc_path:
+                    Path(command[-1]).write_bytes(b"object")
+                elif command[0] == "/usr/bin/dsymutil":
+                    object_paths = [
+                        Path(candidate[-1])
+                        for candidate in commands
+                        if candidate and candidate[0] == llc_path
+                    ]
+                    object_exists_at_dsymutil.append(all(path.is_file() for path in object_paths))
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            with (
+                patch.dict("os.environ", {"XCC_LLC": llc_path}, clear=False),
+                patch("xcc.cc_driver.shutil.which", return_value="/usr/bin/dsymutil"),
+                patch("xcc.cc_driver.subprocess.run", side_effect=fake_run),
+            ):
+                code, stdout, stderr = self._run_main(
+                    ["-g", "-nostdinc", str(source), "-o", str(output)]
+                )
+
+        self.assertEqual((code, stdout, stderr), (0, "", ""))
+        self.assertEqual(object_exists_at_dsymutil, [True])
+        self.assertIn(("/usr/bin/dsymutil", str(output)), commands)
 
     def test_main_explicit_llvm_target_passes_o0_to_llc(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

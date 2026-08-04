@@ -34,7 +34,9 @@ def _llvm() -> Any:
 
 _c_void_p = ctypes.c_void_p
 _c_char_p = ctypes.c_char_p
-_c_bool = ctypes.c_bool
+# LLVMBool is a C int, not C99 _Bool.  Using ctypes.c_bool leaves the upper
+# register bytes unspecified on arm64 and can turn a false argument into true.
+_c_bool = ctypes.c_int
 _c_uint = ctypes.c_uint
 _c_size_t = ctypes.c_size_t
 
@@ -42,6 +44,7 @@ _c_size_t = ctypes.c_size_t
 _LLVMTypeRef = _c_void_p
 _LLVMTypeKind = ctypes.c_int
 _LLVMValueRef = _c_void_p
+_LLVMMetadataRef = _c_void_p
 
 
 class LLVMTypeKind:
@@ -73,6 +76,7 @@ _LLVMBasicBlockRef = _c_void_p
 _LLVMModuleRef = _c_void_p
 _LLVMBuilderRef = _c_void_p
 _LLVMContextRef = _c_void_p
+_LLVMDIBuilderRef = _c_void_p
 
 ATOMIC_ORDER_SEQ_CST = 7
 
@@ -86,6 +90,10 @@ ATOMIC_RMW_XOR = 6
 
 LLVM_EXTERNAL_LINKAGE = 0
 LLVM_INTERNAL_LINKAGE = 8
+
+LLVM_MODULE_FLAG_BEHAVIOR_WARNING = 1
+LLVM_DWARF_SOURCE_LANGUAGE_C11 = 28
+LLVM_DWARF_EMISSION_FULL = 1
 
 
 def ptr_array(values: list[int] | tuple[int, ...]) -> Any:
@@ -122,6 +130,15 @@ class _LLVMC:
             "LLVMModuleCreateWithName", _LLVMModuleRef, _c_char_p
         )
         self.SetTarget = self._bind("LLVMSetTarget", None, _LLVMModuleRef, _c_char_p)
+        self.AddModuleFlag = self._bind(
+            "LLVMAddModuleFlag",
+            None,
+            _LLVMModuleRef,
+            _c_uint,
+            _c_char_p,
+            _c_size_t,
+            _LLVMMetadataRef,
+        )
         self.PrintModuleToString = self._bind("LLVMPrintModuleToString", _c_char_p, _LLVMModuleRef)
         self.DisposeModule = self._bind("LLVMDisposeModule", None, _LLVMModuleRef)
 
@@ -243,6 +260,7 @@ class _LLVMC:
             "LLVMSetValueName2", None, _LLVMValueRef, _c_char_p, _c_size_t
         )
         self.GetReturnType = self._bind("LLVMGetReturnType", _LLVMTypeRef, _LLVMTypeRef)
+        self.ValueAsMetadata = self._bind("LLVMValueAsMetadata", _LLVMMetadataRef, _LLVMValueRef)
         self.CountParamTypes = self._bind(
             "LLVMCountParamTypes", None, _LLVMTypeRef, ctypes.POINTER(_c_uint)
         )
@@ -260,6 +278,94 @@ class _LLVMC:
         )
         self.GetInsertBlock = self._bind("LLVMGetInsertBlock", _LLVMBasicBlockRef, _LLVMBuilderRef)
         self.DisposeBuilder = self._bind("LLVMDisposeBuilder", None, _LLVMBuilderRef)
+        self.GetCurrentDebugLocation2 = self._bind(
+            "LLVMGetCurrentDebugLocation2", _LLVMMetadataRef, _LLVMBuilderRef
+        )
+        self.SetCurrentDebugLocation2 = self._bind(
+            "LLVMSetCurrentDebugLocation2", None, _LLVMBuilderRef, _LLVMMetadataRef
+        )
+
+        # Debug information
+        self.CreateDIBuilder = self._bind("LLVMCreateDIBuilder", _LLVMDIBuilderRef, _LLVMModuleRef)
+        self.DisposeDIBuilder = self._bind("LLVMDisposeDIBuilder", None, _LLVMDIBuilderRef)
+        self.DIBuilderFinalize = self._bind("LLVMDIBuilderFinalize", None, _LLVMDIBuilderRef)
+        self.DIBuilderCreateFile = self._bind(
+            "LLVMDIBuilderCreateFile",
+            _LLVMMetadataRef,
+            _LLVMDIBuilderRef,
+            _c_char_p,
+            _c_size_t,
+            _c_char_p,
+            _c_size_t,
+        )
+        self.DIBuilderCreateCompileUnit = self._bind(
+            "LLVMDIBuilderCreateCompileUnit",
+            _LLVMMetadataRef,
+            _LLVMDIBuilderRef,
+            _c_uint,
+            _LLVMMetadataRef,
+            _c_char_p,
+            _c_size_t,
+            _c_bool,
+            _c_char_p,
+            _c_size_t,
+            _c_uint,
+            _c_char_p,
+            _c_size_t,
+            _c_uint,
+            _c_uint,
+            _c_bool,
+            _c_bool,
+            _c_char_p,
+            _c_size_t,
+            _c_char_p,
+            _c_size_t,
+        )
+        self.DIBuilderCreateSubroutineType = self._bind(
+            "LLVMDIBuilderCreateSubroutineType",
+            _LLVMMetadataRef,
+            _LLVMDIBuilderRef,
+            _LLVMMetadataRef,
+            ctypes.POINTER(_LLVMMetadataRef),
+            _c_uint,
+            _c_uint,
+        )
+        self.DIBuilderCreateFunction = self._bind(
+            "LLVMDIBuilderCreateFunction",
+            _LLVMMetadataRef,
+            _LLVMDIBuilderRef,
+            _LLVMMetadataRef,
+            _c_char_p,
+            _c_size_t,
+            _c_char_p,
+            _c_size_t,
+            _LLVMMetadataRef,
+            _c_uint,
+            _LLVMMetadataRef,
+            _c_bool,
+            _c_bool,
+            _c_uint,
+            _c_uint,
+            _c_bool,
+        )
+        self.DIBuilderCreateLexicalBlockFile = self._bind(
+            "LLVMDIBuilderCreateLexicalBlockFile",
+            _LLVMMetadataRef,
+            _LLVMDIBuilderRef,
+            _LLVMMetadataRef,
+            _LLVMMetadataRef,
+            _c_uint,
+        )
+        self.DIBuilderCreateDebugLocation = self._bind(
+            "LLVMDIBuilderCreateDebugLocation",
+            _LLVMMetadataRef,
+            _LLVMContextRef,
+            _c_uint,
+            _c_uint,
+            _LLVMMetadataRef,
+            _LLVMMetadataRef,
+        )
+        self.SetSubprogram = self._bind("LLVMSetSubprogram", None, _LLVMValueRef, _LLVMMetadataRef)
 
         # Terminators
         self.BuildRetVoid = self._bind("LLVMBuildRetVoid", _LLVMValueRef, _LLVMBuilderRef)

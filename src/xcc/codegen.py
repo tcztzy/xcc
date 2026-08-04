@@ -48,6 +48,7 @@ from xcc.ast import (
     NullStmt,
     ReturnStmt,
     SizeofExpr,
+    SourceLocation,
     StatementExpr,
     StaticAssertDecl,
     Stmt,
@@ -73,8 +74,11 @@ from xcc.llvm_api import (
     ATOMIC_RMW_SUB,
     ATOMIC_RMW_XCHG,
     ATOMIC_RMW_XOR,
+    LLVM_DWARF_EMISSION_FULL,
+    LLVM_DWARF_SOURCE_LANGUAGE_C11,
     LLVM_EXTERNAL_LINKAGE,
     LLVM_INTERNAL_LINKAGE,
+    LLVM_MODULE_FLAG_BEHAVIOR_WARNING,
     LLVMTypeKind,
     llvm,
     ptr_array,
@@ -166,8 +170,23 @@ class _LLVMGen:
     _break_stack: list[int]
     _switch_info: list[tuple[int, int, int | None, bool, int]]
     _entry_block: int
+    _debug: bool
+    _debug_builder: int
+    _debug_files: dict[str, int]
+    _debug_subroutine_type: int
+    _debug_scope: int
+    _debug_scope_filename: str
+    _debug_file_scopes: dict[str, int]
+    _debug_source_location_index: int
+    _debug_function_location: SourceLocation | None
 
-    def __init__(self, result: FrontendResult) -> None:
+    def __init__(
+        self,
+        result: FrontendResult,
+        *,
+        debug: bool = False,
+        target_triple: str = "arm64-apple-macosx11.0.0",
+    ) -> None:
         self._result = result
         self._unit = result.unit
         self._type_map = result.sema.type_map
@@ -176,7 +195,7 @@ class _LLVMGen:
         c = llvm()
         self._ctx = c.ContextCreate()
         self._mod = c.ModuleCreateWithName(result.filename.encode("utf-8"))
-        c.SetTarget(self._mod, b"aarch64-apple-darwin")
+        c.SetTarget(self._mod, target_triple.encode("utf-8"))
         self._builder = c.CreateBuilder()
         self._str_constants: dict[str, int] = {}  # literal → _LLVMValueRef
         self._compound_literal_globals: dict[int, int] = {}
@@ -199,8 +218,164 @@ class _LLVMGen:
         # (switch_inst, end_block, default_block, default_handled, cond_type)
         self._switch_info: list[tuple[int, int, int | None, bool, int]] = []
         self._entry_block: int = 0
+        self._debug = debug
+        self._debug_builder = 0
+        self._debug_files: dict[str, int] = {}
+        self._debug_subroutine_type = 0
+        self._debug_scope = 0
+        self._debug_scope_filename = ""
+        self._debug_file_scopes: dict[str, int] = {}
+        self._debug_source_location_index = 0
+        self._debug_function_location: SourceLocation | None = None
+        if self._debug:
+            self._initialize_debug_info()
 
     # ── helpers ──────────────────────────────────────────────
+
+    def _debug_file(self, filename: str) -> int:
+        cached = self._debug_files.get(filename)
+        if cached is not None:
+            return cached
+        normalized = filename.replace("\\", "/")
+        if "/" in normalized:
+            directory, basename = normalized.rsplit("/", 1)
+            if directory == "":
+                directory = "/"
+        else:
+            directory = ""
+            basename = normalized
+        c = llvm()
+        basename_bytes = basename.encode("utf-8")
+        directory_bytes = directory.encode("utf-8")
+        file_metadata = c.DIBuilderCreateFile(
+            self._debug_builder,
+            basename_bytes,
+            len(basename_bytes),
+            directory_bytes,
+            len(directory_bytes),
+        )
+        self._debug_files[filename] = file_metadata
+        return file_metadata
+
+    def _initialize_debug_info(self) -> None:
+        c = llvm()
+        self._debug_builder = c.CreateDIBuilder(self._mod)
+        file_metadata = self._debug_file(self._result.filename)
+        producer = b"xcc 0.2"
+        c.DIBuilderCreateCompileUnit(
+            self._debug_builder,
+            LLVM_DWARF_SOURCE_LANGUAGE_C11,
+            file_metadata,
+            producer,
+            len(producer),
+            False,
+            b"",
+            0,
+            0,
+            b"",
+            0,
+            LLVM_DWARF_EMISSION_FULL,
+            0,
+            False,
+            True,
+            b"",
+            0,
+            b"",
+            0,
+        )
+        self._debug_subroutine_type = c.DIBuilderCreateSubroutineType(
+            self._debug_builder,
+            file_metadata,
+            None,
+            0,
+            0,
+        )
+        dwarf_version = c.ValueAsMetadata(c.ConstInt(c.Int32Type(), 4, False))
+        debug_version = c.ValueAsMetadata(c.ConstInt(c.Int32Type(), 3, False))
+        c.AddModuleFlag(
+            self._mod,
+            LLVM_MODULE_FLAG_BEHAVIOR_WARNING,
+            b"Dwarf Version",
+            len(b"Dwarf Version"),
+            dwarf_version,
+        )
+        c.AddModuleFlag(
+            self._mod,
+            LLVM_MODULE_FLAG_BEHAVIOR_WARNING,
+            b"Debug Info Version",
+            len(b"Debug Info Version"),
+            debug_version,
+        )
+
+    def _next_source_location(self) -> SourceLocation | None:
+        index = self._debug_source_location_index
+        if index >= len(self._unit.source_locations):
+            return None
+        self._debug_source_location_index += 1
+        return self._unit.source_locations[index]
+
+    def _mapped_source_location(
+        self,
+        location: SourceLocation | None,
+    ) -> tuple[str, int, int]:
+        if location is None:
+            return self._result.filename, 1, 1
+        filename = self._result.filename
+        line = location.line
+        if 1 <= line <= len(self._result.line_map):
+            filename, line = self._result.line_map[line - 1]
+        return filename, max(line, 1), max(location.column, 1)
+
+    def _begin_function_debug(self, func: FunctionDef, function: int) -> None:
+        if not self._debug:
+            return
+        self._debug_function_location = self._next_source_location()
+        filename, line, _column = self._mapped_source_location(self._debug_function_location)
+        file_metadata = self._debug_file(filename)
+        name = func.name.encode("utf-8")
+        c = llvm()
+        subprogram = c.DIBuilderCreateFunction(
+            self._debug_builder,
+            file_metadata,
+            name,
+            len(name),
+            name,
+            len(name),
+            file_metadata,
+            line,
+            self._debug_subroutine_type,
+            self._function_definition_is_internal(func),
+            True,
+            line,
+            0,
+            False,
+        )
+        c.SetSubprogram(function, subprogram)
+        self._debug_scope = subprogram
+        self._debug_scope_filename = filename
+        self._debug_file_scopes = {filename: subprogram}
+
+    def _set_source_debug_location(self, source_location: SourceLocation | None) -> None:
+        if not self._debug or not self._debug_scope:
+            return
+        filename, line, column = self._mapped_source_location(source_location)
+        scope = self._debug_file_scopes.get(filename)
+        if scope is None:
+            scope = llvm().DIBuilderCreateLexicalBlockFile(
+                self._debug_builder,
+                self._debug_scope,
+                self._debug_file(filename),
+                0,
+            )
+            self._debug_file_scopes[filename] = scope
+        location = llvm().DIBuilderCreateDebugLocation(
+            self._ctx,
+            line,
+            column,
+            scope,
+            None,
+        )
+        llvm().SetCurrentDebugLocation2(self._builder, location)
 
     def _type_to_llvm(self, t: Type) -> int:
         """Map XCC Type to LLVMTypeRef."""
@@ -549,7 +724,13 @@ class _LLVMGen:
     def generate(self) -> str:
         self._emit_globals()
         self._emit_functions()
-        return _llvm_print_module_to_string(self._mod)
+        if self._debug:
+            llvm().DIBuilderFinalize(self._debug_builder)
+        llvm_text = _llvm_print_module_to_string(self._mod)
+        if self._debug:
+            llvm().DisposeDIBuilder(self._debug_builder)
+            return _enable_unwind_tables(llvm_text)
+        return llvm_text
 
     def _emit_globals(self) -> None:
         llvm()
@@ -707,10 +888,12 @@ class _LLVMGen:
         if self._function_definition_is_internal(func):
             c.SetLinkage(fn, LLVM_INTERNAL_LINKAGE)
         self._func = fn
+        self._begin_function_debug(func, fn)
 
         entry = c.AppendBasicBlock(fn, b"entry")
         self._entry_block = entry
         c.PositionBuilderAtEnd(self._builder, entry)
+        self._set_source_debug_location(self._debug_function_location)
 
         # Alloca + store params
         param_index = 0
@@ -754,6 +937,12 @@ class _LLVMGen:
                 c.BuildRet(self._builder, c.ConstNull(ret_t))
             else:
                 c.BuildRet(self._builder, c.ConstInt(ret_t, 0, False))
+        if self._debug:
+            c.SetCurrentDebugLocation2(self._builder, None)
+            self._debug_scope = 0
+            self._debug_scope_filename = ""
+            self._debug_file_scopes = {}
+            self._debug_function_location = None
 
     def _build_call_args(self, expr: CallExpr) -> tuple[list[int], list[int], list[Type | None]]:
         """Evaluate call args, return (values, LLVM types, C types)."""
@@ -813,6 +1002,10 @@ class _LLVMGen:
         return term is None or term == 0
 
     def _emit_stmt(self, stmt: Stmt) -> None:
+        previous_debug_location = 0
+        if self._debug:
+            previous_debug_location = llvm().GetCurrentDebugLocation2(self._builder)
+            self._set_source_debug_location(self._next_source_location())
         if isinstance(stmt, CompoundStmt):
             self._locals.append({})
             for s in stmt.statements:
@@ -841,7 +1034,9 @@ class _LLVMGen:
             self._emit_decl_init(stmt)
         elif isinstance(stmt, DeclGroupStmt):
             for d in stmt.declarations:
-                self._emit_stmt(d)
+                if isinstance(d, DeclStmt):
+                    self._ensure_decl_alloca(d)
+                    self._emit_decl_init(d)
         elif isinstance(stmt, SwitchStmt):
             self._emit_switch(stmt)
         elif isinstance(stmt, CaseStmt):
@@ -854,6 +1049,8 @@ class _LLVMGen:
             self._emit_goto(stmt)
         elif isinstance(stmt, (TypedefDecl, StaticAssertDecl)):
             pass
+        if self._debug:
+            llvm().SetCurrentDebugLocation2(self._builder, previous_debug_location)
 
     def _emit_return(self, stmt: ReturnStmt) -> None:
         c = llvm()
@@ -5265,11 +5462,34 @@ class _LLVMGen:
 # ── public API ───────────────────────────────────────────────
 
 
-def generate_llvm_ir(result: FrontendResult) -> str:
-    return _LLVMGen(result).generate()
+def generate_llvm_ir(
+    result: FrontendResult,
+    *,
+    debug: bool = False,
+    target_triple: str = "arm64-apple-macosx11.0.0",
+) -> str:
+    return _LLVMGen(result, debug=debug, target_triple=target_triple).generate()
 
 
 def _llvm_print_module_to_string(module: int) -> str:
     c = llvm()
     ir = c.PrintModuleToString(module)
     return ir.decode("utf-8") if isinstance(ir, bytes) else str(ir)
+
+
+def _enable_unwind_tables(llvm_text: str) -> str:
+    lines: list[str] = []
+    in_function_header = False
+    for line in llvm_text.splitlines():
+        if line.startswith("define "):
+            in_function_header = True
+        if in_function_header and line.endswith("{") and " uwtable" not in line:
+            debug_index = line.find(" !dbg !")
+            if debug_index >= 0:
+                line = line[:debug_index] + " uwtable" + line[debug_index:]
+            else:
+                line = line[:-1].rstrip() + " uwtable {"
+        if in_function_header and line.endswith("{"):
+            in_function_header = False
+        lines.append(line)
+    return "\n".join(lines) + "\n"

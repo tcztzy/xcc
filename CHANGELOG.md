@@ -2,6 +2,42 @@
 
 ## Current
 
+- Extended native profiling/debug support from the AOT compiler to every C
+  program compiled with `xcc -g`. The C frontend now preserves preprocessor
+  file/line maps in a bootstrap-safe parser/codegen traversal, and LLVM emits
+  C11 `DIFile`, `DICompileUnit`, `DISubprogram`, statement `DILocation`, DWARF
+  v4, `uwtable`, frame pointers, and runtime unwind records. macOS links use an
+  explicit `arm64-apple-macosx11.0.0` triple and run `dsymutil` before temporary
+  objects are removed; `dwarfdump` and `atos` resolve function names and exact
+  C lines. A real three-second `sample` of a program compiled by the
+  bootstrap-generated native `xcc` collected 764 complete
+  `main:21 -> outer:17 -> middle:13 -> leaf` stacks. A cross-target x86-64 ELF
+  gate verifies `.debug_info`, `.debug_line`, `.eh_frame`, four FDEs, and an
+  `RBP` frame chain for Linux `perf`. The native LLVM C ABI now represents
+  `LLVMBool` as `i32`, preventing false debug-builder flags from becoming true
+  on ARM64. `-g0` and explicit frame/unwind flags are covered, while ordinary
+  builds remain free of new debug metadata and extra stack options. In 15
+  alternating native compile measurements, `-g` added 0.21% median wall time;
+  five alternating executions added 0.81%. The small test object grew from
+  1,376 B to 2,856 B, the executable from 16,984 B to 17,416 B, and the dSYM
+  occupied 24 KiB. Large generated translation units now compile inside an
+  explicit source-to-object root transaction: the reclaimable phase arena is
+  sized to 4 GiB while the ordinary process-wide allocation guard remains 512
+  MiB. A final strong-bootstrap replay completed Stage 0->1, Stage 1->2, and
+  Stage 2->3 in 41.56 s, 24.11 s, and 25.17 s. All three
+  executables are byte-identical (SHA-256
+  `9290a067b67e026f4bfa124681c6d87c4018d07e7fda9969fe8fa1aaffbefb2b`), as
+  are normalized LLVM outputs (SHA-256
+  `d2511ae8d11ae99e54cfea9f61fdaeeb2718dacb74519bb718b7780af1ba1108`);
+  Stage 2/3 manifests and reachability artifacts match, and the behavior gate
+  passes. The final native compiler then configured a fresh out-of-tree build
+  of an untouched CPython checkout at `7e98debdf4bf` in 395.15 s and completed
+  serial `make -j1` in 2,102.08 s with a 2,003,877,888-byte peak RSS. CPython
+  checked 116 modules (37 built-in, 78 shared, one dependency-missing `_gdbm`,
+  and zero failed on import); the resulting interpreter reports `Clang xcc
+  0.2`, imports `ctypes`, `hashlib`, `sqlite3`, and `ssl`, and its source
+  checkout remained clean.
+
 - Added opt-in native AOT debug/profile builds with source-level LLVM metadata
   (`DIFile`, `DICompileUnit`, `DISubprogram`, and statement `DILocation`),
   DWARF v4, `uwtable`, target frame pointers, and runtime `.eh_frame` unwind

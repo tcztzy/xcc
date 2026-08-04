@@ -13,6 +13,12 @@ class Stmt:
 
 
 @dataclass(frozen=True)
+class SourceLocation:
+    line: int
+    column: int
+
+
+@dataclass(frozen=True)
 class ArrayDecl:
     length: "Expr | int | None"
     qualifiers: tuple[str, ...] = ()
@@ -52,6 +58,7 @@ class TranslationUnit:
     functions: list["FunctionDef"]
     declarations: list["Stmt"] = field(default_factory=list)
     externals: list["FunctionDef | Stmt"] = field(default_factory=list)
+    source_locations: list[SourceLocation] = field(default_factory=list, compare=False)
 
 
 @dataclass(frozen=True)

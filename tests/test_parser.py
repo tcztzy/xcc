@@ -198,6 +198,24 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(right, BinaryExpr)
         self.assertEqual(right.op, "*")
 
+    def test_parser_records_debug_locations_in_codegen_traversal_order(self) -> None:
+        source = (
+            "int main(void) {\n"
+            "  int left = 0, right = 1;\n"
+            "  for (int index = 0; index < 1; index++) {\n"
+            "    left = right;\n"
+            "  }\n"
+            "  return left;\n"
+            "}\n"
+        )
+
+        unit = parse(list(lex(source)))
+
+        self.assertEqual(
+            [location.line for location in unit.source_locations],
+            [1, 1, 2, 3, 3, 3, 4, 6],
+        )
+
     def test_void_return(self) -> None:
         source = "void main(){return;}"
         unit = parse(list(lex(source)))

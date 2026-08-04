@@ -48,6 +48,9 @@ class DriverConfig:
     output: str | None
     native_unsupported_flags: tuple[str, ...]
     evm_initcode: bool
+    debug_info: bool = False
+    frame_pointer: bool = False
+    unwind_tables: bool = False
 
 
 def looks_like_cc_driver(argv: tuple[str, ...] | list[str]) -> bool:
@@ -218,6 +221,33 @@ def _find_llc() -> str:
     raise ValueError("unable to find LLVM llc; set XCC_LLC or put LLVM llc on PATH")
 
 
+def _llvm_target_triple(config: DriverConfig) -> str:
+    if config.target == "x86_64-linux-gnu":
+        return "x86_64-unknown-linux-gnu"
+    if config.target == "aarch64-apple-darwin":
+        return "arm64-apple-macosx11.0.0"
+    if sys.platform.startswith("linux") and platform.machine().lower() in {"x86_64", "amd64"}:
+        return "x86_64-unknown-linux-gnu"
+    return "arm64-apple-macosx11.0.0"
+
+
+def _llvm_object_argv(
+    config: DriverConfig,
+    llc_path: str,
+    source: Path,
+    output: Path,
+) -> list[str]:
+    command = [llc_path, "-O0", "-filetype=obj"]
+    if config.frame_pointer:
+        command.append("--frame-pointer=all")
+    if config.unwind_tables:
+        command.append("--emit-dwarf-unwind=always")
+    if config.debug_info:
+        command.append("--dwarf-version=4")
+    command.extend((str(source), "-o", str(output)))
+    return command
+
+
 def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
     hosted = True
     std: StdMode = "gnu11"
@@ -239,6 +269,9 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
     non_c_inputs: list[str] = []
     clang_argv: list[str] = []
     native_unsupported_flags: list[str] = []
+    debug_info = False
+    frame_pointer = False
+    unwind_tables = False
 
     index = 0
     while index < len(argv):
@@ -322,6 +355,36 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
             no_standard_includes = True
             clang_argv.append(arg)
             continue
+        if arg in {"-g", "-g1", "-g2", "-g3", "-ggdb", "-gline-tables-only"} or arg.startswith(
+            "-gdwarf-"
+        ):
+            debug_info = True
+            frame_pointer = True
+            unwind_tables = True
+            clang_argv.append(arg)
+            continue
+        if arg == "-g0":
+            debug_info = False
+            frame_pointer = False
+            unwind_tables = False
+            clang_argv.append(arg)
+            continue
+        if arg == "-fno-omit-frame-pointer":
+            frame_pointer = True
+            clang_argv.append(arg)
+            continue
+        if arg == "-fomit-frame-pointer":
+            frame_pointer = False
+            clang_argv.append(arg)
+            continue
+        if arg in {"-fasynchronous-unwind-tables", "-funwind-tables"}:
+            unwind_tables = True
+            clang_argv.append(arg)
+            continue
+        if arg in {"-fno-asynchronous-unwind-tables", "-fno-unwind-tables"}:
+            unwind_tables = False
+            clang_argv.append(arg)
+            continue
         taken = _take_joined_or_value(argv, index, arg, "-o")
         if taken is not None:
             output, index = taken
@@ -375,7 +438,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
             arg.startswith("-Wl,")
             or arg.startswith("-O")
             or arg.startswith("-W")
-            or arg in {"-g", "-pipe", "-pthread", "-fno-strict-aliasing", "-fPIC", "-fpic"}
+            or arg in {"-pipe", "-pthread", "-fno-strict-aliasing", "-fPIC", "-fpic"}
         ):
             clang_argv.append(arg)
             continue
@@ -432,6 +495,9 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
         output=output,
         native_unsupported_flags=tuple(native_unsupported_flags),
         evm_initcode=evm_initcode,
+        debug_info=debug_info,
+        frame_pointer=frame_pointer,
+        unwind_tables=unwind_tables,
     )
 
 
@@ -473,14 +539,23 @@ def _aot_smoke_llvm_path(object_path: str) -> str:
     return object_path + ".ll"
 
 
-def _aot_smoke_llc_argv(llvm_path: str, object_path: str) -> tuple[str, ...]:
-    return (
+def _aot_smoke_llc_argv(
+    llvm_path: str,
+    object_path: str,
+    debug: bool = False,
+) -> tuple[str, ...]:
+    argv: tuple[str, ...] = (
         "/opt/homebrew/opt/llvm/bin/llc",
+        "-O0",
         "-filetype=obj",
-        llvm_path,
-        "-o",
-        object_path,
     )
+    if debug:
+        argv = argv + (
+            "--frame-pointer=all",
+            "--emit-dwarf-unwind=always",
+            "--dwarf-version=4",
+        )
+    return argv + (llvm_path, "-o", object_path)
 
 
 def _aot_render_timing_json(
@@ -604,6 +679,10 @@ def _aot_link_argv(
     return argv
 
 
+def _aot_dsymutil_argv(executable_path: str) -> tuple[str, ...]:
+    return ("/usr/bin/dsymutil", executable_path)
+
+
 def _aot_read_text_file(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
@@ -632,6 +711,7 @@ def _aot_compile_source_to_llvm_ir_unchecked(
     defines: tuple[str, ...],
     undefs: tuple[str, ...],
     std: str,
+    debug: bool = False,
 ) -> str:
     options = FrontendOptions(
         std="gnu11" if std == "gnu11" else "c11",
@@ -641,7 +721,7 @@ def _aot_compile_source_to_llvm_ir_unchecked(
         undefs=undefs,
     )
     result: FrontendResult = _aot_compile_source_unchecked(source_text, source_path, options)
-    return generate_llvm_ir(result)
+    return generate_llvm_ir(result, debug=debug)
 
 
 def _aot_compile_source_to_llvm_ir_timed(
@@ -651,6 +731,7 @@ def _aot_compile_source_to_llvm_ir_timed(
     defines: tuple[str, ...],
     undefs: tuple[str, ...],
     std: str,
+    debug: bool = False,
 ) -> tuple[str, int, int, int, int, str]:
     options = FrontendOptions(
         std="gnu11" if std == "gnu11" else "c11",
@@ -689,7 +770,7 @@ def _aot_compile_source_to_llvm_ir_timed(
         )
     codegen_start = _aot_monotonic_ns()
     try:
-        llvm_text = generate_llvm_ir(result)
+        llvm_text = generate_llvm_ir(result, debug=debug)
     except CodegenError:
         codegen_ns = _aot_monotonic_ns() - codegen_start
         return (
@@ -718,6 +799,7 @@ def _aot_compile_source_to_llvm_ir(
     defines: tuple[str, ...],
     undefs: tuple[str, ...],
     std: str,
+    debug: bool = False,
 ) -> str:
     try:
         return _aot_compile_source_to_llvm_ir_unchecked(
@@ -727,6 +809,7 @@ def _aot_compile_source_to_llvm_ir(
             defines,
             undefs,
             std,
+            debug,
         )
     except (FrontendError, CodegenError, PreprocessorError, LexerError, ParserError, SemaError):
         return ""
@@ -750,6 +833,7 @@ def _aot_compile_source_path_to_object(
     undefs: tuple[str, ...],
     std: str,
     timing_path: str = "",
+    debug: bool = False,
 ) -> bool:
     source_text: str = _aot_read_text_file(source_path)
     timing_start = 0
@@ -774,6 +858,7 @@ def _aot_compile_source_path_to_object(
             defines,
             undefs,
             std,
+            debug,
         )
     else:
         llvm_text = _aot_compile_source_to_llvm_ir(
@@ -783,6 +868,7 @@ def _aot_compile_source_path_to_object(
             defines,
             undefs,
             std,
+            debug,
         )
     llvm_path: str = _aot_smoke_llvm_path(object_path)
     if llvm_text == "":
@@ -821,7 +907,7 @@ def _aot_compile_source_path_to_object(
         return False
     if timing_path:
         codegen_ns += _aot_monotonic_ns() - write_start
-    llc_argv: tuple[str, ...] = _aot_smoke_llc_argv(llvm_path, object_path)
+    llc_argv: tuple[str, ...] = _aot_smoke_llc_argv(llvm_path, object_path, debug)
     llc_start = _aot_monotonic_ns() if timing_path else 0
     llc_status = _aot_exec_argv(llc_argv)
     if not timing_path:
@@ -879,6 +965,7 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
     undefs: tuple[str, ...] = ()
     std = "c11"
     timing_path = ""
+    debug_info = False
     index = 1
     while index < count:
         arg: str = argv[index]
@@ -923,6 +1010,12 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
             timing_path = arg.split("=", 1)[1]
             if timing_path == "":
                 return 1
+        elif arg in ("-g", "-g1", "-g2", "-g3", "-ggdb", "-gline-tables-only") or arg.startswith(
+            "-gdwarf-"
+        ):
+            debug_info = True
+        elif arg == "-g0":
+            debug_info = False
         elif arg == "-std=c11":
             std = "c11"
         elif arg == "-std=gnu11":
@@ -956,6 +1049,7 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
             undefs,
             std,
             timing_path,
+            debug_info,
         ):
             return 0
         return 1
@@ -974,10 +1068,14 @@ def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> i
         undefs,
         std,
         timing_path,
+        debug_info,
     ):
         return 1
     link_argv = _aot_link_argv(object_path, executable_path, link_flags)
-    return _aot_exec_argv(link_argv)
+    link_status = _aot_exec_argv(link_argv)
+    if link_status != 0 or not debug_info:
+        return link_status
+    return _aot_exec_argv(_aot_dsymutil_argv(executable_path))
 
 
 def _compile_frontend_inputs(
@@ -1064,6 +1162,18 @@ def _compile_or_link_generated_outputs(
         if link_result.returncode != 0:
             print(f"xcc: link failed with exit code {link_result.returncode}", file=sys.stderr)
             return 1
+        if config.debug_info and sys.platform == "darwin" and config.target != "x86_64-linux-gnu":
+            dsymutil = shutil.which("dsymutil") or "/usr/bin/dsymutil"
+            executable = config.output or "a.out"
+            debug_result = subprocess.run(
+                (dsymutil, executable),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if debug_result.returncode != 0:
+                stderr = (debug_result.stderr or "").strip()
+                raise CodegenError(Diagnostic("codegen", executable, f"dsymutil failed: {stderr}"))
     return 0
 
 
@@ -1151,20 +1261,20 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         if config.target == "llvm":
             from xcc.codegen import generate_llvm_ir
 
+            def generate_configured_llvm(result: FrontendResult) -> str:
+                return generate_llvm_ir(
+                    result,
+                    debug=config.debug_info,
+                    target_triple=_llvm_target_triple(config),
+                )
+
             if config.action == "assembly":
-                return _emit_assembly_outputs(config, results, generate_llvm_ir)
+                return _emit_assembly_outputs(config, results, generate_configured_llvm)
 
             llc_path = _find_llc()
 
             def llvm_object_cmd(source: Path, obj: Path) -> list[str]:
-                return [
-                    llc_path,
-                    "-O0",
-                    "-filetype=obj",
-                    str(source),
-                    "-o",
-                    str(obj),
-                ]
+                return _llvm_object_argv(config, llc_path, source, obj)
 
             def llvm_link_cmd(objects: list[str]) -> list[str]:
                 return _link_argv_with_objects(config, objects)
@@ -1173,10 +1283,48 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                 config,
                 results,
                 suffix="ll",
-                generate=generate_llvm_ir,
+                generate=generate_configured_llvm,
                 object_cmd=llvm_object_cmd,
                 tool_error="llc failed",
                 link_cmd=llvm_link_cmd,
+            )
+
+        if (
+            config.debug_info
+            and config.action != "assembly"
+            and config.target in {"aarch64-apple-darwin", "x86_64-linux-gnu"}
+        ):
+            from xcc.codegen import generate_llvm_ir
+
+            llc_path = _find_llc()
+
+            def generate_debug_llvm(result: FrontendResult) -> str:
+                return generate_llvm_ir(
+                    result,
+                    debug=True,
+                    target_triple=_llvm_target_triple(config),
+                )
+
+            def debug_object_cmd(source: Path, obj: Path) -> list[str]:
+                return _llvm_object_argv(config, llc_path, source, obj)
+
+            def debug_link_cmd(objects: list[str]) -> list[str]:
+                if config.target == "x86_64-linux-gnu":
+                    return _drop_x86_64_linux_latomic(
+                        _link_argv_with_objects(config, objects, linker="cc")
+                    )
+                command = _link_argv_with_objects(config, objects)
+                command[1:1] = ["-target", config.target]
+                return command
+
+            return _compile_or_link_generated_outputs(
+                config,
+                results,
+                suffix="ll",
+                generate=generate_debug_llvm,
+                object_cmd=debug_object_cmd,
+                tool_error="llc failed",
+                link_cmd=debug_link_cmd,
             )
 
         if config.target == "aarch64-apple-darwin":

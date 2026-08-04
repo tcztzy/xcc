@@ -53,7 +53,7 @@ from xcc.ast import (
 )
 from xcc.codegen import _LLVMGen, _base_size, _merge_qualifiers, generate_llvm_ir
 from xcc.diag import CodegenError
-from xcc.frontend import FrontendOptions, compile_source
+from xcc.frontend import FrontendOptions, compile_path, compile_source
 from xcc.llvm_api import (
     ATOMIC_RMW_ADD,
     ATOMIC_RMW_AND,
@@ -91,6 +91,62 @@ class CodegenTests(unittest.TestCase):
             _merge_qualifiers(("const", "volatile", "const"), ("volatile", "restrict")),
             ("const", "volatile", "restrict"),
         )
+
+    def test_debug_ir_has_c_source_metadata_lines_and_unwind_tables(self) -> None:
+        source = (
+            "static int helper(int value) {\n"
+            "  int adjusted = value + 1;\n"
+            "  return adjusted;\n"
+            "}\n"
+            "int main(void) {\n"
+            "  return helper(41);\n"
+            "}\n"
+        )
+        result = compile_source(source, filename="/tmp/xcc-debug/sample.c")
+
+        debug_ir = generate_llvm_ir(result, debug=True)
+        ordinary_ir = generate_llvm_ir(result)
+
+        for metadata in ("!DIFile", "!DICompileUnit", "!DISubprogram", "!DILocation"):
+            self.assertIn(metadata, debug_ir)
+        self.assertIn("language: DW_LANG_C11", debug_ir)
+        self.assertIn('filename: "sample.c", directory: "/tmp/xcc-debug"', debug_ir)
+        self.assertRegex(debug_ir, r'DISubprogram\(name: "helper".*line: 1')
+        self.assertRegex(debug_ir, r'DISubprogram\(name: "main".*line: 5')
+        for line in (2, 3, 6):
+            self.assertRegex(debug_ir, rf"DILocation\(line: {line}, column: [1-9]")
+        self.assertRegex(debug_ir, r"define internal i32 @helper\(i32 %0\) uwtable !dbg !\d+")
+        self.assertNotIn("!DIFile", ordinary_ir)
+        self.assertNotIn("!llvm.dbg.cu", ordinary_ir)
+        self.assertNotIn(" uwtable", ordinary_ir)
+        self.assertEqual(ordinary_ir, generate_llvm_ir(result))
+
+    def test_debug_ir_maps_included_header_and_main_source_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            header = root / "helper.h"
+            source = root / "main.c"
+            header.write_text(
+                "static int helper(void) {\n  return 7;\n}\n",
+                encoding="utf-8",
+            )
+            source.write_text(
+                '#include "helper.h"\nint main(void) { return helper(); }\n',
+                encoding="utf-8",
+            )
+
+            debug_ir = generate_llvm_ir(
+                compile_path(
+                    source,
+                    options=FrontendOptions(include_dirs=(str(root),)),
+                ),
+                debug=True,
+            )
+
+        self.assertIn('filename: "helper.h"', debug_ir)
+        self.assertIn('filename: "main.c"', debug_ir)
+        self.assertRegex(debug_ir, r'DISubprogram\(name: "helper".*line: 1')
+        self.assertRegex(debug_ir, r'DISubprogram\(name: "main".*line: 2')
 
     def test_decode_string_escape_branches(self) -> None:
         result = compile_source("int main(void) { return 0; }", filename="decode.c")

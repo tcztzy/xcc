@@ -26,6 +26,7 @@ from xcc.ast import (
     RecordMemberDecl,
     ReturnStmt,
     SizeofExpr,
+    SourceLocation,
     StatementExpr,
     StaticAssertDecl,
     Stmt,
@@ -151,6 +152,7 @@ class Parser:
         self._function_def_params: list[Param] = []
         self._function_def_has_prototype = False
         self._function_def_is_variadic = False
+        self._source_locations: list[SourceLocation] = []
 
         # Register compiler built-in typedefs
         self._define_typedef(
@@ -290,6 +292,8 @@ class Parser:
                 externals.append(static_assert_decl)
                 continue
             if self._looks_like_function():
+                token = self._current()
+                self._source_locations.append(SourceLocation(token.line, token.column))
                 function = self._parse_function()
                 functions.append(function)
                 externals.append(function)
@@ -302,7 +306,7 @@ class Parser:
             declarations.append(declaration)
             externals.append(declaration)
         self._expect(TokenKind.EOF)
-        return TranslationUnit(functions, declarations, externals)
+        return TranslationUnit(functions, declarations, externals, self._source_locations)
 
     def _is_external_statement_start(self) -> bool:
         token = self._current()
@@ -692,10 +696,21 @@ class Parser:
         initial_names: set[str] | None = None,
         initial_types: dict[str, TypeSpec] | None = None,
     ) -> CompoundStmt:
-        return _statements.parse_compound_stmt(self, initial_names, initial_types)
+        token = self._current()
+        self._source_locations.append(SourceLocation(token.line, token.column))
+        statement = _statements.parse_compound_stmt(self, initial_names, initial_types)
+        return statement
 
     def _parse_statement(self) -> Stmt:
-        return _statements.parse_statement(self)
+        token = self._current()
+        if token.lexeme != "{":
+            self._source_locations.append(SourceLocation(token.line, token.column))
+        statement = _statements.parse_statement(self)
+        return statement
+
+    def _record_current_source_location(self) -> None:
+        token = self._current()
+        self._source_locations.append(SourceLocation(token.line, token.column))
 
     def _is_declaration_start(self) -> bool:
         return _statements.is_declaration_start(self)

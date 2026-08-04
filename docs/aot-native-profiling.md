@@ -1,5 +1,59 @@
 # AOT native profiling, debugging, and phase timing
 
+## Profiling programs compiled by XCC
+
+XCC now emits source-level native debug information for ordinary C programs,
+not only for the AOT compiler itself. Build a profiling-ready program with:
+
+```sh
+xcc -g program.c -o program
+```
+
+`-g` is opt-in. It adds C11 `DIFile`, `DICompileUnit`, `DISubprogram`, and
+statement `DILocation` metadata, requests DWARF v4, retains every frame pointer,
+and emits runtime unwind tables. `-g0` returns to the ordinary metadata-free
+mode. The independent `-fno-omit-frame-pointer`, `-fomit-frame-pointer`,
+`-funwind-tables`, `-fasynchronous-unwind-tables`, and matching `-fno-*` forms
+control the stack options explicitly.
+
+On macOS, a linked `-g` build runs `dsymutil` while XCC's temporary object files
+still exist, leaving `program.dSYM` beside the executable. The LLVM target is
+`arm64-apple-macosx11.0.0`, so objects contain `LC_BUILD_VERSION` and link
+without the fallback-platform warning. Inspect and profile the resulting
+program directly:
+
+```sh
+/usr/bin/dwarfdump --debug-info --debug-line program.dSYM
+/opt/homebrew/opt/llvm/bin/llvm-dwarfdump --eh-frame program
+./program &
+program_pid=$!
+/usr/bin/sample "$program_pid" 10 1 -file program.sample.txt
+wait "$program_pid"
+/usr/bin/atos -o program -arch arm64 -l 0x100000000 0x100000444
+```
+
+For Instruments, run `xcrun xctrace record --template 'Time Profiler' --launch
+-- ./program`. On Linux, the corresponding path is:
+
+```sh
+xcc -g program.c -o program
+readelf --sections program | grep -E 'debug_info|debug_line|eh_frame'
+perf record -g --call-graph fp -- ./program
+perf report --stdio
+```
+
+`perf record -g --call-graph dwarf,16384 -- ./program` is also supported. The
+macOS gate cross-compiles the same C frontend/debug IR to
+`x86_64-unknown-linux-gnu` and executes `llvm-readelf`, `llvm-dwarfdump`, and
+`llvm-objdump` checks for `.debug_info`, `.debug_line`, `.eh_frame`, FDEs, and
+an `RBP` frame chain. This host cannot execute an ELF program under Linux
+`perf`, so the two `perf` commands remain the Linux runtime validation boundary.
+
+Preprocessor line maps are preserved through the AST, including functions and
+statements originating in included headers. Source locations use a stable
+parser/codegen traversal sequence rather than CPython object identities, so
+the same mapping works in the bootstrap-generated native `xcc`.
+
 XCC's AOT compiler can be built in three modes. The default mode preserves the
 existing deterministic, path-independent LLVM text. `debug=True` and
 `profile=True` are explicit opt-ins that both add source-level LLVM debug
@@ -24,10 +78,11 @@ builder CLIs also accept `--debug` and `--profile`. Both modes emit:
 
 The default mode emits none of this metadata and passes none of those extra
 options, so absolute source paths do not enter ordinary bootstrap products.
-XCC does not run `dsymutil` automatically: an adjacent dSYM is useful for
-distribution or archival, but it is not needed for Mach-O object DWARF,
-`sample`, or `atos` validation and would add another nonessential tool to the
-build pipeline.
+The AOT-compiler builder itself does not run `dsymutil` automatically: an
+adjacent dSYM is useful for distribution or archival, but object DWARF is
+sufficient for its build-time validation. This differs from
+`xcc -g program.c -o program`, where the compiler driver automatically creates
+the dSYM needed after its temporary C object is removed.
 
 ## macOS native tools
 
@@ -148,6 +203,19 @@ for `cProfile`. Doing so would measure an emulated event stream rather than the
 native work being optimized.
 
 ## Measured cost
+
+For an ordinary C program compiled by the final bootstrap-generated `xcc`, 15
+alternating object builds measured a 32.217 ms default median and a 32.284 ms
+`-g` median (+0.21%). The object grew from 1,376 B to 2,856 B (+107.56%) because
+small objects are dominated by their DWARF sections. Linked executables were
+16,984 B and 17,416 B (+2.54%); the adjacent dSYM occupied 24 KiB on disk. Five
+alternating executions of the 800-million-iteration native profiling workload
+measured 1.4614 s default and 1.4732 s `-g` medians (+0.81%). Both modes used
+the same `-O0` lowering; the observed runtime difference is the stack/debug
+contract rather than an optimization-level change.
+
+The measurements below describe the independently selectable debug/profile
+modes of the AOT compiler executable itself.
 
 The final builds were measured sequentially on macOS ARM64 while compiling the
 unmodified CPython `Objects/listobject.c` with its real core include paths.

@@ -42,6 +42,7 @@ class FrontendResult:
     sema: SemaUnit
     include_trace: tuple[str, ...]
     macro_table: tuple[str, ...]
+    line_map: tuple[tuple[str, int], ...] = ()
     _pp_tokens: list[Token] | None = None
 
     @property
@@ -129,6 +130,7 @@ def _aot_compile_source_unchecked(
         sema,
         pp_result.include_trace,
         pp_result.macro_table,
+        pp_result.line_map,
     )
 
 
@@ -213,6 +215,7 @@ def compile_source(
         sema,
         pp_result.include_trace,
         pp_result.macro_table,
+        pp_result.line_map,
     )
 
 

@@ -1714,6 +1714,21 @@
   win.
   Before rejecting a narrow optimization, rerun and compare local rows, total
   call count, and unrelated load/runtime rows separately.
+- Never key source metadata by hosted-language object identity when the same
+  compiler must bootstrap through by-value native records. A stable parser and
+  codegen traversal sequence survives record copies and preserves included-file
+  line maps in both hosted and native execution.
+- LLVM's `LLVMBool` is a C `int`, not an LLVM `i1` or C99 `_Bool`. Both ctypes
+  bindings and generated native C-API declarations must use a full `i32`; on
+  ARM64, an `i1` declaration can leave upper argument bits unspecified and turn
+  false debug flags into true.
+- On Darwin, run `dsymutil` before deleting temporary linked objects: the
+  executable debug map points back to those objects. Also give llc a versioned
+  macOS triple so the Mach-O object carries `LC_BUILD_VERSION` rather than
+  relying on the linker's platform guess.
+- Profiler usability is an end-to-end property. LLVM metadata text alone is not
+  enough; gate object DWARF, line tables, runtime FDEs, frame-prologue shape,
+  linked dSYM resolution, and one real native sampling call tree.
 - Callback adapter functions are real work in highly repeated frontend paths.
   If a helper can accept the canonical callable shape directly, avoid allocating
   a forwarding lambda in the wrapper on every call.
@@ -1887,6 +1902,15 @@
   phase boundaries. On macOS, serialize high-memory native compilations: two
   individually bounded compiler processes can still exceed host capacity when
   `make` runs them concurrently.
+- A compiler phase boundary can be too narrow even when each local reset is
+  correct. Source preprocessing, parsing, semantic analysis, LLVM construction,
+  and object emission retain data across their internal calls; charging that
+  whole graph to the process-wide arena defeats local phase resets. When the
+  durable effects are files plus a scalar status, wrap the complete
+  source-to-object operation in one explicit reclaimable root transaction,
+  while keeping the smaller unscoped allocation guard intact. Generated arrays
+  and frozen-resource tables are the right integration cases for sizing this
+  transaction.
 - Never form a full-width integer mask as `(1 << width) - 1` when `width` may
   equal the representation width. For a 64-bit destination, use the all-ones
   value directly; construct the shifted mask only for narrower widths.

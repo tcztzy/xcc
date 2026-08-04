@@ -168,6 +168,83 @@ _LLVM_C_API_INTRINSICS = {
     "ModuleCreateWithName": ("LLVMModuleCreateWithName", "ptr", ("ptr",)),
     "CreateBuilder": ("LLVMCreateBuilder", "ptr", ()),
     "SetTarget": ("LLVMSetTarget", "void", ("ptr", "ptr")),
+    "AddModuleFlag": ("LLVMAddModuleFlag", "void", ("ptr", "i32", "ptr", "i64", "ptr")),
+    "ValueAsMetadata": ("LLVMValueAsMetadata", "ptr", ("ptr",)),
+    "GetCurrentDebugLocation2": ("LLVMGetCurrentDebugLocation2", "ptr", ("ptr",)),
+    "SetCurrentDebugLocation2": (
+        "LLVMSetCurrentDebugLocation2",
+        "void",
+        ("ptr", "ptr"),
+    ),
+    "CreateDIBuilder": ("LLVMCreateDIBuilder", "ptr", ("ptr",)),
+    "DisposeDIBuilder": ("LLVMDisposeDIBuilder", "void", ("ptr",)),
+    "DIBuilderFinalize": ("LLVMDIBuilderFinalize", "void", ("ptr",)),
+    "DIBuilderCreateFile": (
+        "LLVMDIBuilderCreateFile",
+        "ptr",
+        ("ptr", "ptr", "i64", "ptr", "i64"),
+    ),
+    "DIBuilderCreateCompileUnit": (
+        "LLVMDIBuilderCreateCompileUnit",
+        "ptr",
+        (
+            "ptr",
+            "i32",
+            "ptr",
+            "ptr",
+            "i64",
+            "i32",
+            "ptr",
+            "i64",
+            "i32",
+            "ptr",
+            "i64",
+            "i32",
+            "i32",
+            "i32",
+            "i32",
+            "ptr",
+            "i64",
+            "ptr",
+            "i64",
+        ),
+    ),
+    "DIBuilderCreateSubroutineType": (
+        "LLVMDIBuilderCreateSubroutineType",
+        "ptr",
+        ("ptr", "ptr", "ptr", "i32", "i32"),
+    ),
+    "DIBuilderCreateFunction": (
+        "LLVMDIBuilderCreateFunction",
+        "ptr",
+        (
+            "ptr",
+            "ptr",
+            "ptr",
+            "i64",
+            "ptr",
+            "i64",
+            "ptr",
+            "i32",
+            "ptr",
+            "i32",
+            "i32",
+            "i32",
+            "i32",
+            "i32",
+        ),
+    ),
+    "DIBuilderCreateLexicalBlockFile": (
+        "LLVMDIBuilderCreateLexicalBlockFile",
+        "ptr",
+        ("ptr", "ptr", "ptr", "i32"),
+    ),
+    "DIBuilderCreateDebugLocation": (
+        "LLVMDIBuilderCreateDebugLocation",
+        "ptr",
+        ("ptr", "i32", "i32", "ptr", "ptr"),
+    ),
+    "SetSubprogram": ("LLVMSetSubprogram", "void", ("ptr", "ptr")),
     "VoidType": ("LLVMVoidType", "ptr", ()),
     "Int1Type": ("LLVMInt1Type", "ptr", ()),
     "Int8Type": ("LLVMInt8Type", "ptr", ()),
@@ -177,13 +254,13 @@ _LLVM_C_API_INTRINSICS = {
     "FloatType": ("LLVMFloatType", "ptr", ()),
     "DoubleType": ("LLVMDoubleType", "ptr", ()),
     "PointerType": ("LLVMPointerType", "ptr", ("ptr", "i32")),
-    "StructType": ("LLVMStructType", "ptr", ("ptr", "i32", "i1")),
+    "StructType": ("LLVMStructType", "ptr", ("ptr", "i32", "i32")),
     "GetTypeKind": ("LLVMGetTypeKind", "i32", ("ptr",)),
     "GetIntTypeWidth": ("LLVMGetIntTypeWidth", "i32", ("ptr",)),
     "GetArrayLength": ("LLVMGetArrayLength", "i32", ("ptr",)),
-    "ConstInt": ("LLVMConstInt", "ptr", ("ptr", "i64", "i1")),
+    "ConstInt": ("LLVMConstInt", "ptr", ("ptr", "i64", "i32")),
     "ConstReal": ("LLVMConstReal", "ptr", ("ptr", "double")),
-    "ConstString": ("LLVMConstString", "ptr", ("ptr", "i32", "i1")),
+    "ConstString": ("LLVMConstString", "ptr", ("ptr", "i32", "i32")),
     "ConstNull": ("LLVMConstNull", "ptr", ("ptr",)),
     "ConstArray": ("LLVMConstArray2", "ptr", ("ptr", "ptr", "i64")),
     "ConstNamedStruct": ("LLVMConstNamedStruct", "ptr", ("ptr", "ptr", "i32")),
@@ -230,19 +307,23 @@ _LLVM_C_API_INTRINSICS = {
     "BuildCall2": ("LLVMBuildCall2", "ptr", ("ptr", "ptr", "ptr", "ptr", "i32", "ptr")),
     "BuildVAArg": ("LLVMBuildVAArg", "ptr", ("ptr", "ptr", "ptr", "ptr")),
     "BuildExtractValue": ("LLVMBuildExtractValue", "ptr", ("ptr", "ptr", "i32", "ptr")),
-    "BuildMemSet": ("LLVMBuildMemSet", "ptr", ("ptr", "ptr", "ptr", "ptr", "i1")),
+    "BuildMemSet": ("LLVMBuildMemSet", "ptr", ("ptr", "ptr", "ptr", "ptr", "i32")),
     "BuildMemCpy": ("LLVMBuildMemCpy", "ptr", ("ptr", "ptr", "i32", "ptr", "i32", "ptr")),
-    "BuildFence": ("LLVMBuildFence", "ptr", ("ptr", "i32", "i1", "ptr")),
-    "BuildAtomicRMW": ("LLVMBuildAtomicRMW", "ptr", ("ptr", "i32", "ptr", "ptr", "i32", "i1")),
+    "BuildFence": ("LLVMBuildFence", "ptr", ("ptr", "i32", "i32", "ptr")),
+    "BuildAtomicRMW": (
+        "LLVMBuildAtomicRMW",
+        "ptr",
+        ("ptr", "i32", "ptr", "ptr", "i32", "i32"),
+    ),
     "BuildAtomicCmpXchg": (
         "LLVMBuildAtomicCmpXchg",
         "ptr",
-        ("ptr", "ptr", "ptr", "ptr", "i32", "i32", "i1"),
+        ("ptr", "ptr", "ptr", "ptr", "i32", "i32", "i32"),
     ),
     "BuildPhi": ("LLVMBuildPhi", "ptr", ("ptr", "ptr", "ptr")),
     "TypeOf": ("LLVMTypeOf", "ptr", ("ptr",)),
     "ConstPointerNull": ("LLVMConstPointerNull", "ptr", ("ptr",)),
-    "IsNull": ("LLVMIsNull", "i1", ("ptr",)),
+    "IsNull": ("LLVMIsNull", "i32", ("ptr",)),
     "IsAConstantInt": ("LLVMIsAConstantInt", "ptr", ("ptr",)),
     "ConstIntGetSExtValue": ("LLVMConstIntGetSExtValue", "i64", ("ptr",)),
     "ConstIntGetZExtValue": ("LLVMConstIntGetZExtValue", "i64", ("ptr",)),
@@ -935,6 +1016,14 @@ _PHASE_PREPROCESSOR_SHARED_REGION_FUNCTIONS = frozenset(
         "xcc.preprocessor.process.process_text",
     }
 )
+
+# A complete source-to-object invocation is a natural transaction boundary:
+# its only durable effects are files written after compilation, and its return
+# value is scalar.  The conservative escape analysis cannot prove this across
+# LLVM and filesystem intrinsics, so mark the root explicitly.  This keeps
+# large generated translation units inside the reclaimable phase budget instead
+# of charging their retained frontend/codegen graph to the process-wide guard.
+_PHASE_ROOT_TRANSACTION_FUNCTIONS = frozenset({"xcc.cc_driver._aot_compile_source_path_to_object"})
 
 
 def _phase_intrinsic_is_no_capture(target: str) -> bool:
@@ -1942,6 +2031,8 @@ def _function_uses_owned_phase(
     borrowed_return_functions: frozenset[str],
     owned_return_functions: frozenset[str],
 ) -> bool:
+    if function.name in _PHASE_ROOT_TRANSACTION_FUNCTIONS:
+        return True
     if function.name in _PHASE_PREPROCESSOR_SHARED_REGION_FUNCTIONS:
         return False
     scalar_return = isinstance(

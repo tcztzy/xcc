@@ -153,6 +153,16 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("call void @__xcc_aot_phase_finish", body)
         self.assertNotIn("@__xcc_aot_phase_capture_defer", body)
 
+    def test_native_source_to_object_uses_root_transaction_region(self) -> None:
+        llvm_ir = emit_llvm_text(lower_bootstrap_entry_smoke(ROOT))
+        symbol = "define i32 @xcc.cc_driver._aot_compile_source_path_to_object("
+        start = llvm_ir.index(symbol)
+        end = llvm_ir.index("\n}\n", start)
+        body = llvm_ir[start:end]
+
+        self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
+        self.assertIn("call void @__xcc_aot_phase_finish", body)
+
     def test_native_macro_scanners_join_linear_fragment_lists(self) -> None:
         llvm_ir = emit_llvm_text(lower_bootstrap_entry_smoke(ROOT))
         for symbol in (
@@ -2025,6 +2035,40 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             )
             self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
             self.assertTrue(obj.exists())
+
+            if (
+                Path("/usr/bin/dwarfdump").is_file()
+                and Path("/opt/homebrew/opt/llvm/bin/llvm-dwarfdump").is_file()
+            ):
+                debug_obj = work / "main-debug.o"
+                debug_compile = subprocess.run(
+                    (str(output), "-g", "-c", str(source), "-o", str(debug_obj)),
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(debug_compile.returncode, 0, debug_compile.stderr)
+                dwarf = subprocess.run(
+                    ("/usr/bin/dwarfdump", "--debug-info", "--debug-line", str(debug_obj)),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                unwind = subprocess.run(
+                    (
+                        "/opt/homebrew/opt/llvm/bin/llvm-dwarfdump",
+                        "--eh-frame",
+                        str(debug_obj),
+                    ),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                self.assertIn("DW_TAG_compile_unit", dwarf)
+                self.assertIn("DW_TAG_subprogram", dwarf)
+                self.assertIn("main.c", dwarf)
+                self.assertRegex(dwarf, r"0x[0-9a-f]+\s+7\s+[1-9]\s+1")
+                self.assertIn("FDE", unwind)
 
             exe = work / "main"
             link_result = subprocess.run(
