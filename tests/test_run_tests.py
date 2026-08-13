@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -31,6 +32,51 @@ class RunTestsScriptTests(unittest.TestCase):
             args = runner._build_arg_parser().parse_args([])
 
         self.assertEqual(runner._parse_jobs(args.jobs), 1)
+        self.assertEqual(args.timeout, 1800.0)
+
+    def test_run_command_converts_timeout_to_reported_failure(self) -> None:
+        runner = _load_run_tests_module()
+        timeout = subprocess.TimeoutExpired(
+            ("python", "-m", "unittest"),
+            3,
+            output="partial stdout",
+            stderr="partial stderr",
+        )
+
+        with patch.object(runner.subprocess, "run", side_effect=timeout):
+            result = runner._run_command(
+                ("python", "-m", "unittest"),
+                cwd=_repo_root(),
+                env={},
+                timeout=3,
+            )
+
+        self.assertEqual(result.returncode, 124)
+        self.assertTrue(result.timed_out)
+        self.assertEqual(result.stdout, "partial stdout")
+        self.assertIn("partial stderr", result.stderr)
+        self.assertIn("timed out after 3s", result.stderr)
+
+    def test_run_modules_forwards_timeout_to_each_test_process(self) -> None:
+        runner = _load_run_tests_module()
+        timeouts = []
+
+        def fake_run(command, *, cwd, env, timeout):
+            timeouts.append(timeout)
+            return runner.CommandResult(tuple(command), 0, "", "")
+
+        runner.run_modules(
+            modules=["tests.test_lexer"],
+            jobs=1,
+            use_coverage=False,
+            pythonpath=None,
+            verbose=False,
+            root=_repo_root(),
+            timeout=42,
+            run_command=fake_run,
+        )
+
+        self.assertEqual(timeouts, [42])
 
     def test_discover_test_modules_returns_importable_sorted_names(self) -> None:
         runner = _load_run_tests_module()
@@ -119,6 +165,46 @@ class RunTestsScriptTests(unittest.TestCase):
 
         self.assertEqual(calls[0][2]["COVERAGE_FILE"], "/tmp/xcc-coverage/.coverage")
 
+    def test_aot_v2_native_bootstrap_matrix_is_detached_from_coverage(self) -> None:
+        runner = _load_run_tests_module()
+        calls = []
+
+        def fake_run_modules(**kwargs):
+            calls.append(kwargs)
+            return [runner.ModuleResult(module, (), 0, "", "", 0.0) for module in kwargs["modules"]]
+
+        def fake_run_command(command, **_kwargs):
+            return runner.CommandResult(tuple(command), 0, "", "")
+
+        with (
+            patch.object(runner, "run_modules", side_effect=fake_run_modules),
+            patch.object(runner, "_run_command", side_effect=fake_run_command),
+            patch.object(runner, "_print_module_result"),
+        ):
+            status = runner.main(
+                [
+                    "--coverage",
+                    "--fail-under",
+                    "0",
+                    "tests.test_aot_bootstrap",
+                ]
+            )
+
+        self.assertEqual(status, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[0]["use_coverage"])
+        self.assertEqual(calls[0]["modules"], ["tests.test_aot_bootstrap"])
+        self.assertEqual(
+            calls[0]["base_env"]["XCC_SKIP_NATIVE_BOOTSTRAP_TESTS"],
+            "1",
+        )
+        self.assertFalse(calls[1]["use_coverage"])
+        self.assertEqual(
+            calls[1]["modules"],
+            ["tests.test_aot_bootstrap.AotBootstrapNativeBuildTests"],
+        )
+        self.assertNotIn("XCC_SKIP_NATIVE_BOOTSTRAP_TESTS", calls[1]["base_env"])
+
     def test_coverage_report_command_can_require_100_percent(self) -> None:
         runner = _load_run_tests_module()
 
@@ -145,6 +231,21 @@ class GateConfigTests(unittest.TestCase):
         mypyc_command = config["tool"]["tox"]["env"]["mypyc"]["commands"][1]
         self.assertEqual(mypyc_command[-2:], ["--jobs", "1"])
 
+    def test_lint_gate_covers_runtime_and_maintenance_scripts(self) -> None:
+        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
+        commands = config["tool"]["tox"]["env"]["lint"]["commands"]
+
+        self.assertEqual(commands[0], ["ruff", "check", "src", "scripts"])
+        self.assertEqual(commands[1], ["ruff", "format", "--check", "src", "scripts"])
+
+    def test_type_gate_covers_runtime_and_maintenance_scripts(self) -> None:
+        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
+        commands = config["tool"]["tox"]["env"]["type"]["commands"]
+
+        self.assertIn("scripts", config["tool"]["ty"]["src"]["include"])
+        self.assertEqual(config["tool"]["mypy"]["files"], ["src", "scripts"])
+        self.assertEqual(commands[0], ["ty", "check", "src", "scripts"])
+
     def test_coverage_report_uses_current_ratchet(self) -> None:
         config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
 
@@ -170,6 +271,37 @@ class GateConfigTests(unittest.TestCase):
 
         self.assertIn("uv run tox -e py311", text)
         self.assertNotIn("python -m unittest discover", text)
+
+    def test_ci_push_validation_watches_master_and_exposes_installed_llc(self) -> None:
+        text = (_repo_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("      - master", text)
+        self.assertIn("XCC_LLC:", text)
+
+    def test_pages_publish_from_master(self) -> None:
+        text = (_repo_root() / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
+
+        self.assertIn("      - master", text)
+
+    def test_ci_verifies_installed_wheel_outside_source_tree(self) -> None:
+        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
+        package_smoke = config["tool"]["tox"]["env"]["package-smoke"]
+        workflow = (_repo_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+        self.assertNotEqual(package_smoke.get("package"), "skip")
+        self.assertIn(
+            ["python", "scripts/validate_package.py"],
+            package_smoke["commands"],
+        )
+        self.assertIn("uv run tox -e package-smoke", workflow)
+
+    def test_ci_exercises_core_frontend_on_newest_supported_cpython(self) -> None:
+        workflow = (_repo_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn('python-version: "3.14"', workflow)
+        self.assertIn("tests.test_parser", workflow)
+        self.assertIn("tests.test_preprocessor", workflow)
+        self.assertIn("tests.test_sema", workflow)
 
 
 if __name__ == "__main__":

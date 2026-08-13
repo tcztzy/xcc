@@ -33,45 +33,7 @@ if TYPE_CHECKING:
     from . import Parser
 
 _POINTER_OP = ("ptr", 0)
-_POINTER_SIZE = 8
 _INTEGER_LITERAL_SUFFIXES = {"", "u", "l", "ul", "lu", "ll", "ull", "llu"}
-_BASE_TYPE_SIZES = (
-    ("_Bool", 1),
-    ("char", 1),
-    ("unsigned char", 1),
-    ("short", 2),
-    ("unsigned short", 2),
-    ("int", 4),
-    ("unsigned int", 4),
-    ("long", 8),
-    ("unsigned long", 8),
-    ("long long", 8),
-    ("unsigned long long", 8),
-    ("__int128", 16),
-    ("__uint128", 16),
-    ("unsigned __int128", 16),
-    ("__int128_t", 16),
-    ("__uint128_t", 16),
-    ("float", 4),
-    ("double", 8),
-    ("long double", 16),
-    ("enum", 4),
-    ("_Float16", 2),
-    ("__bf16", 2),
-    ("__fp16", 2),
-    ("_Float32", 4),
-    ("_Float64", 8),
-    ("_Float128", 16),
-    ("_Float32x", 8),
-    ("_Float64x", 16),
-)
-
-
-def _base_type_size(name: str) -> int | None:
-    for candidate, size in _BASE_TYPE_SIZES:
-        if name == candidate:
-            return size
-    return None
 
 
 def parse_int_literal_value(lexeme: str) -> int | None:
@@ -513,7 +475,7 @@ def _sizeof_type_spec_from_index(
     index: int,
 ) -> int | None:
     if index >= len(type_spec.declarator_ops):
-        return _base_type_size(type_spec.name)
+        return parser._data_layout.scalar_size(type_spec.name)
     kind, value = type_spec.declarator_ops[index]
     if kind == "arr":
         if not isinstance(value, int):
@@ -533,7 +495,7 @@ def _sizeof_type_spec_from_index(
         item_size = _sizeof_type_spec_from_index(parser, type_spec, index + 1)
         return None if item_size is None else item_size * value
     if kind == "ptr":
-        return _POINTER_SIZE
+        return parser._data_layout.pointer_size
     return None
 
 
@@ -542,10 +504,10 @@ def alignof_type_spec(parser: "Parser", type_spec: TypeSpec) -> int | None:
     if not type_spec.declarator_ops:
         if type_spec.record_tag is not None or type_spec.enum_tag is not None:
             return 16  # Conservative: actual alignment computed at codegen
-        return _base_type_size(type_spec.name)
+        return p._data_layout.scalar_alignment(type_spec.name)
     kind, _ = type_spec.declarator_ops[0]
     if kind == "ptr":
-        return _POINTER_SIZE
+        return p._data_layout.pointer_alignment
     if kind == "arr":
         return p._alignof_type_spec(
             TypeSpec(

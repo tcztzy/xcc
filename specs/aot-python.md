@@ -86,9 +86,13 @@ Python module is forbidden.
   region; commit transfers its complete segment to its parent; exact promotion
   and capture move only validated reachable graphs without changing payload
   addresses.
-- Allocation identity is checked in a bounded exact live index before ownership
-  metadata is read. Static or otherwise untracked pointers are treated as
-  nonmovable; tracked metadata corruption fails closed.
+- AOT-V1: Caller-supplied or derived payload identity is checked in a bounded
+  exact live index before an adjacent prefix is interpreted as its allocation
+  header. An internal header loaded directly from the private allocation head
+  may skip a separate lookup, but its exact-index membership and allocation tag
+  must be validated before header metadata can direct a pointer write. Static
+  or otherwise untracked pointers are nonmovable; missing exact membership or
+  an invalid allocation tag fails closed.
 - Allocation metadata remains bounded at 32 bytes per tracked allocation.
   Allocation, reallocation, free, reset, and commit keep the live index and
   ownership depth consistent.
@@ -116,6 +120,11 @@ Python module is forbidden.
   buffer.
 - Large intermediate render graphs are released before the final LLVM and
   normalized LLVM buffers are assembled.
+- AOT-V2: A validation process constructs each identical full-bootstrap
+  source/configuration artifact at most once. Structural assertions reuse the
+  immutable lowered module and LLVM text, native behavior fixtures reuse one
+  executable per configuration, and the native behavior matrix runs outside
+  Python line tracing while hosted build orchestration remains coverage-visible.
 
 ## Implementation Boundaries
 

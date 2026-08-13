@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TextIO
 
 from xcc.ast import TranslationUnit
+from xcc.data_layout import data_layout_for_target
 from xcc.diag import Diagnostic, FrontendError
 from xcc.lexer import LexerError, Token, lex, lex_pp
 from xcc.options import FrontendOptions, normalize_options
@@ -93,6 +94,10 @@ def _aot_compile_source_unchecked(
     timings: AotFrontendTimings | None = None,
 ) -> FrontendResult:
     normalized_options: FrontendOptions = normalize_options(options)
+    data_layout = data_layout_for_target(
+        normalized_options.target_os,
+        normalized_options.host_machine,
+    )
     preprocessing_start = _aot_monotonic_ns() if timings is not None else 0
     try:
         pp_result: PreprocessResult = preprocess_source(
@@ -106,7 +111,11 @@ def _aot_compile_source_unchecked(
     parser_start = _aot_monotonic_ns() if timings is not None else 0
     try:
         tokens: list[Token] = lex(pp_result.source)
-        unit: TranslationUnit = parse(tokens, std=normalized_options.std)
+        unit: TranslationUnit = parse(
+            tokens,
+            std=normalized_options.std,
+            data_layout=data_layout,
+        )
     finally:
         if timings is not None:
             timings.parser_ns = _aot_monotonic_ns() - parser_start
@@ -117,6 +126,7 @@ def _aot_compile_source_unchecked(
             std=normalized_options.std,
             excess_init_ok=pp_result.embed_used,
             pack_changes=pp_result.pack_changes,
+            data_layout=data_layout,
         )
     finally:
         if timings is not None:
@@ -141,6 +151,10 @@ def compile_source(
     options: FrontendOptions | None = None,
 ) -> FrontendResult:
     normalized_options = normalize_options(options)
+    data_layout = data_layout_for_target(
+        normalized_options.target_os,
+        normalized_options.host_machine,
+    )
     try:
         pp_result = preprocess_source(source, filename=filename, options=normalized_options)
     except PreprocessorError as error:
@@ -178,7 +192,7 @@ def compile_source(
         )
         raise FrontendError(diagnostic) from error
     try:
-        unit = parse(tokens, std=normalized_options.std)
+        unit = parse(tokens, std=normalized_options.std, data_layout=data_layout)
     except ParserError as error:
         token = error.token
         mapped_filename, mapped_line, mapped_column = _map_diagnostic_location(
@@ -201,6 +215,7 @@ def compile_source(
             std=normalized_options.std,
             excess_init_ok=pp_result.embed_used,
             pack_changes=pp_result.pack_changes,
+            data_layout=data_layout,
         )
     except SemaError as error:
         raise FrontendError(

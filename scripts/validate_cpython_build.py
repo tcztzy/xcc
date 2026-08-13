@@ -184,8 +184,7 @@ def main(argv: Sequence[str] | None = None, *, run_step: RunStep = run_step) -> 
         raise SystemExit("--jobs must be >= 1")
     if args.native_aot_cc is not None and args.jobs != 1:
         raise SystemExit(
-            "--native-aot-cc requires --jobs 1 until native AOT allocation "
-            "lifetimes are bounded"
+            "--native-aot-cc requires --jobs 1 until native AOT allocation lifetimes are bounded"
         )
 
     cpython_root = args.cpython.resolve()

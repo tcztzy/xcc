@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from xcc.data_layout import data_layout_for_target
 from xcc.host_includes import host_system_include_dirs
 from xcc.lexer import TokenKind
 from xcc.options import FrontendOptions, normalize_options
@@ -1326,7 +1327,6 @@ _COMPILER_COMPAT_PREDEFINED_MACROS_BATCH1 = (
     "__GNUC__=4",
     "__clang__=1",
 )
-_COMPILER_COMPAT_PREDEFINED_MACROS_BATCH2_5 = ("__APPLE_CC__=6000",)
 _COMPILER_COMPAT_PREDEFINED_MACROS_BATCH2 = (
     "__GNUC_MINOR__=8",
     "__GNUC_PATCHLEVEL__=1",
@@ -1736,6 +1736,7 @@ def _preprocess_source_no_callback_with_processor(
 class _Preprocessor:
     def __init__(self, options: FrontendOptions) -> None:
         self._options = options
+        self._data_layout = data_layout_for_target(options.target_os, options.host_machine)
         translation_start = datetime.now()
         self._date_literal = _quote_string_literal(_format_date_macro(translation_start))
         self._time_literal = _quote_string_literal(translation_start.strftime("%H:%M:%S"))
@@ -1762,21 +1763,7 @@ class _Preprocessor:
         )
         # B661: Critical compat macros loaded directly to avoid tuple-iteration
         # limits in the AOT binary.
-        self._macros["__APPLE_CC__"] = _Macro(
-            "__APPLE_CC__", (_MacroToken(TokenKind.PP_NUMBER, "6000"),)
-        )
         self._macros["__clang__"] = _Macro("__clang__", (_MacroToken(TokenKind.PP_NUMBER, "1"),))
-        # B661: CPython function-like macros.  Self._parse_cli_define()
-        # cannot handle function-like syntax in the AOT binary, but
-        # self._parse_define() (used for inline #define directives) works.
-        for _fm in (
-            "_Py_CAST(type,expr) ((type)(expr))",
-            "_PyObject_CAST(op) _Py_CAST(PyObject*,(op))",
-            "_Py_RVALUE(op) ((void)0,(op))",
-        ):
-            _fm_macro = self._parse_define(_fm)
-            if _fm_macro is not None:
-                self._macros[_fm_macro.name] = _fm_macro
         for _pm in _PREDEFINED_MACROS_BATCH0:
             macro = self._parse_cli_define(_pm)
             self._macros[macro.name] = macro
@@ -1843,9 +1830,6 @@ class _Preprocessor:
         for define in _COMPILER_COMPAT_PREDEFINED_MACROS_BATCH1:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
-        for define in _COMPILER_COMPAT_PREDEFINED_MACROS_BATCH2_5:
-            macro = self._parse_cli_define(define)
-            self._macros[macro.name] = macro
         for define in _COMPILER_COMPAT_PREDEFINED_MACROS_BATCH2:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
@@ -1864,9 +1848,16 @@ class _Preprocessor:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
         target_defines = (
-            _LINUX_PREDEFINED_MACROS if options.target_os == "linux" else _DARWIN_PREDEFINED_MACROS
+            _LINUX_PREDEFINED_MACROS
+            if options.target_os == "linux"
+            else _DARWIN_PREDEFINED_MACROS
+            if options.target_os != "evm"
+            else ()
         )
         for define in target_defines:
+            macro = self._parse_cli_define(define)
+            self._macros[macro.name] = macro
+        for define in self._data_layout.predefined_macros:
             macro = self._parse_cli_define(define)
             self._macros[macro.name] = macro
         host_machine = self._options.host_machine or platform.machine()
@@ -1908,6 +1899,9 @@ class _Preprocessor:
 
     def _init_no_callback(self, options: FrontendOptions) -> None:
         self._options = options
+        target_os = "darwin" if options.target_os is None else options.target_os
+        host_machine = "arm64" if options.host_machine is None else options.host_machine
+        self._data_layout = data_layout_for_target(target_os, host_machine)
         self._counter = 0
         self._base_filename = "<input>"
         self._embed_used = False
@@ -1922,21 +1916,29 @@ class _Preprocessor:
         self._define_object_macro_no_callback("__GNUC_MINOR__", "2")
         self._define_object_macro_no_callback("__clang__", "1")
         self._define_object_macro_no_callback("__clang_version__", '"xcc 0.2"')
-        self._define_object_macro_no_callback("__APPLE__", "1")
-        self._define_object_macro_no_callback("__MACH__", "1")
+        if target_os == "darwin":
+            self._define_object_macro_no_callback("__APPLE__", "1")
+            self._define_object_macro_no_callback("__MACH__", "1")
+            self._define_object_macro_no_callback("__APPLE_CC__", "6000")
+        elif target_os == "linux":
+            self._define_object_macro_no_callback("__linux__", "1")
+            self._define_object_macro_no_callback("__ELF__", "1")
         self._define_object_macro_no_callback("__ATOMIC_RELAXED", "0")
         self._define_object_macro_no_callback("__ATOMIC_CONSUME", "1")
         self._define_object_macro_no_callback("__ATOMIC_ACQUIRE", "2")
         self._define_object_macro_no_callback("__ATOMIC_RELEASE", "3")
         self._define_object_macro_no_callback("__ATOMIC_ACQ_REL", "4")
         self._define_object_macro_no_callback("__ATOMIC_SEQ_CST", "5")
-        self._define_object_macro_no_callback("__aarch64__", "1")
-        self._define_object_macro_no_callback("__arm64__", "1")
-        self._define_object_macro_no_callback("__arm64", "1")
-        self._define_object_macro_no_callback("__arm64__", "1")
+        if host_machine in {"aarch64", "arm64"}:
+            self._define_object_macro_no_callback("__aarch64__", "1")
+            self._define_object_macro_no_callback("__arm64__", "1")
+            self._define_object_macro_no_callback("__arm64", "1")
+        elif host_machine in {"amd64", "x86_64"}:
+            self._define_object_macro_no_callback("__x86_64__", "1")
         self._define_object_macro_no_callback("__LP64__", "1")
         self._define_object_macro_no_callback("_LP64", "1")
-        self._define_object_macro_no_callback("_DARWIN_C_SOURCE", "1")
+        if target_os == "darwin":
+            self._define_object_macro_no_callback("_DARWIN_C_SOURCE", "1")
         self._define_object_macro_no_callback("__SIZE_TYPE__", "unsigned long")
         self._define_object_macro_no_callback("__PTRDIFF_TYPE__", "long")
         self._define_object_macro_no_callback("__INTPTR_TYPE__", "long")
@@ -1964,10 +1966,28 @@ class _Preprocessor:
         self._define_object_macro_no_callback("__FLT_RADIX__", "2")
         self._define_object_macro_no_callback("__FLT_MANT_DIG__", "24")
         self._define_object_macro_no_callback("__DBL_MANT_DIG__", "53")
-        self._define_object_macro_no_callback("__LDBL_MANT_DIG__", "113")
+        self._define_object_macro_no_callback(
+            "__LDBL_MANT_DIG__",
+            "53"
+            if self._data_layout.long_double_mantissa_bits == 53
+            else "64"
+            if self._data_layout.long_double_mantissa_bits == 64
+            else "113",
+        )
         self._define_object_macro_no_callback("__FLT_DIG__", "6")
         self._define_object_macro_no_callback("__DBL_DIG__", "15")
-        self._define_object_macro_no_callback("__LDBL_DIG__", "33")
+        self._define_object_macro_no_callback(
+            "__LDBL_DIG__",
+            "15"
+            if self._data_layout.long_double_mantissa_bits == 53
+            else "18"
+            if self._data_layout.long_double_mantissa_bits == 64
+            else "33",
+        )
+        self._define_object_macro_no_callback(
+            "__SIZEOF_LONG_DOUBLE__",
+            "8" if self._data_layout.long_double_size == 8 else "16",
+        )
         self._define_object_macro_no_callback("__FLT_EPSILON__", "1.19209290e-7F")
         self._define_object_macro_no_callback("__DBL_EPSILON__", "2.2204460492503131e-16")
         self._define_object_macro_no_callback(
@@ -2010,6 +2030,9 @@ class _Preprocessor:
             "__FLOAT_WORD_ORDER__",
             "__ORDER_LITTLE_ENDIAN__",
         )
+        for define in self._data_layout.predefined_macros:
+            define_parts = define.split("=", 1)
+            self._define_object_macro_no_callback(define_parts[0], define_parts[1])
         for define in options.defines:
             if "=" in define:
                 define_parts = define.split("=", 1)
@@ -2154,111 +2177,6 @@ class _Preprocessor:
             base_dir=base_dir,
         )
         return result, updated_stack
-
-    def _handle_conditional_no_callback(
-        self,
-        name: str,
-        body: str,
-        location: _SourceLocation,
-        stack: list[_ConditionalFrame],
-        *,
-        base_dir: Path | None,
-    ) -> str | None:
-        if name not in {
-            "if",
-            "ifdef",
-            "ifndef",
-            "elif",
-            "elifdef",
-            "elifndef",
-            "else",
-            "endif",
-        }:
-            return None
-        if name == "if":
-            parent_active = _is_active(stack)
-            condition = parent_active and self._eval_condition_no_callback(body, location, base_dir)
-            stack.append(_ConditionalFrame(parent_active, condition, condition))
-            return ""
-        if name == "ifdef":
-            parent_active = _is_active(stack)
-            macro_name = self._require_macro_name_no_regex(body, location)
-            condition = parent_active and self._macro_defined_no_callback(macro_name)
-            stack.append(_ConditionalFrame(parent_active, condition, condition))
-            return ""
-        if name == "ifndef":
-            parent_active = _is_active(stack)
-            macro_name = self._require_macro_name_no_regex(body, location)
-            condition = parent_active and not self._macro_defined_no_callback(macro_name)
-            stack.append(_ConditionalFrame(parent_active, condition, condition))
-            return ""
-        if not stack:
-            raise PreprocessorError(
-                f"Unexpected #{name}",
-                location.line,
-                1,
-                filename=location.filename,
-                code=_PP_INVALID_DIRECTIVE,
-            )
-        frame = stack[-1]
-        if name == "elif" or name == "elifdef" or name == "elifndef":
-            if (name == "elifdef" or name == "elifndef") and self._options.std == "c11":
-                raise PreprocessorError(
-                    f"Unknown preprocessor directive: #{name}",
-                    location.line,
-                    1,
-                    filename=location.filename,
-                    code=_PP_UNKNOWN_DIRECTIVE,
-                )
-            if frame.saw_else:
-                raise PreprocessorError(
-                    f"#{name} after #else",
-                    location.line,
-                    1,
-                    filename=location.filename,
-                    code=_PP_INVALID_DIRECTIVE,
-                )
-            if not frame.parent_active or frame.branch_taken:
-                frame.active = False
-                return ""
-            if name == "elif":
-                condition = self._eval_condition_no_callback(body, location, base_dir)
-            else:
-                macro_name = self._require_macro_name_no_regex(body, location)
-                if name == "elifdef":
-                    condition = self._macro_defined_no_callback(macro_name)
-                else:
-                    condition = not self._macro_defined_no_callback(macro_name)
-            frame.active = condition
-            frame.branch_taken = frame.branch_taken or condition
-            return ""
-        if name == "else":
-            _require_empty_conditional_tail(
-                "else",
-                body,
-                location,
-                invalid_directive_code=_PP_INVALID_DIRECTIVE,
-            )
-            if frame.saw_else:
-                raise PreprocessorError(
-                    "Duplicate #else",
-                    location.line,
-                    1,
-                    filename=location.filename,
-                    code=_PP_INVALID_DIRECTIVE,
-                )
-            frame.saw_else = True
-            frame.active = frame.parent_active and not frame.branch_taken
-            frame.branch_taken = True
-            return ""
-        _require_empty_conditional_tail(
-            "endif",
-            body,
-            location,
-            invalid_directive_code=_PP_INVALID_DIRECTIVE,
-        )
-        stack.pop()
-        return ""
 
     def _handle_conditional_no_callback_with_stack(
         self,
@@ -2904,8 +2822,12 @@ class _Preprocessor:
             if cursor >= len(text) or text[cursor] != ")":
                 result_parts.append(name)
                 continue
+            if result_parts and result_parts[-1] == " ":
+                result_parts.pop()
             result_parts.append("\n")
             index = cursor + 1
+            if index < len(text) and text[index] == " ":
+                index += 1
         return "".join(result_parts)
 
     def _line_needs_macro_expansion(self, text: str) -> bool:
@@ -2943,29 +2865,13 @@ class _Preprocessor:
                 expanded_prefix = self._expand_macro_text(before_comment, location)
                 return expanded_prefix + comment_tail
             return text
-        # B661: Inline dynamic macro expansion using a tuple loop instead
-        # of frozenset membership — the AOT binary cannot reliably test
-        # "name in frozenset" but can execute a simple for-equal loop.
-        _result_tokens: list[_MacroToken] = []
-        for _tok in tokens:
-            _name = _tok.text
-            _is_dynamic = False
-            for _dn in _PREDEFINED_DYNAMIC_MACRO_TUPLE:
-                if _dn == _name:
-                    _is_dynamic = True
-                    break
-            if _is_dynamic and self._macros.get(_name) is not None:
-                _macro = self._macros[_name]
-                _result_tokens.extend(_macro.replacement)
-            else:
-                _result_tokens.append(_tok)
         expanded = _expand_macro_tokens(
-            _result_tokens,
+            tokens,
             self._macros,
             self._options.std,
             location,
-            dynamic_macro_resolver=None,
-            dynamic_macro_names=frozenset(),
+            dynamic_macro_resolver=self._resolve_dynamic_macro,
+            dynamic_macro_names=_PREDEFINED_DYNAMIC_MACROS,
         )
         return _render_macro_tokens(expanded)
 

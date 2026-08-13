@@ -30,8 +30,8 @@ def _repo_root() -> Path:
 def _load_build_deps():
     try:
         from mypyc.build import mypycify
-        from setuptools import Distribution
-        from setuptools.command.build_ext import build_ext
+        from setuptools import Distribution  # type: ignore[import-untyped]
+        from setuptools.command.build_ext import build_ext  # type: ignore[import-untyped]
     except ModuleNotFoundError as error:
         message = (
             "missing mypyc build dependency; run with "

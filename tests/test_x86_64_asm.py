@@ -502,9 +502,7 @@ int f(void) { return 0; }
             gen._type_map.set(expr, type_)
             return expr
 
-        unknown_atomic_callee = typed_expr(
-            Identifier("__atomic_unknown"), INT.function_of(())
-        )
+        unknown_atomic_callee = typed_expr(Identifier("__atomic_unknown"), INT.function_of(()))
         unknown_atomic = typed_expr(CallExpr(unknown_atomic_callee, []), INT)
         with self.assertRaisesRegex(CodegenError, "Unknown identifier"):
             gen._emit_call(unknown_atomic, "rax")
@@ -1372,12 +1370,14 @@ int f(void) { struct Mixed local_mixed; return 0; }
             gen._emit_call = original_emit_call
         self.assertIn("    ; call result rcx", gen._lines)
 
-        mismatched_return_call = typed_expr(CallExpr(Identifier("make_big"), []), Type("struct Big"))
+        mismatched_return_call = typed_expr(
+            CallExpr(Identifier("make_big"), []), Type("struct Big")
+        )
         original_emit_address_for_return = gen._emit_address
         original_aggregate_return_from_address = gen._emit_aggregate_return_from_address
         gen._emit_address = lambda _expr, _target: Type("struct Big")
-        gen._emit_aggregate_return_from_address = (
-            lambda _type, _address_reg: gen._emit("; aggregate return")
+        gen._emit_aggregate_return_from_address = lambda _type, _address_reg: gen._emit(
+            "; aggregate return"
         )
         try:
             gen._emit_aggregate_return(mismatched_return_call, Type("struct Mixed"))
@@ -1493,7 +1493,9 @@ int f(void) { struct Mixed local_mixed; return 0; }
             gen._emit_alignof(align_missing, "rax")
 
         self.assertEqual(
-            gen._sizeof_operand_type(SizeofExpr(MemberExpr(Identifier("local_mixed"), "d", False), None)),
+            gen._sizeof_operand_type(
+                SizeofExpr(MemberExpr(Identifier("local_mixed"), "d", False), None)
+            ),
             DOUBLE,
         )
         self.assertEqual(
@@ -1524,10 +1526,12 @@ int f(void) { struct Mixed local_mixed; return 0; }
                     None,
                 )
             )
+        unresolved_float_member = MemberExpr(FloatLiteral("1.0"), "missing", False)
         with self.assertRaisesRegex(CodegenError, "cannot resolve sizeof operand type"):
-            gen._sizeof_operand_type(SizeofExpr(MemberExpr(FloatLiteral("1.0"), "missing", False), None))
+            gen._sizeof_operand_type(SizeofExpr(unresolved_float_member, None))
+        unresolved_function_member = MemberExpr(Identifier("callee"), "missing", False)
         with self.assertRaisesRegex(CodegenError, "cannot resolve sizeof operand type"):
-            gen._sizeof_operand_type(SizeofExpr(MemberExpr(Identifier("callee"), "missing", False), None))
+            gen._sizeof_operand_type(SizeofExpr(unresolved_function_member, None))
         assert gen._func_sym is not None
         gen._func_sym.locals["enum_like"] = EnumConstSymbol("enum_like", 1)
         enum_like_chain = MemberExpr(

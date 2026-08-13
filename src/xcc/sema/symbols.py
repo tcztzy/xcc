@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from xcc.ast import Expr
+from xcc.data_layout import GENERIC_LP64_DATA_LAYOUT, TargetDataLayout
 from xcc.types import INT, Type
 
 
@@ -79,6 +80,7 @@ class SemaUnit:
     file_scope: "Scope | None" = None
     function_signatures: dict[str, FunctionSignature] = field(default_factory=dict)
     transparent_union_types: set[str] = field(default_factory=set)
+    data_layout: TargetDataLayout = GENERIC_LP64_DATA_LAYOUT
 
 
 class Scope:

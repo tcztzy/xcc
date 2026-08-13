@@ -86,6 +86,43 @@ class CodegenTests(unittest.TestCase):
         self.assertEqual(_base_size("void"), 0)
         self.assertEqual(_base_size("unknown"), 4)
 
+    def test_long_double_llvm_type_matches_target_data_layout(self) -> None:
+        darwin = _LLVMGen(
+            compile_source(
+                "long double value;",
+                options=FrontendOptions(target_os="darwin", host_machine="arm64"),
+            )
+        )
+        linux = _LLVMGen(
+            compile_source(
+                "long double value;",
+                options=FrontendOptions(target_os="linux", host_machine="x86_64"),
+            )
+        )
+        llvm_api = llvm()
+
+        self.assertEqual(
+            llvm_api.GetTypeKind(darwin._base_type("long double")),
+            LLVMTypeKind.DOUBLE,
+        )
+        self.assertEqual(
+            llvm_api.GetTypeKind(linux._base_type("long double")),
+            LLVMTypeKind.X86_FP80,
+        )
+
+    def test_aot_bootstrap_profile_uses_darwin_aarch64_data_layout(self) -> None:
+        llvm_ir = cc_driver._aot_compile_source_to_llvm_ir_unchecked(
+            "bootstrap_layout.c",
+            "long double value; char storage[sizeof(long double)];",
+            (),
+            (),
+            (),
+            "c11",
+        )
+
+        self.assertIn("@value = global double", llvm_ir)
+        self.assertIn("@storage = global [8 x i8]", llvm_ir)
+
     def test_merge_qualifiers_preserves_first_occurrence_order(self) -> None:
         self.assertEqual(
             _merge_qualifiers(("const", "volatile", "const"), ("volatile", "restrict")),

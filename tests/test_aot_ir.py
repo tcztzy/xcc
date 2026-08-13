@@ -2262,6 +2262,38 @@ class AotScalarLoweringTests(unittest.TestCase):
             self.assertIsNone(lowerer._project_record_name("Missing"))
         self.assertEqual(check.call_count, 3)
 
+    def test_aot_v2_function_suffix_lookup_is_cached(self) -> None:
+        class CountingFunctions(dict[str, AotFunctionInfo]):
+            def __init__(self, values: dict[str, AotFunctionInfo]) -> None:
+                super().__init__(values)
+                self.iterations = 0
+
+            def __iter__(self):
+                self.iterations += 1
+                return super().__iter__()
+
+        function_info = AotFunctionInfo("render", (), AotType("str"))
+        functions = CountingFunctions(
+            {
+                "first.Value.render": function_info,
+                "second.Value.render": function_info,
+            }
+        )
+        lowerer = _Lowerer("suffix-cache.py", {}, functions)
+
+        self.assertEqual(
+            lowerer._function_names_ending_with(".Value.render"),
+            ("first.Value.render", "second.Value.render"),
+        )
+        self.assertEqual(
+            lowerer._function_names_ending_with(
+                ".Value.render",
+                "first.Value.render",
+            ),
+            ("second.Value.render",),
+        )
+        self.assertEqual(functions.iterations, 1)
+
     def test_lowers_negative_int_literal_subscript_index(self) -> None:
         module = lower_source_to_ir(
             "def last(values: tuple[str, ...]) -> str:\n"

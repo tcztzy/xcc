@@ -1,4 +1,3 @@
-import os
 import unittest
 from pathlib import Path
 
@@ -20,6 +19,7 @@ from xcc.aot import (
 )
 from xcc.aot.slice import _add_missing_records
 from xcc.lexer import Token, TokenKind
+from xcc.llvm_tools import find_llc
 from xcc.parser.type_specs import ParserError
 from xcc.sema.type_helpers import _aot_integer_type_summary
 
@@ -56,7 +56,12 @@ class AotMilestone5AdmissionTests(unittest.TestCase):
         self.assertIn("Parser._lookup_typedef", functions)
         self.assertEqual(
             functions["Parser.__init__"].parameters,
-            (("self", "Parser"), ("tokens", "list[Token]"), ("std", "StdMode")),
+            (
+                ("self", "Parser"),
+                ("tokens", "list[Token]"),
+                ("std", "StdMode"),
+                ("data_layout", "TargetDataLayout"),
+            ),
         )
         self.assertEqual(functions["Parser._lookup_typedef"].return_type.name, "TypeSpec | None")
 
@@ -69,6 +74,7 @@ class AotMilestone5AdmissionTests(unittest.TestCase):
             "dict[str, tuple[RecordMemberInfo, ...]]",
         )
         self.assertEqual(fields["transparent_union_types"].name, "set[str]")
+        self.assertEqual(fields["data_layout"].name, "TargetDataLayout")
 
     def test_accepts_property_getter_as_method_signature(self) -> None:
         analysis = analyze_path(SEMA_SYMBOLS_PATH)
@@ -180,8 +186,11 @@ class AotMilestone5ParserSubsetTests(unittest.TestCase):
 
 
 def _real_llc() -> str | None:
-    path = os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
-    return path if Path(path).exists() else None
+    try:
+        path = find_llc()
+    except ValueError:
+        return None
+    return path if Path(path).is_file() else None
 
 
 class AotMilestone5NativeTests(unittest.TestCase):

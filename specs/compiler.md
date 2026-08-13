@@ -39,6 +39,15 @@ and link behavior belong to the selected target spec.
   target-appropriate diagnostic instead of falling back to another compiler.
 - Project-specific source identities must not affect compiler semantics.
 
+## §V Invariants
+
+- V1: Normalizing `FrontendOptions` is idempotent, preserves every supplied
+  field, and never injects target- or bootstrap-specific include paths or
+  macros into the shared frontend configuration.
+- V2: Every compilation uses one target data layout. Predefined size macros,
+  parser integer-constant evaluation, semantic `sizeof`/`_Alignof` and backend
+  storage decisions must agree for the selected target.
+
 ## Regression Expectations
 
 - Parser or semantic fixes include a minimized C reproducer.

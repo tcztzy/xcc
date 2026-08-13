@@ -6,13 +6,24 @@ from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot.hosted_cli import hosted_main
+from xcc.llvm_tools import find_llc
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LLC = Path("/opt/homebrew/opt/llvm/bin/llc")
 
 
-@unittest.skipUnless(LLC.is_file(), "LLVM llc is not available")
+def _real_llc() -> Path | None:
+    try:
+        path = Path(find_llc())
+    except ValueError:
+        return None
+    return path if path.is_file() else None
+
+
+LLC = _real_llc()
+
+
+@unittest.skipUnless(LLC is not None, "LLVM llc is not available")
 class AotNativeCliTests(unittest.TestCase):
     workspace: tempfile.TemporaryDirectory[str]
     build_root: Path

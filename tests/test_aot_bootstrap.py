@@ -1,4 +1,5 @@
 import ast
+import os
 import re
 import subprocess
 import unittest
@@ -16,6 +17,7 @@ from xcc.aot import (
     emit_llvm_text,
     IrBoolType,
     IrCall,
+    IrModule,
     IrReturn,
     lower_bootstrap_entry_smoke,
     lower_source_to_ir,
@@ -121,8 +123,30 @@ class AotBootstrapEntryTests(unittest.TestCase):
 
 
 class AotBootstrapLoweringTests(unittest.TestCase):
+    _bootstrap_module_fixture: IrModule | None = None
+    _bootstrap_llvm_fixture: str | None = None
+
+    @classmethod
+    def _lowered_bootstrap(cls) -> IrModule:
+        if cls._bootstrap_module_fixture is None:
+            cls._bootstrap_module_fixture = lower_bootstrap_entry_smoke(ROOT)
+        return cls._bootstrap_module_fixture
+
+    @classmethod
+    def _rendered_bootstrap(cls) -> str:
+        if cls._bootstrap_llvm_fixture is None:
+            cls._bootstrap_llvm_fixture = emit_llvm_text(cls._lowered_bootstrap())
+        return cls._bootstrap_llvm_fixture
+
+    def test_aot_v2_full_bootstrap_fixture_is_shared(self) -> None:
+        module = self._lowered_bootstrap()
+        llvm_ir = self._rendered_bootstrap()
+
+        self.assertIs(self._lowered_bootstrap(), module)
+        self.assertIs(self._rendered_bootstrap(), llvm_ir)
+
     def test_bootstrap_compiler_path_reaches_frontend_and_codegen(self) -> None:
-        module = lower_bootstrap_entry_smoke(ROOT)
+        module = self._lowered_bootstrap()
         functions = {function.name for function in module.functions}
         self.assertIn("xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked", functions)
         self.assertIn("xcc.frontend._aot_compile_source_unchecked", functions)
@@ -130,13 +154,13 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("xcc.codegen._LLVMGen.generate", functions)
 
     def test_bootstrap_llvm_has_no_conftest_include_fast_path(self) -> None:
-        llvm_ir = emit_llvm_text(lower_bootstrap_entry_smoke(ROOT))
+        llvm_ir = self._rendered_bootstrap()
         self.assertNotIn("conftest.c", llvm_ir)
         self.assertNotIn("#include <", llvm_ir)
         self.assertNotIn("call ptr @strstr(ptr %source_path", llvm_ir)
 
     def test_native_preprocessing_uses_one_exact_transaction_region(self) -> None:
-        llvm_ir = emit_llvm_text(lower_bootstrap_entry_smoke(ROOT))
+        llvm_ir = self._rendered_bootstrap()
         symbol = (
             "define i32 @xcc.preprocessor.__init__.preprocess_source_no_callback("
         )
@@ -154,17 +178,29 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("@__xcc_aot_phase_capture_defer", body)
 
     def test_native_source_to_object_uses_root_transaction_region(self) -> None:
-        llvm_ir = emit_llvm_text(lower_bootstrap_entry_smoke(ROOT))
+        llvm_ir = self._rendered_bootstrap()
         symbol = "define i32 @xcc.cc_driver._aot_compile_source_path_to_object("
         start = llvm_ir.index(symbol)
         end = llvm_ir.index("\n}\n", start)
         body = llvm_ir[start:end]
 
         self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
+        preserve_message = "call i1 @__xcc_aot_phase_promote_to(ptr %phase.error.message"
+        preserve_payload = (
+            "call void @__xcc_aot_phase_promote_object(ptr %phase.error.payload"
+        )
+        self.assertIn(preserve_message, body)
+        self.assertIn(preserve_payload, body)
         self.assertIn("call void @__xcc_aot_phase_finish", body)
+        self.assertLess(
+            body.index(preserve_message), body.index("call void @__xcc_aot_phase_finish")
+        )
+        self.assertLess(
+            body.index(preserve_payload), body.index("call void @__xcc_aot_phase_finish")
+        )
 
     def test_native_macro_scanners_join_linear_fragment_lists(self) -> None:
-        llvm_ir = emit_llvm_text(lower_bootstrap_entry_smoke(ROOT))
+        llvm_ir = self._rendered_bootstrap()
         for symbol in (
             "define i32 @xcc.preprocessor.__init__._Preprocessor._expand_text_no_callback(",
             (
@@ -183,8 +219,8 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():
             self.skipTest("llc is not installed at the configured path")
-        module = lower_bootstrap_entry_smoke(ROOT)
-        llvm_ir = emit_llvm_text(module)
+        module = self._lowered_bootstrap()
+        llvm_ir = self._rendered_bootstrap()
         out = ROOT / "build/aot/probes/bootstrap-real-path.ll"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(llvm_ir, encoding="utf-8")
@@ -433,7 +469,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("a = analyzer", method_source)
 
     def test_lowers_bootstrap_entry_smoke_wrapper(self) -> None:
-        module = lower_bootstrap_entry_smoke(ROOT)
+        module = self._lowered_bootstrap()
         functions = {function.name: function for function in module.functions}
         self.assertIn("aot_bootstrap_smoke_main", functions)
         self.assertIn("xcc.options.FrontendOptions.__post_init__", functions)
@@ -481,7 +517,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("target='__str_startswith'", body)
 
     def test_native_preprocessor_constructor_uses_no_callback_initializer(self) -> None:
-        module = lower_bootstrap_entry_smoke(ROOT)
+        module = self._lowered_bootstrap()
         functions = {function.name: function for function in module.functions}
         self.assertEqual(
             functions["xcc.preprocessor.__init__._Preprocessor.__init__"].body,
@@ -493,7 +529,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         )
 
     def test_bootstrap_entry_uses_project_owned_smoke_compiler(self) -> None:
-        module = lower_bootstrap_entry_smoke(ROOT)
+        module = self._lowered_bootstrap()
         functions = {function.name: function for function in module.functions}
         entry = functions["aot_bootstrap_smoke_main"]
         self.assertEqual(tuple(param.name for param in entry.params), ("argc", "argv"))
@@ -566,7 +602,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             functions,
         )
 
-        llvm_ir = emit_llvm_text(module)
+        llvm_ir = self._rendered_bootstrap()
 
         type_map_set_start = llvm_ir.index(
             "define void @xcc.sema.symbols.TypeMap.set("
@@ -644,7 +680,8 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn(
             "define i32 @xcc.cc_driver._aot_compile_source_to_llvm_ir("
             "ptr %source_path, ptr %source_text, ptr %include_dirs, "
-            "ptr %defines, ptr %undefs, ptr %std, ptr %result_out, ptr %error_out)",
+            "ptr %defines, ptr %undefs, ptr %std, i1 %debug, "
+            "ptr %result_out, ptr %error_out)",
             llvm_ir,
         )
         self.assertIn(
@@ -683,7 +720,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertNotIn("%ll_closed = call i32 @fclose", llvm_ir)
         self.assertIn(
             "define ptr @xcc.cc_driver._aot_smoke_llc_argv("
-            "ptr %llvm_path, ptr %object_path)",
+            "ptr %llvm_path, ptr %object_path, i1 %debug)",
             llvm_ir,
         )
         self.assertIn(
@@ -792,7 +829,12 @@ class AotBootstrapLoweringTests(unittest.TestCase):
 
     def test_codegen_base_type_lowers_without_callable_dict_dispatch(self) -> None:
         class_types = {}
-        for module_path in (ROOT / "src/xcc/codegen.py", ROOT / "src/xcc/types.py"):
+        for module_path in (
+            ROOT / "src/xcc/codegen.py",
+            ROOT / "src/xcc/data_layout.py",
+            ROOT / "src/xcc/sema/symbols.py",
+            ROOT / "src/xcc/types.py",
+        ):
             class_types.update(analyze_path(module_path).types.classes)
         source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
         module = lower_source_to_ir(
@@ -885,6 +927,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         class_types = {}
         for module_path in (
             ROOT / "src/xcc/codegen.py",
+            ROOT / "src/xcc/data_layout.py",
             ROOT / "src/xcc/sema/symbols.py",
             ROOT / "src/xcc/types.py",
         ):
@@ -1720,6 +1763,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         class_types = {}
         for module_path in (
             ROOT / "src/xcc/codegen.py",
+            ROOT / "src/xcc/data_layout.py",
             ROOT / "src/xcc/sema/symbols.py",
             ROOT / "src/xcc/types.py",
         ):
@@ -1741,6 +1785,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         class_types = {}
         for module_path in (
             ROOT / "src/xcc/codegen.py",
+            ROOT / "src/xcc/data_layout.py",
             ROOT / "src/xcc/sema/symbols.py",
             ROOT / "src/xcc/types.py",
         ):
@@ -1790,6 +1835,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         module = aot_slice.lower_core_slice(
             (
                 ROOT / "src/xcc/ast.py",
+                ROOT / "src/xcc/data_layout.py",
                 ROOT / "src/xcc/lexer.py",
                 ROOT / "src/xcc/parser/__init__.py",
                 ROOT / "src/xcc/parser/expressions.py",
@@ -1934,7 +1980,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         )
 
 
-class AotBootstrapNativeBuildTests(unittest.TestCase):
+class AotBootstrapBuildTests(unittest.TestCase):
     def test_build_native_bootstrap_invokes_llc_and_linker(self) -> None:
         commands: list[tuple[str, ...]] = []
 
@@ -1958,7 +2004,16 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
                 output.write_bytes(b"out")
             return Result()
 
-        with TemporaryDirectory() as temp_dir, patch("subprocess.run", fake_run):
+        llvm_ir = (
+            "define i32 @aot_bootstrap_smoke_main() { ret i32 0 }\n"
+            "define void @xcc.options.FrontendOptions.__post_init__() { ret void }\n"
+        )
+        with (
+            TemporaryDirectory() as temp_dir,
+            patch("xcc.aot.bootstrap.lower_bootstrap_entry_smoke", return_value=object()),
+            patch("xcc.aot.bootstrap.emit_llvm_text", return_value=llvm_ir),
+            patch("subprocess.run", fake_run),
+        ):
             output = build_native_bootstrap(
                 ROOT,
                 Path(temp_dir) / "xcc",
@@ -1981,6 +2036,8 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             return Result()
 
         with (
+            patch("xcc.aot.bootstrap.lower_bootstrap_entry_smoke", return_value=object()),
+            patch("xcc.aot.bootstrap.emit_llvm_text", return_value=""),
             patch("subprocess.run", fake_run),
             self.assertRaises(AotError) as ctx,
         ):
@@ -1994,11 +2051,46 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-BOOTSTRAP-0003")
         self.assertEqual(ctx.exception.diagnostics[0].message, "llc failed")
 
+
+@unittest.skipIf(
+    os.environ.get("XCC_SKIP_NATIVE_BOOTSTRAP_TESTS") == "1",
+    "native bootstrap behavior matrix runs outside Python coverage",
+)
+class AotBootstrapNativeBuildTests(unittest.TestCase):
+    _native_build_temp: TemporaryDirectory[str] | None = None
+    _native_bootstrap_executable: Path | None = None
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls._native_build_temp is not None:
+            cls._native_build_temp.cleanup()
+        super().tearDownClass()
+
+    def _shared_native_bootstrap(self, llc: Path) -> Path:
+        cls = type(self)
+        if cls._native_bootstrap_executable is None:
+            cls._native_build_temp = TemporaryDirectory(prefix="xcc-native-bootstrap-")
+            cls._native_bootstrap_executable = build_native_bootstrap(
+                ROOT,
+                Path(cls._native_build_temp.name) / "xcc",
+                llc=str(llc),
+                cc="cc",
+            )
+        return cls._native_bootstrap_executable
+
+    def test_aot_v2_native_bootstrap_fixture_is_shared(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        executable = self._shared_native_bootstrap(llc)
+
+        self.assertIs(self._shared_native_bootstrap(llc), executable)
+
     def test_real_native_bootstrap_smoke_when_llc_exists(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():
             self.skipTest("llc is not installed at the configured path")
-        output = build_native_bootstrap(ROOT, ROOT / "build/aot/xcc-smoke")
+        output = self._shared_native_bootstrap(llc)
         self.assertTrue(output.exists())
         with TemporaryDirectory() as temp_dir:
             work = Path(temp_dir)
@@ -2087,8 +2179,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b583-build-flags"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "build_flags.c"
             obj = root / "build_flags.o"
             source.write_text("int main(void){return 0;}\n", encoding="utf-8")
@@ -2128,8 +2219,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b564-object-macro"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "object_macro.c"
             obj = root / "object_macro.o"
             source.write_text(
@@ -2156,8 +2246,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b565-object-macro-alias"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "object_macro_alias.c"
             obj = root / "object_macro_alias.o"
             source.write_text(
@@ -2185,8 +2274,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b567-macro-regions"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "macro_regions.c"
             obj = root / "macro_regions.o"
             source.write_text(
@@ -2215,8 +2303,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b568-integer-condition"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "integer_condition.c"
             obj = root / "integer_condition.o"
             source.write_text(
@@ -2251,8 +2338,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b571-has-include"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             (root / "present.h").write_text("#define PRESENT 7\n", encoding="utf-8")
             source = root / "has_include.c"
             obj = root / "has_include.o"
@@ -2289,8 +2375,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b573-undef"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "undef.c"
             obj = root / "undef.o"
             source.write_text(
@@ -2322,8 +2407,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b574-nested-compound"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "nested_compound.c"
             obj = root / "nested_compound.o"
             source.write_text(
@@ -2354,8 +2438,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b575-compatible-typedef"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "compatible_typedef.c"
             obj = root / "compatible_typedef.o"
             source.write_text(
@@ -2382,8 +2465,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b576-function-macro"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "function_macro.c"
             obj = root / "function_macro.o"
             source.write_text(
@@ -2420,8 +2502,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b578-pragma-operator"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "pragma_operator.c"
             obj = root / "pragma_operator.o"
             source.write_text(
@@ -2448,8 +2529,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b579-signed-alias"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "signed_alias.c"
             obj = root / "signed_alias.o"
             source.write_text(
@@ -2478,8 +2558,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b580-stddef-offsetof"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "stddef_offsetof.c"
             program = root / "stddef_offsetof"
             source.write_text(
@@ -2518,8 +2597,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b584-limits"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "limits.c"
             obj = root / "limits.o"
             source.write_text(
@@ -2551,8 +2629,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b585-atomic-orders"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "atomic_orders.c"
             obj = root / "atomic_orders.o"
             source.write_text(
@@ -2585,8 +2662,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b587-floating-minima"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "floating_minima.c"
             obj = root / "floating_minima.o"
             source.write_text(
@@ -2615,8 +2691,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b588-enum-constant"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "enum_constant.c"
             obj = root / "enum_constant.o"
             source.write_text(
@@ -2643,8 +2718,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b581-switch-default"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "switch_default.c"
             obj = root / "switch_default.o"
             source.write_text(
@@ -2676,8 +2750,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b582-inferred-global-array"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "inferred_global_array.c"
             program = root / "inferred_global_array"
             source.write_text(
@@ -2713,8 +2786,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-b577-function-pointer"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "function_pointer.c"
             obj = root / "function_pointer.o"
             source.write_text(
@@ -2745,8 +2817,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-configure-driver"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "conftest.c"
             obj = root / "conftest.o"
             exe = root / "conftest"
@@ -2776,8 +2847,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-v367"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             source = root / "missing_include.c"
             obj = root / "missing_include.o"
             source.write_text(
@@ -2804,8 +2874,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-v368"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             include_next_source = root / "include_next.c"
             include_next_obj = root / "include_next.o"
             include_next_source.write_text(
@@ -2845,8 +2914,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             self.skipTest("llc is not installed at the configured path")
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            output = ROOT / "build/aot/xcc-conditional-driver"
-            executable = build_native_bootstrap(ROOT, output, llc=str(llc), cc="cc")
+            executable = self._shared_native_bootstrap(llc)
             header = root / "guarded.h"
             source = root / "main.c"
             obj = root / "main.o"

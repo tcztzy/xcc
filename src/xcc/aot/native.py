@@ -1,4 +1,3 @@
-import os
 import pickle
 import subprocess
 import sys
@@ -12,6 +11,7 @@ from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
 from xcc.aot.module import parse_source
 from xcc.aot.slice import core_entry_wrapper, lower_core_entry_slice
+from xcc.llvm_tools import find_llc
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ def run_native_smoke(
     python_result = _run_python_entry(source, entry)
     module = lower_source_to_ir(source, filename=filename, entry=entry)
     llvm_ir = emit_llvm_text(module)
-    llc_path = llc or os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
+    llc_path = find_llc(llc)
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         ll_path = root / "module.ll"
@@ -69,7 +69,7 @@ def run_native_core_smoke(
     wrapper = core_entry_wrapper(entry, fixture)
     module = lower_core_entry_slice(paths, wrapper)
     llvm_ir = emit_llvm_text(module)
-    llc_path = llc or os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
+    llc_path = find_llc(llc)
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         ll_path = root / "core.ll"
@@ -112,7 +112,7 @@ def compile_llvm_executable(
     assembly_path = output.parent / f"{output.name}.s"
     obj_path = output.parent / f"{output.name}.o"
     ll_path.write_text(llvm_ir, encoding="utf-8")
-    llc_path = llc or os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
+    llc_path = find_llc(llc)
     commands: list[tuple[str, ...]] = []
     command: tuple[str, ...]
     llc_options = _native_llc_options(debug=debug, profile=profile)

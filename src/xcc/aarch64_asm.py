@@ -5173,7 +5173,7 @@ class _AArch64AsmGen:
         if type_.declarator_ops:
             kind, value = type_.declarator_ops[0]
             if kind == "ptr":
-                return 8
+                return self._sema.data_layout.pointer_size
             if kind == "arr":
                 if isinstance(value, int) and value < 0:
                     return 0
@@ -5184,26 +5184,7 @@ class _AArch64AsmGen:
                 )
                 return None if elem_size is None else elem_size * value
             return None
-        scalar_size = {
-            "_Bool": 1,
-            "bool": 1,
-            "char": 1,
-            "signed char": 1,
-            "unsigned char": 1,
-            "short": 2,
-            "unsigned short": 2,
-            "int": 4,
-            "unsigned int": 4,
-            "long": 8,
-            "unsigned long": 8,
-            "long long": 8,
-            "unsigned long long": 8,
-            "__int128_t": 16,
-            "__uint128_t": 16,
-            "float": 4,
-            "double": 8,
-            "long double": 8,
-        }.get(type_.name)
+        scalar_size = self._sema.data_layout.scalar_size(type_.name)
         if scalar_size is not None:
             return scalar_size
         return self._record_size(type_)
@@ -5211,30 +5192,11 @@ class _AArch64AsmGen:
     def _type_align(self, type_: Type) -> int | None:
         if type_.declarator_ops:
             return (
-                8
+                self._sema.data_layout.pointer_alignment
                 if type_.declarator_ops[0][0] == "ptr"
                 else self._type_align(Type(type_.name, declarator_ops=type_.declarator_ops[1:]))
             )
-        scalar_align = {
-            "_Bool": 1,
-            "bool": 1,
-            "char": 1,
-            "signed char": 1,
-            "unsigned char": 1,
-            "short": 2,
-            "unsigned short": 2,
-            "int": 4,
-            "unsigned int": 4,
-            "long": 8,
-            "unsigned long": 8,
-            "long long": 8,
-            "unsigned long long": 8,
-            "__int128_t": 16,
-            "__uint128_t": 16,
-            "float": 4,
-            "double": 8,
-            "long double": 8,
-        }.get(type_.name)
+        scalar_align = self._sema.data_layout.scalar_alignment(type_.name)
         if scalar_align is not None:
             return scalar_align
         members = self._sema.record_definitions.get(type_.name)
@@ -5341,7 +5303,12 @@ class _AArch64AsmGen:
             "unsigned long long": _ScalarInfo(8, 8, False),
             "float": _ScalarInfo(4, 4, True, True),
             "double": _ScalarInfo(8, 8, True, True),
-            "long double": _ScalarInfo(8, 8, True, True),
+            "long double": _ScalarInfo(
+                self._sema.data_layout.long_double_size,
+                self._sema.data_layout.long_double_alignment,
+                True,
+                True,
+            ),
             "__builtin_va_list": _ScalarInfo(8, 8, False),
         }
         info = by_name.get(type_.name)

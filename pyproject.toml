@@ -12,7 +12,7 @@ license-files = ["LICENSE"]
 xcc = "xcc:main"
 
 [build-system]
-requires = ["uv_build>=0.11.15"]
+requires = ["uv_build>=0.11.15,<0.12"]
 build-backend = "uv_build"
 
 [dependency-groups]
@@ -49,7 +49,7 @@ docstring-code-format = true
 python-version = "3.11"
 
 [tool.ty.src]
-include = ["src"]
+include = ["src", "scripts"]
 exclude = [
     ".tox/**",
     ".venv/**",
@@ -61,7 +61,8 @@ exclude = [
 
 [tool.mypy]
 python_version = "3.11"
-files = ["src"]
+files = ["src", "scripts"]
+mypy_path = "src"
 show_error_codes = true
 
 [tool.coverage.run]
@@ -70,7 +71,7 @@ source = ["src"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 94.65
+fail_under = 94.76
 precision = 2
 
 [tool.tox]
@@ -86,13 +87,21 @@ commands = [["python", "scripts/run_tests.py", "--coverage", "--jobs", "1"]]
 runner = "uv-venv-lock-runner"
 dependency_groups = ["dev"]
 package = "skip"
-commands = [["ruff", "check", "src"], ["ruff", "format", "--check", "src"]]
+commands = [["ruff", "check", "src", "scripts"], ["ruff", "format", "--check", "src", "scripts"]]
 
 [tool.tox.env.type]
 runner = "uv-venv-lock-runner"
 dependency_groups = ["dev"]
 package = "skip"
-commands = [["ty", "check", "src"], ["mypy"]]
+commands = [["ty", "check", "src", "scripts"], ["mypy"]]
+
+[tool.tox.env.package-smoke]
+runner = "uv-venv-lock-runner"
+package = "wheel"
+dependency_groups = []
+no_default_groups = true
+base_python = ["python3.11"]
+commands = [["python", "scripts/validate_package.py"]]
 
 [tool.tox.env.mypyc]
 runner = "uv-venv-lock-runner"

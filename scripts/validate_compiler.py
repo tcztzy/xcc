@@ -291,10 +291,10 @@ def run_validation(
     results: list[ValidationResult] = []
 
     if _clang_available(clang_command):
-        for case in PROGRAM_CASES:
+        for program_case in PROGRAM_CASES:
             results.append(
                 _run_program_case(
-                    case,
+                    program_case,
                     work_root=work_root,
                     xcc_command=xcc_command,
                     clang_command=clang_command,
@@ -303,20 +303,20 @@ def run_validation(
                 )
             )
     else:
-        for case in PROGRAM_CASES:
+        for program_case in PROGRAM_CASES:
             results.append(
                 ValidationResult(
                     "program",
-                    case.name,
+                    program_case.name,
                     "skip",
                     f"clang command not found: {_format_command(clang_command)}",
                 )
             )
 
-    for case in BOUNDARY_CASES:
+    for boundary_case in BOUNDARY_CASES:
         results.append(
             _run_boundary_case(
-                case,
+                boundary_case,
                 work_root=work_root,
                 xcc_command=xcc_command,
                 timeout=timeout,

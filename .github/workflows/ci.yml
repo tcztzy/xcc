@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - master
   workflow_dispatch:
 
 permissions:
@@ -18,6 +18,9 @@ jobs:
   gates:
     name: Validation and handoff gates
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      XCC_LLC: /usr/bin/llc
 
     steps:
       - name: Check out repository
@@ -45,8 +48,43 @@ jobs:
       - name: Run test gates
         run: uv run tox -e py311,mypyc
 
+      - name: Verify installed wheel and console entry point
+        run: uv run tox -e package-smoke
+
       - name: Run lint gate
         run: uv run tox -e lint
 
       - name: Run type gate
         run: uv run tox -e type
+
+  compatibility:
+    name: CPython 3.14 core frontend compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Install development environment
+        run: uv sync --dev
+
+      - name: Run core frontend compatibility suite
+        run: >-
+          uv run python scripts/run_tests.py
+          tests.test_options
+          tests.test_data_layout
+          tests.test_lexer
+          tests.test_frontend
+          tests.test_parser
+          tests.test_preprocessor
+          tests.test_sema
+          --jobs 1 --quiet

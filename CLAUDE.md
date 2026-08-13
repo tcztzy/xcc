@@ -3,6 +3,10 @@
 Target: produce a C compiler in Python that compiles CPython to a working
 binary via LLVM IR.
 
+## Git workflow
+
+- Do not create, switch to, or use additional Git branches. Work directly on the checked-out mainline branch (`master` in this repository).
+
 ## Pipeline
 
 ```

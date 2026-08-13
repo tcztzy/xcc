@@ -40,6 +40,32 @@ class FrontendOptionsTests(unittest.TestCase):
         options = FrontendOptions(std="gnu11", hosted=False)
         self.assertIs(normalize_options(options), options)
 
+    def test_normalize_options_preserves_every_field_and_is_idempotent(self) -> None:
+        options = FrontendOptions(
+            std="gnu11",
+            hosted=False,
+            include_dirs=("include",),
+            quote_include_dirs=("quote",),
+            system_include_dirs=("system",),
+            after_include_dirs=("after",),
+            forced_includes=("forced.h",),
+            macro_includes=("macros.h",),
+            defines=("VALUE=1",),
+            undefs=("OLD_VALUE",),
+            embed_dirs=("embed",),
+            no_standard_includes=True,
+            diag_format="json",
+            warn_as_error=True,
+            host_machine="x86_64",
+            target_os="linux",
+            strip_gnu_asm_statements=False,
+        )
+
+        normalized = normalize_options(options)
+
+        self.assertIs(normalized, options)
+        self.assertIs(normalize_options(normalized), normalized)
+
 
 if __name__ == "__main__":
     unittest.main()

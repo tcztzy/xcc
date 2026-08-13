@@ -1,5 +1,6 @@
 # XCC Agent Instructions
 
+- Do not create, switch to, or use additional Git branches. Work directly on the checked-out mainline branch (`master` in this repository).
 - Runtime code uses only the Python standard library.
 - Support CPython 3.11+.
 - No `from __future__ import annotations`.

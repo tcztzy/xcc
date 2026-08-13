@@ -14,8 +14,8 @@ def _repo_root() -> Path:
 def _load_build_deps():
     try:
         from Cython.Build import cythonize
-        from setuptools import Distribution, Extension
-        from setuptools.command.build_ext import build_ext
+        from setuptools import Distribution, Extension  # type: ignore[import-untyped]
+        from setuptools.command.build_ext import build_ext  # type: ignore[import-untyped]
     except ModuleNotFoundError as error:
         message = (
             "missing Cython build dependency; run with "

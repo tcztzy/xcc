@@ -2,6 +2,65 @@
 
 ## Current
 
+- Removed repeated full-bootstrap work from the AOT validation path. Function
+  suffix resolution now caches each `_Lowerer` query, reducing one hosted
+  bootstrap lowering/LLVM render from 37.56s to 16.59s (55.8%) with identical
+  8,079,744-byte output and SHA-256. Bootstrap structural tests share one
+  immutable IR/LLVM fixture, 26 native behavior tests share one executable, and
+  the test runner executes that native matrix outside Python coverage while
+  retaining hosted orchestration coverage. The focused coverage command now
+  completes both stages in 631.79s instead of remaining unfinished after more
+  than 23 minutes.
+
+- Replaced the native AOT runtime's 5,000-line LLVM string assembly with a
+  standard-library-only Python object model for LLVM types, symbols, globals,
+  functions, blocks, and instructions. `runtime_module()` now exposes all
+  runtime definitions for symbol queries, validation, renaming, and call-target
+  redirection before deterministic rendering. Allocation routing uses function
+  symbols instead of whole-text replacement, and raw `@global`/`%local`
+  references are rejected inside instruction fragments. The original runtime
+  LLVM remains semantically identical apart from normalizing one multiline
+  function header, and the structured builder is itself lowered through the
+  native AOT subset and accepted by `llc`.
+
+- Unified target data layout across predefined macros, parser constant
+  evaluation, semantic layout, AArch64/x86-64 assembly, LLVM lowering, and the
+  EVM backend. Darwin AArch64 now consistently models `long double` as an
+  8-byte binary64 value, including `sizeof` inside array bounds and the
+  corresponding predefined macros. Target layout records are constructed at
+  runtime on AOT paths so native bootstrap binaries do not depend on
+  CPython-initialized module globals.
+
+- Made frontend option normalization pure, field-preserving, and idempotent.
+  Darwin AOT bootstrap includes and target identity now live in its explicit
+  adapter instead of leaking into hosted preprocessing. Dynamic predefined
+  macros retain their source-aware resolver, while Apple and Linux identity
+  macros follow the selected target.
+
+- Repaired validation coverage: CI and Pages now watch `master`; LLVM tool
+  discovery is shared by the driver, AOT builder, and tests; subprocess and CI
+  timeouts prevent indefinite hangs; Python 3.14 and an installed-wheel smoke
+  test exercise the declared compatibility and packaging contracts; lint and
+  type checks include maintenance scripts; and the coverage ratchet is aligned
+  at 94.76%.
+
+- Re-profiled the native AOT compiler's live-allocation index on CPython
+  `Objects/listobject.c`. The index now uses 2,097,152 bounded buckets, hashes
+  inline at its three call sites, lets phase reset release a private-list header
+  without a separate lookup while still validating exact membership and tag
+  before metadata-driven pointer writes, and caches completed payload/target
+  promotions. In five alternating before/after runs, median compile time fell
+  from 5.2639s to 4.4485s (15.49%) and preprocessing from 3.5116s to 2.6951s;
+  all ten objects had SHA-256
+  `52a256e27d380cf6871ad3697ef6137d317b289c87148e1fad307ae90f53d285`.
+  Peak RSS rose from 605,372,416 to 619,708,416 bytes, matching the intentional
+  bounded-index increase.
+
+- Preserve a caught native AOT error's dynamic message and payload before an
+  owned compiler phase resets. Source-to-object failures therefore retain their
+  complete diagnostic while the successful path still reclaims its phase; the
+  bootstrap IR assertions now also track the current debug-aware helper ABIs.
+
 - Extended native profiling/debug support from the AOT compiler to every C
   program compiled with `xcc -g`. The C frontend now preserves preprocessor
   file/line maps in a bootstrap-safe parser/codegen traversal, and LLVM emits
@@ -95,10 +154,10 @@
   `Objects/listobject.c`, `Objects/dictobject.c`, `Python/compile.c`,
   `Parser/parser.c`, and `Modules/_json.c`. The repository-wide `py311`
   coverage gate was also run: all AOT modules passed after updating one stale
-  linear-dictionary IR assertion. The overall gate remains red in the current
-  mainline's ordinary frontend/preprocessor/CLI option-output expectations and
-  its coverage-ratchet assertion (`94.76` expected versus `94.65` configured),
-  none of which are modified by this AOT optimization.
+  linear-dictionary IR assertion. At that measurement snapshot, unrelated
+  frontend/preprocessor/CLI expectations and a `94.76`-versus-`94.65`
+  coverage-ratchet mismatch remained; the current entries above supersede that
+  historical gate status.
   Finally, the optimized native compiler completed a fresh out-of-tree
   `configure` and serial `make -j1` of the clean CPython checkout at
   `0f1f7c788987`: `make` exited 0 after checking all 116 configured modules

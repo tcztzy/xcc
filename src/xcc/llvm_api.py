@@ -154,6 +154,8 @@ class _LLVMC:
         self.Int64Type = self._bind("LLVMInt64Type", _LLVMTypeRef)
         self.FloatType = self._bind("LLVMFloatType", _LLVMTypeRef)
         self.DoubleType = self._bind("LLVMDoubleType", _LLVMTypeRef)
+        self.X86FP80Type = self._bind("LLVMX86FP80Type", _LLVMTypeRef)
+        self.FP128Type = self._bind("LLVMFP128Type", _LLVMTypeRef)
         self.PointerType = self._bind("LLVMPointerType", _LLVMTypeRef, _LLVMTypeRef, _c_uint)
         self.FunctionType = self._bind(
             "LLVMFunctionType",

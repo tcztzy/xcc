@@ -643,7 +643,7 @@ class EvmTargetTests(unittest.TestCase):
         return compile_source(
             source,
             filename="evm_test.c",
-            options=FrontendOptions(std="gnu11", hosted=False),
+            options=FrontendOptions(std="gnu11", hosted=False, host_machine="evm"),
         )
 
     def _assert_evm_diagnostic(self, source: str, message: str) -> None:
@@ -2404,6 +2404,22 @@ uint256 get_marker(void) { return marker; }
         self.assertEqual(int.from_bytes(anonymous_size, "big"), 64)
         self.assertEqual(int.from_bytes(anonymous_value, "big"), 23)
         self.assertEqual(int.from_bytes(marker, "big"), 7)
+
+    def test_array_bound_sizeof_uses_same_evm_layout_as_backend_storage(self) -> None:
+        source = """
+typedef __evm_uint256 uint256;
+
+uint256 array_size(void)
+{
+  char values[sizeof(int)];
+  return sizeof(values);
+}
+"""
+        bytecode = generate_evm_bytecode(self._compile(source))
+
+        returned = _MiniEvm(bytecode, _calldata("array_size()")).run()
+
+        self.assertEqual(int.from_bytes(returned, "big"), 1024)
 
     def test_builtin_offsetof_uses_evm_word_object_layout(self) -> None:
         source = """

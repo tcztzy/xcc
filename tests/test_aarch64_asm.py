@@ -71,6 +71,8 @@ from xcc.types import DOUBLE, INT, LONG, VOID, Type
 
 class AArch64AsmTests(unittest.TestCase):
     def _asm(self, source: str, options: FrontendOptions | None = None) -> str:
+        if options is None:
+            options = FrontendOptions(target_os="darwin", host_machine="arm64")
         return generate_aarch64_asm(compile_source(source, filename="test.c", options=options))
 
     def _run(self, source: str, options: FrontendOptions | None = None) -> int:
@@ -1462,6 +1464,16 @@ int main(void) {
 }
 """
         self.assertEqual(self._run(source), 0)
+
+    def test_long_double_array_bound_uses_darwin_data_layout_in_every_stage(self) -> None:
+        asm = self._asm(
+            "char storage[sizeof(long double)]; "
+            "long storage_size(void) { return sizeof(storage); }"
+        )
+
+        self.assertIn("    .zero 8", asm)
+        self.assertNotIn("    .zero 16", asm)
+        self.assertIn("    mov w0, #8", asm)
 
     def test_sizeof_member_chains_and_nested_offsetof_execute(self) -> None:
         source = """

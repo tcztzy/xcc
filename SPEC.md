@@ -9,22 +9,29 @@ specifications. Use Git history for old text, [`CHANGELOG.md`](CHANGELOG.md) for
 capability and status, and [`LESSONS.md`](LESSONS.md) for reusable engineering
 lessons.
 
-## Project Contract
+## §G GOAL
 
-- XCC is a C11 compiler and CC-style driver written for CPython 3.11+.
-- Runtime code uses only the Python standard library.
-- Runtime source must not use `from __future__ import annotations`.
-- GPL-derived source and tests are forbidden.
-- Compiler behavior must be project-neutral. CPython paths, filenames, macros,
-  or project identity must never select a special compiler path.
-- A behavior change requires the smallest practical regression reproducer and,
-  where useful, an independent oracle such as clang or CPython.
-- Unsupported input must fail deterministically; hidden backend fallback is
-  forbidden.
-- Existing user changes must be preserved, and unrelated refactors must not be
-  mixed into a change.
+XCC is a C11 compiler and CC-style driver, written for CPython 3.11+, whose
+release target is a successful clean CPython build with `CC="xcc"`.
 
-## Owned Specs
+## §C CONSTRAINTS
+
+- C1: Runtime code uses only the Python standard library.
+- C2: Runtime source must not use `from __future__ import annotations`.
+- C3: GPL-derived source and tests are forbidden.
+- C4: Existing user changes must be preserved, and unrelated refactors must not
+  be mixed into a change.
+- C5: LLVM IR is lowered on this development machine through
+  `/opt/homebrew/opt/llvm/bin/llc`; the portable driver contract remains in the
+  LLVM target spec.
+- C6: Specs contain only current goals, public interfaces, constraints, and
+  acceptance criteria.
+- C7: Specs do not contain task lists, completed-work tables, bug timelines,
+  commit diaries, benchmark runs, or numbered implementation-history ledgers.
+- C8: Capability and status changes go in `CHANGELOG.md`; reusable engineering
+  lessons go in `LESSONS.md`; historical reasoning remains in Git history.
+
+## §I INTERFACES
 
 | Area | Contract |
 | --- | --- |
@@ -39,7 +46,27 @@ lessons.
 The narrowest owning spec wins for subsystem details. This root contract wins
 for project-wide constraints.
 
-## Validation Contract
+## §V INVARIANTS
+
+- V1: Compiler behavior must be project-neutral. CPython paths, filenames,
+  macros, or project identity must never select a special compiler path.
+- V2: A behavior change requires the smallest practical regression reproducer
+  and, where useful, an independent oracle such as clang or CPython.
+- V3: Unsupported input must fail deterministically; hidden backend fallback is
+  forbidden.
+- V4: Put target-neutral behavior in `specs/compiler.md`, target selection in
+  `specs/driver.md`, and target-specific ABI or output behavior in the owning
+  target file.
+- V5: Every code handoff must pass the lint and type validation commands below.
+- V6: Behavior changes must pass the focused regression suite and the broadest
+  practical integration gate.
+- V7: The release target remains a clean CPython build using the public compiler
+  path, without CPython-specific compiler dispatch.
+- V8: Push validation watches the repository's actual default branch. Required
+  tool-dependent integration checks use the documented portable resolver or
+  fail explicitly instead of silently skipping an installed tool.
+
+### Validation Contract
 
 Every code handoff must run:
 
@@ -56,17 +83,4 @@ CC="xcc" ./configure && make
 ```
 
 LLVM IR is lowered on this development machine through
-`/opt/homebrew/opt/llvm/bin/llc`; the portable driver contract remains in the
-LLVM target spec.
-
-## Editing Rules
-
-- Specs contain only current goals, public interfaces, constraints, and
-  acceptance criteria.
-- Specs do not contain task lists, completed-work tables, bug timelines, commit
-  diaries, benchmark runs, or numbered implementation-history ledgers.
-- Put target-neutral behavior in `compiler.md`, target selection in
-  `driver.md`, and target-specific ABI or output behavior in the owning target
-  file.
-- Update `CHANGELOG.md` when capability or status changes.
-- Update `LESSONS.md` only when a result yields a reusable lesson.
+`/opt/homebrew/opt/llvm/bin/llc` as required by §C.5.

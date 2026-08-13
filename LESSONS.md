@@ -1,5 +1,46 @@
 # Lessons
 
+- Expensive integration artifacts should be fixtures, not incidental work in
+  every assertion. First profile the production path, cache repeated semantic
+  lookups there, then construct immutable IR, rendered LLVM, and native
+  executables once per source/configuration in tests. Native subprocess behavior
+  adds no Python line coverage, so run that matrix as a required untraced phase
+  while keeping hosted orchestration under coverage; increasing a timeout only
+  hides duplicated work.
+- Generated IR should retain semantic references as objects until the final
+  render. Whole-text replacement cannot distinguish a call target from data and
+  cannot report duplicate, foreign, or unresolved symbols. Keep textual
+  fragments for syntax and attributes, require symbol/local objects for names,
+  and compile the builder itself through the self-hosting path: a hosted-only
+  test will miss abstract union dispatch and indirect-call reachability gaps.
+- Target ABI facts need one data-layout value passed through preprocessing,
+  parsing, semantic analysis, and every backend. Duplicated size tables can
+  make `sizeof(T)` and `sizeof(array[sizeof(T)])` disagree in one translation
+  unit. For native AOT output, construct the selected record on the executable
+  path rather than returning a CPython-initialized module singleton: the latter
+  lowers into a null static reference even when hosted tests are green.
+- Shared option normalization should only establish defaults and canonical
+  forms; it must be idempotent and preserve every caller-supplied field.
+  Bootstrap include paths, compatibility macros, and target identity belong in
+  an explicit profile adapter applied once at the owning entry point.
+- Installing a build tool in CI is not evidence that integration tests used it.
+  Share one environment/PATH/known-location resolver between production and
+  tests, and make required native smoke checks fail explicitly instead of
+  silently skipping. Validate packaging from outside the checkout against the
+  installed wheel so a repository `PYTHONPATH` cannot mask missing artifacts.
+- A fixed collision-chained index is only constant-time in practice when its
+  bucket count matches the live working set. Native sampling can expose this as
+  time in a tiny lookup leaf rather than an obvious long scan. Increase the
+  bounded BSS table only with an alternating wall-time benchmark and an RSS
+  measurement; here 14.3 MB of resident memory removed 15.49% of compile time.
+  Also preserve provenance already held by the caller: phase reset owns a header
+  from the private allocation list and should not hash the derived payload merely
+  to recover that header. The mandatory exact-index removal can validate its
+  membership and tag before any header metadata drives a pointer write.
+- A fallible function can return a successful status ABI while deliberately
+  retaining a caught error for its caller to report alongside a scalar failure
+  result. An owned phase must promote that error message and payload before
+  reset; promoting only pointer-valued return values is not sufficient.
 - Native profiling and Python profiling are different observability contracts.
   `cProfile` is valid while compiler semantics execute under CPython, but an
   AOT-lowered compiler must be measured with `sample`, Instruments, or `perf`.

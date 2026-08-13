@@ -58,6 +58,154 @@ from xcc.preprocessor import (
 
 
 class PreprocessorTests(unittest.TestCase):
+    def test_target_long_double_macros_and_platform_identity_match_layout(self) -> None:
+        darwin = preprocess_source(
+            "int size = __SIZEOF_LONG_DOUBLE__; int mantissa = __LDBL_MANT_DIG__;",
+            options=FrontendOptions(target_os="darwin", host_machine="arm64"),
+        )
+        linux = preprocess_source(
+            "#ifdef __APPLE_CC__\n#error apple macro on linux\n#endif\n"
+            "int size = __SIZEOF_LONG_DOUBLE__;",
+            options=FrontendOptions(target_os="linux", host_machine="x86_64"),
+        )
+        evm = preprocess_source(
+            "#if defined(__APPLE__) || defined(__linux__)\n"
+            "#error host platform macro on evm\n"
+            "#endif\n"
+            "int int_size = __SIZEOF_INT__; int pointer_size = __SIZEOF_POINTER__;",
+            options=FrontendOptions(target_os="evm", host_machine="evm"),
+        )
+
+        self.assertIn("int size = 8 ;", darwin.source)
+        self.assertIn("int mantissa = 53 ;", darwin.source)
+        self.assertIn("int size = 16 ;", linux.source)
+        self.assertIn("int int_size = 32 ;", evm.source)
+        self.assertIn("int pointer_size = 32 ;", evm.source)
+
+    def test_no_callback_long_double_macros_match_darwin_layout(self) -> None:
+        result = preprocess_source_no_callback(
+            "long double epsilon = __LDBL_EPSILON__;\n"
+            "long double minimum = __LDBL_MIN__;\n"
+            "long double maximum = __LDBL_MAX__;\n"
+            "int minimum_exponent = __LDBL_MIN_EXP__;\n"
+            "int maximum_exponent = __LDBL_MAX_EXP__;\n",
+            options=FrontendOptions(target_os="darwin", host_machine="arm64"),
+        )
+
+        self.assertIn("epsilon = 2.2204460492503131e-16L", result.source)
+        self.assertIn("minimum = 2.2250738585072014e-308L", result.source)
+        self.assertIn("maximum = 1.7976931348623157e+308L", result.source)
+        self.assertIn("minimum_exponent = -1021", result.source)
+        self.assertIn("maximum_exponent = 1024", result.source)
+
+    def test_no_callback_target_layout_and_identity_are_not_host_derived(self) -> None:
+        linux = preprocess_source_no_callback(
+            "int platform = __linux__; int elf = __ELF__;\n"
+            "int arch = __x86_64__; int size = __SIZEOF_LONG_DOUBLE__;\n"
+            "int mantissa = __LDBL_MANT_DIG__; int digits = __LDBL_DIG__;\n"
+            "int configured = CONFIGURED; int enabled = ENABLED;\n",
+            options=FrontendOptions(
+                target_os="linux",
+                host_machine="x86_64",
+                no_standard_includes=True,
+                defines=("CONFIGURED=7", "ENABLED"),
+            ),
+        )
+        evm = preprocess_source_no_callback(
+            "int int_size = __SIZEOF_INT__; int pointer_size = __SIZEOF_POINTER__;\n"
+            "int long_double_size = __SIZEOF_LONG_DOUBLE__;\n"
+            "int mantissa = __LDBL_MANT_DIG__; int digits = __LDBL_DIG__;\n",
+            options=FrontendOptions(target_os="evm", host_machine="evm"),
+        )
+
+        self.assertIn("platform = 1", linux.source)
+        self.assertIn("elf = 1", linux.source)
+        self.assertIn("arch = 1", linux.source)
+        self.assertIn("size = 16", linux.source)
+        self.assertIn("mantissa = 64", linux.source)
+        self.assertIn("digits = 18", linux.source)
+        self.assertIn("configured = 7", linux.source)
+        self.assertIn("enabled = 1", linux.source)
+        self.assertNotIn("__APPLE__", linux.macro_table)
+        self.assertIn("int_size = 32", evm.source)
+        self.assertIn("pointer_size = 32", evm.source)
+        self.assertIn("long_double_size = 32", evm.source)
+        self.assertIn("mantissa = 113", evm.source)
+        self.assertIn("digits = 33", evm.source)
+        self.assertNotIn("__APPLE__", evm.macro_table)
+        self.assertNotIn("__linux__", evm.macro_table)
+
+    def test_no_callback_conditional_stack_adapter_matches_directive_rules(self) -> None:
+        options = FrontendOptions(defines=("FLAG=1",))
+        processor = _Preprocessor(options)
+        processor._init_no_callback(options)
+        location = _SourceLocation("conditional.c", 1)
+
+        def handle(
+            name: str,
+            body: str,
+            stack: list[_ConditionalFrame],
+        ) -> tuple[str | None, list[_ConditionalFrame]]:
+            return processor._handle_conditional_for_process_no_callback(
+                name,
+                body,
+                location,
+                stack,
+                base_dir=None,
+            )
+
+        result, stack = handle("define", "VALUE 1", [])
+        self.assertIsNone(result)
+        self.assertEqual(stack, [])
+
+        result, stack = handle("if", "1", [])
+        self.assertEqual(result, "")
+        self.assertTrue(stack[-1].active)
+        result, stack = handle("endif", "", stack)
+        self.assertEqual((result, stack), ("", []))
+
+        for directive, body in (("ifdef", "FLAG"), ("ifndef", "MISSING")):
+            with self.subTest(directive=directive):
+                result, selected = handle(directive, body, [])
+                self.assertEqual(result, "")
+                self.assertTrue(selected[-1].active)
+
+        _result, stack = handle("if", "0", [])
+        _result, stack = handle("elif", "1", stack)
+        self.assertTrue(stack[-1].active)
+        _result, stack = handle("else", "", stack)
+        self.assertFalse(stack[-1].active)
+        _result, stack = handle("endif", "", stack)
+        self.assertEqual(stack, [])
+
+        _result, stack = handle("if", "1", [])
+        _result, stack = handle("elif", "0", stack)
+        self.assertFalse(stack[-1].active)
+
+        with self.assertRaises(PreprocessorError):
+            handle("else", "", [])
+        with self.assertRaises(PreprocessorError):
+            handle("elifdef", "FLAG", [_ConditionalFrame(True, False, False)])
+        with self.assertRaises(PreprocessorError):
+            handle("elif", "1", [_ConditionalFrame(True, False, False, saw_else=True)])
+        with self.assertRaises(PreprocessorError):
+            handle("else", "", [_ConditionalFrame(True, False, False, saw_else=True)])
+
+        gnu_options = FrontendOptions(std="gnu11", defines=("FLAG=1",))
+        gnu_processor = _Preprocessor(gnu_options)
+        gnu_processor._init_no_callback(gnu_options)
+        for directive, body in (("elifdef", "FLAG"), ("elifndef", "MISSING")):
+            with self.subTest(directive=directive):
+                result, selected = gnu_processor._handle_conditional_for_process_no_callback(
+                    directive,
+                    body,
+                    location,
+                    [_ConditionalFrame(True, False, False)],
+                    base_dir=None,
+                )
+                self.assertEqual(result, "")
+                self.assertTrue(selected[-1].active)
+
     def test_preprocessor_package_keeps_entry_exports_stable(self) -> None:
         self.assertEqual(PreprocessorError.__module__, "xcc.preprocessor")
         self.assertEqual(_SourceLocation.__module__, "xcc.preprocessor")
@@ -389,7 +537,7 @@ class PreprocessorTests(unittest.TestCase):
 
         self.assertIn("minimum_float = 1.17549435e-38F", result.source)
         self.assertIn("minimum_double = 2.2250738585072014e-308", result.source)
-        self.assertIn("minimum_long_double = 3.36210314311209350626e-4932L", result.source)
+        self.assertIn("minimum_long_double = 2.2250738585072014e-308L", result.source)
         self.assertIn("maximum_double = 1.7976931348623157e+308", result.source)
         self.assertIn("maximum_double_exponent = 1024", result.source)
 
@@ -5202,7 +5350,7 @@ A(0)
         self.assertNotIn("\\\n", result.source)
 
     def test_backslash_newline_splicing_strips_block_comment(self) -> None:
-        """Block comment spanning \ continuation lines is stripped."""
+        r"""Block comment spanning \ continuation lines is stripped."""
         result = preprocess_source(
             "int x = /* hello \\\n  world */ 42 ;\n",
             filename="splice_bc.c",
@@ -5215,7 +5363,7 @@ A(0)
         self.assertIn("42", result.source)
 
     def test_backslash_newline_splicing_strips_line_comment(self) -> None:
-        """Line comment spanning \ continuation lines is stripped."""
+        r"""Line comment spanning \ continuation lines is stripped."""
         result = preprocess_source(
             "int x = 42 ; // hello \\\n  world\n",
             filename="splice_lc.c",
@@ -5226,7 +5374,7 @@ A(0)
         self.assertIn("int x = 42 ;", result.source)
 
     def test_backslash_newline_splicing_with_division_operator(self) -> None:
-        """Division / in \ continuation is preserved (not confused with // comment)."""
+        r"""Division / in \ continuation is preserved (not confused with // comment)."""
         result = preprocess_source(
             "int x = a / b \\\n  + c ;\n",
             filename="splice_div.c",
@@ -5235,7 +5383,7 @@ A(0)
         self.assertIn("+ c ;", result.source)
 
     def test_backslash_newline_splicing_line_comment_at_eof(self) -> None:
-        """Line comment in \ continuation at EOF without trailing newline."""
+        r"""Line comment in \ continuation at EOF without trailing newline."""
         result = preprocess_source(
             "int x = 1 ; \\\n  // eof comment",
             filename="splice_eof.c",
@@ -5295,7 +5443,7 @@ A(0)
         self.assertNotIn("};", result)
 
     def test_backslash_in_block_comment_banner_preserved(self) -> None:
-        """Block comment banner with \ continuation, */ on later line.
+        r"""Block comment banner with \ continuation, */ on later line.
 
         The first line opens /* and has a trailing backslash.  The
         continuation joins the next line but */ is on a third line,
@@ -5309,7 +5457,7 @@ A(0)
         self.assertIn("int x = 1 ;", result.source)
 
     def test_unterminated_macro_with_inner_directive_has_continuation(self) -> None:
-        """Unterminated macro where next line is #if with \ continuation."""
+        r"""Unterminated macro where next line is #if with \ continuation."""
         result = preprocess_source(
             "#define M(x) x\nM(42\n#if 1 \\\n  && 1\n#endif\n)\n",
             filename="inner_dir.c",

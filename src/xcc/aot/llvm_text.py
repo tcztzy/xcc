@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import NoReturn
 
-from xcc.aot.core_runtime import guard_allocation_calls, runtime_prelude
+from xcc.aot.core_runtime import RUNTIME_ALLOC, RUNTIME_CALLOC, runtime_prelude
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.ir import (
     IrAssign,
@@ -253,6 +253,8 @@ _LLVM_C_API_INTRINSICS = {
     "Int64Type": ("LLVMInt64Type", "ptr", ()),
     "FloatType": ("LLVMFloatType", "ptr", ()),
     "DoubleType": ("LLVMDoubleType", "ptr", ()),
+    "X86FP80Type": ("LLVMX86FP80Type", "ptr", ()),
+    "FP128Type": ("LLVMFP128Type", "ptr", ()),
     "PointerType": ("LLVMPointerType", "ptr", ("ptr", "i32")),
     "StructType": ("LLVMStructType", "ptr", ("ptr", "i32", "i32")),
     "GetTypeKind": ("LLVMGetTypeKind", "i32", ("ptr",)),
@@ -2126,20 +2128,16 @@ class _Emitter:
         declarations = [self._emit_record(record) for record in self.module.records]
         functions = []
         for function in self.module.functions:
-            emitted = guard_allocation_calls(self._emit_function(function))
+            emitted = self._emit_function(function)
             functions.append(self._add_function_debug(emitted, function))
         raw_main = self._emit_main()
-        main = None if raw_main is None else guard_allocation_calls(raw_main)
+        main = raw_main
         if main is not None and self.module.entry is not None:
             main = self._add_function_debug(main, self.functions[self.module.entry], name="main")
         phase_promotion_helpers = self._emit_phase_promotion_helpers()
         phase_capture_helpers = self._emit_phase_capture_helpers()
-        record_equality_helpers = [
-            guard_allocation_calls(helper) for helper in self._emit_record_equality_helpers()
-        ]
-        tagged_object_equality_helpers = [
-            guard_allocation_calls(helper) for helper in self._emit_tagged_object_equality_helpers()
-        ]
+        record_equality_helpers = self._emit_record_equality_helpers()
+        tagged_object_equality_helpers = self._emit_tagged_object_equality_helpers()
         lines: list[str] = []
         if self.fallible_functions:
             lines.append(_ERROR_LLVM_DECLARATION)
@@ -2613,6 +2611,7 @@ class _Emitter:
             return
         if self.current_function_is_fallible:
             if isinstance(return_type, IrNoneType):
+                self._emit_phase_preserve_error(lines)
                 self._emit_active_iteration_phase_finishes(lines)
                 self._emit_phase_reset(lines)
                 lines.append("  ret i32 0")
@@ -2629,6 +2628,7 @@ class _Emitter:
                 f"  store {self._storage_llvm_type(return_type)} {stored}, "
                 f"ptr {self.current_result_out}"
             )
+            self._emit_phase_preserve_error(lines)
             self._emit_active_iteration_phase_finishes(lines)
             self._emit_phase_reset(lines)
             lines.append("  ret i32 0")
@@ -3177,6 +3177,52 @@ class _Emitter:
         if self.current_phase_mark is None:
             return
         lines.append(f"  call void @__xcc_aot_phase_finish(ptr {self.current_phase_mark})")
+
+    def _emit_phase_preserve_error(self, lines: list[str]) -> None:
+        if self.current_phase_mark is None or self.current_error_out is None:
+            return
+        self.needs_runtime_prelude = True
+        self.needs_phase_object_promotion_helpers = True
+        type_ptr = self._tmp("phase.error.type.ptr")
+        error_type = self._tmp("phase.error.type")
+        has_error = self._tmp("phase.error.present")
+        preserve_label = self._label("phase.error.preserve")
+        done_label = self._label("phase.error.done")
+        lines.append(
+            f"  {type_ptr} = getelementptr inbounds {_ERROR_LLVM_TYPE}, "
+            f"ptr {self.current_error_out}, i32 0, i32 0"
+        )
+        lines.append(f"  {error_type} = load ptr, ptr {type_ptr}")
+        lines.append(f"  {has_error} = icmp ne ptr {error_type}, null")
+        lines.append(f"  br i1 {has_error}, label %{preserve_label}, label %{done_label}")
+        lines.append(f"{preserve_label}:")
+        message_ptr = self._tmp("phase.error.message.ptr")
+        message = self._tmp("phase.error.message")
+        payload_ptr = self._tmp("phase.error.payload.ptr")
+        payload = self._tmp("phase.error.payload")
+        lines.append(
+            f"  {message_ptr} = getelementptr inbounds {_ERROR_LLVM_TYPE}, "
+            f"ptr {self.current_error_out}, i32 0, i32 1"
+        )
+        lines.append(f"  {message} = load ptr, ptr {message_ptr}")
+        lines.append(
+            f"  {payload_ptr} = getelementptr inbounds {_ERROR_LLVM_TYPE}, "
+            f"ptr {self.current_error_out}, i32 0, i32 7"
+        )
+        lines.append(f"  {payload} = load ptr, ptr {payload_ptr}")
+        lines.append(f"  call void @__xcc_aot_phase_promote_begin(ptr {self.current_phase_mark})")
+        promoted = self._tmp("phase.error.message.promoted")
+        lines.append(
+            f"  {promoted} = call i1 @__xcc_aot_phase_promote_to("
+            f"ptr {message}, ptr {self.current_phase_mark})"
+        )
+        lines.append(
+            f"  call void @__xcc_aot_phase_promote_object("
+            f"ptr {payload}, ptr {self.current_phase_mark})"
+        )
+        lines.append(f"  call void @__xcc_aot_phase_promote_end(ptr {self.current_phase_mark})")
+        lines.append(f"  br label %{done_label}")
+        lines.append(f"{done_label}:")
 
     def _emit_iteration_phase_finish(
         self,
@@ -4728,7 +4774,7 @@ class _Emitter:
         if isinstance(value.type, IrFloatType):
             self.needs_runtime_prelude = True
             boxed = self._tmp("floatbox")
-            lines.append(f"  {boxed} = call ptr @malloc(i64 8)")
+            lines.append(f"  {boxed} = call ptr @{RUNTIME_ALLOC}(i64 8)")
             lines.append(f"  store double {value.value}, ptr {boxed}")
             return boxed
         self._error(f"Unsupported tuple item type: {type(value.type).__name__}")
@@ -4778,7 +4824,7 @@ class _Emitter:
             self._register_tuple_object_layout(value.value, value.type, lines)
         boxed = self._tmp("object")
         payload = self._tmp("object.payload")
-        lines.append(f"  {boxed} = call ptr @malloc(i64 16)")
+        lines.append(f"  {boxed} = call ptr @{RUNTIME_ALLOC}(i64 16)")
         lines.append(f"  store i64 {tag}, ptr {boxed}")
         lines.append(f"  {payload} = getelementptr i8, ptr {boxed}, i64 8")
         if isinstance(value.type, IrBoolType):
@@ -4854,7 +4900,7 @@ class _Emitter:
         record = self.records[expr.record]
         type_id = self.record_type_ids[expr.record]
         self.needs_runtime_prelude = True
-        lines.append(f"  {raw} = call ptr @malloc(i64 {_record_allocation_size(record)})")
+        lines.append(f"  {raw} = call ptr @{RUNTIME_ALLOC}(i64 {_record_allocation_size(record)})")
         lines.append(f"  store i64 {type_id}, ptr {raw}")
         lines.append(f"  {result} = getelementptr i8, ptr {raw}, i64 8")
         for index, (arg, field) in enumerate(zip(expr.args, record.fields, strict=True)):
@@ -5566,7 +5612,7 @@ class _Emitter:
         raw = self._tmp("recordctor.raw")
         type_id = self._tmp("recordctor.type")
         result = self._tmp("recordctor")
-        lines.append(f"  {raw} = call ptr @malloc(i64 {allocation_size})")
+        lines.append(f"  {raw} = call ptr @{RUNTIME_ALLOC}(i64 {allocation_size})")
         lines.append(f"  {type_id} = ptrtoint ptr {marker.value} to i64")
         lines.append(f"  store i64 {type_id}, ptr {raw}")
         lines.append(f"  {result} = getelementptr i8, ptr {raw}, i64 8")
@@ -11561,7 +11607,7 @@ class _Emitter:
                 "empty:",
                 "  ret ptr null",
                 "alloc:",
-                "  %array = call ptr @calloc(i64 %len, i64 8)",
+                f"  %array = call ptr @{RUNTIME_CALLOC}(i64 %len, i64 8)",
                 "  br label %loop",
                 "loop:",
                 "  %index = phi i64 [ 0, %alloc ], [ %next, %body ]",
@@ -11594,7 +11640,7 @@ class _Emitter:
                 "empty:",
                 "  ret ptr null",
                 "alloc:",
-                f"  %array = call ptr @calloc(i64 %{param.name}, i64 8)",
+                f"  %array = call ptr @{RUNTIME_CALLOC}(i64 %{param.name}, i64 8)",
                 "  ret ptr %array",
                 "}",
             )
@@ -11615,7 +11661,7 @@ class _Emitter:
                 "empty:",
                 "  ret ptr null",
                 "alloc:",
-                f"  %array = call ptr @calloc(i64 %{param.name}, i64 8)",
+                f"  %array = call ptr @{RUNTIME_CALLOC}(i64 %{param.name}, i64 8)",
                 "  ret ptr %array",
                 "}",
             )
@@ -12219,6 +12265,7 @@ class _Emitter:
             lines.append(f"  store {llvm_type} {value}, ptr {field_ptr}")
 
     def _emit_default_return(self, lines: list[str], return_type: IrType) -> None:
+        self._emit_phase_preserve_error(lines)
         self._emit_active_iteration_phase_finishes(lines)
         self._emit_phase_reset(lines)
         if self.current_function_is_fallible:

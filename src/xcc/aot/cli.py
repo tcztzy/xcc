@@ -141,7 +141,7 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
             llc = value
         elif option == "--assembler":
             assembler = value
-        elif option == "--linker":
+        else:
             linker = value
         seen_options += (option,)
         index += 1
@@ -149,9 +149,6 @@ def main(argc: int32, argv: tuple[str, ...]) -> int32:
         if required not in seen_options:
             print(f"xcc-aot: missing required option: {required}")
             return 2
-    if parser != "subset":
-        print(f"xcc-aot: native mode rejects parser: {parser}")
-        return 2
     return _run_native_build(
         source_root,
         entry,
@@ -271,18 +268,6 @@ def _run_native_build(
         print(f"xcc-aot: cannot write tool log: {tool_log}")
         return 1
     return 0
-
-
-def _module_source_path(source_root: str, module_name: str) -> str:
-    root = Path(source_root)
-    package = root.name
-    if module_name == package:
-        return str(root / "__init__.py")
-    prefix = package + "."
-    if not module_name.startswith(prefix):
-        return ""
-    relative = module_name.removeprefix(prefix).replace(".", "/") + ".py"
-    return str(root / relative)
 
 
 def _write_native_reachability(

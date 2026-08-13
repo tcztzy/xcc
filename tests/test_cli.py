@@ -583,6 +583,17 @@ class CliTests(unittest.TestCase):
         self.assertEqual(config.frontend_options.host_machine, "x86_64")
         self.assertEqual(config.frontend_options.target_os, "linux")
 
+    def test_driver_default_target_on_darwin_arm64_tracks_native_layout(self) -> None:
+        with (
+            patch("xcc.cc_driver.sys.platform", "darwin"),
+            patch("xcc.cc_driver.platform.machine", return_value="arm64"),
+        ):
+            config = cc_driver._parse_driver_config(["-c", "ok.c"])
+
+        self.assertEqual(config.target, "llvm")
+        self.assertEqual(config.frontend_options.host_machine, "arm64")
+        self.assertEqual(config.frontend_options.target_os, "darwin")
+
     def test_main_version_reports_x86_64_linux_default_target(self) -> None:
         with (
             patch("xcc.cc_driver.sys.platform", "linux"),
@@ -616,11 +627,11 @@ class CliTests(unittest.TestCase):
             cc_driver._parse_std("kandr")
 
     def test_llvm_config_and_llc_probe_ignore_failed_tools(self) -> None:
-        with patch("xcc.cc_driver.subprocess.run", side_effect=OSError):
+        with patch("xcc.llvm_tools.subprocess.run", side_effect=OSError):
             self.assertIsNone(cc_driver._llvm_config_bindir("/missing/llvm-config"))
             self.assertFalse(cc_driver._is_llvm_llc("/missing/llc"))
 
-        with patch("xcc.cc_driver.subprocess.run") as run:
+        with patch("xcc.llvm_tools.subprocess.run") as run:
             run.return_value = subprocess.CompletedProcess(
                 ("/bad/llvm-config", "--bindir"),
                 1,
@@ -640,8 +651,8 @@ class CliTests(unittest.TestCase):
 
         with (
             patch.dict("os.environ", {"LLVM_CONFIG": "/empty/llvm-config"}, clear=True),
-            patch("xcc.cc_driver.shutil.which", side_effect=fake_which),
-            patch("xcc.cc_driver.subprocess.run", side_effect=fake_run),
+            patch("xcc.llvm_tools.shutil.which", side_effect=fake_which),
+            patch("xcc.llvm_tools.subprocess.run", side_effect=fake_run),
         ):
             self.assertEqual(cc_driver._llc_candidates(), ())
 
@@ -927,8 +938,8 @@ class CliTests(unittest.TestCase):
     def test_find_llc_trusts_explicit_xcc_llc_without_probe(self) -> None:
         with (
             patch.dict("os.environ", {"XCC_LLC": "/toolchain/bin/llc"}, clear=True),
-            patch("xcc.cc_driver.shutil.which") as which,
-            patch("xcc.cc_driver.subprocess.run") as run,
+            patch("xcc.llvm_tools.shutil.which") as which,
+            patch("xcc.llvm_tools.subprocess.run") as run,
         ):
             self.assertEqual(cc_driver._find_llc(), "/toolchain/bin/llc")
 
@@ -945,8 +956,8 @@ class CliTests(unittest.TestCase):
 
         with (
             patch.dict("os.environ", {}, clear=True),
-            patch("xcc.cc_driver.shutil.which", side_effect=fake_which),
-            patch("xcc.cc_driver.subprocess.run", side_effect=fake_run),
+            patch("xcc.llvm_tools.shutil.which", side_effect=fake_which),
+            patch("xcc.llvm_tools.subprocess.run", side_effect=fake_run),
         ):
             self.assertEqual(cc_driver._find_llc(), "/toolchain/bin/llc")
 
@@ -974,8 +985,8 @@ class CliTests(unittest.TestCase):
                 {"LLVM_CONFIG": "/bad/llvm-config"},
                 clear=True,
             ),
-            patch("xcc.cc_driver.shutil.which", side_effect=fake_which),
-            patch("xcc.cc_driver.subprocess.run", side_effect=fake_run),
+            patch("xcc.llvm_tools.shutil.which", side_effect=fake_which),
+            patch("xcc.llvm_tools.subprocess.run", side_effect=fake_run),
         ):
             self.assertEqual(cc_driver._find_llc(), "/good/bin/llc")
 
@@ -1001,8 +1012,8 @@ class CliTests(unittest.TestCase):
 
             with (
                 patch.dict("os.environ", {}, clear=True),
-                patch("xcc.cc_driver.shutil.which", side_effect=fake_which),
-                patch("xcc.cc_driver.subprocess.run", side_effect=fake_run),
+                patch("xcc.llvm_tools.shutil.which", side_effect=fake_which),
+                patch("xcc.llvm_tools.subprocess.run", side_effect=fake_run),
             ):
                 code, stdout, stderr = self._run_main(
                     ["--target=llvm", "-nostdinc", "-c", str(src), "-o", str(obj)]

@@ -1,4 +1,3 @@
-import os
 import platform
 import shutil
 import subprocess
@@ -22,7 +21,14 @@ from xcc.frontend import (
     read_source,
 )
 from xcc.lexer import LexerError
-from xcc.options import FrontendOptions, StdMode
+from xcc.llvm_tools import (
+    find_llc,
+    is_llvm_llc,
+    llc_candidates,
+    llvm_config_bindir,
+    unique_tool_candidates,
+)
+from xcc.options import FrontendOptions, StdMode, TargetOS
 from xcc.parser import ParserError
 from xcc.preprocessor import PreprocessorError
 from xcc.sema import SemaError
@@ -32,8 +38,6 @@ int32 = int
 TargetName = Literal["llvm", "aarch64-apple-darwin", "x86_64-linux-gnu", "evm"]
 DriverAction = Literal["link", "compile", "assembly", "delegate"]
 
-_LLVM_LLC_OVERVIEW = "OVERVIEW: llvm system compiler"
-_LLVM_LLC_USAGE = "USAGE: llc [options] <input bitcode>"
 _AOT_BOOTSTRAP_LLC = "/opt/homebrew/opt/llvm/bin/llc"
 
 
@@ -150,75 +154,37 @@ def _default_target() -> TargetName:
     return "llvm"
 
 
-def _unique_tool_candidates(candidates: list[str]) -> tuple[str, ...]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        if candidate and candidate not in seen:
-            seen.add(candidate)
-            result.append(candidate)
-    return tuple(result)
+def _frontend_target_identity(target: TargetName) -> tuple[TargetOS | None, str | None]:
+    if target == "aarch64-apple-darwin":
+        return "darwin", "arm64"
+    if target == "x86_64-linux-gnu":
+        return "linux", "x86_64"
+    if target == "llvm":
+        target_os: TargetOS = "linux" if sys.platform.startswith("linux") else "darwin"
+        return target_os, platform.machine().lower()
+    if target == "evm":
+        return "evm", "evm"
+    return None, None
 
 
 def _llvm_config_bindir(llvm_config: str) -> str | None:
-    try:
-        completed = subprocess.run(
-            (llvm_config, "--bindir"),
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
-        return None
-    bindir = (completed.stdout or "").strip().splitlines()
-    if not bindir:
-        return None
-    return bindir[0]
+    return llvm_config_bindir(llvm_config)
+
+
+def _unique_tool_candidates(candidates: list[str]) -> tuple[str, ...]:
+    return unique_tool_candidates(candidates)
 
 
 def _llc_candidates() -> tuple[str, ...]:
-    candidates: list[str] = []
-
-    llvm_config = os.environ.get("LLVM_CONFIG") or shutil.which("llvm-config")
-    if llvm_config:
-        bindir = _llvm_config_bindir(llvm_config)
-        if bindir:
-            candidates.append(str(Path(bindir) / "llc"))
-
-    path_llc = shutil.which("llc")
-    if path_llc:
-        candidates.append(path_llc)
-
-    return _unique_tool_candidates(candidates)
+    return llc_candidates()
 
 
 def _is_llvm_llc(path: str) -> bool:
-    try:
-        completed = subprocess.run(
-            (path, "--help"),
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    stdout = completed.stdout or ""
-    return completed.returncode == 0 and _LLVM_LLC_OVERVIEW in stdout and _LLVM_LLC_USAGE in stdout
+    return is_llvm_llc(path)
 
 
 def _find_llc() -> str:
-    explicit = os.environ.get("XCC_LLC")
-    if explicit:
-        return explicit
-
-    for candidate in _llc_candidates():
-        if _is_llvm_llc(candidate):
-            return candidate
-    raise ValueError("unable to find LLVM llc; set XCC_LLC or put LLVM llc on PATH")
+    return find_llc()
 
 
 def _llvm_target_triple(config: DriverConfig) -> str:
@@ -457,6 +423,7 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
             continue
         native_unsupported_flags.append(arg)
 
+    target_os, host_machine = _frontend_target_identity(target)
     options = FrontendOptions(
         std=std,
         hosted=False if target == "evm" else hosted,
@@ -469,20 +436,8 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
         defines=tuple(defines),
         undefs=tuple(undefs),
         no_standard_includes=no_standard_includes,
-        host_machine=(
-            "arm64"
-            if target == "aarch64-apple-darwin"
-            else "x86_64"
-            if target == "x86_64-linux-gnu"
-            else None
-        ),
-        target_os=(
-            "darwin"
-            if target == "aarch64-apple-darwin"
-            else "linux"
-            if target == "x86_64-linux-gnu"
-            else None
-        ),
+        host_machine=host_machine,
+        target_os=target_os,
         strip_gnu_asm_statements=target == "x86_64-linux-gnu",
     )
     return DriverConfig(
@@ -704,6 +659,23 @@ def _aot_default_system_include_dirs() -> tuple[str, ...]:
     )
 
 
+def _aot_bootstrap_frontend_options(
+    include_dirs: tuple[str, ...],
+    defines: tuple[str, ...],
+    undefs: tuple[str, ...],
+    std: str,
+) -> FrontendOptions:
+    return FrontendOptions(
+        std="gnu11" if std == "gnu11" else "c11",
+        target_os="darwin",
+        host_machine="arm64",
+        include_dirs=include_dirs,
+        system_include_dirs=_aot_default_system_include_dirs(),
+        defines=defines,
+        undefs=undefs,
+    )
+
+
 def _aot_compile_source_to_llvm_ir_unchecked(
     source_path: str,
     source_text: str,
@@ -713,13 +685,7 @@ def _aot_compile_source_to_llvm_ir_unchecked(
     std: str,
     debug: bool = False,
 ) -> str:
-    options = FrontendOptions(
-        std="gnu11" if std == "gnu11" else "c11",
-        include_dirs=include_dirs,
-        system_include_dirs=_aot_default_system_include_dirs(),
-        defines=defines,
-        undefs=undefs,
-    )
+    options = _aot_bootstrap_frontend_options(include_dirs, defines, undefs, std)
     result: FrontendResult = _aot_compile_source_unchecked(source_text, source_path, options)
     return generate_llvm_ir(result, debug=debug)
 
@@ -733,13 +699,7 @@ def _aot_compile_source_to_llvm_ir_timed(
     std: str,
     debug: bool = False,
 ) -> tuple[str, int, int, int, int, str]:
-    options = FrontendOptions(
-        std="gnu11" if std == "gnu11" else "c11",
-        include_dirs=include_dirs,
-        system_include_dirs=_aot_default_system_include_dirs(),
-        defines=defines,
-        undefs=undefs,
-    )
+    options = _aot_bootstrap_frontend_options(include_dirs, defines, undefs, std)
     timings = AotFrontendTimings()
     try:
         result = _aot_compile_source_unchecked(

@@ -398,6 +398,7 @@ class _Lowerer:
         self.global_record_constructor_maps = global_record_constructor_maps or {}
         self.project_record_names: dict[str, str] = {}
         self.callable_param_targets: dict[str, str] = {}
+        self.function_suffix_matches: dict[str, tuple[str, ...]] = {}
         self.current_owner: str | None = None
 
     def _class_info(self, name: str) -> AotClassInfo | None:
@@ -422,17 +423,27 @@ class _Lowerer:
         self,
         suffix: str,
         excluded: str | None = None,
-    ) -> list[str]:
-        matches: list[str] = []
-        for function_types in (
-            self.function_types,
-            self.imported_function_types,
-            self.fallback_function_types,
-        ):
-            for name in function_types:
-                if name != excluded and name.endswith(suffix) and name not in matches:
-                    matches.append(name)
-        return matches
+    ) -> tuple[str, ...]:
+        cached = self.function_suffix_matches.get(suffix)
+        if cached is None:
+            matches: list[str] = []
+            for function_types in (
+                self.function_types,
+                self.imported_function_types,
+                self.fallback_function_types,
+            ):
+                for name in function_types:
+                    if name.endswith(suffix) and name not in matches:
+                        matches.append(name)
+            cached = tuple(matches)
+            self.function_suffix_matches[suffix] = cached
+        if excluded is None:
+            return cached
+        filtered: list[str] = []
+        for name in cached:
+            if name != excluded:
+                filtered.append(name)
+        return tuple(filtered)
 
     def _alias(self, name: str) -> AotType | None:
         alias = self.aliases.get(name)

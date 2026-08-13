@@ -2,7 +2,9 @@ import contextlib
 import inspect
 import io
 import json
+import runpy
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,9 +29,244 @@ def _run(entry, argv: tuple[str, ...]):
 
 
 class AotCliTests(unittest.TestCase):
+    def test_native_command_and_option_boundaries(self) -> None:
+        cases = (
+            (("xcc-aot",), 2, "usage:"),
+            (("xcc-aot", "--help"), 0, "usage:"),
+            (("xcc-aot", "unknown"), 2, "unknown command"),
+            (("xcc-aot", "build", "--help"), 0, "usage:"),
+            (("xcc-aot", "build", "--parser"), 2, "rejects parser"),
+            (
+                ("xcc-aot", "build", "--parser=subset", "--debug", "--debug"),
+                2,
+                "duplicate option",
+            ),
+            (
+                ("xcc-aot", "build", "--parser=subset", "--source-root"),
+                2,
+                "missing value",
+            ),
+            (
+                ("xcc-aot", "build", "--parser=subset", "--unknown=value"),
+                2,
+                "unknown option",
+            ),
+            (
+                ("xcc-aot", "build", "--parser=subset", "--source-root="),
+                2,
+                "empty value",
+            ),
+        )
+        for argv, expected_status, message in cases:
+            with self.subTest(argv=argv):
+                status, stdout, stderr = _run(native_main, argv)
+                self.assertEqual((status, stderr), (expected_status, ""))
+                self.assertIn(message, stdout)
+
+    def test_native_option_values_reach_build_boundary(self) -> None:
+        argv = (
+            "xcc-aot",
+            "build",
+            "--source-root",
+            "/source",
+            "--entry=pkg.cli:main",
+            "--output=/output",
+            "--parser=subset",
+            "--emit-llvm=/output.ll",
+            "--emit-normalized-ir=/output.norm.ll",
+            "--source-manifest=/sources.json",
+            "--tool-log=/tools.log",
+            "--llc=/tools/llc",
+            "--assembler=/tools/as",
+            "--linker=/tools/cc",
+            "--debug",
+            "--profile",
+            "--no-cache",
+        )
+        with patch("xcc.aot.cli._run_native_build", return_value=23) as build:
+            status, stdout, stderr = _run(native_main, argv)
+
+        self.assertEqual((status, stdout, stderr), (23, "", ""))
+        build.assert_called_once_with(
+            "/source",
+            "pkg.cli:main",
+            "/output",
+            "/output.ll",
+            "/output.norm.ll",
+            "/sources.json",
+            "/tools.log",
+            "/tools/llc",
+            "/tools/as",
+            "/tools/cc",
+            True,
+            True,
+            True,
+        )
+
+    def test_native_build_reports_artifact_and_tool_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "pkg"
+            root.mkdir()
+            (root / "__init__.py").write_text("", encoding="utf-8")
+            (root / "cli.py").write_text(
+                "def main(argc: int, argv: tuple[str, ...]) -> int:\n    return 0\n",
+                encoding="utf-8",
+            )
+            output = str(Path(tmp) / "out")
+
+            def invoke(
+                *,
+                entry: str = "pkg.cli:main",
+                normalized: str = "",
+                manifest: str = "",
+                tool_log: str = "",
+                assembler: str = "",
+                debug: bool = False,
+                profile: bool = False,
+            ) -> tuple[int, str]:
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    status = native_cli_module._run_native_build(
+                        str(root),
+                        entry,
+                        output,
+                        output + ".ll",
+                        normalized,
+                        manifest,
+                        tool_log,
+                        "/tools/llc",
+                        assembler,
+                        "/tools/cc",
+                        True,
+                        debug,
+                        profile,
+                    )
+                return status, stdout.getvalue()
+
+            status, stdout = invoke(entry="invalid")
+            self.assertEqual(status, 2)
+            self.assertIn("invalid entry", stdout)
+
+            with patch("xcc.aot.cli._write_native_reachability", return_value=False):
+                status, stdout = invoke()
+            self.assertEqual(status, 1)
+            self.assertIn("cannot write native reachability", stdout)
+
+            with (
+                patch("xcc.aot.cli._write_native_reachability", return_value=True),
+                patch("xcc.aot.cli._write_text", return_value=False),
+            ):
+                status, stdout = invoke()
+            self.assertEqual(status, 1)
+            self.assertIn("cannot write LLVM", stdout)
+
+            with (
+                patch("xcc.aot.cli._write_native_reachability", return_value=True),
+                patch("xcc.aot.cli._write_text", side_effect=(True, False)),
+            ):
+                status, stdout = invoke(normalized=output + ".norm.ll")
+            self.assertEqual(status, 1)
+            self.assertIn("cannot write normalized LLVM", stdout)
+
+            with (
+                patch("xcc.aot.cli._write_native_reachability", return_value=True),
+                patch("xcc.aot.cli._write_text", side_effect=(True, False)),
+            ):
+                status, stdout = invoke(manifest=output + ".json")
+            self.assertEqual(status, 1)
+            self.assertIn("cannot write source manifest", stdout)
+
+            common_patches = (
+                patch("xcc.aot.cli._write_native_reachability", return_value=True),
+                patch("xcc.aot.cli._write_text", return_value=True),
+            )
+            with (
+                common_patches[0],
+                common_patches[1],
+                patch("xcc.aot.cli._run_tool", return_value=1),
+            ):
+                status, stdout = invoke(assembler="/tools/as", debug=True)
+            self.assertEqual(status, 1)
+            self.assertIn("llc failed", stdout)
+
+            with (
+                patch("xcc.aot.cli._write_native_reachability", return_value=True),
+                patch("xcc.aot.cli._write_text", return_value=True),
+                patch("xcc.aot.cli._run_tool", side_effect=(0, 1)),
+            ):
+                status, stdout = invoke(assembler="/tools/as", profile=True)
+            self.assertEqual(status, 1)
+            self.assertIn("assembler failed", stdout)
+
+            with (
+                patch("xcc.aot.cli._write_native_reachability", return_value=True),
+                patch("xcc.aot.cli._write_text", return_value=True),
+                patch("xcc.aot.cli._run_tool", return_value=1),
+            ):
+                status, stdout = invoke()
+            self.assertEqual(status, 1)
+            self.assertIn("llc failed", stdout)
+
+            with (
+                patch("xcc.aot.cli._write_native_reachability", return_value=True),
+                patch("xcc.aot.cli._write_text", return_value=True),
+                patch("xcc.aot.cli._run_tool", side_effect=(0, 1)),
+            ):
+                status, stdout = invoke()
+            self.assertEqual(status, 1)
+            self.assertIn("linker failed", stdout)
+
+            with (
+                patch("xcc.aot.cli._write_native_reachability", return_value=True),
+                patch("xcc.aot.cli._write_text", side_effect=(True, False)),
+                patch("xcc.aot.cli._run_tool", return_value=0),
+            ):
+                status, stdout = invoke(tool_log=output + ".tools")
+            self.assertEqual(status, 1)
+            self.assertIn("cannot write tool log", stdout)
+
+            with (
+                patch("xcc.aot.cli._write_native_reachability", return_value=True),
+                patch("xcc.aot.cli._write_text", return_value=True) as write_text,
+                patch("xcc.aot.cli._run_tool", return_value=0),
+            ):
+                status, stdout = invoke(
+                    tool_log=output + ".tools",
+                    assembler="/tools/as",
+                    debug=True,
+                )
+            self.assertEqual((status, stdout), (0, ""))
+            self.assertIn("format=xcc-aot-tool-log-v1", write_text.call_args_list[-1].args[1])
+
+    def test_native_normalizer_and_tool_subprocess_boundaries(self) -> None:
+        source_root = "/tmp/source"
+        llvm_text = (
+            f'; ModuleID = "{source_root}/module.py"  \n'
+            f'source_filename = "{source_root}/module.py"\n'
+            f'!DIFile(filename: "module.py", directory: "{source_root}")\n'
+            "define i32 @main() { ret i32 0 }  \n"
+        )
+        normalized = native_cli_module._normalize_llvm(llvm_text, source_root)
+        self.assertNotIn(source_root, normalized)
+        self.assertFalse(native_cli_module._llvm_is_already_normalized("line\r\n", source_root))
+        with patch("xcc.aot.cli.subprocess.call", return_value=17) as call:
+            self.assertEqual(native_cli_module._run_tool(("tool", "arg")), 17)
+        call.assert_called_once_with(("tool", "arg"))
+
+    def test_aot_module_entrypoint_delegates_to_cli(self) -> None:
+        stdout = io.StringIO()
+        with (
+            patch.object(sys, "argv", ["xcc-aot", "--help"]),
+            contextlib.redirect_stdout(stdout),
+            self.assertRaises(SystemExit) as context,
+        ):
+            runpy.run_module("xcc.aot.__main__", run_name="__main__")
+
+        self.assertEqual(context.exception.code, 0)
+        self.assertIn("usage:", stdout.getvalue())
+
     @unittest.skipUnless(
-        Path("/opt/homebrew/opt/llvm/bin/llc").is_file()
-        and Path("/usr/bin/dwarfdump").is_file(),
+        Path("/opt/homebrew/opt/llvm/bin/llc").is_file() and Path("/usr/bin/dwarfdump").is_file(),
         "LLVM llc and dwarfdump are required",
     )
     def test_real_debug_object_has_dwarf_lines_and_runtime_unwind(self) -> None:
@@ -163,8 +400,7 @@ class AotCliTests(unittest.TestCase):
             root.mkdir()
             (root / "__init__.py").write_text("", encoding="utf-8")
             (root / "cli.py").write_text(
-                "def main(argc: int, argv: tuple[str, ...]) -> int:\n"
-                "    return 0\n",
+                "def main(argc: int, argv: tuple[str, ...]) -> int:\n    return 0\n",
                 encoding="utf-8",
             )
             output = base / "xcc-aot"
@@ -290,9 +526,7 @@ class AotCliTests(unittest.TestCase):
             root.mkdir()
             (root / "__init__.py").write_text("", encoding="utf-8")
             (root / "helper.py").write_text(
-                "int32 = int\n"
-                "def result() -> int32:\n"
-                "    return 7\n",
+                "int32 = int\ndef result() -> int32:\n    return 7\n",
                 encoding="utf-8",
             )
             (root / "cli.py").write_text(
@@ -348,8 +582,7 @@ class AotCliTests(unittest.TestCase):
             root.mkdir()
             (root / "__init__.py").write_text("", encoding="utf-8")
             (root / "helper.py").write_text(
-                "def result() -> int:\n"
-                "    return 7\n",
+                "def result() -> int:\n    return 7\n",
                 encoding="utf-8",
             )
             (root / "cli.py").write_text(

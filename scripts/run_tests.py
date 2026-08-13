@@ -20,6 +20,7 @@ class CommandResult:
     returncode: int
     stdout: str
     stderr: str
+    timed_out: bool = False
 
 
 @dataclass(frozen=True)
@@ -30,9 +31,15 @@ class ModuleResult:
     stdout: str
     stderr: str
     elapsed: float
+    timed_out: bool = False
 
 
 RunCommand = Callable[..., CommandResult]
+
+_COVERAGE_SKIP_NATIVE_BOOTSTRAP = "XCC_SKIP_NATIVE_BOOTSTRAP_TESTS"
+_COVERAGE_DETACHED_TESTS = {
+    "tests.test_aot_bootstrap": ("tests.test_aot_bootstrap.AotBootstrapNativeBuildTests",),
+}
 
 
 def _repo_root() -> Path:
@@ -104,26 +111,53 @@ def coverage_report_command(*, fail_under: int | None = None) -> list[str]:
     return command
 
 
+def coverage_detached_tests(modules: Sequence[str]) -> list[str]:
+    detached: list[str] = []
+    for module in modules:
+        for target in _COVERAGE_DETACHED_TESTS.get(module, ()):
+            if target not in detached:
+                detached.append(target)
+    return detached
+
+
 def _run_command(
     command: Sequence[str],
     *,
     cwd: Path,
     env: Mapping[str, str],
+    timeout: float | None = None,
 ) -> CommandResult:
-    completed = subprocess.run(
-        tuple(command),
-        cwd=cwd,
-        env=dict(env),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            tuple(command),
+            cwd=cwd,
+            env=dict(env),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        stdout = _output_text(error.stdout)
+        stderr = _output_text(error.stderr)
+        if stderr and not stderr.endswith("\n"):
+            stderr += "\n"
+        stderr += f"test command timed out after {timeout:g}s\n"
+        return CommandResult(tuple(command), 124, stdout, stderr, timed_out=True)
     return CommandResult(
         tuple(command),
         completed.returncode,
         completed.stdout,
         completed.stderr,
     )
+
+
+def _output_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value
 
 
 def _env_with_pythonpath(
@@ -151,11 +185,15 @@ def _run_module(
     verbose: bool,
     run_command: RunCommand,
     base_env: Mapping[str, str] | None = None,
+    timeout: float | None = None,
 ) -> ModuleResult:
     command = build_module_command(module=module, use_coverage=use_coverage, verbose=verbose)
     env = _env_with_pythonpath(root=root, pythonpaths=pythonpaths, base=base_env)
     started = time.perf_counter()
-    result = run_command(command, cwd=root, env=env)
+    if timeout is None:
+        result = run_command(command, cwd=root, env=env)
+    else:
+        result = run_command(command, cwd=root, env=env, timeout=timeout)
     elapsed = time.perf_counter() - started
     return ModuleResult(
         module,
@@ -164,6 +202,7 @@ def _run_module(
         result.stdout,
         result.stderr,
         elapsed,
+        result.timed_out,
     )
 
 
@@ -176,6 +215,7 @@ def run_modules(
     verbose: bool,
     root: Path,
     base_env: Mapping[str, str] | None = None,
+    timeout: float | None = None,
     run_command: RunCommand = _run_command,
 ) -> list[ModuleResult]:
     pythonpaths = () if pythonpath is None else (pythonpath,)
@@ -189,6 +229,7 @@ def run_modules(
                 verbose=verbose,
                 run_command=run_command,
                 base_env=base_env,
+                timeout=timeout,
             )
             for module in modules
         ]
@@ -206,6 +247,7 @@ def run_modules(
                 verbose=verbose,
                 run_command=run_command,
                 base_env=base_env,
+                timeout=timeout,
             )
             for module in modules
         ]
@@ -226,6 +268,16 @@ def _parse_jobs(value: str) -> int:
     return jobs
 
 
+def _parse_timeout(value: str) -> float:
+    try:
+        timeout = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("--timeout must be a positive number") from error
+    if timeout <= 0:
+        raise argparse.ArgumentTypeError("--timeout must be > 0")
+    return timeout
+
+
 def _print_command_result(result: CommandResult) -> None:
     if result.stdout:
         print(result.stdout, end="")
@@ -234,7 +286,7 @@ def _print_command_result(result: CommandResult) -> None:
 
 
 def _print_module_result(result: ModuleResult, *, show_output: bool) -> None:
-    status = "PASS" if result.returncode == 0 else "FAIL"
+    status = "TIMEOUT" if result.timed_out else "PASS" if result.returncode == 0 else "FAIL"
     print(f"{status} {result.module} ({result.elapsed:.2f}s)", flush=True)
     if result.stdout and (show_output or result.returncode != 0):
         print(result.stdout, end="")
@@ -255,6 +307,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--jobs",
         default=os.environ.get("XCC_TEST_JOBS", "1"),
         help="parallel module workers: auto or a positive integer",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=_parse_timeout,
+        default=os.environ.get("XCC_TEST_TIMEOUT_SECONDS", "1800"),
+        help="maximum seconds for each test module (default: 1800)",
     )
     parser.add_argument("--coverage", action="store_true", help="collect combined coverage data")
     parser.add_argument(
@@ -306,6 +364,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not modules:
         raise SystemExit("no test modules selected")
 
+    detached_tests = coverage_detached_tests(modules) if args.coverage else []
+
     pythonpaths = () if args.pythonpath is None else (args.pythonpath,)
     coverage_tmp: tempfile.TemporaryDirectory[str] | None = None
     base_env: dict[str, str] | None = None
@@ -313,6 +373,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         coverage_tmp = tempfile.TemporaryDirectory(prefix="xcc-coverage-")
         base_env = dict(os.environ)
         base_env["COVERAGE_FILE"] = str(Path(coverage_tmp.name) / ".coverage")
+        if detached_tests:
+            base_env[_COVERAGE_SKIP_NATIVE_BOOTSTRAP] = "1"
 
     try:
         env = _env_with_pythonpath(root=root, pythonpaths=pythonpaths, base=base_env)
@@ -331,7 +393,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             verbose=verbose,
             root=root,
             base_env=base_env,
+            timeout=args.timeout,
         )
+        if detached_tests:
+            detached_env = dict(base_env or os.environ)
+            detached_env.pop(_COVERAGE_SKIP_NATIVE_BOOTSTRAP, None)
+            results.extend(
+                run_modules(
+                    modules=detached_tests,
+                    jobs=jobs,
+                    use_coverage=False,
+                    pythonpath=args.pythonpath,
+                    verbose=verbose,
+                    root=root,
+                    base_env=detached_env,
+                    timeout=args.timeout,
+                )
+            )
         for result in results:
             _print_module_result(result, show_output=args.show_output)
 

@@ -37,6 +37,7 @@ from xcc.ast import (
     TypeSpec,
     WhileStmt,
 )
+from xcc.data_layout import GENERIC_LP64_DATA_LAYOUT, TargetDataLayout
 from xcc.lexer import Token, TokenKind
 
 from . import array_sizes as _array_sizes
@@ -138,10 +139,17 @@ StdMode = Literal["c11", "gnu11"]
 
 
 class Parser:
-    def __init__(self, tokens: list[Token], *, std: StdMode = "c11") -> None:
+    def __init__(
+        self,
+        tokens: list[Token],
+        *,
+        std: StdMode = "c11",
+        data_layout: TargetDataLayout = GENERIC_LP64_DATA_LAYOUT,
+    ) -> None:
         self._tokens = tokens
         self._index = 0
         self._std = std
+        self._data_layout = data_layout
         self._typedef_scopes: list[dict[str, TypeSpec]] = [{}]
         self._typedef_qualified_scopes: list[dict[str, bool]] = [{}]
         self._ordinary_name_scopes: list[set[str]] = [set()]
@@ -1382,5 +1390,10 @@ class Parser:
         return self._current().kind == kind
 
 
-def parse(tokens: list[Token], *, std: StdMode = "c11") -> TranslationUnit:
-    return Parser(tokens, std=std).parse()
+def parse(
+    tokens: list[Token],
+    *,
+    std: StdMode = "c11",
+    data_layout: TargetDataLayout = GENERIC_LP64_DATA_LAYOUT,
+) -> TranslationUnit:
+    return Parser(tokens, std=std, data_layout=data_layout).parse()

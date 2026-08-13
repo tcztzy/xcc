@@ -31,6 +31,12 @@ development machine.
 - Large frames and offsets are materialized through registers when instruction
   immediates cannot encode them.
 
+## §V Invariants
+
+- V1: Darwin AArch64 `long double` has size and alignment 8, 53 mantissa bits,
+  and every frontend constant, predefined macro and emitted storage decision
+  reflects that same data model.
+
 ## Language Semantics
 
 - Native lowering supports ordinary C lvalues, pointer arithmetic, casts,

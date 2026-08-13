@@ -444,8 +444,15 @@ class _LLVMGen:
             return c.Int16Type()
         if name == "float":
             return c.FloatType()
-        if name in ("double", "long double"):
+        if name == "double":
             return c.DoubleType()
+        if name == "long double":
+            mantissa_bits = self._sema.data_layout.long_double_mantissa_bits
+            if mantissa_bits == 53:
+                return c.DoubleType()
+            if mantissa_bits == 64:
+                return c.X86FP80Type()
+            return c.FP128Type()
         if name == "void":
             return c.VoidType()
         return c.Int32Type()
@@ -613,15 +620,17 @@ class _LLVMGen:
                 return self._record_size(t.name)
             if t.name.startswith("union "):
                 return self._union_size(t.name)
-            return _base_size(t.name)
+            scalar_size = self._sema.data_layout.scalar_size(t.name)
+            return _base_size(t.name) if scalar_size is None else scalar_size
         for kind, value in t.declarator_ops:
             if kind == "ptr":
-                return 8
+                return self._sema.data_layout.pointer_size
             if kind == "arr":
                 assert isinstance(value, int)
                 elem_type = Type(t.name, declarator_ops=t.declarator_ops[1:])
                 return max(value, 0) * self._type_size(elem_type)
-        return _base_size(t.name)
+        scalar_size = self._sema.data_layout.scalar_size(t.name)
+        return _base_size(t.name) if scalar_size is None else scalar_size
 
     def _type_align(self, t: Type) -> int:
         if not t.declarator_ops:
@@ -635,10 +644,11 @@ class _LLVMGen:
                     if member_align > max_align:
                         max_align = member_align
                 return max_align
-            return min(_base_size(t.name), 8)
+            scalar_align = self._sema.data_layout.scalar_alignment(t.name)
+            return min(_base_size(t.name), 8) if scalar_align is None else scalar_align
         kind, _ = t.declarator_ops[0]
         if kind == "ptr":
-            return 8
+            return self._sema.data_layout.pointer_alignment
         if kind == "arr":
             elem_type = Type(t.name, declarator_ops=t.declarator_ops[1:])
             return self._type_align(elem_type)

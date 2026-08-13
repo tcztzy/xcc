@@ -1,4 +1,3 @@
-import os
 import pickle
 import subprocess
 import sys
@@ -8,6 +7,7 @@ from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
 from xcc.aot import AotError, NativeSmokeResult, run_native_smoke
+from xcc.llvm_tools import find_llc
 
 
 class AotNativeHarnessTests(unittest.TestCase):
@@ -101,8 +101,11 @@ class AotNativeHarnessTests(unittest.TestCase):
 
 
 def _real_llc() -> str | None:
-    path = os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
-    return path if Path(path).exists() else None
+    try:
+        path = find_llc()
+    except ValueError:
+        return None
+    return path if Path(path).is_file() else None
 
 
 class AotNativeRealSmokeTests(unittest.TestCase):

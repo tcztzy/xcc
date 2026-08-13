@@ -1,4 +1,3 @@
-import os
 import unittest
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from xcc.aot import (
     lower_core_slice,
     run_native_core_smoke,
 )
+from xcc.llvm_tools import find_llc
 
 ROOT = Path(__file__).resolve().parents[1]
 AST_PATH = ROOT / "src/xcc/ast.py"
@@ -174,8 +174,11 @@ class AotMilestone4SliceTests(unittest.TestCase):
 
 
 def _real_llc() -> str | None:
-    path = os.environ.get("XCC_LLC") or "/opt/homebrew/opt/llvm/bin/llc"
-    return path if Path(path).exists() else None
+    try:
+        path = find_llc()
+    except ValueError:
+        return None
+    return path if Path(path).is_file() else None
 
 
 class AotMilestone4NativeTests(unittest.TestCase):

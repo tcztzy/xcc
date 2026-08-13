@@ -19,6 +19,7 @@ from xcc.ast import (
     TypeSpec,
     UnaryExpr,
 )
+from xcc.data_layout import GENERIC_LP64_DATA_LAYOUT, TargetDataLayout
 from xcc.types import (
     DOUBLE,
     EVM_ADDRESS,
@@ -141,8 +142,10 @@ class Analyzer:
         std: StdMode = "c11",
         excess_init_ok: bool = False,
         pack_changes: tuple[tuple[str, int, int | None], ...] = (),
+        data_layout: TargetDataLayout = GENERIC_LP64_DATA_LAYOUT,
     ) -> None:
         self._std = std
+        self._data_layout = data_layout
         self._excess_init_ok = excess_init_ok
         self._pack_changes = pack_changes
         self._allow_const_var_folding = False
@@ -676,6 +679,7 @@ class Analyzer:
             self._file_scope,
             dict(self._function_signatures),
             set(self._transparent_union_types),
+            self._data_layout,
         )
 
     def _register_function_external(self, func: FunctionDef) -> None:
@@ -1682,5 +1686,11 @@ def analyze(
     std: StdMode = "c11",
     excess_init_ok: bool = False,
     pack_changes: tuple[tuple[str, int, int | None], ...] = (),
+    data_layout: TargetDataLayout = GENERIC_LP64_DATA_LAYOUT,
 ) -> SemaUnit:
-    return Analyzer(std=std, excess_init_ok=excess_init_ok, pack_changes=pack_changes).analyze(unit)
+    return Analyzer(
+        std=std,
+        excess_init_ok=excess_init_ok,
+        pack_changes=pack_changes,
+        data_layout=data_layout,
+    ).analyze(unit)

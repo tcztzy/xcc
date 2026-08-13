@@ -6,37 +6,12 @@ def _align_to(value: int, alignment: int) -> int:
     return ((value + alignment - 1) // alignment) * alignment
 
 
-POINTER_SIZE = 8
-BASE_TYPE_SIZES: dict[str, int] = {
-    "_Bool": 1,
-    "char": 1,
-    "unsigned char": 1,
-    "short": 2,
-    "unsigned short": 2,
-    "int": 4,
-    "unsigned int": 4,
-    "long": 8,
-    "unsigned long": 8,
-    "long long": 8,
-    "unsigned long long": 8,
-    "__int128": 16,
-    "__uint128": 16,
-    "unsigned __int128": 16,
-    "__int128_t": 16,
-    "__uint128_t": 16,
-    "float": 4,
-    "double": 8,
-    "long double": 16,
-}
-BASE_TYPE_ALIGNMENTS: dict[str, int] = dict(BASE_TYPE_SIZES)
-
-
 def sizeof_type(analyzer: object, type_: Type, limit: int | None = None) -> int | None:
     if not type_.declarator_ops:
         return analyzer._sizeof_object_base_type(type_, limit)  # type: ignore
     kind, value = type_.declarator_ops[0]
     if kind == "ptr":
-        return POINTER_SIZE
+        return analyzer._data_layout.pointer_size  # type: ignore
     if kind == "fn":
         return None
     assert kind == "arr"
@@ -57,7 +32,7 @@ def alignof_type(analyzer: object, type_: Type) -> int | None:
         return analyzer._alignof_object_base_type(type_)  # type: ignore
     kind, _ = type_.declarator_ops[0]
     if kind == "ptr":
-        return POINTER_SIZE
+        return analyzer._data_layout.pointer_alignment  # type: ignore
     if kind == "fn":
         return None
     element_type = Type(type_.name, declarator_ops=type_.declarator_ops[1:])
@@ -69,7 +44,7 @@ def sizeof_object_base_type(
     type_: Type,
     limit: int | None,
 ) -> int | None:
-    base_size = BASE_TYPE_SIZES.get(type_.name)
+    base_size = analyzer._data_layout.scalar_size(type_.name)  # type: ignore
     if base_size is not None:
         return base_size
     if not analyzer._is_record_name(type_.name):  # type: ignore
@@ -134,7 +109,7 @@ def sizeof_object_base_type(
 
 
 def alignof_object_base_type(analyzer: object, type_: Type) -> int | None:
-    base_align = BASE_TYPE_ALIGNMENTS.get(type_.name)
+    base_align = analyzer._data_layout.scalar_alignment(type_.name)  # type: ignore
     if base_align is not None:
         return base_align
     if not analyzer._is_record_name(type_.name):  # type: ignore

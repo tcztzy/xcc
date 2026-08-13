@@ -4204,7 +4204,7 @@ class _X86_64AsmGen:
         if type_.declarator_ops:
             kind, value = type_.declarator_ops[0]
             if kind == "ptr":
-                return 8
+                return self._sema.data_layout.pointer_size
             if kind == "fn":
                 return None
             if not isinstance(value, int) or value < 0:
@@ -4214,30 +4214,7 @@ class _X86_64AsmGen:
                 return None
             element_size = self._type_size(element)
             return None if element_size is None else element_size * value
-        base_sizes = {
-            "_Bool": 1,
-            "char": 1,
-            "signed char": 1,
-            "unsigned char": 1,
-            "short": 2,
-            "unsigned short": 2,
-            "int": 4,
-            "unsigned int": 4,
-            "long": 8,
-            "unsigned long": 8,
-            "long long": 8,
-            "unsigned long long": 8,
-            "__int128": 16,
-            "__uint128": 16,
-            "unsigned __int128": 16,
-            "__int128_t": 16,
-            "__uint128_t": 16,
-            "enum": 4,
-            "float": 4,
-            "double": 8,
-            "long double": 16,
-        }
-        base = base_sizes.get(type_.name)
+        base = self._sema.data_layout.scalar_size(type_.name)
         if base is not None:
             return base
         return self._record_size(type_)
@@ -4248,35 +4225,12 @@ class _X86_64AsmGen:
         if type_.declarator_ops:
             kind, _ = type_.declarator_ops[0]
             if kind == "ptr":
-                return 8
+                return self._sema.data_layout.pointer_alignment
             if kind == "fn":
                 return None
             element = type_.element_type()
             return None if element is None else self._type_align(element)
-        base_align = {
-            "_Bool": 1,
-            "char": 1,
-            "signed char": 1,
-            "unsigned char": 1,
-            "short": 2,
-            "unsigned short": 2,
-            "int": 4,
-            "unsigned int": 4,
-            "long": 8,
-            "unsigned long": 8,
-            "long long": 8,
-            "unsigned long long": 8,
-            "__int128": 16,
-            "__uint128": 16,
-            "unsigned __int128": 16,
-            "__int128_t": 16,
-            "__uint128_t": 16,
-            "enum": 4,
-            "float": 4,
-            "double": 8,
-            "long double": 16,
-        }
-        base = base_align.get(type_.name)
+        base = self._sema.data_layout.scalar_alignment(type_.name)
         if base is not None:
             return base
         members = self._sema.record_definitions.get(type_.name)
