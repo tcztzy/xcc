@@ -113,30 +113,23 @@ class AotPythonLexerTests(unittest.TestCase):
                 self.assertEqual(ctx.exception.diagnostics[0].code, code)
 
     def test_all_active_sources_match_cpython_token_stream(self) -> None:
-        failures: list[str] = []
         for path in sorted((ROOT / "src/xcc").rglob("*.py")):
-            source = path.read_text(encoding="utf-8")
-            try:
+            with self.subTest(path=path.relative_to(ROOT)):
+                source = path.read_text(encoding="utf-8")
                 owned = _owned_tokens(source)
                 hosted = _cpython_tokens(source)
-            except Exception as error:
-                failures.append(f"{path.relative_to(ROOT)}: {error}")
-                continue
-            if owned != hosted:
-                mismatch = next(
-                    (
-                        index
-                        for index, (left, right) in enumerate(zip(owned, hosted, strict=False))
-                        if left != right
-                    ),
-                    min(len(owned), len(hosted)),
-                )
-                left = owned[mismatch] if mismatch < len(owned) else "<missing>"
-                right = hosted[mismatch] if mismatch < len(hosted) else "<missing>"
-                failures.append(
-                    f"{path.relative_to(ROOT)} token {mismatch}: {left!r} != {right!r}"
-                )
-        self.assertEqual(failures, [])
+                if owned != hosted:
+                    mismatch = next(
+                        (
+                            index
+                            for index, (left, right) in enumerate(zip(owned, hosted, strict=False))
+                            if left != right
+                        ),
+                        min(len(owned), len(hosted)),
+                    )
+                    left = owned[mismatch] if mismatch < len(owned) else "<missing>"
+                    right = hosted[mismatch] if mismatch < len(hosted) else "<missing>"
+                    self.fail(f"token {mismatch}: {left!r} != {right!r}")
 
     def test_token_records_are_immutable(self) -> None:
         item = lex_python("value = 1\n")[0]

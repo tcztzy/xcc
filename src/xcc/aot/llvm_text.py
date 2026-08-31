@@ -168,6 +168,20 @@ _LLVM_C_API_INTRINSICS = {
     "ModuleCreateWithName": ("LLVMModuleCreateWithName", "ptr", ("ptr",)),
     "CreateBuilder": ("LLVMCreateBuilder", "ptr", ()),
     "SetTarget": ("LLVMSetTarget", "void", ("ptr", "ptr")),
+    "SetThreadLocal": ("LLVMSetThreadLocal", "void", ("ptr", "i32")),
+    "GetEnumAttributeKindForName": (
+        "LLVMGetEnumAttributeKindForName",
+        "i32",
+        ("ptr", "i64"),
+    ),
+    "CreateTypeAttribute": ("LLVMCreateTypeAttribute", "ptr", ("ptr", "i32", "ptr")),
+    "IntType": ("LLVMIntType", "ptr", ("i32",)),
+    "AddAttributeAtIndex": ("LLVMAddAttributeAtIndex", "void", ("ptr", "i32", "ptr")),
+    "AddCallSiteAttribute": (
+        "LLVMAddCallSiteAttribute",
+        "void",
+        ("ptr", "i32", "ptr"),
+    ),
     "AddModuleFlag": ("LLVMAddModuleFlag", "void", ("ptr", "i32", "ptr", "i64", "ptr")),
     "ValueAsMetadata": ("LLVMValueAsMetadata", "ptr", ("ptr",)),
     "GetCurrentDebugLocation2": ("LLVMGetCurrentDebugLocation2", "ptr", ("ptr",)),
@@ -338,9 +352,6 @@ _LLVM_C_API_INTRINSICS = {
     "SetOrdering": ("LLVMSetOrdering", "void", ("ptr", "i32")),
     "SetInitializer": ("LLVMSetInitializer", "void", ("ptr", "ptr")),
     "SetLinkage": ("LLVMSetLinkage", "void", ("ptr", "i32")),
-}
-_PROTOCOL_RECORD_ALIASES = {
-    "_StatementParser": "Parser",
 }
 _ERROR_LLVM_TYPE = "%__xcc_aot_error"
 _ERROR_LLVM_DECLARATION = "%__xcc_aot_error = type { ptr, ptr, ptr, i32, i32, i32, i32, ptr }"
@@ -2500,7 +2511,10 @@ class _Emitter:
                 value = self._emit_expr(statement.value, names, lines)
             if statement.target == "__expr":
                 return
-            if "," in statement.target:
+            if statement.chain:
+                for target in _for_each_targets(statement.target):
+                    self._emit_assign_target(target, value, names, lines)
+            elif "," in statement.target:
                 self._bind_emitted_tuple_target(statement.target, value, names, lines)
             else:
                 self._emit_assign_target(statement.target, value, names, lines)
@@ -3505,14 +3519,15 @@ class _Emitter:
     ) -> None:
         if handler.target is None:
             return
-        payload = self._load_error_field("payload", "ptr", 7, lines)
         message = self._load_error_field("message", "ptr", 1, lines)
-        has_payload = self._tmp("errorpayload")
-        value = self._tmp("errorvalue")
-        lines.append(f"  {has_payload} = icmp ne ptr {payload}, null")
-        lines.append(f"  {value} = select i1 {has_payload}, ptr {payload}, ptr {message}")
         target_type: IrType = IrRecordType("object")
+        value = message
         if len(handler.exceptions) == 1 and handler.exceptions[0] in self.records:
+            payload = self._load_error_field("payload", "ptr", 7, lines)
+            has_payload = self._tmp("errorpayload")
+            value = self._tmp("errorvalue")
+            lines.append(f"  {has_payload} = icmp ne ptr {payload}, null")
+            lines.append(f"  {value} = select i1 {has_payload}, ptr {payload}, ptr {message}")
             target_type = IrRecordType(handler.exceptions[0])
         names[handler.target] = _EmittedValue(value, target_type)
 
@@ -5222,10 +5237,16 @@ class _Emitter:
             return self._emit_path_join_call(expr, names, lines)
         if expr.target == "__path_read_text":
             return self._emit_path_read_text_call(expr, names, lines)
+        if expr.target == "__path_read_bytes":
+            return self._emit_path_read_bytes_call(expr, names, lines)
         if expr.target == "__path_write_text":
             return self._emit_path_write_text_call(expr, names, lines)
         if expr.target == "__path_is_file":
             return self._emit_path_is_file_call(expr, names, lines)
+        if expr.target == "__path_is_absolute":
+            return self._emit_path_is_absolute_call(expr, names, lines)
+        if expr.target == "__caught_error_str":
+            return self._emit_caught_error_str_call(expr, names, lines)
         if expr.target == "__exec_argv":
             return self._emit_exec_argv_call(expr, names, lines)
         if expr.target == "__dict_get":
@@ -7542,8 +7563,11 @@ class _Emitter:
                 lines,
             )
         )
-        if not isinstance(iterable.type, IrTupleType | IrDictType):
-            self._error(f"{expr.target} expects tuple-backed iterables")
+        if not isinstance(
+            iterable.type,
+            IrBytesType | IrDictType | IrStringType | IrTupleType,
+        ):
+            self._error(f"{expr.target} expects an iterable value")
         index_ptr = self._tmp(f"seqcomp.{level}.indexptr")
         cond_label = self._label("seqcomp.cond")
         body_label = self._label("seqcomp.body")
@@ -7557,31 +7581,64 @@ class _Emitter:
         length = self._tmp("seqcomp.len")
         done = self._tmp("seqcomp.done")
         lines.append(f"  {index} = load i64, ptr {index_ptr}")
-        lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
+        byte_data = iterable.value
+        if isinstance(iterable.type, IrStringType):
+            lines.append(f"  {length} = call i64 @__xcc_aot_string_len(ptr {iterable.value})")
+        elif isinstance(iterable.type, IrBytesType):
+            byte_data = self._tmp("seqcomp.bytesdata")
+            lines.append(f"  {byte_data} = call ptr @__xcc_aot_bytes_data(ptr {iterable.value})")
+            lines.append(f"  {length} = call i64 @__xcc_aot_bytes_len(ptr {iterable.value})")
+        else:
+            lines.append(f"  {length} = call i64 @__xcc_aot_tuple_len(ptr {iterable.value})")
         lines.append(f"  {done} = icmp uge i64 {index}, {length}")
         lines.append(f"  br i1 {done}, label %{end_label}, label %{body_label}")
         lines.append(f"{body_label}:")
-        raw = self._tmp("seqcomp.item")
-        lines.append(f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})")
-        if isinstance(iterable.type, IrDictType):
-            raw_key = self._tmp("seqcomp.key")
-            lines.append(f"  {raw_key} = call ptr @__xcc_aot_tuple_get(ptr {raw}, i64 0)")
-            raw = raw_key
+        enumerate_index = index
         if enumerate_type is not None:
             if enumerate_start is None:
                 self._error("Malformed __enumerate comprehension")
-            enumerate_index = index
             if enumerate_start.value != "0":
                 enumerate_index = self._tmp("seqcomp.enumindex")
                 lines.append(f"  {enumerate_index} = add i64 {index}, {enumerate_start.value}")
-            item = self._emit_enumerate_pair_tuple(
-                enumerate_type,
-                enumerate_index,
-                raw,
-                lines,
-            )
+        scalar_iterable = isinstance(iterable.type, IrStringType | IrBytesType)
+        if scalar_iterable:
+            pointer = self._tmp("seqcomp.itemptr")
+            byte = self._tmp("seqcomp.item")
+            lines.append(f"  {pointer} = getelementptr i8, ptr {byte_data}, i64 {index}")
+            lines.append(f"  {byte} = load i8, ptr {pointer}")
+            if isinstance(iterable.type, IrStringType):
+                character = self._tmp("seqcomp.character")
+                lines.append(f"  {character} = call ptr @__xcc_aot_single_byte_string(i8 {byte})")
+                item = _EmittedValue(character, IrStringType())
+            else:
+                wide = self._tmp("seqcomp.item64")
+                lines.append(f"  {wide} = zext i8 {byte} to i64")
+                item = _EmittedValue(wide, IrIntType(64, signed=True))
+            if enumerate_type is not None:
+                item = self._emit_enumerate_pair_tuple(
+                    enumerate_type,
+                    enumerate_index,
+                    self._box_to_runtime_ptr(item, lines),
+                    lines,
+                )
         else:
-            item = self._emit_runtime_boxed_value(raw, marker.type, lines)
+            raw = self._tmp("seqcomp.item")
+            lines.append(
+                f"  {raw} = call ptr @__xcc_aot_tuple_get(ptr {iterable.value}, i64 {index})"
+            )
+            if isinstance(iterable.type, IrDictType):
+                raw_key = self._tmp("seqcomp.key")
+                lines.append(f"  {raw_key} = call ptr @__xcc_aot_tuple_get(ptr {raw}, i64 0)")
+                raw = raw_key
+            if enumerate_type is not None:
+                item = self._emit_enumerate_pair_tuple(
+                    enumerate_type,
+                    enumerate_index,
+                    raw,
+                    lines,
+                )
+            else:
+                item = self._emit_runtime_boxed_value(raw, marker.type, lines)
         comprehension_names = dict(names)
         if "," in marker.name:
             self._bind_emitted_tuple_target(
@@ -7906,6 +7963,8 @@ class _Emitter:
             if len(iterable_expr.args) != 2:
                 self._error("Malformed filtered generator iterable")
             iterable_expr, level_predicate = iterable_expr.args
+        if isinstance(iterable_expr, IrCall) and iterable_expr.target == "__enumerate":
+            return self._emit_nested_generator_predicate_call(expr, names, lines)
         iterable = self._emit_expr(iterable_expr, names, lines)
         marker = expr.args[1]
         self.needs_runtime_prelude = True
@@ -8082,7 +8141,7 @@ class _Emitter:
         names: dict[str, _EmittedValue],
         lines: list[str],
     ) -> _EmittedValue:
-        if len(expr.args) < 5 or len(expr.args) % 2 == 0:
+        if len(expr.args) < 3 or len(expr.args) % 2 == 0:
             self._error(f"{expr.target} expects generator pairs and a predicate")
         if not isinstance(expr.type, IrBoolType):
             self._error(f"{expr.target} expects a bool result")
@@ -8714,6 +8773,24 @@ class _Emitter:
         lines.append(f"  {result} = call ptr @__xcc_aot_read_text_file(ptr {path.value})")
         return _EmittedValue(result, expr.type)
 
+    def _emit_path_read_bytes_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("__path_read_bytes expects one argument")
+        path = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(path.type, IrRecordType):
+            self._error("__path_read_bytes expects an opaque path object")
+        if not isinstance(expr.type, IrBytesType):
+            self._error("__path_read_bytes expects a bytes result")
+        self.needs_runtime_prelude = True
+        result = self._tmp("pathread")
+        lines.append(f"  {result} = call ptr @__xcc_aot_read_bytes_file(ptr {path.value})")
+        return _EmittedValue(result, expr.type)
+
     def _emit_path_write_text_call(
         self,
         expr: IrCall,
@@ -8774,6 +8851,36 @@ class _Emitter:
         result = self._tmp("pathfile")
         lines.append(f"  {result} = call i1 @__xcc_aot_path_is_file(ptr {path.value})")
         return _EmittedValue(result, expr.type)
+
+    def _emit_path_is_absolute_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1:
+            self._error("__path_is_absolute expects one argument")
+        path = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(path.type, IrRecordType) or not isinstance(expr.type, IrBoolType):
+            self._error("__path_is_absolute expects a path and bool result")
+        first = self._tmp("pathfirst")
+        result = self._tmp("pathabsolute")
+        lines.append(f"  {first} = load i8, ptr {path.value}")
+        lines.append(f"  {result} = icmp eq i8 {first}, 47")
+        return _EmittedValue(result, expr.type)
+
+    def _emit_caught_error_str_call(
+        self,
+        expr: IrCall,
+        names: dict[str, _EmittedValue],
+        lines: list[str],
+    ) -> _EmittedValue:
+        if len(expr.args) != 1 or self.current_error_out is None:
+            self._error("__caught_error_str expects one caught error")
+        value = self._emit_expr(expr.args[0], names, lines)
+        if not isinstance(value.type, IrRecordType) or not isinstance(expr.type, IrStringType):
+            self._error("__caught_error_str expects a record and string result")
+        return _EmittedValue(self._load_error_field("message", "ptr", 1, lines), expr.type)
 
     def _emit_string_repeat_call(
         self,
@@ -9499,22 +9606,6 @@ class _Emitter:
             return self._emit_bool_not(membership, lines)
         return membership
 
-    def _emit_bool_fold(
-        self,
-        op: str,
-        args: list[_EmittedValue],
-        lines: list[str],
-    ) -> _EmittedValue:
-        if not args:
-            return _EmittedValue("true" if op == "and" else "false", IrBoolType())
-        value = self._coerce_to_bool(args[0], lines)
-        for arg in args[1:]:
-            right = self._coerce_to_bool(arg, lines)
-            result = self._tmp(op)
-            lines.append(f"  {result} = {op} i1 {value.value}, {right.value}")
-            value = _EmittedValue(result, IrBoolType())
-        return value
-
     def _emit_bool_short_circuit(
         self,
         op: str,
@@ -9616,11 +9707,6 @@ class _Emitter:
             f"[ {true_result}, %{true_source} ], [ {false_result}, %{false_source} ]"
         )
         return _EmittedValue(result, expr.type)
-
-    def _select_arm_value(self, value: _EmittedValue, result_type: IrType) -> str:
-        if isinstance(value.type, IrNoneType):
-            return self._default_value(result_type)
-        return value.value
 
     def _emit_bool_not(self, value: _EmittedValue, lines: list[str]) -> _EmittedValue:
         truth = self._coerce_to_bool(value, lines)
@@ -12480,8 +12566,8 @@ class _Emitter:
         type_id = self.record_type_ids["Type"]
         self.global_constants[global_name] = (
             f"{global_name} = private global {{ i64, %Type }} "
-            f"{{ i64 {type_id}, %Type {{ ptr {name_constant}, i64 0, "
-            f"ptr {tuple_name}, ptr {tuple_name}, ptr {tuple_name} }} }}"
+            f"{{ i64 {type_id}, %Type {{ ptr {name_constant}, "
+            f"ptr {tuple_name}, ptr {tuple_name} }} }}"
         )
         return global_name
 
@@ -12493,11 +12579,6 @@ class _Emitter:
         self._error(f"Unknown LLVM record field: {record_name}.{field}")
 
     def _field_record_name(self, record_name: str, field: str) -> str:
-        alias = _PROTOCOL_RECORD_ALIASES.get(record_name)
-        if alias is not None:
-            record = self.records.get(alias)
-            if record is not None and any(candidate.name == field for candidate in record.fields):
-                return alias
         if record_name in self.records:
             return record_name
         for part in _record_union_parts(record_name):
@@ -12916,6 +12997,8 @@ def _statement_assignment_types(statement: IrStmt) -> dict[str, tuple[IrType, ..
     if isinstance(statement, IrAssign):
         if statement.target == "__expr":
             return {}
+        if statement.chain:
+            return {name.strip(): (statement.value.type,) for name in statement.target.split(",")}
         if "," in statement.target:
             targets = _for_each_targets(statement.target)
             if isinstance(statement.value.type, IrTupleType) and len(

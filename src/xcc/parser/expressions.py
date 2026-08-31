@@ -43,6 +43,26 @@ ALIGNOF_KEYWORDS = {"_Alignof", "__alignof__"}
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
 _CANONICAL_TYPE_QUALIFIER_ORDER = ("const", "restrict", "volatile", "_Atomic")
+_BINARY_PRECEDENCE = {
+    "||": 1,
+    "&&": 2,
+    "|": 3,
+    "^": 4,
+    "&": 5,
+    "==": 6,
+    "!=": 6,
+    "<": 7,
+    "<=": 7,
+    ">": 7,
+    ">=": 7,
+    "<<": 8,
+    ">>": 8,
+    "+": 9,
+    "-": 9,
+    "*": 10,
+    "/": 10,
+    "%": 10,
+}
 PAREN_TYPE_NAME_KEYWORDS = {
     "_Atomic",
     "_Bool",
@@ -101,7 +121,7 @@ def parse_assignment(parser: "Parser") -> Expr:
 
 
 def parse_conditional(parser: "Parser") -> Expr:
-    expr = parser._parse_logical_or()
+    expr = parse_binary(parser)
     if not parser._check_punct("?"):
         return expr
     parser._advance()
@@ -111,121 +131,22 @@ def parse_conditional(parser: "Parser") -> Expr:
     return ConditionalExpr(expr, then_expr, else_expr)
 
 
-def parse_binary_left_associative(
-    parser: "Parser",
-    operand_name: str,
-    _operators: tuple[str, ...],
-) -> Expr:
-    expr = _parse_binary_operand(parser, operand_name)
-    while _check_binary_operator(parser, operand_name):
-        op = parser._advance().lexeme
-        right = _parse_binary_operand(parser, operand_name)
-        expr = BinaryExpr(str(op), expr, right)
-    return expr
-
-
-def _check_binary_operator(parser: "Parser", operand_name: str) -> bool:
-    if operand_name == "_parse_logical_and":
-        return parser._check_punct("||")
-    if operand_name == "_parse_bitwise_or":
-        return parser._check_punct("&&")
-    if operand_name == "_parse_bitwise_xor":
-        return parser._check_punct("|")
-    if operand_name == "_parse_bitwise_and":
-        return parser._check_punct("^")
-    if operand_name == "_parse_equality":
-        return parser._check_punct("&")
-    if operand_name == "_parse_relational":
-        if parser._check_punct("=="):
-            return True
-        return parser._check_punct("!=")
-    if operand_name == "_parse_shift":
-        if parser._check_punct("<"):
-            return True
-        if parser._check_punct("<="):
-            return True
-        if parser._check_punct(">"):
-            return True
-        return parser._check_punct(">=")
-    if operand_name == "_parse_additive":
-        if parser._check_punct("<<"):
-            return True
-        return parser._check_punct(">>")
-    if operand_name == "_parse_multiplicative":
-        if parser._check_punct("+"):
-            return True
-        return parser._check_punct("-")
-    if operand_name == "_parse_unary":
-        if parser._check_punct("*"):
-            return True
-        if parser._check_punct("/"):
-            return True
-        return parser._check_punct("%")
-    raise AssertionError(f"unhandled binary operator parser: {operand_name}")  # pragma: no cover
-
-
-def _parse_binary_operand(parser: "Parser", operand_name: str) -> Expr:
-    if operand_name == "_parse_logical_and":
-        return parser._parse_logical_and()
-    if operand_name == "_parse_bitwise_or":
-        return parser._parse_bitwise_or()
-    if operand_name == "_parse_bitwise_xor":
-        return parser._parse_bitwise_xor()
-    if operand_name == "_parse_bitwise_and":
-        return parser._parse_bitwise_and()
-    if operand_name == "_parse_equality":
-        return parser._parse_equality()
-    if operand_name == "_parse_relational":
-        return parser._parse_relational()
-    if operand_name == "_parse_shift":
-        return parser._parse_shift()
-    if operand_name == "_parse_additive":
-        return parser._parse_additive()
-    if operand_name == "_parse_multiplicative":
-        return parser._parse_multiplicative()
-    if operand_name == "_parse_unary":
-        return parser._parse_unary()
-    raise AssertionError(f"unhandled binary operand parser: {operand_name}")  # pragma: no cover
-
-
-def parse_logical_or(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_logical_and", ("||",))
-
-
-def parse_logical_and(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_bitwise_or", ("&&",))
-
-
-def parse_bitwise_or(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_bitwise_xor", ("|",))
-
-
-def parse_bitwise_xor(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_bitwise_and", ("^",))
-
-
-def parse_bitwise_and(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_equality", ("&",))
-
-
-def parse_equality(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_relational", ("==", "!="))
-
-
-def parse_relational(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_shift", ("<", "<=", ">", ">="))
-
-
-def parse_shift(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_additive", ("<<", ">>"))
-
-
-def parse_additive(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_multiplicative", ("+", "-"))
-
-
-def parse_multiplicative(parser: "Parser") -> Expr:
-    return parse_binary_left_associative(parser, "_parse_unary", ("*", "/", "%"))
+def parse_binary(parser: "Parser", min_precedence: int = 1) -> Expr:
+    expr = parser._parse_unary()
+    while True:
+        token = parser._current()
+        if token.kind != TokenKind.PUNCTUATOR:
+            return expr
+        op = cast(str, token.lexeme)
+        precedence = _BINARY_PRECEDENCE.get(op, 0)
+        if precedence < min_precedence:
+            return expr
+        parser._advance()
+        expr = BinaryExpr(
+            op,
+            expr,
+            parse_binary(parser, precedence + 1),
+        )
 
 
 def parse_unary(parser: "Parser") -> Expr:
@@ -283,11 +204,11 @@ def parse_alignof_expr(parser: "Parser") -> AlignofExpr:
     is_gnu = token.lexeme == "__alignof__"
     if parser._is_parenthesized_type_name_start():
         type_spec = parser._parse_parenthesized_type_name()
-        return AlignofExpr(None, type_spec, is_gnu)
+        return AlignofExpr(None, type_spec)
     if parser._std == "c11" and not is_gnu:
         raise parser._make_error("Invalid alignof operand", token)
     operand = parser._parse_unary()
-    return AlignofExpr(operand, None, is_gnu)
+    return AlignofExpr(operand, None)
 
 
 def parse_typeof_type_spec(parser: "Parser") -> TypeSpec:
@@ -310,20 +231,18 @@ def parse_cast_expr(parser: "Parser") -> CastExpr:
 def _with_type_spec_source(type_spec: TypeSpec, line: int, column: int) -> TypeSpec:
     return TypeSpec(
         type_spec.name,
-        type_spec.pointer_depth,
-        type_spec.array_lengths,
-        type_spec.declarator_ops,
-        type_spec.qualifiers,
-        type_spec.is_atomic,
-        type_spec.atomic_target,
-        type_spec.enum_tag,
-        type_spec.enum_members,
-        type_spec.record_tag,
-        type_spec.record_members,
-        type_spec.has_record_body,
-        line,
-        column,
-        type_spec.typeof_expr,
+        declarator_ops=type_spec.declarator_ops,
+        qualifiers=type_spec.qualifiers,
+        is_atomic=type_spec.is_atomic,
+        atomic_target=type_spec.atomic_target,
+        enum_tag=type_spec.enum_tag,
+        enum_members=type_spec.enum_members,
+        record_tag=type_spec.record_tag,
+        record_members=type_spec.record_members,
+        has_record_body=type_spec.has_record_body,
+        source_line=line,
+        source_column=column,
+        typeof_expr=type_spec.typeof_expr,
     )
 
 
@@ -485,25 +404,7 @@ def parse_primary(parser: "Parser") -> Expr:
         expr = parser._parse_expression()
         parser._expect_punct(")")
         return expr
-    invalid_expression_starts = {
-        "...",
-        ")",
-        "]",
-        "}",
-        ",",
-        ":",
-        "?",
-        ";",
-        "{",
-        "##",
-        "%:",
-        "%:%:",
-        "<:",
-        ":>",
-        "<%",
-        "%>",
-    }
-    if token.kind == TokenKind.PUNCTUATOR and token.lexeme in invalid_expression_starts:
+    if token.kind == TokenKind.PUNCTUATOR:
         raise parser._make_error(
             f"Expression cannot start with '{token.lexeme}': expected an operand",
             token,
@@ -673,29 +574,19 @@ def parse_statement_expr(parser: "Parser") -> StatementExpr:
 def parse_string_literal(parser: "Parser") -> StringLiteral:
     token = parser._expect(TokenKind.STRING_LITERAL)
     assert isinstance(token.lexeme, str)
-    prefix, body = split_string_literal(parser, token.lexeme, token)
+    prefix, body = split_string_literal(token.lexeme)
     while parser._current().kind == TokenKind.STRING_LITERAL:
         token = parser._advance()
         assert isinstance(token.lexeme, str)
-        next_prefix, next_body = split_string_literal(parser, token.lexeme, token)
+        next_prefix, next_body = split_string_literal(token.lexeme)
         prefix = merge_string_prefix(parser, prefix, next_prefix, token)
         body += next_body
     return StringLiteral(f'{prefix}"{body}"')
 
 
-def split_string_literal(parser: "Parser", lexeme: str, token: Token) -> tuple[str, str]:
-    if lexeme.startswith('"') and lexeme.endswith('"'):
-        return "", lexeme[1:-1]
-    if lexeme.startswith('u8"') and lexeme.endswith('"'):
-        return "u8", lexeme[3:-1]
-    if (
-        len(lexeme) >= 3
-        and lexeme[0] in {"u", "U", "L"}
-        and lexeme[1] == '"'
-        and lexeme.endswith('"')
-    ):
-        return lexeme[0], lexeme[2:-1]
-    raise parser._make_error("Invalid string literal", token)
+def split_string_literal(lexeme: str) -> tuple[str, str]:
+    prefix = "u8" if lexeme.startswith('u8"') else lexeme[:1].strip('"')
+    return prefix, lexeme[len(prefix) + 1 : -1]
 
 
 def merge_string_prefix(

@@ -14,6 +14,13 @@ from tests import _bootstrap  # noqa: F401
 from xcc import cc_driver, main
 from xcc.codegen import generate_llvm_ir
 from xcc.frontend import compile_source
+from xcc.llvm_tools import (
+    find_llc,
+    is_llvm_llc,
+    llc_candidates,
+    llvm_config_bindir,
+)
+from xcc.parser import ParserError
 
 
 class CliTests(unittest.TestCase):
@@ -192,10 +199,12 @@ class CliTests(unittest.TestCase):
             parser_source = root / "parser-error.c"
             parser_timing = root / "parser-error.json"
             parser_source.write_text("int main(\n", encoding="utf-8")
-            parser_code = cc_driver._aot_compile_smoke_source_to_object(
-                4,
-                ("xcc", "-c", str(parser_source), f"--timing-json={parser_timing}"),
-            )
+            parser_output = io.StringIO()
+            with redirect_stdout(parser_output):
+                parser_code = cc_driver._aot_compile_smoke_source_to_object(
+                    4,
+                    ("xcc", "-c", str(parser_source), f"--timing-json={parser_timing}"),
+                )
             parser_payload = json.loads(parser_timing.read_text(encoding="utf-8"))
 
             llc_source = root / "llc-error.c"
@@ -209,6 +218,7 @@ class CliTests(unittest.TestCase):
             llc_payload = json.loads(llc_timing.read_text(encoding="utf-8"))
 
         self.assertEqual(parser_code, 1)
+        self.assertIn("Declaration type is missing", parser_output.getvalue())
         self.assertFalse(parser_payload["success"])
         self.assertEqual(parser_payload["failed_stage"], "parser")
         self.assertEqual(parser_payload["phases"]["parser"]["status"], "error")
@@ -402,6 +412,17 @@ class CliTests(unittest.TestCase):
         self.assertIn("define i32 @main()", llvm_ir)
         self.assertIn("ret i32 0", llvm_ir)
 
+    def test_aot_source_to_llvm_preserves_parser_error(self) -> None:
+        with self.assertRaises(ParserError):
+            cc_driver._aot_compile_source_to_llvm_ir(
+                "bad.c",
+                "int main( {",
+                (),
+                (),
+                (),
+                "c11",
+            )
+
     def test_aot_smoke_compiler_rejects_failed_llvm_write_under_cpython(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -433,7 +454,11 @@ class CliTests(unittest.TestCase):
             output = root / "smoke.o"
             source.write_text("int main(void){\n", encoding="utf-8")
 
-            with patch("xcc.cc_driver._aot_exec_argv") as exec_argv:
+            output_text = io.StringIO()
+            with (
+                redirect_stdout(output_text),
+                patch("xcc.cc_driver._aot_exec_argv") as exec_argv,
+            ):
                 bad_args = cc_driver._aot_compile_smoke_source_to_object(
                     4,
                     ("xcc", "-c", str(source), "-o"),
@@ -450,6 +475,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(bad_args, 1)
             self.assertEqual(bad_flags, 1)
             self.assertEqual(bad_source, 1)
+            self.assertIn("Expression is missing before end of input", output_text.getvalue())
             exec_argv.assert_not_called()
             self.assertFalse((root / "smoke.o.ll").exists())
 
@@ -618,18 +644,21 @@ class CliTests(unittest.TestCase):
         self.assertTrue(cc_driver.looks_like_cc_driver(["-xc"]))
         self.assertFalse(cc_driver.looks_like_cc_driver(["-D", "NAME=1"]))
 
-    def test_driver_value_helpers_reject_missing_values_and_bad_std(self) -> None:
-        with self.assertRaisesRegex(ValueError, "Missing value for -o"):
-            cc_driver._take_value((), 0, "-o")
-        self.assertEqual(cc_driver._parse_std("gnu17"), "gnu11")
-        self.assertEqual(cc_driver._parse_std("iso9899:2011"), "c11")
-        with self.assertRaisesRegex(ValueError, "Unsupported language standard"):
-            cc_driver._parse_std("kandr")
+    def test_main_rejects_missing_driver_value_and_unsupported_std(self) -> None:
+        for argv, message in (
+            (["-c", "ok.c", "-o"], "Missing value for -o"),
+            (["-c", "ok.c", "-std=c99"], "Unsupported language standard: c99"),
+        ):
+            with self.subTest(argv=argv):
+                code, stdout, stderr = self._run_main(argv)
+                self.assertEqual(code, 1)
+                self.assertEqual(stdout, "")
+                self.assertIn(message, stderr)
 
     def test_llvm_config_and_llc_probe_ignore_failed_tools(self) -> None:
         with patch("xcc.llvm_tools.subprocess.run", side_effect=OSError):
-            self.assertIsNone(cc_driver._llvm_config_bindir("/missing/llvm-config"))
-            self.assertFalse(cc_driver._is_llvm_llc("/missing/llc"))
+            self.assertIsNone(llvm_config_bindir("/missing/llvm-config"))
+            self.assertFalse(is_llvm_llc("/missing/llc"))
 
         with patch("xcc.llvm_tools.subprocess.run") as run:
             run.return_value = subprocess.CompletedProcess(
@@ -638,7 +667,7 @@ class CliTests(unittest.TestCase):
                 stdout="",
                 stderr="failed",
             )
-            self.assertIsNone(cc_driver._llvm_config_bindir("/bad/llvm-config"))
+            self.assertIsNone(llvm_config_bindir("/bad/llvm-config"))
 
     def test_llc_candidates_ignore_empty_llvm_config_and_missing_path_llc(self) -> None:
         def fake_run(cmd, **kwargs):
@@ -654,7 +683,7 @@ class CliTests(unittest.TestCase):
             patch("xcc.llvm_tools.shutil.which", side_effect=fake_which),
             patch("xcc.llvm_tools.subprocess.run", side_effect=fake_run),
         ):
-            self.assertEqual(cc_driver._llc_candidates(), ())
+            self.assertEqual(llc_candidates(), ())
 
     def test_parse_driver_config_tracks_split_joined_and_passthrough_args(self) -> None:
         config = cc_driver._parse_driver_config(
@@ -666,8 +695,8 @@ class CliTests(unittest.TestCase):
                 "-xc",
                 "-xnone",
                 "-std",
-                "c99",
-                "-std=gnu17",
+                "c11",
+                "-std=gnu11",
                 "-fhosted",
                 "-ffreestanding",
                 "-oout",
@@ -702,45 +731,6 @@ class CliTests(unittest.TestCase):
         passthrough_config = cc_driver._parse_driver_config(["--", "-Wl,--as-needed", "extra.o"])
         self.assertEqual(passthrough_config.non_c_inputs, ("extra.o",))
         self.assertIn("-Wl,--as-needed", passthrough_config.clang_argv)
-
-    def test_driver_misc_error_and_output_helpers(self) -> None:
-        version_config = cc_driver._parse_driver_config(["-V"])
-        self.assertEqual(version_config.clang_argv, ("-V",))
-        self.assertEqual(
-            cc_driver._unique_tool_candidates(["", "/tool/llc", "/tool/llc", "/other/llc"]),
-            ("/tool/llc", "/other/llc"),
-        )
-        self.assertEqual(cc_driver._default_output("input.c", "link", "llvm"), "a.out")
-        self.assertEqual(
-            cc_driver._default_output("input.c", "compile", "evm", evm_initcode=True),
-            "input.init.bin",
-        )
-        self.assertEqual(cc_driver._default_output("input.c", "compile", "llvm"), "input.o")
-
-        config = cc_driver._parse_driver_config(["-xc", "input.c"])
-        self.assertEqual(
-            cc_driver._link_argv_with_objects(config, ["input.o"]),
-            ["clang", "input.o"],
-        )
-        delegate_config = cc_driver._parse_driver_config(["-E", "-S", "-c", "input.c"])
-        self.assertEqual(delegate_config.action, "delegate")
-
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with (
-            patch("xcc.cc_driver.subprocess.run", side_effect=OSError("no tool")),
-            redirect_stdout(stdout),
-            redirect_stderr(stderr),
-        ):
-            self.assertEqual(cc_driver._run_tool("missing-cc", ["-v"]), 1)
-        self.assertEqual(stdout.getvalue(), "")
-        self.assertIn("failed to execute missing-cc", stderr.getvalue())
-
-    def test_main_removed_no_backend_fallback_option_is_rejected(self) -> None:
-        code, stdout, stderr = self._run_main(["--no-backend-fallback", "ok.c"])
-        self.assertEqual(code, 1)
-        self.assertEqual(stdout, "")
-        self.assertIn("--no-backend-fallback has been removed", stderr)
 
     def test_compile_frontend_inputs_rejects_duplicate_stdin(self) -> None:
         config = cc_driver._parse_driver_config(["-x", "c", "-", "-"])
@@ -798,7 +788,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
         self.assertEqual(stderr, "")
-        self.assertNotIn(((llc_path, "--help"),), [call.args for call in run.call_args_list])
+        self.assertIn(((llc_path, "--help"),), [call.args for call in run.call_args_list])
         llc_cmd = self._llc_compile_cmds(run, llc_path)[0]
         self.assertIn("-O0", llc_cmd)
         self.assertLess(llc_cmd.index("-O0"), llc_cmd.index("-filetype=obj"))
@@ -884,13 +874,20 @@ class CliTests(unittest.TestCase):
             def fake_run(command, **kwargs):
                 command = tuple(command)
                 commands.append(command)
+                if command == (llc_path, "--help"):
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=self.LLVM_LLC_HELP,
+                        stderr="",
+                    )
                 if command[0] == llc_path:
                     Path(command[-1]).write_bytes(b"object")
                 elif command[0] == "/usr/bin/dsymutil":
                     object_paths = [
                         Path(candidate[-1])
                         for candidate in commands
-                        if candidate and candidate[0] == llc_path
+                        if candidate and candidate[0] == llc_path and "-filetype=obj" in candidate
                     ]
                     object_exists_at_dsymutil.append(all(path.is_file() for path in object_paths))
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -930,21 +927,29 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
         self.assertEqual(stderr, "")
-        self.assertNotIn(((llc_path, "--help"),), [call.args for call in run.call_args_list])
+        self.assertIn(((llc_path, "--help"),), [call.args for call in run.call_args_list])
         llc_cmd = self._llc_compile_cmds(run, llc_path)[0]
         self.assertIn("-O0", llc_cmd)
         self.assertLess(llc_cmd.index("-O0"), llc_cmd.index("-filetype=obj"))
 
-    def test_find_llc_trusts_explicit_xcc_llc_without_probe(self) -> None:
+    def test_find_llc_rejects_non_llvm_explicit_xcc_llc(self) -> None:
         with (
             patch.dict("os.environ", {"XCC_LLC": "/toolchain/bin/llc"}, clear=True),
             patch("xcc.llvm_tools.shutil.which") as which,
             patch("xcc.llvm_tools.subprocess.run") as run,
         ):
-            self.assertEqual(cc_driver._find_llc(), "/toolchain/bin/llc")
+            run.return_value = subprocess.CompletedProcess((), 0, stdout="not llvm", stderr="")
+            with self.assertRaisesRegex(ValueError, "not LLVM llc"):
+                find_llc()
 
         which.assert_not_called()
-        run.assert_not_called()
+        run.assert_called_once_with(
+            ("/toolchain/bin/llc", "--help"),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
 
     def test_find_llc_accepts_path_candidate_with_llvm_help_stdout(self) -> None:
         def fake_run(cmd, **kwargs):
@@ -959,7 +964,7 @@ class CliTests(unittest.TestCase):
             patch("xcc.llvm_tools.shutil.which", side_effect=fake_which),
             patch("xcc.llvm_tools.subprocess.run", side_effect=fake_run),
         ):
-            self.assertEqual(cc_driver._find_llc(), "/toolchain/bin/llc")
+            self.assertEqual(find_llc(), "/toolchain/bin/llc")
 
     def test_find_llc_rejects_same_name_tool_with_wrong_help_stdout(self) -> None:
         def fake_run(cmd, **kwargs):
@@ -988,7 +993,7 @@ class CliTests(unittest.TestCase):
             patch("xcc.llvm_tools.shutil.which", side_effect=fake_which),
             patch("xcc.llvm_tools.subprocess.run", side_effect=fake_run),
         ):
-            self.assertEqual(cc_driver._find_llc(), "/good/bin/llc")
+            self.assertEqual(find_llc(), "/good/bin/llc")
 
     def test_main_llvm_target_rejects_when_no_verified_llc_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1418,7 +1423,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("link failed with exit code 7", stderr)
 
-    def test_main_x86_64_linux_target_link_drops_latomic(self) -> None:
+    def test_main_x86_64_linux_target_link_preserves_latomic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             src = root / "ok.c"
@@ -1449,9 +1454,9 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertEqual(stderr, "")
         self.assertEqual(len(link_cmds), 1)
-        self.assertNotIn("-latomic", link_cmds[0])
+        self.assertIn("-latomic", link_cmds[0])
 
-    def test_main_x86_64_linux_target_object_only_link_drops_latomic(self) -> None:
+    def test_main_x86_64_linux_target_object_only_link_preserves_latomic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             obj = root / "ok.o"
@@ -1474,7 +1479,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "")
         self.assertEqual(stderr, "")
-        run.assert_called_once_with(("cc", str(obj), "-o", str(exe)), check=False)
+        run.assert_called_once_with(
+            ("cc", str(obj), "-latomic", "-l", "atomic", "-o", str(exe)),
+            check=False,
+        )
 
     def test_main_aarch64_target_compile_assembles_generated_asm(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1566,38 +1574,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("Unsupported target: wasm32", stderr)
         run.assert_not_called()
-
-    def test_main_backend_option_is_removed(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "ok.c"
-            path.write_text("int main(){return 0;}", encoding="utf-8")
-            with patch("xcc.cc_driver.subprocess.run") as run:
-                code, stdout, stderr = self._run_main(["--backend=xcc", str(path)])
-
-        self.assertEqual(code, 1)
-        self.assertEqual(stdout, "")
-        self.assertIn("--backend has been removed", stderr)
-        run.assert_not_called()
-
-    def test_main_unhandled_internal_target_asserts(self) -> None:
-        config = cc_driver.DriverConfig(
-            frontend_options=cc_driver.FrontendOptions(),
-            clang_argv=(),
-            c_inputs=("ok.c",),
-            non_c_inputs=(),
-            target="not-a-target",
-            action="compile",
-            output=None,
-            native_unsupported_flags=(),
-            evm_initcode=False,
-        )
-
-        with (
-            patch("xcc.cc_driver._parse_driver_config", return_value=config),
-            patch("xcc.cc_driver._compile_frontend_inputs", return_value=[]),
-            self.assertRaisesRegex(AssertionError, "unhandled target: not-a-target"),
-        ):
-            self._run_main(["ok.c"])
 
     def test_main_llvm_target_link_preserves_linker_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

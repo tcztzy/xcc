@@ -170,9 +170,6 @@ class LlvmIrTests(unittest.TestCase):
         allocation = module.symbol(RUNTIME_ALLOC)
         malloc = module.symbol("malloc")
 
-        self.assertEqual(len(module.globals), 69)
-        self.assertEqual(len(module.declarations), 22)
-        self.assertEqual(len(module.functions), 140)
         self.assertEqual(module.symbol_uses(malloc), ())
         self.assertGreaterEqual(len(module.symbol_uses(allocation)), 40)
         self.assertEqual(

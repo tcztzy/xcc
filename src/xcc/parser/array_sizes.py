@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from xcc.ast import (
     AlignofExpr,
@@ -163,7 +163,7 @@ def array_size_non_ice_error(
     return f"Array size expression '{type(expr).__name__}' is not an integer constant expression"
 
 
-def array_size_non_ice_error_for_parser(parser: "Parser", expr: Expr) -> str:
+def array_size_non_ice_error_for_parser(p: "Parser", expr: Expr) -> str:
     if isinstance(expr, Identifier):
         return f"Array size identifier '{expr.name}' is not an integer constant expression"
     if isinstance(expr, UnaryExpr):
@@ -199,61 +199,34 @@ def array_size_non_ice_error_for_parser(parser: "Parser", expr: Expr) -> str:
     if isinstance(expr, LabelAddressExpr):
         return "Array size label address expression is not an integer constant expression"
     if isinstance(expr, CastExpr):
-        if parser._eval_array_size_expr(expr.expr) is None:
-            return array_size_non_ice_error_for_parser(parser, expr.expr)
+        if p._eval_array_size_expr(expr.expr) is None:
+            return array_size_non_ice_error_for_parser(p, expr.expr)
         return "Array size cast expression is not an integer constant expression"
     if isinstance(expr, SizeofExpr):
         return "Array size sizeof expression is not an integer constant expression"
     if isinstance(expr, AlignofExpr):
         return "Array size alignof expression is not an integer constant expression"
     if isinstance(expr, ConditionalExpr):
-        condition = parser._eval_array_size_expr(expr.condition)
+        condition = p._eval_array_size_expr(expr.condition)
         if condition is None:
             return "Array size conditional condition is not an integer constant expression"
         branch = expr.then_expr if condition != 0 else expr.else_expr
-        if parser._eval_array_size_expr(branch) is None:
-            return array_size_non_ice_error_for_parser(parser, branch)
+        if p._eval_array_size_expr(branch) is None:
+            return array_size_non_ice_error_for_parser(p, branch)
         return "Array size conditional expression is not an integer constant expression"
     return "Array size expression is not an integer constant expression"
 
 
-def parse_array_size(parser: "Parser", token: Token) -> int:
-    p = cast(Any, parser)
-    lexeme = token.lexeme
-    if not isinstance(lexeme, str):
-        raise p._make_error("Array size literal token is malformed", token)
-    message = array_size_literal_error(lexeme)
-    if message is not None:
-        raise p._make_error(message, token)
-    size = parse_int_literal_value(lexeme)
-    assert size is not None
-    if size < 0:
-        raise p._make_error("Array size must be positive", token)
-    return size
-
-
-def parse_array_size_expr(parser: "Parser", expr: Expr, token: Token) -> int:
-    p = cast(Any, parser)
+def parse_array_size_expr(p: "Parser", expr: Expr, token: Token) -> int:
     size = p._eval_array_size_expr(expr)
     if size is None:
-        raise p._make_error(array_size_non_ice_error_for_parser(parser, expr), token)
+        raise p._make_error(array_size_non_ice_error_for_parser(p, expr), token)
     if size < 0:
         raise p._make_error("Array size must be positive", token)
     return size
 
 
-def parse_array_size_expr_or_vla(parser: "Parser", expr: Expr, token: Token) -> int:
-    p = cast(Any, parser)
-    size = p._eval_array_size_expr(expr)
-    if size is None:
-        return -1
-    if size < 0:
-        raise p._make_error("Array size must be positive", token)
-    return size
-
-
-def eval_array_size_expr(parser: "Parser", expr: Expr) -> int | None:
-    p = cast(Any, parser)
+def eval_array_size_expr(p: "Parser", expr: Expr) -> int | None:
     if isinstance(expr, IntLiteral):
         assert isinstance(expr.value, str)
         return parse_int_literal_value(expr.value)
@@ -353,8 +326,7 @@ def _trunc_div_quotient(left: int, right: int) -> int:
     return quotient if (left >= 0) == (right >= 0) else -quotient
 
 
-def eval_array_size_generic_expr(parser: "Parser", expr: GenericExpr) -> int | None:
-    p = cast(Any, parser)
+def eval_array_size_generic_expr(p: "Parser", expr: GenericExpr) -> int | None:
     control_type = p._array_size_generic_control_type(expr.control)
     default_expr: Expr | None = None
     selected_expr: Expr | None = None
@@ -375,8 +347,7 @@ def eval_array_size_generic_expr(parser: "Parser", expr: GenericExpr) -> int | N
     return p._eval_array_size_expr(selected_expr)
 
 
-def array_size_generic_control_type(parser: "Parser", control: Expr) -> TypeSpec | None:
-    p = cast(Any, parser)
+def array_size_generic_control_type(p: "Parser", control: Expr) -> TypeSpec | None:
     if isinstance(control, IntLiteral):
         return p._int_literal_type_spec(control.value)
     if isinstance(control, StringLiteral):
@@ -465,17 +436,17 @@ def unqualified_type_spec(type_spec: TypeSpec) -> TypeSpec:
     )
 
 
-def sizeof_type_spec(parser: "Parser", type_spec: TypeSpec) -> int | None:
-    return _sizeof_type_spec_from_index(parser, type_spec, 0)
+def sizeof_type_spec(p: "Parser", type_spec: TypeSpec) -> int | None:
+    return _sizeof_type_spec_from_index(p, type_spec, 0)
 
 
 def _sizeof_type_spec_from_index(
-    parser: "Parser",
+    p: "Parser",
     type_spec: TypeSpec,
     index: int,
 ) -> int | None:
     if index >= len(type_spec.declarator_ops):
-        return parser._data_layout.scalar_size(type_spec.name)
+        return p._data_layout.scalar_size(type_spec.name)
     kind, value = type_spec.declarator_ops[index]
     if kind == "arr":
         if not isinstance(value, int):
@@ -486,21 +457,20 @@ def _sizeof_type_spec_from_index(
             if isinstance(value.length, int):
                 value = value.length
             else:
-                evaluated = parser._eval_array_size_expr(value.length)
+                evaluated = p._eval_array_size_expr(value.length)
                 if evaluated is None:
                     return None
                 value = evaluated
         if value <= 0:
             return None
-        item_size = _sizeof_type_spec_from_index(parser, type_spec, index + 1)
+        item_size = _sizeof_type_spec_from_index(p, type_spec, index + 1)
         return None if item_size is None else item_size * value
     if kind == "ptr":
-        return parser._data_layout.pointer_size
+        return p._data_layout.pointer_size
     return None
 
 
-def alignof_type_spec(parser: "Parser", type_spec: TypeSpec) -> int | None:
-    p = cast(Any, parser)
+def alignof_type_spec(p: "Parser", type_spec: TypeSpec) -> int | None:
     if not type_spec.declarator_ops:
         if type_spec.record_tag is not None or type_spec.enum_tag is not None:
             return 16  # Conservative: actual alignment computed at codegen

@@ -4,10 +4,14 @@ from xcc.ast import Expr
 from xcc.data_layout import GENERIC_LP64_DATA_LAYOUT, TargetDataLayout
 from xcc.types import INT, Type
 
+from .layout import RecordLayout
+
 
 @dataclass
 class SemaError(ValueError):
     message: str
+    line: int | None = None
+    column: int | None = None
 
     def __str__(self) -> str:
         return self.message
@@ -58,8 +62,10 @@ class RecordMemberInfo:
 class TypeMap:
     def __init__(self) -> None:
         self._map: dict[int, Type] = {}
+        self._nodes: list[Expr] = []
 
     def set(self, node: Expr, type_: Type) -> None:
+        self._nodes.append(node)
         self._map[id(node)] = type_
 
     def get(self, node: Expr) -> Type | None:
@@ -81,6 +87,9 @@ class SemaUnit:
     function_signatures: dict[str, FunctionSignature] = field(default_factory=dict)
     transparent_union_types: set[str] = field(default_factory=set)
     data_layout: TargetDataLayout = GENERIC_LP64_DATA_LAYOUT
+    record_type_names: dict[int, str] = field(default_factory=dict)
+    record_packs: dict[str, int | None] = field(default_factory=dict)
+    record_layouts: dict[str, RecordLayout] = field(default_factory=dict)
 
 
 class Scope:

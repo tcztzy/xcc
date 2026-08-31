@@ -1,265 +1,70 @@
-# XCC 架构详解
+# XCC 架构
 
-XCC 是一个用 Python 3.11+ 标准库实现的 C11 编译器，也是一个展示如何用规格、测试、oracle 和负边界把 coding agent 管控在预期行为内的工程样板。实现仍然保持可读，但项目组织已经围绕 CPython 规模验证和显式 agent 控制展开。
+XCC 是一个 Python 3.11+、运行时仅依赖标准库的 C11/GNU11 编译器。它采用一条共享前端和四个显式目标，不把 CPython、宿主编译器或备用后端藏进编译路径。
 
-## 设计目标
+## 主编译路径
 
-1. **Python 3.11+ 标准库运行时**：没有运行时包依赖
-2. **编译真实 C 项目**：CPython 是旗舰集成测试，不是特殊路径
-3. **目标自有输出路径**：LLVM、Darwin AArch64、Linux x86_64 和 EVM 都是显式目标，没有隐藏 fallback compiler
-4. **Agent-control 工程**：行为写入 specs、tests、oracles、负边界、`CHANGELOG.md` 和 `LESSONS.md`
-
-## 源码总览
-
-```
-src/xcc/                         (~21,000 行 Python，41 个文件)
-├── __init__.py              CLI 入口 (main)
-├── options.py               FrontendOptions 数据类
-├── cc_driver.py             CC 兼容模式 (-c, -S, -E, -o)
-├── frontend.py              前端流水线编排
-├── diag.py                  诊断 / 错误类型
-├── lexer.py                 手写 C11 词法分析器 (~570 行)
-├── ast.py                   AST 节点定义 (~410 行)
-├── types.py                 语义类型表示 (~150 行)
-├── llvm_api.py              原始 libLLVM-C ctypes 绑定 (~700 行)
-├── codegen.py               AST → LLVM IR 降低 (~4500 行)
-├── aarch64_asm.py           原生 Darwin AArch64 汇编目标
-├── x86_64_asm.py            原生 Linux x86_64 汇编目标
-├── evm.py                   Ethereum EVM 汇编/字节码目标
-├── host_includes.py         macOS SDK 头文件路径探测
-│
-├── parser/                  递归下降 C11 解析器 (~4500 行)
-│   ├── __init__.py          Parser 主类
-│   ├── expressions.py       表达式解析 (优先级爬升)
-│   ├── statements.py        语句解析
-│   ├── type_specs.py        类型说明符解析
-│   ├── declarators.py       声明符解析
-│   ├── array_sizes.py       数组大小求值和诊断
-│   └── extensions.py        GNU/MSVC 扩展
-│
-├── sema/                    语义分析 (~5000 行)
-│   ├── __init__.py          Analyzer 主类
-│   ├── symbols.py           符号表 / TypeMap / SemaUnit
-│   ├── declarations.py      声明分析
-│   ├── statements.py        语句类型检查
-│   ├── expressions.py       表达式类型解析
-│   ├── type_resolution.py   TypeSpec → Type
-│   ├── type_helpers.py      整数等级、提升、算术转换
-│   ├── conversions.py       隐式转换规则
-│   ├── constants.py         整型常量表达式求值
-│   ├── records.py           记录 (struct/union) 布局
-│   ├── layout.py            sizeof / alignof 计算
-│   ├── initializers.py      初始化列表分析
-│   └── format_checking.py   格式化字符串检查
-│
-└── preprocessor/             C 预处理器 (~4200 行)
-    ├── __init__.py          _Preprocessor、错误、源码位置
-    ├── text.py              指令解析
-    ├── macros.py            宏定义结构
-    ├── macro_expansion.py   宏展开引擎
-    ├── expressions.py       #if 表达式求值
-    ├── conditionals.py      条件编译栈
-    ├── includes.py          #include 路径解析
-    ├── probes.py            __has_include 等
-    └── pragmas.py           #pragma 处理
+```text
+CLI / CC driver
+       │
+       ▼
+preprocessor → lexer → parser → sema
+                              │
+                              ▼
+                       FrontendResult
+                              │
+          ┌───────────┬───────┼───────────┐
+          ▼           ▼       ▼           ▼
+        LLVM       AArch64   x86-64       EVM
+          │           │       │           │
+         llc        assembler/linker      bytecode
 ```
 
-## 文件间调用关系
+- `frontend.py` 只编排预处理、词法、语法和语义阶段，并统一把阶段错误转换成带源码位置的诊断。
+- `cc_driver.py` 只负责参数、目标选择、产物和工具调用。它不修补前端语义，也不调用隐藏的备用编译器。
+- `preprocessor/`、`parser/` 和 `sema/` 各自由包入口中的状态对象拥有可变状态；同包 helper 是处理一种语义的具体函数，不另造虚假的抽象接口。
+- `ast.py` 是 C 语法树的唯一表示；`types.py` 是语义类型的唯一表示。两者都用有序 `declarator_ops` 表达指针、数组和函数声明符，没有并行的旧字段。
+- 语义分析不重写 AST。表达式类型存入 `TypeMap`，记录布局、符号和函数签名存入 `SemaUnit`，后端只消费 `FrontendResult`。
+- `TranslationUnit.source_map` 按节点身份支持语义诊断的随机查询；`source_locations` 按前序保存调试位置，避免 AOT 阶段搬移对象后失效的整数身份。
+- `data_layout.py` 是大小、对齐和目标整数模型的共享事实源。
 
-```
-                          __init__.py (CLI)
-                               │
-                    ┌──────────┼──────────┐
-                    ▼                     ▼
-              frontend.py           cc_driver.py
-              (完整流水线)          (CC 兼容接口)
-                    │                     │
-         ┌─────────┤                     │
-         ▼         │                     │
-   options.py      │                     │
-                   │                     │
-         ┌─────────┼──────────┐         │
-         ▼         ▼          ▼         │
-   preprocessor/   lexer.py   parser/    │
-         │         │          │         │
-         │         └────┬─────┘         │
-         │              ▼               │
-         │          parser/             │
-         │              │               │
-         │         ┌────┴─────┐        │
-         │         ▼          ▼        │
-         │     sema/      ast.py + types.py
-         │         │                    │
-         │    ┌────┴─────┐             │
-         │    ▼          ▼             │
-         │  symbols.py  declarations.py│
-         │  expressions.py  ...        │
-         │         │                    │
-         │    FrontendResult           │
-         │         │                    │
-         └────┬────┘                    │
-              ▼                         │
-        target backend                  │
-   ┌──────────┼──────────┐              │
-   ▼          ▼          ▼              ▼
-codegen.py  aarch64_asm.py  x86_64_asm.py  evm.py
-LLVM IR    Darwin asm      Linux asm      EVM asm/bin
-   │          │             │              │
-   ▼          ▼             ▼              ▼
-  llc      system tools  system tools   bytecode output
+## 后端边界
+
+`codegen.py`、`aarch64_asm.py`、`x86_64_asm.py` 和 `evm.py` 是四个互不回退的叶子后端。共享的只有 AST 遍历、类型、布局和语义结果；ABI、寄存器、指令与产物格式留在所属目标中。
+
+LLVM 目标通过 `llvm_api.py` 生成 IR，并由 `llvm_tools.py` 验证后选择 `llc`。原生 AArch64、x86-64 和 EVM 直接生成各自输出。某目标不支持的构造必须报错，不能悄悄换目标。
+
+这些后端文件较大，但不是重复层：每个文件拥有一个目标的完整降低状态。仅按行数拆分会把寄存器、栈帧和控制流状态扩散到更多模块。真正跨目标重复的无状态逻辑才进入共享模块，例如 `walk_ast_children`。
+
+## AOT / 自举路径
+
+AOT 是编译器自身的 Python 子集编译器，不是 C 前端的第二份实现：
+
+```text
+Python source
+  → owned Python lexer/parser (`py_lexer.py`, `py_parser.py`, `py_ast.py`)
+  → subset check + binding + analysis
+  → reachable slice
+  → typed AOT IR (`ir.py`, `lower.py`)
+  → LLVM text + native runtime
+  → native compiler / bootstrap
 ```
 
-## 关键设计决策
+`source_contract.py` 决定源集和可达边界，`slice.py` 只保留入口可达代码，`lower.py` 负责 Python 子集到 AOT IR，`llvm_text.py` 与 `core_runtime.py` 共同拥有原生表示和运行时。固定的 Darwin ARM64 bootstrap 工具布局是该产物边界的显式约定，不是通用 driver 的兼容分支。
 
-### 1. AST 用 frozen dataclass
+## 测试边界
 
-```python
-@dataclass(frozen=True)
-class BinaryExpr:
-    op: str
-    left: Expr
-    right: Expr
-```
+测试按可观察契约分层：
 
-`frozen=True` 意味着 AST 节点创建后不可变。这防止了 parser 或 sema 意外修改 AST，也使得 AST 节点可哈希（可以用作 dict key，例如 `TypeMap` 中 node → type 的映射）。
+1. 用最小 C/Python 源码测试 parser、sema 和预处理语义。
+2. 用公开 CLI 与产物测试 driver 和各目标。
+3. 用执行结果、LLVM 工具、宿主 oracle 和真实 CPython 构建验证跨阶段行为。
+4. 用 hosted/native/bootstrap 对照验证 AOT 自举闭包。
 
-### 2. 隐式转换显式插入
+同一语义只在拥有它的最低阶段精确断言一次，上层仅保留集成价值。测试不伪造生产路径不可能产生的 AST/IR，不检查源码形状，也不为覆盖率数字制造分支。覆盖率是观察值，不是保留冗余测试的理由。
 
-在语义分析阶段，当发现类型不匹配时，分析器**向 AST 中插入 `ImplicitCast` 节点**：
+## 结论
 
-```python
-@dataclass(frozen=True)
-class ImplicitCast(Expr):
-    expr: Expr            # 被转换的表达式
-    target_type: Type     # 目标类型
-    cast_kind: str        # "lvalue_to_rvalue" | "integral_promotion" | ...
-```
+这是合格的模块化编译器架构：前端阶段、共享语义、目标后端和 AOT 自举边界清楚；导入时依赖图无环；现有模块均有入口或被生产路径引用，没有可删除的冗余模块。
 
-这避免了代码生成器处理类型转换逻辑——它只需要机械地翻译每个节点。
-
-### 3. 目标驱动代码生成
-
-XCC 使用目标选择，而不是后端模式。在 x86_64 Linux 宿主上，driver 默认选择
-`x86_64-linux-gnu`；其他宿主默认选择 `llvm`。不支持的目标会在编译源码前被拒绝：
-
-```python
-# 宿主默认目标：
-#   x86_64 Linux -> x86_64-linux-gnu
-#   其他宿主      -> llvm
-
-# 显式 target：
-#   xcc --target=llvm -c file.c -o file.o
-#   xcc --target=aarch64-apple-darwin -c file.c -o file.o
-#   xcc --target=x86_64-linux-gnu -c file.c -o file.o
-#   xcc --target=evm -c file.c -o file.bin
-
-# -S 写出目标汇编语言。
-# 对 target=llvm，这意味着文本 LLVM IR。
-```
-
-### 4. Opaque Pointer
-
-XCC 使用 LLVM 15+ 的 opaque pointer 特性——所有指针类型统一为 `ptr`（在 LLVM-C API 中为 `LLVMPointerType(i8, 0)`），不再区分 `i32*` vs `i64*`。这简化了类型映射和 GEP 操作。
-
-### 5. 类型化 helper 模块契约
-
-大型 parser、preprocessor、sema helper 保持在聚焦的小模块里，但入口使用窄
-`Protocol` 契约，而不是无类型 `Any`。这样主类仍然负责状态，helper 依赖也能被
-`ty check` 看到。
-
-### 6. 内置函数处理
-
-XCC 对 C 标准中的 `__builtin_*` 函数做特殊处理：
-
-```python
-def _emit_builtin_call(self, name: str, args: list) -> LLVMValueRef | None:
-    if name == "__builtin_memset":
-        return LLVMBuildMemSet(self.builder, ptr, val, size, align)
-    if name == "__builtin_memcpy":
-        return LLVMBuildMemCpy(self.builder, dst, src, size, align)
-    # ... 直接映射到 LLVM 内建 intrinsic
-    return None  # 未识别的 builtin，作为普通函数调用
-```
-
-## 类型系统
-
-XCC 的类型系统 (`types.py`) 使用一个统一的 `Type` 数据类：
-
-```python
-@dataclass(frozen=True)
-class Type:
-    kind: TypeKind      # INT | PTR | ARRAY | FUNC | RECORD | VOID | ...
-    modifiers: int      # bitmask: CONST | VOLATILE | RESTRICT
-    # kind-specific fields:
-    subtype: Type | None          # 指针目标类型 / 数组元素类型
-    array_size: int | None        # 数组大小
-    param_types: tuple[Type, ...] # 函数参数类型
-    return_type: Type | None      # 函数返回类型
-    record_name: str | None       # struct/union 名称
-    # 整数类型细节：
-    int_size: int                 # 位宽 (8, 16, 32, 64)
-    int_signed: bool              # 是否有符号
-```
-
-预定义的常用类型别名：
-
-```python
-INT = Type(kind=TypeKind.INT, int_size=32, int_signed=True)
-UINT = Type(kind=TypeKind.INT, int_size=32, int_signed=False)
-LONG = Type(kind=TypeKind.INT, int_size=64, int_signed=True)
-CHAR = Type(kind=TypeKind.INT, int_size=8, int_signed=True)
-VOID = Type(kind=TypeKind.VOID)
-# ...
-
-def ptr_to(t: Type) -> Type:
-    return Type(kind=TypeKind.PTR, subtype=t)
-
-def array_of(t: Type, size: int) -> Type:
-    return Type(kind=TypeKind.ARRAY, subtype=t, array_size=size)
-
-def func_type(ret: Type, params: tuple[Type, ...]) -> Type:
-    return Type(kind=TypeKind.FUNC, return_type=ret, param_types=params)
-```
-
-## 代码生成器的工作流
-
-1. **创建 LLVM 上下文和模块**
-   ```python
-   self.context = LLVMContextCreate()
-   self.module = LLVMModuleCreateWithNameInContext(b"xcc", self.context)
-   ```
-
-2. **声明全局变量和函数**（先声明，后定义）
-   ```python
-   for decl in translation_unit.decls:
-       if isinstance(decl, FunctionDef):
-           self._declare_function(decl)
-       elif isinstance(decl, VarDecl):
-           self._declare_global(decl)
-   ```
-
-3. **定义函数体**
-   ```python
-   for func_def in function_defs:
-       self._define_function(func_def)
-       # 内部：
-       #   alloca 每个参数和局部变量
-       #   遍历 CompoundStmt，逐个 emit 每个语句
-       #   处理控制流：if → cond_br, while → loop + br, for → entry/test/body/inc loop
-   ```
-
-4. **输出 LLVM IR**
-   ```python
-   ir_text = LLVMPrintModuleToString(self.module)
-   ```
-
-## 已验证的能力
-
-- 完整解析 CPython 的 442 个 .c 文件（预处理 + 词法分析 + 解析 + 语义分析）
-- 432/442 文件通过原生 LLVM 后端编译
-- C11 核心特性：函数定义、指针、数组、struct、enum、typedef、控制流、表达式
-- GNU 扩展：`__attribute__`、`typeof`、语句表达式、复合字面量、K&R 定义
-
----
-
-下一站：[学习路径](learning-path.md) — 如何从零开始学习编译器构建。
+限制也明确：几个目标后端和 AOT lowering/runtime 是大型叶子，修改成本高；原生后端直接消费 AST + `TypeMap`，没有独立的共享 C IR。当前目标数量下，这比为了形式上的小文件引入转发层更简单。只有出现第二个真实消费者或跨目标重复语义时，才应继续抽取模块。

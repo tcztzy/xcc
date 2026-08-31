@@ -1,269 +1,70 @@
 # XCC Architecture
 
-XCC is a Python 3.11+ standard-library C11 compiler and an engineering specimen
-for keeping coding agents inside intended behavior with specs, tests, oracles,
-and negative boundaries. The implementation remains readable, but the project
-is organized around CPython-scale validation and explicit agent controls.
+XCC is a Python 3.11+ C11/GNU11 compiler whose runtime uses only the standard library. It has one shared frontend and four explicit targets; CPython, a host compiler, and fallback backends are not hidden in the compile path.
 
-## Design Goals
+## Main compile path
 
-1. **Python 3.11+ stdlib runtime**: no runtime package dependencies.
-2. **Compile real C projects**: CPython is a flagship integration test, not a special case.
-3. **Target-owned output paths**: LLVM, Darwin AArch64, Linux x86_64, and EVM are explicit targets with no hidden fallback compiler.
-4. **Agent-control engineering**: behavior lives in specs, tests, oracles, negative boundaries, `CHANGELOG.md`, and `LESSONS.md`.
-
-## Source Overview
-
-```
-src/xcc/                         (~21,000 lines Python, 41 files)
-├── __init__.py              CLI entry point (main)
-├── options.py               FrontendOptions dataclass
-├── cc_driver.py             CC-compatible mode (-c, -S, -E, -o)
-├── frontend.py              Frontend pipeline orchestrator
-├── diag.py                  Diagnostics / error types
-├── lexer.py                 Hand-written C11 lexer (~570 lines)
-├── ast.py                   AST node definitions (~410 lines)
-├── types.py                 Semantic type representation (~150 lines)
-├── llvm_api.py              Raw libLLVM-C ctypes bindings (~700 lines)
-├── codegen.py               AST → LLVM IR lowering (~4500 lines)
-├── aarch64_asm.py           Native Darwin AArch64 assembly target
-├── x86_64_asm.py            Native Linux x86_64 assembly target
-├── evm.py                   Ethereum EVM assembly/bytecode target
-├── host_includes.py         macOS SDK header path detection
-│
-├── parser/                  Recursive-descent C11 parser (~4500 lines)
-│   ├── __init__.py          Parser main class
-│   ├── expressions.py       Expression parsing (precedence climbing)
-│   ├── statements.py        Statement parsing
-│   ├── type_specs.py        Type specifier parsing
-│   ├── declarators.py       Declarator parsing
-│   ├── array_sizes.py       Array size evaluation and diagnostics
-│   └── extensions.py        GNU/MSVC extensions
-│
-├── sema/                    Semantic analysis (~5000 lines)
-│   ├── __init__.py          Analyzer main class
-│   ├── symbols.py           Symbol table / TypeMap / SemaUnit
-│   ├── declarations.py      Declaration analysis
-│   ├── statements.py        Statement type checking
-│   ├── expressions.py       Expression type resolution
-│   ├── type_resolution.py   TypeSpec → Type
-│   ├── type_helpers.py      Integer ranks, promotions, arithmetic conversions
-│   ├── conversions.py       Implicit conversion rules
-│   ├── constants.py         Integer constant expression evaluation
-│   ├── records.py           Record (struct/union) layout
-│   ├── layout.py            sizeof / alignof computation
-│   ├── initializers.py      Initializer list analysis
-│   └── format_checking.py   Format string checking
-│
-└── preprocessor/            C preprocessor (~4200 lines)
-    ├── __init__.py          _Preprocessor, errors, source locations
-    ├── text.py              Directive parsing
-    ├── macros.py            Macro definition structures
-    ├── macro_expansion.py   Macro expansion engine
-    ├── expressions.py       #if expression evaluation
-    ├── conditionals.py      Conditional compilation stack
-    ├── includes.py          #include path resolution
-    ├── probes.py            __has_include etc.
-    └── pragmas.py           #pragma handling
+```text
+CLI / CC driver
+       │
+       ▼
+preprocessor → lexer → parser → sema
+                              │
+                              ▼
+                       FrontendResult
+                              │
+          ┌───────────┬───────┼───────────┐
+          ▼           ▼       ▼           ▼
+        LLVM       AArch64   x86-64       EVM
+          │           │       │           │
+         llc        assembler/linker      bytecode
 ```
 
-## Call Graph
+- `frontend.py` only orchestrates preprocessing, lexing, parsing, and semantic analysis, and converts stage failures into source-located diagnostics.
+- `cc_driver.py` owns arguments, target selection, products, and tool invocation. It does not repair frontend semantics or invoke a hidden fallback compiler.
+- The state objects in the `preprocessor/`, `parser/`, and `sema/` package facades own mutable state. Helpers are concrete functions for one semantic concern rather than invented abstraction interfaces.
+- `ast.py` is the sole C syntax-tree representation and `types.py` is the sole semantic-type representation. Both encode pointer, array, and function declarators with ordered `declarator_ops`; no parallel legacy fields remain.
+- Semantic analysis does not rewrite the AST. Expression types live in `TypeMap`; layouts, symbols, and function signatures live in `SemaUnit`; backends consume only `FrontendResult`.
+- `TranslationUnit.source_map` supports random node-identity lookup for semantic diagnostics; the preorder `source_locations` stream remains valid when AOT phase promotion moves objects used by debug emission.
+- `data_layout.py` is the shared authority for size, alignment, and target integer models.
 
-```
-                          __init__.py (CLI)
-                               │
-                    ┌──────────┼──────────┐
-                    ▼                     ▼
-              frontend.py           cc_driver.py
-              (full pipeline)       (CC-compatible)
-                    │                     │
-         ┌─────────┤                     │
-         ▼         │                     │
-   options.py      │                     │
-                   │                     │
-         ┌─────────┼──────────┐         │
-         ▼         ▼          ▼         │
-   preprocessor/   lexer.py   parser/    │
-         │         │          │         │
-         │         └────┬─────┘         │
-         │              ▼               │
-         │          parser/             │
-         │              │               │
-         │         ┌────┴─────┐        │
-         │         ▼          ▼        │
-         │     sema/      ast.py + types.py
-         │         │                    │
-         │    ┌────┴─────┐             │
-         │    ▼          ▼             │
-         │  symbols.py  declarations.py│
-         │  expressions.py  ...        │
-         │         │                    │
-         │    FrontendResult           │
-         │         │                    │
-         └────┬────┘                    │
-              ▼                         │
-        target backend                  │
-   ┌──────────┼──────────┐              │
-   ▼          ▼          ▼              ▼
-codegen.py  aarch64_asm.py  x86_64_asm.py  evm.py
-LLVM IR    Darwin asm      Linux asm      EVM asm/bin
-   │          │             │              │
-   ▼          ▼             ▼              ▼
-  llc      system tools  system tools   bytecode output
+## Backend boundary
+
+`codegen.py`, `aarch64_asm.py`, `x86_64_asm.py`, and `evm.py` are four non-fallback leaf backends. They share AST traversal, types, layout, and semantic results; ABI rules, registers, instructions, and product formats stay with the owning target.
+
+The LLVM target builds IR through `llvm_api.py` and selects a verified `llc` through `llvm_tools.py`. Native AArch64, x86-64, and EVM emit their target output directly. An unsupported construct must fail for that target rather than switch targets.
+
+These backend files are large but are not duplicate layers: each owns the complete lowering state for one target. Splitting them by line count alone would spread register, frame, and control-flow state across more files. Only genuinely target-neutral stateless behavior belongs in a shared module, as with `walk_ast_children`.
+
+## AOT and bootstrap path
+
+AOT is the Python-subset compiler used to compile XCC itself, not a second C frontend:
+
+```text
+Python source
+  → owned Python lexer/parser (`py_lexer.py`, `py_parser.py`, `py_ast.py`)
+  → subset check + binding + analysis
+  → reachable slice
+  → typed AOT IR (`ir.py`, `lower.py`)
+  → LLVM text + native runtime
+  → native compiler / bootstrap
 ```
 
-## Key Design Decisions
+`source_contract.py` owns source-set and reachability boundaries, `slice.py` retains entry-reachable code, `lower.py` maps the Python subset to AOT IR, and `llvm_text.py` plus `core_runtime.py` own the native representation and runtime. The fixed Darwin ARM64 bootstrap tool layout is an explicit artifact-boundary convention, not compatibility logic in the general driver.
 
-### 1. Frozen Dataclass AST
+## Test boundary
 
-```python
-@dataclass(frozen=True)
-class BinaryExpr:
-    op: str
-    left: Expr
-    right: Expr
-```
+Tests follow observable contracts:
 
-`frozen=True` means AST nodes are immutable after creation. This prevents the parser or sema from accidentally mutating the AST, and makes nodes hashable (usable as dict keys, e.g., in `TypeMap` for node → type mapping).
+1. Minimal C or Python source exercises preprocessor, parser, and sema semantics.
+2. Public CLI behavior and products exercise the driver and targets.
+3. Execution, LLVM tools, host oracles, and real CPython builds exercise cross-stage claims.
+4. Hosted/native/bootstrap comparisons exercise the AOT closure.
 
-### 2. Explicit Implicit Conversions
+One semantic rule receives one exact assertion at its lowest owning stage; upper layers remain only when they add integration value. Tests do not forge AST or IR that production cannot create, inspect source shape, or preserve branches only for a coverage number. Coverage is an observation, not a reason to keep redundant tests.
 
-During semantic analysis, when a type mismatch is detected, the analyzer **inserts `ImplicitCast` nodes into the AST**:
+## Verdict
 
-```python
-@dataclass(frozen=True)
-class ImplicitCast(Expr):
-    expr: Expr            # expression being converted
-    target_type: Type     # target type
-    cast_kind: str        # "lvalue_to_rvalue" | "integral_promotion" | ...
-```
+This is a qualified modular compiler architecture: frontend stages, shared semantics, target backends, and the AOT bootstrap boundary are clear; the import-time dependency graph is acyclic; every current module is an entry point or is reached by production code, so there is no redundant module to delete.
 
-This avoids the code generator having to handle type conversion logic — it simply mechanically translates each node.
-
-### 3. Target-Driven Codegen
-
-XCC has target selection, not backend modes. On x86_64 Linux hosts, the driver
-defaults to `x86_64-linux-gnu`; other hosts default to `llvm`. Unsupported
-targets are rejected before source compilation:
-
-```python
-# host default:
-#   x86_64 Linux -> x86_64-linux-gnu
-#   other hosts  -> llvm
-
-# explicit target:
-#   xcc --target=llvm -c file.c -o file.o
-#   xcc --target=aarch64-apple-darwin -c file.c -o file.o
-#   xcc --target=x86_64-linux-gnu -c file.c -o file.o
-#   xcc --target=evm -c file.c -o file.bin
-
-# -S writes the target assembly language.
-# For target=llvm, that means textual LLVM IR.
-```
-
-### 4. Opaque Pointers
-
-XCC uses LLVM 15+'s opaque pointer feature — all pointer types are unified as `ptr` (in LLVM-C API: `LLVMPointerType(i8, 0)`), no longer distinguishing `i32*` vs `i64*`. This simplifies type mapping and GEP operations.
-
-### 5. Typed Helper-Module Contracts
-
-Large parser, preprocessor, and sema helpers are kept in focused modules, but
-their entry points use narrow `Protocol` contracts instead of untyped `Any`.
-That keeps the main classes free to own state while making helper dependencies
-visible to `ty check`.
-
-### 6. Builtin Handling
-
-XCC specially handles C standard `__builtin_*` functions:
-
-```python
-def _emit_builtin_call(self, name: str, args: list) -> LLVMValueRef | None:
-    if name == "__builtin_memset":
-        return LLVMBuildMemSet(self.builder, ptr, val, size, align)
-    if name == "__builtin_memcpy":
-        return LLVMBuildMemCpy(self.builder, dst, src, size, align)
-    # ... direct mapping to LLVM intrinsic
-    return None  # unrecognized builtin, treated as normal function call
-```
-
-## Type System
-
-XCC's type system (`types.py`) uses a unified `Type` dataclass:
-
-```python
-@dataclass(frozen=True)
-class Type:
-    kind: TypeKind      # INT | PTR | ARRAY | FUNC | RECORD | VOID | ...
-    modifiers: int      # bitmask: CONST | VOLATILE | RESTRICT
-    # kind-specific fields:
-    subtype: Type | None          # pointee type / array element type
-    array_size: int | None        # array size
-    param_types: tuple[Type, ...] # function parameter types
-    return_type: Type | None      # function return type
-    record_name: str | None       # struct/union name
-    # integer type details:
-    int_size: int                 # bit width (8, 16, 32, 64)
-    int_signed: bool              # signedness
-```
-
-Predefined common type aliases:
-
-```python
-INT = Type(kind=TypeKind.INT, int_size=32, int_signed=True)
-UINT = Type(kind=TypeKind.INT, int_size=32, int_signed=False)
-LONG = Type(kind=TypeKind.INT, int_size=64, int_signed=True)
-CHAR = Type(kind=TypeKind.INT, int_size=8, int_signed=True)
-VOID = Type(kind=TypeKind.VOID)
-
-def ptr_to(t: Type) -> Type:
-    return Type(kind=TypeKind.PTR, subtype=t)
-
-def array_of(t: Type, size: int) -> Type:
-    return Type(kind=TypeKind.ARRAY, subtype=t, array_size=size)
-
-def func_type(ret: Type, params: tuple[Type, ...]) -> Type:
-    return Type(kind=TypeKind.FUNC, return_type=ret, param_types=params)
-```
-
-## Code Generator Workflow
-
-1. **Create LLVM context and module**
-   ```python
-   self.context = LLVMContextCreate()
-   self.module = LLVMModuleCreateWithNameInContext(b"xcc", self.context)
-   ```
-
-2. **Declare globals and functions** (declare first, define later)
-   ```python
-   for decl in translation_unit.decls:
-       if isinstance(decl, FunctionDef):
-           self._declare_function(decl)
-       elif isinstance(decl, VarDecl):
-           self._declare_global(decl)
-   ```
-
-3. **Define function bodies**
-   ```python
-   for func_def in function_defs:
-       self._define_function(func_def)
-       # Inside:
-       #   alloca each parameter and local variable
-       #   walk CompoundStmt, emit each statement
-       #   handle control flow: if→cond_br, while→loop+br, for→entry/test/body/inc
-   ```
-
-4. **Output LLVM IR**
-   ```python
-   ir_text = LLVMPrintModuleToString(self.module)
-   ```
-
-## Verified Capabilities
-
-- Full parse of CPython's 442 .c files (preprocessor + lex + parse + sema)
-- 432/442 files compile through native LLVM backend
-- C11 core features: function definitions, pointers, arrays, struct, enum, typedef, control flow, expressions
-- GNU extensions: `__attribute__`, `typeof`, statement expressions, compound literals, K&R definitions
-
----
-
-Next: [Learning Path](learning-path.md) — how to learn compiler construction from scratch.
+The limits are explicit. Several target backends and AOT lowering/runtime components are large leaves, and native C backends consume AST plus `TypeMap` without a separate shared C IR. At the current target count this is simpler than adding forwarding layers for cosmetic file size. Extract another module only when a second real consumer or repeated cross-target semantic rule appears.

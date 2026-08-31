@@ -236,7 +236,8 @@ def eval_int_constant_expr(analyzer: "Analyzer", expr: Expr, scope: Scope) -> in
             return None
         return analyzer._alignof_type(operand_type)
     if isinstance(expr, BuiltinOffsetofExpr):
-        return None
+        analyzer._register_type_spec(expr.type_spec)
+        return analyzer._offsetof_type(analyzer._resolve_type(expr.type_spec), expr.member)
     if isinstance(expr, BuiltinTypesCompatExpr):
         analyzer._register_type_spec(expr.type1)
         analyzer._register_type_spec(expr.type2)
@@ -322,9 +323,9 @@ def _lookup_member_in_init(
     for idx, m in enumerate(members):
         if m.name == member_name and idx < len(init_list.items):
             item = init_list.items[idx]
-            if item.designators:
+            if item.designators or isinstance(item.initializer, InitList):
                 return None
-            return analyzer._eval_int_constant_expr(item.initializer, scope)  # type: ignore
+            return analyzer._eval_int_constant_expr(item.initializer, scope)
     return None
 
 
@@ -428,7 +429,21 @@ def char_const_value(analyzer: "Analyzer", lexeme: str) -> int | None:
     units = analyzer._decode_escaped_units(body)
     if len(units) != 1:
         return None
-    return units[0]
+    return char_literal_value(lexeme)
+
+
+def char_literal_value(lexeme: str) -> int:
+    body = char_literal_body(lexeme)
+    units = decode_escaped_units(body) if body is not None else [ord(ch) for ch in lexeme]
+    if len(units) == 1:
+        value = units[0]
+        if lexeme.startswith("'") and 0x80 <= value <= 0xFF:
+            return value - 0x100
+        return value
+    value = 0
+    for unit in units:
+        value = (value << 8) | (unit & 0xFF)
+    return value
 
 
 def char_literal_body(lexeme: str) -> str | None:
@@ -442,7 +457,11 @@ def char_literal_body(lexeme: str) -> str | None:
 
 def string_literal_required_length(analyzer: "Analyzer", lexeme: str) -> int | None:
     body = analyzer._string_literal_body(lexeme)
-    return None if body is None else len(analyzer._decode_escaped_units(body)) + 1
+    if body is None:
+        return None
+    if lexeme.startswith(('L"', 'u"', 'U"')):
+        return len(analyzer._decode_escaped_units(body)) + 1
+    return len(narrow_string_bytes(body)) + 1
 
 
 def string_literal_body(lexeme: str) -> str | None:
@@ -460,20 +479,20 @@ def string_literal_body(lexeme: str) -> str | None:
     return None
 
 
-def decode_escaped_units(body: str) -> list[int]:
-    units: list[int] = []
+def _escaped_units(body: str) -> list[tuple[int, bool]]:
+    units: list[tuple[int, bool]] = []
     index = 0
     while index < len(body):
         ch = body[index]
         if ch != "\\":
-            units.append(ord(ch))
+            units.append((ord(ch), True))
             index += 1
             continue
         index += 1
         esc = body[index]
         simple = SIMPLE_ESCAPES.get(esc)
         if simple is not None:
-            units.append(simple)
+            units.append((simple, False))
             index += 1
             continue
         if esc == "x":
@@ -481,7 +500,7 @@ def decode_escaped_units(body: str) -> list[int]:
             start = index
             while index < len(body) and body[index] in HEX_DIGITS:
                 index += 1
-            units.append(int(body[start:index], 16))
+            units.append((int(body[start:index], 16), False))
             continue
         if esc in OCTAL_DIGITS:
             start = index
@@ -490,10 +509,24 @@ def decode_escaped_units(body: str) -> list[int]:
                 index += 1
             if index < len(body) and body[index] in OCTAL_DIGITS:
                 index += 1
-            units.append(int(body[start:index], 8))
+            units.append((int(body[start:index], 8), False))
             continue
         width = 4 if esc == "u" else 8
         index += 1
-        units.append(int(body[index : index + width], 16))
+        units.append((int(body[index : index + width], 16), True))
         index += width
     return units
+
+
+def decode_escaped_units(body: str) -> list[int]:
+    return [unit for unit, _ in _escaped_units(body)]
+
+
+def narrow_string_bytes(body: str) -> bytes:
+    data = b""
+    for unit, character in _escaped_units(body):
+        if character:
+            data += chr(unit).encode()
+        else:
+            data += unit.to_bytes(1, "little")
+    return data

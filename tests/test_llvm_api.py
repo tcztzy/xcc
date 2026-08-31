@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import xcc.llvm_api as llvm_api
 from xcc.llvm_api import optional_zero_ptr_array, ptr_array, zero_ptr_array
@@ -21,6 +22,15 @@ class _FakeLLVMLibrary:
 
 
 class LLVMApiTests(unittest.TestCase):
+    def test_llvm_loader_uses_discovered_library(self) -> None:
+        sentinel = object()
+        with (
+            patch("xcc.llvm_api.find_libllvm", return_value="/toolchain/lib/libLLVM.so"),
+            patch("xcc.llvm_api.ctypes.CDLL", return_value=sentinel) as load,
+        ):
+            self.assertIs(llvm_api._load_llvm(), sentinel)
+        load.assert_called_once_with("/toolchain/lib/libLLVM.so")
+
     def test_ptr_array_preserves_pointer_values(self) -> None:
         arr = ptr_array([11, 22, 33])
 

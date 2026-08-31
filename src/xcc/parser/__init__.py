@@ -160,6 +160,7 @@ class Parser:
         self._function_def_params: list[Param] = []
         self._function_def_has_prototype = False
         self._function_def_is_variadic = False
+        self._source_map: dict[int, SourceLocation] = {}
         self._source_locations: list[SourceLocation] = []
 
         # Register compiler built-in typedefs
@@ -295,7 +296,9 @@ class Parser:
             if self._match(TokenKind.EOF):
                 break
             if self._check_keyword("_Static_assert") or self._is_static_assert_ident():
+                token = self._current()
                 static_assert_decl = self._parse_static_assert_decl()
+                self._locate(static_assert_decl, token)
                 declarations.append(static_assert_decl)
                 externals.append(static_assert_decl)
                 continue
@@ -303,6 +306,7 @@ class Parser:
                 token = self._current()
                 self._source_locations.append(SourceLocation(token.line, token.column))
                 function = self._parse_function()
+                self._locate(function, token)
                 functions.append(function)
                 externals.append(function)
                 continue
@@ -310,11 +314,19 @@ class Parser:
                 token = self._current()
                 assert isinstance(token.lexeme, str)
                 raise ParserError(f"{token.lexeme} statement outside of a function", token)
+            token = self._current()
             declaration = self._parse_decl_stmt()
+            self._locate(declaration, token)
             declarations.append(declaration)
             externals.append(declaration)
         self._expect(TokenKind.EOF)
-        return TranslationUnit(functions, declarations, externals, self._source_locations)
+        return TranslationUnit(
+            functions,
+            declarations,
+            externals,
+            self._source_map,
+            self._source_locations,
+        )
 
     def _is_external_statement_start(self) -> bool:
         token = self._current()
@@ -506,7 +518,7 @@ class Parser:
 
     def _parse_knr_identifier_list(self) -> list[Param]:
         """Parse K&R identifier list: (a, b, c)."""
-        int_type = TypeSpec("int", 0)
+        int_type = TypeSpec("int")
         names: list[str] = []
         names.append(str(self._expect(TokenKind.IDENT).lexeme))
         while self._check_punct(","):
@@ -535,7 +547,7 @@ class Parser:
                 else:
                     break
             self._expect_punct(";")
-        int_type = TypeSpec("int", 0)
+        int_type = TypeSpec("int")
         updated_params: list[Param] = []
         for param in params:
             param_name = str(param.name)
@@ -626,24 +638,6 @@ class Parser:
     def _unsupported_type_message(self, context: str, token: Token) -> str:
         return _type_specs.unsupported_type_message(context, token)
 
-    def _unsupported_type_name_token_message(self, token_text: str, token_kind: str) -> str:
-        return _type_specs.unsupported_type_name_token_message(token_text, token_kind)
-
-    def _unsupported_declaration_type_token_message(self, token_text: str, token_kind: str) -> str:
-        return _type_specs.unsupported_declaration_type_token_message(
-            token_text,
-            token_kind,
-        )
-
-    def _unsupported_type_name_punctuator_message(self, punctuator: str) -> str:
-        return _type_specs.unsupported_type_name_punctuator_message(punctuator)
-
-    def _unsupported_declaration_type_punctuator_message(self, punctuator: str) -> str:
-        return _type_specs.unsupported_declaration_type_punctuator_message(punctuator)
-
-    def _unsupported_type_token_kind(self, kind: TokenKind) -> str:
-        return _type_specs.unsupported_type_token_kind(kind)
-
     def _consume_type_qualifiers(self, *, allow_atomic: bool = False) -> tuple[str, ...]:
         return _type_specs.consume_type_qualifiers(self, allow_atomic=allow_atomic)
 
@@ -707,6 +701,7 @@ class Parser:
         token = self._current()
         self._source_locations.append(SourceLocation(token.line, token.column))
         statement = _statements.parse_compound_stmt(self, initial_names, initial_types)
+        self._locate(statement, token)
         return statement
 
     def _parse_statement(self) -> Stmt:
@@ -714,11 +709,11 @@ class Parser:
         if token.lexeme != "{":
             self._source_locations.append(SourceLocation(token.line, token.column))
         statement = _statements.parse_statement(self)
+        self._locate(statement, token)
         return statement
 
-    def _record_current_source_location(self) -> None:
-        token = self._current()
-        self._source_locations.append(SourceLocation(token.line, token.column))
+    def _locate(self, node: object, token: Token) -> None:
+        self._source_map[id(node)] = SourceLocation(token.line, token.column)
 
     def _is_declaration_start(self) -> bool:
         return _statements.is_declaration_start(self)
@@ -969,36 +964,6 @@ class Parser:
     def _parse_conditional(self) -> Expr:
         return _expressions.parse_conditional(self)
 
-    def _parse_logical_or(self) -> Expr:
-        return _expressions.parse_logical_or(self)
-
-    def _parse_logical_and(self) -> Expr:
-        return _expressions.parse_logical_and(self)
-
-    def _parse_bitwise_or(self) -> Expr:
-        return _expressions.parse_bitwise_or(self)
-
-    def _parse_bitwise_xor(self) -> Expr:
-        return _expressions.parse_bitwise_xor(self)
-
-    def _parse_bitwise_and(self) -> Expr:
-        return _expressions.parse_bitwise_and(self)
-
-    def _parse_equality(self) -> Expr:
-        return _expressions.parse_equality(self)
-
-    def _parse_relational(self) -> Expr:
-        return _expressions.parse_relational(self)
-
-    def _parse_shift(self) -> Expr:
-        return _expressions.parse_shift(self)
-
-    def _parse_additive(self) -> Expr:
-        return _expressions.parse_additive(self)
-
-    def _parse_multiplicative(self) -> Expr:
-        return _expressions.parse_multiplicative(self)
-
     def _parse_unary(self) -> Expr:
         return _expressions.parse_unary(self)
 
@@ -1124,22 +1089,6 @@ class Parser:
             allow_flexible_array=allow_flexible_array,
         )
 
-    def _parse_direct_declarator(
-        self,
-        allow_abstract: bool,
-        *,
-        allow_vla: bool = False,
-        allow_parameter_arrays: bool = False,
-        allow_flexible_array: bool = False,
-    ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
-        return _declarators.parse_direct_declarator(
-            self,
-            allow_abstract,
-            allow_vla=allow_vla,
-            allow_parameter_arrays=allow_parameter_arrays,
-            allow_flexible_array=allow_flexible_array,
-        )
-
     def _parse_array_declarator(
         self,
         *,
@@ -1154,14 +1103,8 @@ class Parser:
             allow_flexible_array=allow_flexible_array,
         )
 
-    def _parse_array_size(self, token: Token) -> int:
-        return _array_sizes.parse_array_size(self, token)
-
     def _parse_array_size_expr(self, expr: Expr, token: Token) -> int:
         return _array_sizes.parse_array_size_expr(self, expr, token)
-
-    def _parse_array_size_expr_or_vla(self, expr: Expr, token: Token) -> int:
-        return _array_sizes.parse_array_size_expr_or_vla(self, expr, token)
 
     def _eval_array_size_expr(self, expr: Expr) -> int | None:
         return _array_sizes.eval_array_size_expr(self, expr)
@@ -1184,9 +1127,6 @@ class Parser:
         assoc_type: TypeSpec,
     ) -> bool:
         return _array_sizes.is_generic_control_type_compatible(control_type, assoc_type)
-
-    def _unqualified_type_spec(self, type_spec: TypeSpec) -> TypeSpec:
-        return _array_sizes.unqualified_type_spec(type_spec)
 
     def _sizeof_type_spec(self, type_spec: TypeSpec) -> int | None:
         return _array_sizes.sizeof_type_spec(self, type_spec)
@@ -1220,12 +1160,6 @@ class Parser:
 
     def _parse_string_literal(self) -> StringLiteral:
         return _expressions.parse_string_literal(self)
-
-    def _split_string_literal(self, lexeme: str, token: Token) -> tuple[str, str]:
-        return _expressions.split_string_literal(self, lexeme, token)
-
-    def _merge_string_prefix(self, prefix: str, next_prefix: str, token: Token) -> str:
-        return _expressions.merge_string_prefix(self, prefix, next_prefix, token)
 
     def _current(self) -> Token:
         return self._tokens[self._index]

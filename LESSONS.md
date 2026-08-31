@@ -1,5 +1,44 @@
 # Lessons
 
+- Bootstrap source admission, IR lowering, LLVM rendering, and native execution
+  are separate gates. A module can parse while an unsupported method, missing
+  flow type, or unmapped LLVM C call still breaks the complete compiler closure;
+  validate that closure at every layer.
+- Distinguish unnecessary syntax from missing subset semantics. Replace a
+  `lambda`, `partition`, mutable byte buffer, or `insert(0, ...)` when an
+  equivalent admitted primitive is simpler, but teach first `append` to infer
+  an unannotated empty list's real element type instead of rewriting `-1` to
+  appease the lowerer.
+- A native LLVM bridge must classify each used C API by its real result and
+  argument ABI. Treating a void setter as an integer-returning fallback emits
+  an undefined wrapper call; add only calls reached by the compiler closure.
+- A fixed LLVM `alloca` emitted in a loop lives until function return, so
+  compiler-created temporaries belong in the entry block. Keep source-level
+  `__builtin_alloca` dynamic, and let declaration lowering own each local once;
+  pre-collecting it before entering the lexical scope creates dead duplicate
+  storage.
+- C hexadecimal and octal escapes in a narrow string denote byte values, not
+  Unicode code points to encode as UTF-8. Decode narrow literals once in the
+  semantic layer and pass the resulting bytes to every backend.
+- Incrementally rebuilding a compiler-generated interpreter can leave `.pyc`
+  files written by the broken binary, masking a corrected runtime. Use a fresh
+  bytecode cache while diagnosing, then require a clean configure-and-build for
+  the final claim.
+- Coverage thresholds and source-shape assertions reward implementation
+  accidents. Keep one exact behavior test at the lowest owning layer and retain
+  higher-level cases only when they add a new integration claim.
+- An AOT runtime that promotes objects between phases cannot persist `id()` as
+  identity: the object pointer can move while the copied integer cannot. Retain
+  object references for random lookup or carry an ordered value stream when
+  traversal order is the actual contract.
+- A bodyless constructor in the native AOT slice still needs explicit runtime
+  initialization. Keep that initializer compact and build it from the same
+  canonical data as hosted execution; deleting duplicated setup requires a
+  native integration run, not only hosted tests.
+- A self-hosted lowerer cannot rely on correlations between separate
+  conditionals to prove a local is initialized. Express mutually exclusive
+  cases in one branch tree so every path produces the value without a fake
+  default.
 - Expensive integration artifacts should be fixtures, not incidental work in
   every assertion. First profile the production path, cache repeated semantic
   lookups there, then construct immutable IR, rendered LLVM, and native

@@ -1,6 +1,7 @@
 """Printf format string checking."""
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from xcc.ast import Expr, StringLiteral
 from xcc.types import Type
@@ -8,6 +9,9 @@ from xcc.types import Type
 from .constants import decode_escaped_units, string_literal_body
 from .symbols import Scope, SemaError
 from .type_helpers import is_floating_type, is_integer_type
+
+if TYPE_CHECKING:
+    from . import Analyzer
 
 
 @dataclass
@@ -69,7 +73,7 @@ def _format_flag_msg(arg_index: int, arg_type_str: str, expected: str) -> str:
 
 
 def check_printf_format(
-    analyzer: object,
+    a: "Analyzer",
     format_expr: Expr,
     variadic_args: list[Expr],
     scope: Scope,
@@ -93,7 +97,7 @@ def check_printf_format(
             arg_index += 1
         if arg_index >= len(variadic_args):  # pragma: no cover
             break
-        arg_type = analyzer._type_map.require(variadic_args[arg_index])  # type: ignore
+        arg_type = a._type_map.require(variadic_args[arg_index])
         _check_format_spec(spec, arg_type, arg_index + 1)
         arg_index += 1
 

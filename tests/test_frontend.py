@@ -7,7 +7,6 @@ from tests import _bootstrap  # noqa: F401
 from xcc.frontend import (
     Diagnostic,
     FrontendError,
-    _map_diagnostic_location,
     compile_path,
     compile_source,
     format_token,
@@ -39,6 +38,28 @@ class FrontendTests(unittest.TestCase):
         source = "#define ZERO 0\nint main(void){\n#if ZERO\nreturn 1;\n#endif\nreturn 0;\n}\n"
         result = compile_source(source, filename="pp.c")
         self.assertEqual(result.unit.functions[0].name, "main")
+
+    def test_v3_direct_pragma_pack_controls_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / "pack.h").write_text(
+                "#pragma pack(push, 4)\n"
+                "struct P { char c; long i; };\n"
+                "#pragma pack(pop)\n"
+                "#pragma pack(1)\n"
+                "struct Q { char c; int i; };\n"
+                "#pragma pack()\n"
+                "struct N { char c; int i; };\n"
+            )
+            compile_source(
+                "\n" * 10
+                + '#include "pack.h"\n'
+                + '_Static_assert(sizeof(struct P) == 12, "push");\n'
+                + '_Static_assert(sizeof(struct Q) == 5, "direct");\n'
+                + '_Static_assert(sizeof(struct N) == 8, "reset");\n',
+                filename=str(path / "pack.c"),
+                options=FrontendOptions(std="gnu11", include_dirs=(directory,)),
+            )
 
     def test_compile_source_ignores_multiline_preprocessor_directive(self) -> None:
         source = "#define SUM(a, b) \\\n  ((a) + (b))\nint main(void){return 0;}\n"
@@ -192,8 +213,11 @@ class FrontendTests(unittest.TestCase):
         diagnostic = ctx.exception.diagnostic
         self.assertEqual(diagnostic.stage, "sema")
         self.assertEqual(diagnostic.code, "XCC-SEMA-0001")
-        self.assertEqual((diagnostic.line, diagnostic.column), (None, None))
-        self.assertEqual(str(ctx.exception), "bad.c: sema: Non-void function must return a value")
+        self.assertEqual((diagnostic.line, diagnostic.column), (1, 12))
+        self.assertEqual(
+            str(ctx.exception),
+            "bad.c:1:12: sema: Non-void function must return a value",
+        )
 
     def test_compile_source_alignof_expression_rejected_in_c11(self) -> None:
         with self.assertRaises(FrontendError) as ctx:
@@ -313,16 +337,6 @@ class FrontendTests(unittest.TestCase):
         )
         diagnostic = Diagnostic("pp", "bad.c", "oops", code="XCC-PP-0001")
         self.assertEqual(diagnostic.code, "XCC-PP-0001")
-
-    def test_map_diagnostic_location_fallback_paths(self) -> None:
-        self.assertEqual(
-            _map_diagnostic_location((("mapped.c", 1),), None, None),
-            (None, None, None),
-        )
-        self.assertEqual(
-            _map_diagnostic_location((("mapped.c", 1),), 2, 3),
-            (None, 2, 3),
-        )
 
     def test_format_token(self) -> None:
         result = compile_source("int main(){return 0;}")

@@ -2,7 +2,6 @@ from collections.abc import Callable
 
 from xcc.lexer import TokenKind
 
-from . import PreprocessorError, _SourceLocation
 from .macros import (
     _EMPTY_MACRO_TOKEN,
     _join_macro_arguments,
@@ -12,6 +11,7 @@ from .macros import (
     _stringize_tokens,
     _tokenize_macro_text,
 )
+from .model import PreprocessorError, _SourceLocation
 
 _PP_INVALID_MACRO = "XCC-PP-0201"
 _PP_UNTERMINATED_MACRO = "XCC-PP-0202"
@@ -29,9 +29,9 @@ def _expand_macro_tokens(
     std: str,
     location: _SourceLocation,
     disabled: frozenset[str] = frozenset(),
-    dynamic_macro_resolver: Callable[[str, _SourceLocation], _MacroToken] | None = None,
-    dynamic_macro_names: frozenset[str] = frozenset(),
     *,
+    dynamic_macro_resolver: Callable[[str, _SourceLocation], _MacroToken],
+    dynamic_macro_names: frozenset[str],
     ancestor_disabled: frozenset[str] | None = None,
     self_disabled: str | None = None,
     base_ancestor_disabled: frozenset[str] | None = None,
@@ -54,10 +54,7 @@ def _expand_macro_tokens(
             index += 1
             continue
         if token.text in dynamic_macro_names and token.text in macros:
-            if dynamic_macro_resolver is not None:
-                expanded.append(dynamic_macro_resolver(token.text, location))
-            else:
-                expanded.append(_MacroToken(TokenKind.INT_CONST, "0"))
+            expanded.append(dynamic_macro_resolver(token.text, location))
             index += 1
             continue
         macro = macros.get(token.text)
@@ -253,7 +250,7 @@ def _expand_function_like_macro(
     std: str,
     location: _SourceLocation,
     disabled: frozenset[str],
-    dynamic_macro_resolver: Callable[[str, _SourceLocation], _MacroToken] | None,
+    dynamic_macro_resolver: Callable[[str, _SourceLocation], _MacroToken],
     dynamic_macro_names: frozenset[str],
 ) -> list[_MacroToken]:
     assert macro.parameters is not None

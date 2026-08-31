@@ -2,6 +2,29 @@
 
 ## Current
 
+- Completed the minimalist architecture and behavior pass. Semantic analysis now
+  owns one record layout consumed by every backend; duplicate backend layout,
+  LLVM local pre-collection, and backend-specific narrow-string decoding are
+  gone. Fixed LLVM temporaries are allocated once in the entry block, while
+  explicit `__builtin_alloca` remains dynamic, so aggregate calls in loops no
+  longer grow the stack. C hexadecimal and octal string escapes now contribute
+  raw bytes instead of UTF-8-encoding their numeric values. AOT-V3–V6 now gate
+  source-manifest admission, first-append inference, complete compiler-closure
+  lowering, and `llc` acceptance; the native LLVM bridge maps only C APIs used
+  by that closure. A fresh mypyc-built
+  `xcc` configured and completed serial `make` for CPython 3.16.0a0, checking
+  116 modules (37 built-in, 78 shared, only host-unavailable `_gdbm` missing).
+  Fresh-cache `test_pickle` and `test_ctypes` passed 1,689 tests with 107 skips.
+
+- Audited the compiler by observable ownership rather than coverage or source
+  shape. Removed duplicate and unreachable tests, parallel legacy type fields,
+  dead forwarding methods, fake protocols, permissive driver compatibility,
+  speculative backend fallbacks, and duplicated backend AST traversal. Source
+  locations, scoped `#pragma pack`, verified LLVM discovery, native AOT
+  preprocessing, self-hosted comprehension control flow, and explicit compile
+  errors now cover the real failures found by the reduced suite. Coverage
+  remains reported without dictating design.
+
 - Removed repeated full-bootstrap work from the AOT validation path. Function
   suffix resolution now caches each `_Lowerer` query, reducing one hosted
   bootstrap lowering/LLVM render from 37.56s to 16.59s (55.8%) with identical
@@ -41,8 +64,7 @@
   discovery is shared by the driver, AOT builder, and tests; subprocess and CI
   timeouts prevent indefinite hangs; Python 3.14 and an installed-wheel smoke
   test exercise the declared compatibility and packaging contracts; lint and
-  type checks include maintenance scripts; and the coverage ratchet is aligned
-  at 94.76%.
+  type checks include maintenance scripts; coverage remains report-only.
 
 - Re-profiled the native AOT compiler's live-allocation index on CPython
   `Objects/listobject.c`. The index now uses 2,097,152 bounded buckets, hashes

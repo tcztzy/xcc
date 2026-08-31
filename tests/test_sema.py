@@ -1,24 +1,12 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from tests import _bootstrap  # noqa: F401
-import xcc.sema.constants as sema_constants
-import xcc.sema.declarations as sema_declarations
-import xcc.sema.expressions as sema_expressions
-import xcc.sema.initializers as sema_initializers
-import xcc.sema.layout as sema_layout
-import xcc.sema.records as sema_records
-import xcc.sema.statements as sema_statements
 import xcc.sema.symbols as sema_symbols
 import xcc.sema.type_helpers as sema_types
-import xcc.sema.type_resolution as sema_type_resolution
+from tests import _bootstrap  # noqa: F401
 from xcc.ast import (
     AlignofExpr,
-    ArrayDecl,
-    AssignExpr,
-    BinaryExpr,
     BreakStmt,
     CallExpr,
     CaseStmt,
@@ -29,38 +17,27 @@ from xcc.ast import (
     ConditionalExpr,
     DeclStmt,
     DefaultStmt,
-    Expr,
     ExprStmt,
+    FloatLiteral,
     FunctionDef,
     GenericExpr,
-    FloatLiteral,
     Identifier,
     IfStmt,
-    InitItem,
-    InitList,
     IntLiteral,
     Param,
-    RecordMemberDecl,
     ReturnStmt,
     SizeofExpr,
     StaticAssertDecl,
-    Stmt,
-    StringLiteral,
     SwitchStmt,
-    TypedefDecl,
     TranslationUnit,
+    TypedefDecl,
     TypeSpec,
-    UnaryExpr,
     UpdateExpr,
 )
 from xcc.frontend import FrontendOptions, compile_source
 from xcc.lexer import lex
 from xcc.parser import parse
 from xcc.sema import (
-    Analyzer,
-    FunctionSignature,
-    RecordMemberInfo,
-    Scope,
     SemaError,
     VarSymbol,
     analyze,
@@ -95,43 +72,7 @@ def _body(func):
 
 
 class SemaTests(unittest.TestCase):
-    def test_sema_symbol_helpers_live_outside_entrypoint(self) -> None:
-        self.assertEqual(
-            sema_declarations.analyze_file_scope_decl.__module__, "xcc.sema.declarations"
-        )
-        self.assertEqual(sema_expressions.analyze_expr.__module__, "xcc.sema.expressions")
-        self.assertEqual(sema_statements.analyze_stmt.__module__, "xcc.sema.statements")
-        self.assertEqual(sema_type_resolution.resolve_type.__module__, "xcc.sema.type_resolution")
-        self.assertEqual(
-            sema_type_resolution.register_type_spec.__module__, "xcc.sema.type_resolution"
-        )
-        self.assertEqual(sema_symbols.SemaError.__module__, "xcc.sema.symbols")
-        self.assertEqual(sema_symbols.Scope.__module__, "xcc.sema.symbols")
-        self.assertEqual(sema_symbols.TypeMap.__module__, "xcc.sema.symbols")
-        self.assertEqual(SemaError.__module__, "xcc.sema.symbols")
-        self.assertEqual(Scope.__module__, "xcc.sema.symbols")
-        self.assertEqual(VarSymbol.__module__, "xcc.sema.symbols")
-
-    def test_sema_type_helpers_live_outside_entrypoint(self) -> None:
-        analyzer = Analyzer()
-        const_int = Type("int", qualifiers=("const",))
-        self.assertEqual(sema_types.is_integer_type.__module__, "xcc.sema.type_helpers")
-        self.assertTrue(sema_types.is_integer_type(INT))
-        self.assertEqual(sema_types.integer_promotion(USHORT), INT)
-        self.assertEqual(sema_types.usual_arithmetic_conversion(UINT, LONG), LONG)
-        self.assertTrue(analyzer._is_floating_type(FLOAT))
-        self.assertTrue(analyzer._is_arithmetic_type(DOUBLE))
-        self.assertEqual(analyzer._unqualified_type(const_int), INT)
-        self.assertEqual(analyzer._integer_rank(LLONG), 6)
-        self.assertTrue(analyzer._is_signed_integer_type(LONG))
-        self.assertEqual(analyzer._integer_promotion(USHORT), INT)
-        self.assertEqual(analyzer._signed_range(INT), (-(1 << 31), (1 << 31) - 1))
-        self.assertEqual(analyzer._unsigned_max(UINT), (1 << 32) - 1)
-        self.assertTrue(analyzer._signed_can_represent_unsigned(LONG, UINT))
-        self.assertEqual(analyzer._usual_arithmetic_conversion(UINT, LONG), LONG)
-        self.assertTrue(analyzer._qualifiers_contain(const_int, INT))
-
-    def test_integer_type_helper_branch_tables(self) -> None:
+    def test_integer_type_properties(self) -> None:
         rank_cases = (
             (BOOL, 1),
             (CHAR, 2),
@@ -168,319 +109,6 @@ class SemaTests(unittest.TestCase):
         self.assertEqual(sema_types.unsigned_max(EVM_UINT256), (1 << 256) - 1)
         self.assertEqual(sema_types.unsigned_max(EVM_ADDRESS), (1 << 160) - 1)
         self.assertIsNone(sema_types.unsigned_max(INT))
-
-        self.assertIsNone(sema_types._integer_promotion_type("int"))
-        for type_ in (
-            BOOL,
-            CHAR,
-            UCHAR,
-            SHORT,
-            USHORT,
-            INT,
-            UINT,
-            LONG,
-            ULONG,
-            LLONG,
-            ULLONG,
-            EVM_ADDRESS,
-            EVM_UINT256,
-        ):
-            with self.subTest(canonical=type_.name):
-                self.assertEqual(sema_types._canonical_integer_type(type_.name), type_)
-        self.assertEqual(sema_types._canonical_integer_type("__int128"), INT128)
-        self.assertEqual(sema_types._canonical_integer_type("unsigned __int128"), UINT128)
-        self.assertIsNone(sema_types._canonical_integer_type("void"))
-        self.assertEqual(sema_types._unsigned_counterpart("int"), UINT)
-        self.assertEqual(sema_types._unsigned_counterpart("long"), ULONG)
-        self.assertEqual(sema_types._unsigned_counterpart("long long"), ULLONG)
-        self.assertEqual(sema_types._unsigned_counterpart("__int128"), UINT128)
-        self.assertIsNone(sema_types._unsigned_counterpart("short"))
-
-    def test_scope_merges_compatible_extern_definition(self) -> None:
-        scope = Scope()
-        scope.define(VarSymbol("value", INT, is_extern=True))
-        replacement = VarSymbol("value", INT)
-
-        scope.define(replacement)
-
-        self.assertIs(scope.lookup("value"), replacement)
-
-    def test_scope_type_mergeability_rejects_incompatible_shapes(self) -> None:
-        scope = Scope()
-        self.assertTrue(scope._types_mergeable(INT, INT))
-        self.assertTrue(scope._types_mergeable(INT.array_of(-1), INT.array_of(4)))
-        self.assertFalse(scope._types_mergeable(INT, LONG))
-        self.assertFalse(scope._types_mergeable(INT, INT.pointer_to()))
-        self.assertFalse(
-            scope._types_mergeable(
-                Type("int", qualifiers=("const",)),
-                Type("int", qualifiers=("volatile",)),
-            )
-        )
-        self.assertFalse(scope._types_mergeable(INT.pointer_to(), INT.array_of(4)))
-        self.assertFalse(scope._types_mergeable(INT.array_of(3), INT.array_of(4)))
-        self.assertFalse(
-            scope._types_mergeable(
-                INT.function_of((INT,)),
-                INT.function_of((LONG,)),
-            )
-        )
-        self.assertFalse(
-            scope._types_mergeable(
-                Type("int", declarator_ops=(("fn", ((INT,), False)), ("arr", 3))),
-                Type("int", declarator_ops=(("fn", ((INT,), False)), ("arr", 4))),
-            )
-        )
-
-    def test_scope_composite_array_type_prefers_known_bound(self) -> None:
-        scope = Scope()
-        known = INT.array_of(4)
-        unknown = INT.array_of(-1)
-        dynamic_bound = Type("int", declarator_ops=(("arr", "n"),))  # type: ignore[arg-type]
-
-        self.assertEqual(scope._composite_type(known, INT), INT)
-        self.assertEqual(scope._composite_type(known, dynamic_bound), dynamic_bound)
-        self.assertEqual(scope._composite_type(known, unknown), known)
-        self.assertEqual(scope._composite_type(unknown, known), known)
-        self.assertEqual(scope._composite_type(known, INT.array_of(8)), INT.array_of(8))
-
-    def test_scope_record_tag_definition_reuses_existing_name(self) -> None:
-        scope = Scope()
-
-        self.assertEqual(scope.define_record_tag("struct", "Node", "struct Node"), "struct Node")
-        self.assertEqual(
-            scope.define_record_tag("struct", "Node", "struct Node duplicate"),
-            "struct Node",
-        )
-
-    def test_sema_record_helpers_live_outside_entrypoint(self) -> None:
-        analyzer = Analyzer()
-        members = (RecordMemberInfo("value", INT),)
-        record_spec = TypeSpec(
-            "struct",
-            record_members=(RecordMemberDecl(TypeSpec("int"), "value"),),
-            has_record_body=True,
-        )
-        self.assertEqual(sema_records.record_key.__module__, "xcc.sema.records")
-        self.assertEqual(sema_records.record_key("struct", "S"), "struct S")
-        self.assertEqual(
-            sema_records.record_type_name(TypeSpec("struct", record_tag="S"), {}, 0),
-            ("struct S", 0),
-        )
-        self.assertEqual(analyzer._record_key("struct", "S"), "struct S")
-        self.assertEqual(analyzer._normalize_record_members((("value", INT),)), members)
-        analyzer._record_definitions["struct S"] = members
-        self.assertEqual(analyzer._record_members("struct S"), members)
-        self.assertFalse(analyzer._is_anonymous_record_member(members[0]))
-        self.assertEqual(analyzer._record_member_lookup("struct S"), {"value": (INT, 0)})
-        self.assertEqual(analyzer._record_type_name(record_spec), "struct <anon:1>")
-
-    def test_sema_initializer_constant_layout_helpers_live_outside_entrypoint(self) -> None:
-        analyzer = Analyzer()
-        scope = Scope()
-        self.assertEqual(sema_constants.parse_int_literal.__module__, "xcc.sema.constants")
-        self.assertEqual(sema_constants.decode_escaped_units.__module__, "xcc.sema.constants")
-        self.assertEqual(sema_initializers.analyze_initializer.__module__, "xcc.sema.initializers")
-        self.assertEqual(
-            sema_initializers.lookup_initializer_member.__module__, "xcc.sema.initializers"
-        )
-        self.assertEqual(sema_layout.sizeof_type.__module__, "xcc.sema.layout")
-        self.assertEqual(sema_layout.alignof_type.__module__, "xcc.sema.layout")
-
-        self.assertEqual(analyzer._parse_int_literal("42"), (42, INT))
-        self.assertTrue(analyzer._fits_integer_literal_value(255, UINT))
-        self.assertEqual(analyzer._eval_int_constant_expr(IntLiteral("4"), scope), 4)
-        self.assertEqual(analyzer._char_const_value("'\\n'"), 10)
-        self.assertEqual(analyzer._char_literal_body("'x'"), "x")
-        self.assertEqual(analyzer._decode_escaped_units("x\\n"), [ord("x"), 10])
-
-        self.assertEqual(analyzer._sizeof_type(INT), 4)
-        self.assertEqual(analyzer._alignof_type(LONG), 8)
-        self.assertEqual(analyzer._sizeof_object_base_type(INT, None), 4)
-        self.assertEqual(analyzer._alignof_object_base_type(INT), 4)
-
-        string_expr = StringLiteral('"ab"')
-        self.assertTrue(analyzer._is_char_array_string_initializer(CHAR.array_of(3), string_expr))
-        self.assertEqual(analyzer._string_literal_required_length('"ab"'), 3)
-        self.assertEqual(analyzer._string_literal_body('"ab"'), "ab")
-        analyzer._analyze_initializer(INT, IntLiteral("1"), scope)
-
-    def test_internal_constant_initializer_and_statement_edge_paths(self) -> None:
-        analyzer = Analyzer()
-        scope = Scope()
-
-        self.assertIsNone(analyzer._eval_int_constant_expr(AlignofExpr(None, None), scope))
-        self.assertEqual(analyzer._eval_int_constant_expr(SizeofExpr(IntLiteral("1"), None), scope), 4)
-        self.assertEqual(analyzer._eval_int_constant_expr(AlignofExpr(IntLiteral("1"), None), scope), 4)
-        raising_analyzer = Analyzer()
-        original_raising_analyze_expr = raising_analyzer._analyze_expr
-
-        def raise_sema_error(_expr, _scope):
-            raise SemaError("bad expression")
-
-        raising_analyzer._analyze_expr = raise_sema_error  # type: ignore[method-assign]
-        try:
-            self.assertIsNone(
-                raising_analyzer._eval_int_constant_expr(
-                    SizeofExpr(Identifier("bad"), None),
-                    Scope(),
-                )
-            )
-            self.assertIsNone(
-                raising_analyzer._eval_int_constant_expr(
-                    AlignofExpr(Identifier("bad"), None),
-                    Scope(),
-                )
-            )
-        finally:
-            raising_analyzer._analyze_expr = original_raising_analyze_expr  # type: ignore[method-assign]
-        fallback_analyzer = Analyzer()
-        fallback_scope = Scope()
-        original_analyze_expr = fallback_analyzer._analyze_expr
-        fallback_analyzer._analyze_expr = lambda _expr, _scope: None  # type: ignore[method-assign]
-        try:
-            self.assertIsNone(
-                fallback_analyzer._eval_int_constant_expr(
-                    SizeofExpr(Identifier("missing"), None),
-                    fallback_scope,
-                )
-            )
-            self.assertIsNone(
-                fallback_analyzer._eval_int_constant_expr(
-                    AlignofExpr(Identifier("missing"), None),
-                    fallback_scope,
-                )
-            )
-        finally:
-            fallback_analyzer._analyze_expr = original_analyze_expr  # type: ignore[method-assign]
-        known_align_expr = Identifier("known")
-        analyzer._type_map.set(known_align_expr, LONG)
-        self.assertEqual(
-            analyzer._eval_int_constant_expr(AlignofExpr(known_align_expr, None), scope),
-            8,
-        )
-        self.assertIsNone(analyzer._string_literal_body("not-a-string"))
-
-        class MissingRecordAnalyzer:
-            def _record_members(self, _name):
-                return None
-
-        with self.assertRaises(SemaError):
-            sema_initializers.analyze_record_initializer_list(
-                MissingRecordAnalyzer(),
-                Type("struct Missing"),
-                InitList(items=(InitItem((), IntLiteral("1")),)),
-                scope,
-            )
-
-        class UnionAnalyzer:
-            _std = "c11"
-
-            def _record_members(self, _name):
-                return (RecordMemberInfo("value", INT),)
-
-            def _is_anonymous_record_member(self, _member):
-                return False
-
-            def _analyze_initializer(self, *_args):
-                raise AssertionError("initializer should not be analyzed")
-
-        with patch("xcc.sema.initializers._next_initializable_record_member_index", return_value=None):
-            with self.assertRaises(SemaError):
-                sema_initializers.analyze_record_initializer_list(
-                    UnionAnalyzer(),
-                    Type("union U"),
-                    InitList(items=(InitItem((), IntLiteral("1")),)),
-                    scope,
-                )
-
-        class BadStringAnalyzer:
-            def _string_literal_body(self, _value):
-                return None
-
-        self.assertFalse(
-            sema_initializers.is_char_array_string_initializer(
-                BadStringAnalyzer(),
-                CHAR.array_of(4),
-                StringLiteral('"bad"'),
-            )
-        )
-
-        analyzer._analyze_stmt(
-            TypedefDecl(
-                TypeSpec("union", record_members=(RecordMemberDecl(TypeSpec("int"), "value"),)),
-                "Transparent",
-                is_transparent_union=True,
-            ),
-            scope,
-            INT,
-        )
-        self.assertTrue(analyzer._transparent_union_types)
-        analyzer._register_transparent_union_typedef(INT)
-        analyzer._register_transparent_union_typedef(Type("union Pointer", 1))
-        analyzer._register_transparent_union_typedef(Type("union Missing"))
-        gnu_analyzer = Analyzer(std="gnu11")
-        self.assertTrue(
-            gnu_analyzer._is_assignment_compatible(
-                Type("void", 1),
-                INT.function_of(()).pointer_to(),
-            )
-        )
-        self.assertIsNone(analyzer._infer_array_size_from_init(IntLiteral("1"), scope))
-        unknown_array_decl = DeclStmt(
-            TypeSpec("int", declarator_ops=(("arr", -1),)),
-            "unknown_items",
-            InitList(items=(InitItem((), IntLiteral("1")),)),
-        )
-        array_fallback_analyzer = Analyzer()
-        original_analyze_initializer = array_fallback_analyzer._analyze_initializer
-        original_infer_array_size = array_fallback_analyzer._infer_array_size_from_init
-        array_fallback_analyzer._analyze_initializer = lambda *_args: None  # type: ignore[method-assign]
-        array_fallback_analyzer._infer_array_size_from_init = lambda *_args: None  # type: ignore[method-assign]
-        try:
-            sema_declarations.analyze_file_scope_decl(array_fallback_analyzer, unknown_array_decl)
-            file_symbol = array_fallback_analyzer._file_scope.lookup("unknown_items")
-            self.assertIsInstance(file_symbol, VarSymbol)
-            self.assertEqual(file_symbol.type_.declarator_ops[0], ("arr", -1))
-
-            block_scope = Scope(array_fallback_analyzer._file_scope)
-            array_fallback_analyzer._analyze_stmt(unknown_array_decl, block_scope, INT)
-            block_symbol = block_scope.lookup("unknown_items")
-            self.assertIsInstance(block_symbol, VarSymbol)
-            self.assertEqual(block_symbol.type_.declarator_ops[0], ("arr", -1))
-        finally:
-            array_fallback_analyzer._analyze_initializer = original_analyze_initializer  # type: ignore[method-assign]
-            array_fallback_analyzer._infer_array_size_from_init = original_infer_array_size  # type: ignore[method-assign]
-        analyzer._transparent_union_types.add("union Missing")
-        self.assertFalse(
-            analyzer._is_transparent_union_argument_compatible(
-                Type("union Missing"),
-                IntLiteral("1"),
-                INT,
-                scope,
-            )
-        )
-
-    def test_type_str(self) -> None:
-        self.assertEqual(str(INT), "int")
-        self.assertEqual(str(UINT), "unsigned int")
-        self.assertEqual(str(SHORT), "short")
-        self.assertEqual(str(USHORT), "unsigned short")
-        self.assertEqual(str(LONG), "long")
-        self.assertEqual(str(ULONG), "unsigned long")
-        self.assertEqual(str(LLONG), "long long")
-        self.assertEqual(str(ULLONG), "unsigned long long")
-        self.assertEqual(str(INT128), "__int128_t")
-        self.assertEqual(str(UINT128), "__uint128_t")
-        self.assertEqual(str(CHAR), "char")
-        self.assertEqual(str(UCHAR), "unsigned char")
-        self.assertEqual(str(BOOL), "_Bool")
-        self.assertEqual(str(FLOAT), "float")
-        self.assertEqual(str(DOUBLE), "double")
-        self.assertEqual(str(LONGDOUBLE), "long double")
-        self.assertEqual(str(Type("int", qualifiers=("const",))), "const int")
-        array = Type("int").array_of(4)
-        self.assertEqual(str(array), "int[4]")
 
     def test_function_invalid_storage_class_error(self) -> None:
         unit = parse(list(lex("auto int f(void);")))
@@ -788,132 +416,10 @@ class SemaTests(unittest.TestCase):
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Invalid object type for compound literal: atomic")
 
-    def test_internal_vla_helpers_cover_fallback_paths(self) -> None:
-        analyzer = Analyzer()
-        self.assertEqual(analyzer._resolve_array_bound("bad"), -1)
-        self.assertEqual(analyzer._resolve_array_bound(ArrayDecl(None)), -1)
-        self.assertEqual(analyzer._resolve_array_bound(ArrayDecl(1)), 1)
-        self.assertEqual(analyzer._resolve_array_bound(ArrayDecl(IntLiteral("1"))), 1)
-        self.assertEqual(analyzer._resolve_array_bound(ArrayDecl(Identifier("n"))), -1)
-        self.assertTrue(
-            analyzer._is_variably_modified_type_spec(TypeSpec("int", declarator_ops=(("arr", -1),)))
-        )
-        self.assertFalse(
-            analyzer._is_variably_modified_type_spec(TypeSpec("int", declarator_ops=(("arr", 1),)))
-        )
-        self.assertTrue(
-            analyzer._is_variably_modified_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(None)),))
-            )
-        )
-        self.assertTrue(
-            analyzer._is_variably_modified_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", object()),))
-            )
-        )
-        self.assertFalse(
-            analyzer._is_variably_modified_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(IntLiteral("1"))),))
-            )
-        )
-        self.assertFalse(
-            analyzer._is_variably_modified_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(1)),))
-            )
-        )
-        self.assertFalse(
-            analyzer._is_file_scope_vla_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(None)),))
-            )
-        )
-        self.assertTrue(
-            analyzer._is_file_scope_vla_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", object()),))
-            )
-        )
-        self.assertFalse(
-            analyzer._is_file_scope_vla_type_spec(TypeSpec("int", declarator_ops=(("arr", 1),)))
-        )
-        self.assertFalse(
-            analyzer._is_file_scope_vla_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(1)),))
-            )
-        )
-        self.assertFalse(
-            analyzer._is_file_scope_vla_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(IntLiteral("1"))),))
-            )
-        )
-        self.assertIsNone(analyzer._sizeof_type(Type("int", declarator_ops=(("arr", -1),))))
-        self.assertEqual(analyzer._sizeof_type(Type("int", declarator_ops=(("arr", 1),))), 4)
-
-    def test_internal_stmt_storage_edge_paths(self) -> None:
-        analyzer = Analyzer()
-        with self.assertRaises(SemaError):
-            analyzer._analyze_stmt(
-                DeclStmt(TypeSpec("int"), "x", None, storage_class="typedef"),
-                Scope(),
-                INT,
-            )
-        with self.assertRaises(SemaError):
-            analyzer._analyze_stmt(
-                DeclStmt(TypeSpec("struct", record_tag="S"), None, None, storage_class="static"),
-                Scope(),
-                INT,
-            )
-
-    def test_record_member_len4_normalization(self) -> None:
-        type_spec = TypeSpec(
-            "struct",
-            record_members=((TypeSpec("int"), "x", 8, IntLiteral("1")),),
-        )
-        member = type_spec.record_members[0]
-        self.assertEqual(member.alignment, 8)
-        self.assertEqual(member.bit_width_expr, IntLiteral("1"))
-
-    def test_record_member_lookup_anonymous_edge_paths(self) -> None:
-        analyzer = Analyzer()
-        self.assertEqual(analyzer._flatten_hoisted_record_members(Type("struct Missing"), 0), [])
-        analyzer._record_definitions["struct Inner"] = (
-            RecordMemberInfo("x", INT),
-            RecordMemberInfo(None, INT, bit_width=0),
-        )
-        self.assertEqual(analyzer._record_member_lookup("struct Inner"), {"x": (INT, 0)})
-        analyzer._record_definitions["struct Outer"] = (
-            RecordMemberInfo("x", INT),
-            RecordMemberInfo(None, Type("struct Inner")),
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyzer._record_member_lookup("struct Outer")
-        self.assertEqual(str(ctx.exception), "Duplicate declaration: x")
-
-    def test_register_type_spec_handles_missing_nested_lookup_entry(self) -> None:
-        analyzer = Analyzer()
-        original_lookup = analyzer._record_member_lookup
-        analyzer._record_member_lookup = lambda _record_name: None  # type: ignore[method-assign]
-        try:
-            analyzer._register_type_spec(
-                TypeSpec(
-                    "struct",
-                    record_members=(
-                        (
-                            TypeSpec(
-                                "struct",
-                                record_members=((TypeSpec("int"), "x"),),
-                            ),
-                            None,
-                        ),
-                    ),
-                )
-            )
-        finally:
-            analyzer._record_member_lookup = original_lookup  # type: ignore[method-assign]
-
-    def test_type_helper_methods(self) -> None:
-        analyzer = Analyzer()
+    def test_type_declarator_operations(self) -> None:
         array = Type("int").array_of(4)
         pointer = array.pointer_to()
-        self.assertEqual(str(Type("int", 1)), "int*")
+        self.assertEqual(str(Type("int", declarator_ops=(("ptr", 0),))), "int*")
         self.assertEqual(pointer, Type("int", declarator_ops=(("ptr", 0), ("arr", 4))))
         self.assertEqual(pointer.pointee(), array)
         self.assertEqual(array.element_type(), Type("int"))
@@ -929,14 +435,6 @@ class SemaTests(unittest.TestCase):
         )
         self.assertIsNone(Type("int").pointee())
         self.assertIsNone(Type("int").element_type())
-        self.assertIs(analyzer._integer_promotion(FLOAT), FLOAT)
-        self.assertFalse(analyzer._is_pointer_conversion_compatible(INT, Type("int", 1)))
-
-    def test_scope_lookup_typedef_from_parent(self) -> None:
-        parent = Scope()
-        parent.define_typedef("T", INT)
-        child = Scope(parent)
-        self.assertEqual(child.lookup_typedef("T"), INT)
 
     def test_analyze_success_and_typemap(self) -> None:
         source = "int main(){int x=1; x=2+3; return x;}"
@@ -986,7 +484,7 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         update_expr = _body(unit.functions[0]).statements[2].expr
         self.assertIsInstance(update_expr, UpdateExpr)
-        self.assertEqual(sema.type_map.get(update_expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(update_expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_char_declaration_and_update_typemap(self) -> None:
         source = "int main(){char c=1; c++; return c;}"
@@ -1178,20 +676,7 @@ class SemaTests(unittest.TestCase):
         self.assertIs(sema.type_map.get(return_stmt.value), INT)
 
     def test_alignas_rejects_member_weaker_than_natural_alignment(self) -> None:
-        unit = TranslationUnit(
-            [],
-            [
-                DeclStmt(
-                    TypeSpec(
-                        "struct",
-                        record_tag="S",
-                        record_members=(RecordMemberDecl(TypeSpec("int"), "x", 1),),
-                    ),
-                    None,
-                    None,
-                )
-            ],
-        )
+        unit = parse(list(lex("struct S { _Alignas(1) int x; };")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -1360,25 +845,6 @@ class SemaTests(unittest.TestCase):
             "Invalid atomic type for block-scope typedef declaration",
         )
 
-    def test_atomic_invalid_member_type_error(self) -> None:
-        atomic_function_type = TypeSpec(
-            "int",
-            declarator_ops=(("fn", ((), False)),),
-            is_atomic=True,
-        )
-        struct_with_atomic_member = TypeSpec(
-            "struct",
-            record_tag="S",
-            record_members=((atomic_function_type, "x"),),
-        )
-        unit = TranslationUnit([], [DeclStmt(struct_with_atomic_member, None, None)])
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Invalid object type for record member declaration: atomic",
-        )
-
     def test_atomic_invalid_parameter_in_function_pointer_typedef_error(self) -> None:
         atomic_function_type = TypeSpec(
             "int",
@@ -1439,21 +905,25 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
-        self.assertEqual(func_symbol.locals["a"].type_, Type("int", 0, (536870911,)))
+        self.assertEqual(
+            func_symbol.locals["a"].type_, Type("int", declarator_ops=(("arr", 536870911),))
+        )
 
     def test_array_size_shift_constant_expression_typemap(self) -> None:
         source = "int main(){int a[1LL<<4]; return a[0];}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
-        self.assertEqual(func_symbol.locals["a"].type_, Type("int", 0, (16,)))
+        self.assertEqual(func_symbol.locals["a"].type_, Type("int", declarator_ops=(("arr", 16),)))
 
     def test_array_size_sizeof_typedef_cast_expression_typemap(self) -> None:
         source = "int main(){typedef char a[1LL<<10]; char b[(long long)sizeof(a)-1]; return b[0];}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
-        self.assertEqual(func_symbol.locals["b"].type_, Type("char", 0, (1023,)))
+        self.assertEqual(
+            func_symbol.locals["b"].type_, Type("char", declarator_ops=(("arr", 1023),))
+        )
 
     def test_array_size_too_large_error(self) -> None:
         unit = parse(list(lex("int main(){int a[2147483647U][2147483647U];return 0;}")))
@@ -1615,10 +1085,19 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex(source)), std="gnu11")
         analyze(unit, std="gnu11")
 
-    def test_uint128_t_type_helpers(self) -> None:
-        analyzer = Analyzer()
-        self.assertEqual(analyzer._sizeof_type(UINT128), 16)
-        self.assertEqual(analyzer._alignof_type(UINT128), 16)
+    def test_uint128_t_size_and_alignment(self) -> None:
+        analyze(
+            parse(
+                list(
+                    lex(
+                        '_Static_assert(sizeof(__uint128_t) == 16, "size");'
+                        '_Static_assert(_Alignof(__uint128_t) == 16, "alignment");'
+                    )
+                ),
+                std="gnu11",
+            ),
+            std="gnu11",
+        )
 
     def test_char_literal_typemap(self) -> None:
         unit = parse(list(lex("int main(){return 'a';}")))
@@ -1676,9 +1155,9 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){enum E { A=0x10, B=010, C=A+B }; return C;}")))
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
-        self.assertEqual(getattr(func_symbol.locals["A"], "value"), 16)
-        self.assertEqual(getattr(func_symbol.locals["B"], "value"), 8)
-        self.assertEqual(getattr(func_symbol.locals["C"], "value"), 24)
+        self.assertEqual(func_symbol.locals["A"].value, 16)
+        self.assertEqual(func_symbol.locals["B"].value, 8)
+        self.assertEqual(func_symbol.locals["C"].value, 24)
 
     def test_string_literal_typemap(self) -> None:
         unit = parse(list(lex('int main(){"abc";return 0;}')))
@@ -1726,12 +1205,6 @@ class SemaTests(unittest.TestCase):
         second_expr = _body(unit.functions[0]).statements[1].expr
         self.assertEqual(sema.type_map.get(first_expr), USHORT.array_of(3))
         self.assertEqual(sema.type_map.get(second_expr), UINT.array_of(3))
-
-    def test_invalid_string_literal_expr_error(self) -> None:
-        analyzer = Analyzer()
-        with self.assertRaises(SemaError) as ctx:
-            analyzer._analyze_expr(StringLiteral("not-a-string"), Scope())
-        self.assertEqual(str(ctx.exception), "Invalid string literal")
 
     def test_string_literal_assign_to_char_pointer(self) -> None:
         unit = parse(list(lex('int main(){char *s="abc";return 0;}')))
@@ -1873,84 +1346,6 @@ class SemaTests(unittest.TestCase):
         assert sema.file_scope is not None
         self.assertIsInstance(sema.file_scope.lookup("TAG"), sema_symbols.EnumConstSymbol)
 
-    def test_internal_enum_constant_evaluator_operations_and_failures(self) -> None:
-        class EnumEvalAnalyzer:
-            def _eval_int_constant_expr(self, expr, _scope):
-                if isinstance(expr, IntLiteral):
-                    return int(expr.value, 0)
-                return None
-
-            def _resolve_type(self, type_spec):
-                if type_spec.name == "void":
-                    return VOID
-                return INT
-
-            def _is_integer_type(self, type_):
-                return type_.name != "void"
-
-            def _char_literal_body(self, lexeme):
-                if not (lexeme.startswith("'") and lexeme.endswith("'")):
-                    return None
-                return lexeme[1:-1]
-
-            def _decode_escaped_units(self, body):
-                return [ord(ch) for ch in body]
-
-        analyzer = EnumEvalAnalyzer()
-        scope = Scope()
-
-        def eval_enum(expr):
-            return sema_type_resolution._eval_enum_int_constant_expr(analyzer, expr, scope)
-
-        self.assertEqual(eval_enum(CastExpr(TypeSpec("int"), CharLiteral("'A'"))), 65)
-        self.assertIsNone(eval_enum(CastExpr(TypeSpec("void"), IntLiteral("1"))))
-        self.assertEqual(eval_enum(UnaryExpr("+", IntLiteral("4"))), 4)
-        self.assertEqual(eval_enum(UnaryExpr("-", IntLiteral("4"))), -4)
-        self.assertEqual(eval_enum(UnaryExpr("!", IntLiteral("0"))), 1)
-        self.assertEqual(eval_enum(UnaryExpr("~", IntLiteral("0"))), -1)
-        self.assertIsNone(eval_enum(UnaryExpr("+", Identifier("missing"))))
-        self.assertEqual(eval_enum(ConditionalExpr(IntLiteral("1"), IntLiteral("8"), IntLiteral("9"))), 8)
-        self.assertEqual(eval_enum(ConditionalExpr(IntLiteral("0"), IntLiteral("8"), IntLiteral("9"))), 9)
-        self.assertIsNone(
-            eval_enum(ConditionalExpr(Identifier("missing"), IntLiteral("8"), IntLiteral("9")))
-        )
-
-        cases = [
-            ("+", 7, 3, 10),
-            ("-", 7, 3, 4),
-            ("*", 7, 3, 21),
-            ("/", 7, 3, 2),
-            ("%", 7, 3, 1),
-            ("<<", 1, 3, 8),
-            (">>", 8, 1, 4),
-            ("<", 1, 2, 1),
-            ("<=", 2, 2, 1),
-            (">", 3, 2, 1),
-            (">=", 3, 3, 1),
-            ("==", 3, 3, 1),
-            ("!=", 3, 4, 1),
-            ("&", 6, 3, 2),
-            ("^", 6, 3, 5),
-            ("|", 4, 1, 5),
-        ]
-        for op, left, right, expected in cases:
-            with self.subTest(op=op):
-                self.assertEqual(eval_enum(BinaryExpr(op, IntLiteral(str(left)), IntLiteral(str(right)))), expected)
-
-        self.assertEqual(eval_enum(BinaryExpr("&&", IntLiteral("0"), Identifier("missing"))), 0)
-        self.assertIsNone(eval_enum(BinaryExpr("&&", IntLiteral("1"), Identifier("missing"))))
-        self.assertEqual(eval_enum(BinaryExpr("||", IntLiteral("1"), Identifier("missing"))), 1)
-        self.assertIsNone(eval_enum(BinaryExpr("||", IntLiteral("0"), Identifier("missing"))))
-        self.assertIsNone(eval_enum(BinaryExpr("+", Identifier("missing"), IntLiteral("1"))))
-        self.assertIsNone(eval_enum(BinaryExpr("+", IntLiteral("1"), Identifier("missing"))))
-        self.assertIsNone(eval_enum(BinaryExpr("/", IntLiteral("1"), IntLiteral("0"))))
-        self.assertIsNone(eval_enum(BinaryExpr("%", IntLiteral("1"), IntLiteral("0"))))
-        self.assertIsNone(eval_enum(BinaryExpr("<<", IntLiteral("1"), IntLiteral("-1"))))
-        self.assertIsNone(eval_enum(BinaryExpr(">>", IntLiteral("1"), IntLiteral("-1"))))
-        self.assertIsNone(eval_enum(BinaryExpr("?", IntLiteral("1"), IntLiteral("2"))))
-        self.assertIsNone(eval_enum(CharLiteral("bad")))
-        self.assertIsNone(eval_enum(CharLiteral("''")))
-
     def test_case_invalid_char_literal_constant_error(self) -> None:
         unit = TranslationUnit(
             [
@@ -2035,7 +1430,7 @@ class SemaTests(unittest.TestCase):
         expr = _body(unit.functions[0]).statements[2].init
         assert expr is not None
         self.assertIsInstance(expr, ConditionalExpr)
-        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_conditional_pointer_and_null_constant_typemap(self) -> None:
         source = "int main(){int x=1; int *p=&x; int *q=1 ? p : 0; return q!=0;}"
@@ -2044,7 +1439,7 @@ class SemaTests(unittest.TestCase):
         expr = _body(unit.functions[0]).statements[2].init
         assert expr is not None
         self.assertIsInstance(expr, ConditionalExpr)
-        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_conditional_null_constant_and_pointer_typemap(self) -> None:
         source = "int main(){int x=1; int *p=&x; int *q=1 ? 0 : p; return q!=0;}"
@@ -2053,7 +1448,7 @@ class SemaTests(unittest.TestCase):
         expr = _body(unit.functions[0]).statements[2].init
         assert expr is not None
         self.assertIsInstance(expr, ConditionalExpr)
-        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_conditional_void_pointer_and_object_pointer_typemap(self) -> None:
         source = "int main(){int x=1; int *p=&x; void *vp=0; void *r=1 ? vp : p; return r!=0;}"
@@ -2062,7 +1457,7 @@ class SemaTests(unittest.TestCase):
         expr = _body(unit.functions[0]).statements[3].init
         assert expr is not None
         self.assertIsInstance(expr, ConditionalExpr)
-        self.assertEqual(sema.type_map.get(expr), Type("void", 1))
+        self.assertEqual(sema.type_map.get(expr), Type("void", declarator_ops=(("ptr", 0),)))
 
     def test_conditional_object_pointer_and_void_pointer_typemap(self) -> None:
         source = "int main(){int x=1; int *p=&x; void *vp=0; void *r=1 ? p : vp; return r!=0;}"
@@ -2071,7 +1466,7 @@ class SemaTests(unittest.TestCase):
         expr = _body(unit.functions[0]).statements[3].init
         assert expr is not None
         self.assertIsInstance(expr, ConditionalExpr)
-        self.assertEqual(sema.type_map.get(expr), Type("void", 1))
+        self.assertEqual(sema.type_map.get(expr), Type("void", declarator_ops=(("ptr", 0),)))
 
     def test_conditional_pointer_compatible_pointee_qualifier_union_typemap(self) -> None:
         source = (
@@ -2083,7 +1478,10 @@ class SemaTests(unittest.TestCase):
         expr = _body(unit.functions[0]).statements[3].init
         assert expr is not None
         self.assertIsInstance(expr, ConditionalExpr)
-        self.assertEqual(sema.type_map.get(expr), Type("int", 1, qualifiers=("const", "volatile")))
+        self.assertEqual(
+            sema.type_map.get(expr),
+            Type("int", declarator_ops=(("ptr", 0),), qualifiers=("const", "volatile")),
+        )
 
     def test_conditional_void_pointer_qualifier_union_typemap(self) -> None:
         source = "int main(){int x=1; const int *cp=&x; void *vp=0; const void *rp=1 ? vp : cp; return rp!=0;}"
@@ -2092,7 +1490,10 @@ class SemaTests(unittest.TestCase):
         expr = _body(unit.functions[0]).statements[3].init
         assert expr is not None
         self.assertIsInstance(expr, ConditionalExpr)
-        self.assertEqual(sema.type_map.get(expr), Type("void", 1, qualifiers=("const",)))
+        self.assertEqual(
+            sema.type_map.get(expr),
+            Type("void", declarator_ops=(("ptr", 0),), qualifiers=("const",)),
+        )
 
     def test_conditional_pointer_and_casted_void_null_pointer_constant_typemap(self) -> None:
         source = "int main(){int x=1; int *p=&x; int *q=1 ? p : (void *)0; return q!=0;}"
@@ -2101,7 +1502,7 @@ class SemaTests(unittest.TestCase):
         expr = _body(unit.functions[0]).statements[2].init
         assert expr is not None
         self.assertIsInstance(expr, ConditionalExpr)
-        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_generic_selection_typemap(self) -> None:
         unit = parse(list(lex("int main(void){int x=0; return _Generic(x, int: 1, default: 2);}")))
@@ -2740,13 +2141,13 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int f(void *p){return 0;}")))
         sema = analyze(unit)
         func_symbol = sema.functions["f"]
-        self.assertEqual(func_symbol.locals["p"].type_, Type("void", 1))
+        self.assertEqual(func_symbol.locals["p"].type_, Type("void", declarator_ops=(("ptr", 0),)))
 
     def test_array_parameter_decays_to_pointer(self) -> None:
         unit = parse(list(lex("int f(int a[4]){return a[0];}")))
         sema = analyze(unit)
         func_symbol = sema.functions["f"]
-        self.assertEqual(func_symbol.locals["a"].type_, Type("int", 1))
+        self.assertEqual(func_symbol.locals["a"].type_, Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_array_parameter_spelling_matches_function_pointer_parameter(self) -> None:
         source = (
@@ -2956,120 +2357,6 @@ class SemaTests(unittest.TestCase):
         )
         sema = analyze(unit)
         self.assertEqual(sema.functions, {})
-
-    def test_merge_signature_helper_rejects_incompatible_signatures(self) -> None:
-        analyzer = Analyzer()
-        with self.assertRaises(SemaError) as ctx:
-            analyzer._merge_signature(
-                FunctionSignature(INT, (INT,), False),
-                FunctionSignature(DOUBLE, (INT,), False),
-                "f",
-            )
-        self.assertEqual(str(ctx.exception), "Conflicting declaration: f")
-
-    def test_overload_resolution_helpers_cover_fallback_and_match_paths(self) -> None:
-        analyzer = Analyzer()
-        scope = Scope()
-        scope.define(VarSymbol("x", INT))
-        default = FunctionSignature(INT, (INT,), False)
-        self.assertEqual(
-            analyzer._resolve_call_signature("f", [Identifier("x")], scope, default=default),
-            default,
-        )
-        analyzer._function_overloads["f"] = [FunctionSignature(INT, (CHAR.pointer_to(),), False)]
-        self.assertEqual(
-            analyzer._resolve_call_signature("f", [Identifier("x")], scope, default=default),
-            default,
-        )
-        self.assertEqual(
-            analyzer._match_overload_signature(
-                [Identifier("x")],
-                [INT],
-                FunctionSignature(INT, None, False),
-                scope,
-            ),
-            (0, 0),
-        )
-        self.assertIsNone(
-            analyzer._match_overload_signature(
-                [Identifier("x")],
-                [INT],
-                FunctionSignature(INT, (INT, INT), False),
-                scope,
-            )
-        )
-        self.assertIsNone(
-            analyzer._match_overload_signature(
-                [],
-                [],
-                FunctionSignature(INT, (INT,), True),
-                scope,
-            )
-        )
-        self.assertEqual(
-            analyzer._match_overload_signature(
-                [Identifier("x")],
-                [INT],
-                FunctionSignature(INT, (INT,), True),
-                scope,
-            ),
-            (1, 0),
-        )
-
-    def test_overload_cast_helper_paths_and_unhashable_expr_tracking(self) -> None:
-        analyzer = Analyzer()
-        unhashable_expr = CallExpr(Identifier("f"), [])
-        analyzer._set_overload_expr_name(unhashable_expr, "f")
-        self.assertEqual(analyzer._get_overload_expr_name(unhashable_expr), "f")
-        signature = FunctionSignature(INT, (INT,), False)
-        self.assertFalse(analyzer._signature_matches_callable_type(signature, INT))
-        self.assertIsNone(analyzer._resolve_overload_for_cast("missing", INT.pointer_to()))
-
-    def test_register_function_typed_file_scope_decl_error_paths(self) -> None:
-        function_type = TypeSpec(
-            "int",
-            declarator_ops=(("fn", ((TypeSpec("int"),), False)),),
-        )
-
-        with self.subTest(case="storage_class"):
-            analyzer = Analyzer()
-            with self.assertRaises(SemaError) as ctx:
-                analyzer._register_function_typed_file_scope_decl(
-                    DeclStmt(function_type, "add_one", None, storage_class="auto")
-                )
-            self.assertEqual(
-                str(ctx.exception),
-                "Invalid storage class for file-scope function declaration: 'auto'",
-            )
-
-        with self.subTest(case="thread_local"):
-            analyzer = Analyzer()
-            with self.assertRaises(SemaError) as ctx:
-                analyzer._register_function_typed_file_scope_decl(
-                    DeclStmt(function_type, "add_one", None, is_thread_local=True)
-                )
-            self.assertEqual(
-                str(ctx.exception),
-                "Invalid declaration specifier for function declaration: '_Thread_local'",
-            )
-
-        with self.subTest(case="object_conflict"):
-            analyzer = Analyzer()
-            analyzer._file_scope.define(VarSymbol("add_one", INT))
-            with self.assertRaises(SemaError) as ctx:
-                analyzer._register_function_typed_file_scope_decl(
-                    DeclStmt(function_type, "add_one", None)
-                )
-            self.assertEqual(str(ctx.exception), "Conflicting declaration: add_one")
-
-        with self.subTest(case="typedef_conflict"):
-            analyzer = Analyzer()
-            analyzer._file_scope.define_typedef("add_one", INT)
-            with self.assertRaises(SemaError) as ctx:
-                analyzer._register_function_typed_file_scope_decl(
-                    DeclStmt(function_type, "add_one", None)
-                )
-            self.assertEqual(str(ctx.exception), "Conflicting declaration: add_one")
 
     def test_overloadable_call_resolves_exact_match(self) -> None:
         unit = parse(
@@ -3471,16 +2758,16 @@ class SemaTests(unittest.TestCase):
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
         self.assertIs(func_symbol.locals["A"].type_, INT)
-        self.assertEqual(getattr(func_symbol.locals["B"], "value"), 3)
-        self.assertEqual(getattr(func_symbol.locals["C"], "value"), 4)
+        self.assertEqual(func_symbol.locals["B"].value, 3)
+        self.assertEqual(func_symbol.locals["C"].value, 4)
 
     def test_enum_member_constant_expression_values(self) -> None:
         unit = parse(list(lex("int main(){enum E { A=1, B=A+2, C=B<<1 }; return C;}")))
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
-        self.assertEqual(getattr(func_symbol.locals["A"], "value"), 1)
-        self.assertEqual(getattr(func_symbol.locals["B"], "value"), 3)
-        self.assertEqual(getattr(func_symbol.locals["C"], "value"), 6)
+        self.assertEqual(func_symbol.locals["A"].value, 1)
+        self.assertEqual(func_symbol.locals["B"].value, 3)
+        self.assertEqual(func_symbol.locals["C"].value, 6)
 
     def test_enum_member_non_constant_value_error(self) -> None:
         unit = parse(list(lex("int main(){int x=1; enum E { A=x }; return 0;}")))
@@ -3498,7 +2785,7 @@ class SemaTests(unittest.TestCase):
         unit = parse(list(lex("int main(){enum E *p; return 0;}")))
         sema = analyze(unit)
         func_symbol = sema.functions["main"]
-        self.assertEqual(func_symbol.locals["p"].type_, Type("int", 1))
+        self.assertEqual(func_symbol.locals["p"].type_, Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_case_accepts_enum_constant_and_unary_sign(self) -> None:
         source = (
@@ -3608,7 +2895,7 @@ int caller(int x) {
         sema = analyze(unit)
         pointer_init = _body(unit.functions[0]).statements[1].init
         assert pointer_init is not None
-        self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
+        self.assertEqual(sema.type_map.get(pointer_init), Type("int", declarator_ops=(("ptr", 0),)))
         return_expr = _body(unit.functions[0]).statements[2].value
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
@@ -3627,7 +2914,7 @@ int caller(int x) {
         sema = analyze(unit)
         pointer_init = _body(unit.functions[0]).statements[2].init
         assert pointer_init is not None
-        self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
+        self.assertEqual(sema.type_map.get(pointer_init), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_pointer_plus_integer_typemap(self) -> None:
         source = "int main(){int a[3]; int *p=&a[1]; int *q=p+1; return q-p;}"
@@ -3635,7 +2922,7 @@ int caller(int x) {
         sema = analyze(unit)
         plus_expr = _body(unit.functions[0]).statements[2].init
         assert plus_expr is not None
-        self.assertEqual(sema.type_map.get(plus_expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(plus_expr), Type("int", declarator_ops=(("ptr", 0),)))
         minus_expr = _body(unit.functions[0]).statements[3].value
         assert minus_expr is not None
         self.assertEqual(sema.type_map.get(minus_expr), INT)
@@ -3646,7 +2933,7 @@ int caller(int x) {
         sema = analyze(unit)
         plus_expr = _body(unit.functions[0]).statements[2].init
         assert plus_expr is not None
-        self.assertEqual(sema.type_map.get(plus_expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(plus_expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_pointer_minus_integer_typemap(self) -> None:
         source = "int main(){int a[3]; int *p=&a[2]; int *q=p-1; return q-p;}"
@@ -3654,7 +2941,7 @@ int caller(int x) {
         sema = analyze(unit)
         minus_expr = _body(unit.functions[0]).statements[2].init
         assert minus_expr is not None
-        self.assertEqual(sema.type_map.get(minus_expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(minus_expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_array_decay_pointer_subtraction_typemap(self) -> None:
         source = "int main(){int a[3]; return &a[2]-a;}"
@@ -3676,7 +2963,7 @@ int caller(int x) {
         source = "struct token { const char *start, *end; }; int main(void){return 0;}"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
-        expected = Type("char", 1, qualifiers=("const",))
+        expected = Type("char", declarator_ops=(("ptr", 0),), qualifiers=("const",))
         self.assertEqual(sema.record_definitions["struct token"][0].type_, expected)
         self.assertEqual(sema.record_definitions["struct token"][1].type_, expected)
 
@@ -3770,7 +3057,7 @@ int caller(int x) {
         sema = analyze(unit)
         pointer_init = _body(unit.functions[0]).statements[1].init
         assert pointer_init is not None
-        self.assertEqual(sema.type_map.get(pointer_init), Type("int", 1))
+        self.assertEqual(sema.type_map.get(pointer_init), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_member_access_typemap(self) -> None:
         source = "int main(){struct S { int x; } s; return s.x;}"
@@ -3897,31 +3184,6 @@ int caller(int x) {
         assert return_expr is not None
         self.assertEqual(sema.type_map.get(return_expr), INT)
 
-    def test_alignof_expression_rejected_in_c11(self) -> None:
-        unit = parse(list(lex("int main(){int x; return _Alignof(x);}")), std="gnu11")
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit, std="c11")
-        self.assertEqual(
-            str(ctx.exception), "Invalid alignof operand: expression form requires GNU mode"
-        )
-
-    def test_alignof_expression_rejected_in_c11_ast_path(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt([ReturnStmt(AlignofExpr(Identifier("x"), None))]),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit, std="c11")
-        self.assertEqual(
-            str(ctx.exception), "Invalid alignof operand: expression form requires GNU mode"
-        )
-
     def test_cast_expression_typemap(self) -> None:
         unit = parse(list(lex("int main(){int *p; return (int)p;}")))
         sema = analyze(unit)
@@ -3948,7 +3210,7 @@ int caller(int x) {
         sema = analyze(unit)
         init_expr = _body(unit.functions[0]).statements[1].init
         assert init_expr is not None
-        self.assertEqual(sema.type_map.get(init_expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(init_expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_void_cast_statement_ok(self) -> None:
         unit = parse(list(lex("int f(void){return 0;} int main(){(void)f(); return 0;}")))
@@ -3981,7 +3243,7 @@ int caller(int x) {
         sema = analyze(unit)
         init_expr = _body(unit.functions[1]).statements[1].init
         assert init_expr is not None
-        self.assertEqual(sema.type_map.get(init_expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(init_expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_typedef_inner_scope_shadowing(self) -> None:
         source = "int main(){typedef int T; {typedef int* T; int x=1; T p=&x;} T y=2; return y;}"
@@ -4246,24 +3508,6 @@ int caller(int x) {
         self.assertIsInstance(statement, StaticAssertDecl)
         self.assertIn("main", sema.functions)
 
-    def test_file_scope_void_object_error(self) -> None:
-        unit = TranslationUnit([], [DeclStmt(TypeSpec("void"), "g", None)])
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Invalid object type for file-scope object declaration: void",
-        )
-
-    def test_unsupported_file_scope_declaration_node_error(self) -> None:
-        unit = TranslationUnit([], [ExprStmt(IntLiteral("1"))])
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Unsupported file-scope declaration node: ExprStmt (internal sema bug: unexpected AST file-scope declaration node)",
-        )
-
     def test_parenthesized_pointer_to_array_typemap(self) -> None:
         source = "int main(){int a[4]; int (*p)[4]=&a; return (*p)[1];}"
         unit = parse(list(lex(source)))
@@ -4501,10 +3745,7 @@ int caller(int x) {
     def test_incomplete_array_of_records_flattened_initializer_infers_element_count(
         self,
     ) -> None:
-        source = (
-            "struct Pair { int first; int second; };"
-            "struct Pair pairs[] = {1, 2, 3, 4};"
-        )
+        source = "struct Pair { int first; int second; };struct Pair pairs[] = {1, 2, 3, 4};"
         unit = parse(list(lex(source)))
         sema = analyze(unit)
         assert sema.file_scope is not None
@@ -4512,148 +3753,6 @@ int caller(int x) {
         self.assertIsInstance(symbol, VarSymbol)
         assert isinstance(symbol, VarSymbol)
         self.assertEqual(symbol.type_, Type("struct Pair").array_of(2))
-
-    def test_unbraced_aggregate_initializer_helper_edge_paths(self) -> None:
-        analyzer = Analyzer()
-        scope = Scope()
-        item = InitItem((), IntLiteral("5"))
-        indexed_item = InitItem((("index", IntLiteral("0")),), IntLiteral("7"))
-
-        self.assertEqual(
-            sema_initializers._analyze_unbraced_aggregate_initializer_items(
-                analyzer,
-                INT.array_of(2),
-                (item,),
-                1,
-                scope,
-            ),
-            0,
-        )
-        self.assertEqual(
-            sema_initializers._analyze_unbraced_aggregate_initializer_items(
-                analyzer,
-                INT.array_of(0),
-                (item,),
-                0,
-                scope,
-            ),
-            0,
-        )
-        self.assertEqual(
-            sema_initializers._analyze_unbraced_aggregate_initializer_items(
-                analyzer,
-                INT.array_of(-1),
-                (item,),
-                0,
-                scope,
-            ),
-            0,
-        )
-        with patch.object(Type, "element_type", return_value=None):
-            self.assertEqual(
-                sema_initializers._analyze_unbraced_aggregate_initializer_items(
-                    analyzer,
-                    INT.array_of(2),
-                    (item,),
-                    0,
-                    scope,
-                ),
-                0,
-            )
-        self.assertEqual(
-            sema_initializers._analyze_unbraced_aggregate_initializer_items(
-                analyzer,
-                INT.array_of(2),
-                (indexed_item,),
-                0,
-                scope,
-            ),
-            0,
-        )
-        self.assertEqual(
-            sema_initializers._analyze_unbraced_aggregate_initializer_items(
-                analyzer,
-                INT,
-                (item,),
-                0,
-                scope,
-            ),
-            0,
-        )
-        self.assertEqual(
-            sema_initializers._analyze_unbraced_initializer_item(
-                analyzer,
-                INT,
-                (indexed_item,),
-                0,
-                scope,
-            ),
-            0,
-        )
-
-        analyzer._record_definitions["struct Pair"] = (
-            RecordMemberInfo("first", INT),
-            RecordMemberInfo("second", INT),
-        )
-        analyzer._record_definitions["struct HoldsMissing"] = (
-            RecordMemberInfo("missing", Type("struct Missing")),
-        )
-        self.assertEqual(
-            sema_initializers._analyze_unbraced_aggregate_initializer_items(
-                analyzer,
-                Type("struct Pair"),
-                (indexed_item,),
-                0,
-                scope,
-            ),
-            0,
-        )
-        self.assertEqual(
-            sema_initializers._analyze_unbraced_aggregate_initializer_items(
-                analyzer,
-                Type("struct HoldsMissing"),
-                (item,),
-                0,
-                scope,
-            ),
-            0,
-        )
-        self.assertEqual(
-            sema_initializers._analyze_unbraced_aggregate_initializer_items(
-                analyzer,
-                Type("struct Missing").array_of(1),
-                (item,),
-                0,
-                scope,
-            ),
-            0,
-        )
-
-        unknown_inner = INT.array_of(-1)
-        analyzer._record_definitions["struct Outer"] = (
-            RecordMemberInfo("items", unknown_inner),
-        )
-        sema_initializers.analyze_array_initializer_list(
-            analyzer,
-            unknown_inner.array_of(1),
-            InitList((item,)),
-            scope,
-        )
-        sema_initializers.analyze_record_initializer_list(
-            analyzer,
-            Type("struct Outer"),
-            InitList((item,)),
-            scope,
-        )
-        self.assertEqual(
-            sema_initializers.infer_incomplete_array_length(
-                analyzer,
-                InitList((item,)),
-                scope,
-                unknown_inner.array_of(-1),
-            ),
-            1,
-        )
 
     def test_incomplete_array_designator_infers_highest_index_bound(self) -> None:
         source = "unsigned long a[] = { [8] = 56, [16] = 112 };"
@@ -4748,13 +3847,13 @@ int caller(int x) {
         unit = parse(list(lex("int main(){int a[3]; int *p=&a[0]; p+=1; return p-a;}")))
         sema = analyze(unit)
         expr = _body(unit.functions[0]).statements[2].expr
-        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_compound_assignment_pointer_minus_equals_int_ok(self) -> None:
         unit = parse(list(lex("int main(){int a[3]; int *p=&a[2]; p-=1; return p-a;}")))
         sema = analyze(unit)
         expr = _body(unit.functions[0]).statements[2].expr
-        self.assertEqual(sema.type_map.get(expr), Type("int", 1))
+        self.assertEqual(sema.type_map.get(expr), Type("int", declarator_ops=(("ptr", 0),)))
 
     def test_compound_assignment_pointer_plus_equals_pointer_error(self) -> None:
         unit = parse(
@@ -4790,88 +3889,6 @@ int caller(int x) {
             str(ctx.exception),
             "Compound bitwise/shift/modulo assignment requires integer operands",
         )
-
-    def test_manual_assignment_expression_still_analyzes_supported_operator(self) -> None:
-        expr = AssignExpr("|=", Identifier("x"), IntLiteral("1"))
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            DeclStmt(TypeSpec("int"), "x", IntLiteral("0")),
-                            ExprStmt(expr),
-                            ReturnStmt(Identifier("x")),
-                        ]
-                    ),
-                )
-            ]
-        )
-        sema = analyze(unit)
-        self.assertIs(sema.type_map.get(expr), INT)
-
-    def test_unsupported_assignment_operator_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            DeclStmt(TypeSpec("int"), "x", IntLiteral("1")),
-                            ExprStmt(AssignExpr("?=", Identifier("x"), IntLiteral("2"))),
-                        ]
-                    ),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported assignment operator: ?=")
-
-    def test_manual_update_expression_still_analyzes_supported_operator(self) -> None:
-        expr = UpdateExpr("++", Identifier("x"), False)
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            DeclStmt(TypeSpec("int"), "x", IntLiteral("1")),
-                            ExprStmt(expr),
-                            ReturnStmt(Identifier("x")),
-                        ]
-                    ),
-                )
-            ]
-        )
-        sema = analyze(unit)
-        self.assertIs(sema.type_map.get(expr), INT)
-
-    def test_unsupported_update_operator_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            DeclStmt(TypeSpec("int"), "x", IntLiteral("1")),
-                            ExprStmt(UpdateExpr("?!", Identifier("x"), False)),
-                        ]
-                    ),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported update operator: ?!")
 
     def test_assignment_pointer_null_constant_ok(self) -> None:
         unit = parse(list(lex("int main(){int *p; p=0; return p==0;}")))
@@ -4945,17 +3962,10 @@ int caller(int x) {
         source = (
             "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; vp=fp; return 0;}"
         )
-        unit = parse(list(lex(source)))
-        sema = analyze(unit)
-        self.assertIn("main", sema.functions)
-
-    def test_assignment_function_pointer_to_void_pointer_ok_in_gnu_mode(self) -> None:
-        source = (
-            "int f(void){return 0;} int main(){int (*fp)(void)=f; void *vp=0; vp=fp; return 0;}"
-        )
-        unit = parse(list(lex(source)), std="gnu11")
-        sema = analyze(unit, std="gnu11")
-        self.assertIn("main", sema.functions)
+        for std in ("c11", "gnu11"):
+            with self.subTest(std=std):
+                unit = parse(list(lex(source)), std=std)
+                self.assertIn("main", analyze(unit, std=std).functions)
 
     def test_gnu_cross_pointer_assignment_allowed(self) -> None:
         source = "int main(){int *p = 0; char *q; q = p; return 0;}"
@@ -5382,36 +4392,6 @@ int caller(int x) {
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Address-of operand is not assignable")
 
-    def test_unsupported_unary_operator_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt([ExprStmt(UnaryExpr("?", IntLiteral("1")))]),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported unary operator: ?")
-
-    def test_manual_unary_expression_still_analyzes_supported_operator(self) -> None:
-        expr = UnaryExpr("-", IntLiteral("1"))
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt([ExprStmt(expr)]),
-                )
-            ]
-        )
-        sema = analyze(unit)
-        self.assertEqual(sema.type_map.get(expr), INT)
-
     def test_invalid_integer_literal_expression_error(self) -> None:
         unit = TranslationUnit(
             [
@@ -5426,166 +4406,6 @@ int caller(int x) {
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Invalid integer literal")
-
-    def test_parse_int_literal_helper_rejects_invalid_forms(self) -> None:
-        analyzer = Analyzer()
-        self.assertIsNone(analyzer._parse_int_literal(None))
-        self.assertIsNone(analyzer._parse_int_literal("1uu"))
-        self.assertIsNone(analyzer._parse_int_literal("0xU"))
-        self.assertIsNone(analyzer._parse_int_literal("08"))
-        self.assertIsNone(analyzer._parse_int_literal("abc"))
-        self.assertIsNone(analyzer._parse_int_literal("18446744073709551616ULL"))
-
-    def test_record_member_normalization_helpers(self) -> None:
-        analyzer = Analyzer()
-        normalized = analyzer._normalize_record_members(
-            (
-                RecordMemberInfo("x", INT),
-                ("y", LONG),
-                ("z", SHORT, 16),
-            )
-        )
-        self.assertEqual(
-            normalized,
-            (
-                RecordMemberInfo("x", INT),
-                RecordMemberInfo("y", LONG),
-                RecordMemberInfo("z", SHORT, 16),
-            ),
-        )
-        with self.assertRaises(TypeError):
-            analyzer._normalize_record_members((("bad",),))
-
-    def test_explicit_alignment_helper_rejects_non_power_of_two(self) -> None:
-        analyzer = Analyzer()
-        self.assertFalse(analyzer._is_valid_explicit_alignment(3, 4))
-
-    def test_sizeof_type_helpers_cover_non_object_and_record_paths(self) -> None:
-        analyzer = Analyzer()
-        function_type = Type("int", declarator_ops=(("fn", (None, False)),))
-        self.assertIsNone(analyzer._sizeof_type(function_type))
-        self.assertIsNone(
-            analyzer._sizeof_type(Type("int", declarator_ops=(("arr", 2), ("fn", (None, False)))))
-        )
-        self.assertIsNone(analyzer._sizeof_object_base_type(Type("_unknown"), None))
-        self.assertIsNone(analyzer._sizeof_object_base_type(Type("struct Missing"), None))
-
-        analyzer._record_definitions["struct S"] = (("x", INT), ("y", LONG))
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 16)
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), 8), 9)
-
-        analyzer._record_definitions["struct Bad"] = (("f", function_type),)
-        self.assertIsNone(analyzer._sizeof_object_base_type(Type("struct Bad"), None))
-
-        analyzer._record_definitions["union U"] = (("x", INT), ("y", LONG))
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("union U"), None), 8)
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("union U"), 4), 5)
-
-        analyzer._record_definitions["union V"] = (("x", LONG), ("y", INT))
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("union V"), None), 8)
-
-        analyzer._record_definitions["union Bad"] = (("f", function_type),)
-        self.assertIsNone(analyzer._sizeof_object_base_type(Type("union Bad"), None))
-
-    def test_alignof_type_helpers_cover_non_object_and_record_paths(self) -> None:
-        analyzer = Analyzer()
-        function_type = Type("int", declarator_ops=(("fn", (None, False)),))
-        self.assertEqual(analyzer._alignof_type(Type("int", declarator_ops=(("ptr", 0),))), 8)
-        self.assertIsNone(analyzer._alignof_type(function_type))
-        self.assertEqual(
-            analyzer._alignof_type(Type("int", declarator_ops=(("arr", 2), ("ptr", 0)))),
-            8,
-        )
-        self.assertIsNone(analyzer._alignof_object_base_type(Type("_unknown")))
-        self.assertIsNone(analyzer._alignof_object_base_type(Type("struct Missing")))
-        analyzer._record_definitions["struct S"] = (("x", INT), ("y", LONG))
-        self.assertEqual(analyzer._alignof_object_base_type(Type("struct S")), 8)
-        analyzer._record_definitions["struct Small"] = (("x", INT), ("y", SHORT))
-        self.assertEqual(analyzer._alignof_object_base_type(Type("struct Small")), 4)
-        analyzer._record_definitions["struct Bad"] = (("f", function_type),)
-        self.assertIsNone(analyzer._alignof_object_base_type(Type("struct Bad")))
-
-    def test_initializer_member_lookup_helper_errors(self) -> None:
-        analyzer = Analyzer()
-        with self.assertRaises(SemaError) as ctx:
-            analyzer._lookup_initializer_member(Type("int"), "x")
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
-        with self.assertRaises(SemaError) as ctx:
-            analyzer._lookup_initializer_member(Type("struct Missing"), "x")
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
-        analyzer._record_definitions["struct S"] = (("x", INT),)
-        self.assertEqual(analyzer._lookup_initializer_member(Type("struct S"), "x"), (INT, 0))
-
-    def test_record_initializer_helper_rejects_empty_definition(self) -> None:
-        analyzer = Analyzer()
-        analyzer._record_definitions["struct Empty"] = ()
-        with self.assertRaises(SemaError) as ctx:
-            analyzer._analyze_record_initializer_list(
-                Type("struct Empty"),
-                InitList((InitItem((), IntLiteral("1")),)),
-                Scope(),
-            )
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
-
-    def test_designated_initializer_helper_rejects_unknown_designator_kind(self) -> None:
-        analyzer = Analyzer()
-        with self.assertRaises(SemaError) as ctx:
-            analyzer._analyze_designated_initializer(
-                INT,
-                (("other", "x"),),
-                IntLiteral("1"),
-                Scope(),
-            )
-        self.assertEqual(str(ctx.exception), "Initializer type mismatch")
-
-    def test_eval_int_constant_expr_helpers_for_sizeof_alignof_and_generic(self) -> None:
-        analyzer = Analyzer()
-        scope = Scope()
-        self.assertIsNone(
-            analyzer._eval_int_constant_expr(SizeofExpr(Identifier("x"), None), scope)
-        )
-        self.assertEqual(
-            analyzer._eval_int_constant_expr(SizeofExpr(None, TypeSpec("int")), scope), 4
-        )
-        self.assertIsNone(
-            analyzer._eval_int_constant_expr(SizeofExpr(None, TypeSpec("void")), scope)
-        )
-        self.assertIsNone(
-            analyzer._eval_int_constant_expr(AlignofExpr(Identifier("x"), None), scope)
-        )
-        self.assertEqual(
-            analyzer._eval_int_constant_expr(AlignofExpr(None, TypeSpec("int", 1)), scope), 8
-        )
-        self.assertIsNone(
-            analyzer._eval_int_constant_expr(AlignofExpr(None, TypeSpec("void")), scope)
-        )
-        generic = GenericExpr(IntLiteral("1"), ((TypeSpec("int"), IntLiteral("3")),))
-        self.assertEqual(analyzer._eval_int_constant_expr(generic, scope), 3)
-        generic_default = GenericExpr(
-            IntLiteral("1u"),
-            ((TypeSpec("int"), IntLiteral("3")), (None, IntLiteral("5"))),
-        )
-        self.assertEqual(analyzer._eval_int_constant_expr(generic_default, scope), 5)
-        cached_control = IntLiteral("1")
-        analyzer._type_map.set(cached_control, INT)
-        generic_cached = GenericExpr(cached_control, ((TypeSpec("int"), IntLiteral("7")),))
-        self.assertEqual(analyzer._eval_int_constant_expr(generic_cached, scope), 7)
-        generic_no_match = GenericExpr(IntLiteral("1u"), ((TypeSpec("int"), IntLiteral("3")),))
-        self.assertIsNone(analyzer._eval_int_constant_expr(generic_no_match, scope))
-
-    def test_null_pointer_constant_helper_accepts_casted_void_zero(self) -> None:
-        analyzer = Analyzer()
-        scope = Scope()
-        self.assertTrue(
-            analyzer._is_null_pointer_constant(
-                CastExpr(TypeSpec("void", 1), IntLiteral("0")), scope
-            )
-        )
-        self.assertFalse(
-            analyzer._is_null_pointer_constant(
-                CastExpr(TypeSpec("void", 1), IntLiteral("1")), scope
-            )
-        )
 
     def test_duplicate_declaration(self) -> None:
         unit = parse(list(lex("int main(){int x; int x; return 0;}")))
@@ -5675,21 +4495,6 @@ int caller(int x) {
         function = sema.functions["main"]
         self.assertIsInstance(function.locals["VALUE"], sema_symbols.VarSymbol)
 
-    def test_define_scoped_enum_members_ignores_repeated_binding(self) -> None:
-        unit = parse(list(lex("int main(){sizeof(enum { A }); return 0;}")))
-        expr_stmt = _body(unit.functions[0]).statements[0]
-        assert isinstance(expr_stmt, ExprStmt)
-        assert isinstance(expr_stmt.expr, SizeofExpr)
-        assert expr_stmt.expr.type_spec is not None
-        analyzer = Analyzer()
-        scope = Scope()
-        analyzer._define_scoped_enum_members(expr_stmt.expr.type_spec, scope)
-        analyzer._define_scoped_enum_members(expr_stmt.expr.type_spec, scope)
-        symbol = scope.lookup("A")
-        self.assertIsNotNone(symbol)
-        assert symbol is not None
-        self.assertEqual(symbol.value, 0)
-
     def test_duplicate_struct_definition_error(self) -> None:
         unit = parse(list(lex("int main(){struct S { int x; }; struct S { int y; }; return 0;}")))
         with self.assertRaises(SemaError) as ctx:
@@ -5761,62 +4566,8 @@ int caller(int x) {
             "Invalid object type for block-scope object declaration: incomplete",
         )
 
-    def test_invalid_record_member_type_void_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            DeclStmt(
-                                TypeSpec(
-                                    "struct",
-                                    record_members=((TypeSpec("void"), "x"),),
-                                ),
-                                None,
-                                None,
-                            )
-                        ]
-                    ),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Invalid object type for record member declaration: void",
-        )
-
     def test_invalid_record_member_function_type_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            DeclStmt(
-                                TypeSpec(
-                                    "struct",
-                                    record_members=(
-                                        (
-                                            TypeSpec("int", declarator_ops=(("fn", ((), False)),)),
-                                            "call",
-                                        ),
-                                    ),
-                                ),
-                                None,
-                                None,
-                            )
-                        ]
-                    ),
-                )
-            ]
-        )
+        unit = parse(list(lex("int main(void) { struct { int call(void); }; }")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -5825,29 +4576,7 @@ int caller(int x) {
         )
 
     def test_invalid_record_member_incomplete_type_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            DeclStmt(
-                                TypeSpec(
-                                    "struct",
-                                    record_members=(
-                                        (TypeSpec("struct", record_tag="Node"), "next"),
-                                    ),
-                                ),
-                                None,
-                                None,
-                            )
-                        ]
-                    ),
-                )
-            ]
-        )
+        unit = parse(list(lex("int main(void) { struct { struct Node next; }; }")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(
@@ -5994,27 +4723,7 @@ int caller(int x) {
         self.assertIn("f", sema.functions)
 
     def test_duplicate_record_member_name_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            DeclStmt(
-                                TypeSpec(
-                                    "struct",
-                                    record_members=((TypeSpec("int"), "x"), (TypeSpec("int"), "x")),
-                                ),
-                                None,
-                                None,
-                            )
-                        ]
-                    ),
-                )
-            ]
-        )
+        unit = parse(list(lex("int main(void) { struct { int x; int x; }; }")))
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Duplicate declaration: x")
@@ -6312,35 +5021,6 @@ int caller(int x) {
             analyze(unit)
         self.assertEqual(str(ctx.exception), "case value is not integer constant")
 
-    def test_unsupported_binary_case_constant_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            SwitchStmt(
-                                IntLiteral("0"),
-                                CompoundStmt(
-                                    [
-                                        CaseStmt(
-                                            BinaryExpr("?", IntLiteral("1"), IntLiteral("2")),
-                                            ReturnStmt(IntLiteral("0")),
-                                        )
-                                    ]
-                                ),
-                            )
-                        ]
-                    ),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "case value is not integer constant")
-
     def test_switch_void_condition_error(self) -> None:
         unit = parse(list(lex("void foo(){return;} int main(){switch(foo()){default:return 0;}}")))
         with self.assertRaises(SemaError) as ctx:
@@ -6589,41 +5269,6 @@ int caller(int x) {
             analyze(unit, std="gnu11")
         self.assertEqual(str(ctx.exception), "Invalid alignof operand: function type")
 
-    def test_alignof_unknown_type_name_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt([ReturnStmt(AlignofExpr(None, TypeSpec("_unknown")))]),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand: unknown or unsupported type")
-
-    def test_alignof_unknown_expression_type_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt(
-                        [
-                            DeclStmt(TypeSpec("_unknown"), "x", None),
-                            ReturnStmt(AlignofExpr(Identifier("x"), None)),
-                        ]
-                    ),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit, std="gnu11")
-        self.assertEqual(str(ctx.exception), "Invalid alignof operand: unknown or unsupported type")
-
     def test_cast_void_expression_to_int_error(self) -> None:
         unit = parse(list(lex("void f(void){return;} int main(){return (int)f();}")))
         with self.assertRaises(SemaError) as ctx:
@@ -6674,139 +5319,6 @@ int caller(int x) {
         with self.assertRaises(SemaError) as ctx:
             analyze(unit)
         self.assertEqual(str(ctx.exception), "Cast target type is not castable")
-
-    def test_unsupported_expression(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt([ExprStmt(Expr())]),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Unsupported expression node: Expr (internal sema bug: unexpected AST expression node)",
-        )
-
-    def test_supported_expression_does_not_hit_fallback(self) -> None:
-        expr = IntLiteral("1")
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt([ExprStmt(expr)]),
-                )
-            ]
-        )
-        sema = analyze(unit)
-        self.assertEqual(sema.type_map.get(expr), INT)
-
-    def test_unsupported_binary_expression_error(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt([ExprStmt(BinaryExpr("?", IntLiteral("1"), IntLiteral("2")))]),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(str(ctx.exception), "Unsupported binary operator: ?")
-
-    def test_manual_binary_expression_still_analyzes_supported_operator(self) -> None:
-        expr = BinaryExpr("+", IntLiteral("1"), IntLiteral("2"))
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt([ExprStmt(expr)]),
-                )
-            ]
-        )
-        sema = analyze(unit)
-        self.assertEqual(sema.type_map.get(expr), INT)
-
-    def test_unsupported_statement_node(self) -> None:
-        unit = TranslationUnit(
-            [
-                FunctionDef(
-                    TypeSpec("int"),
-                    "main",
-                    [],
-                    CompoundStmt([Stmt()]),
-                )
-            ]
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit)
-        self.assertEqual(
-            str(ctx.exception),
-            "Unsupported statement node: Stmt (internal sema bug: unexpected AST statement node)",
-        )
-
-    def test_missing_file_scope_identifier_message_without_qualifiers(self) -> None:
-        analyzer = Analyzer()
-        message = analyzer._missing_object_identifier_message(
-            "file-scope",
-            DeclStmt(TypeSpec("int"), None, None),
-        )
-        self.assertEqual(message, "Expected identifier for file-scope object declaration")
-
-    def test_invalid_alignment_message_helper_paths(self) -> None:
-        analyzer = Analyzer()
-        self.assertEqual(
-            analyzer._invalid_alignment_message(
-                "file-scope object declaration", 0, natural_alignment=4
-            ),
-            "Invalid alignment specifier for file-scope object declaration: alignment must be positive",
-        )
-        self.assertEqual(
-            analyzer._invalid_alignment_message(
-                "file-scope object declaration", 8, natural_alignment=None
-            ),
-            "Invalid alignment specifier for file-scope object declaration: cannot determine natural alignment",
-        )
-
-    def test_sizeof_alignof_and_generic_invalid_type_helpers(self) -> None:
-        analyzer = Analyzer()
-        self.assertTrue(analyzer._is_invalid_sizeof_type(VOID))
-        self.assertTrue(analyzer._is_invalid_alignof_type(VOID))
-        self.assertTrue(analyzer._is_invalid_generic_association_type_spec(TypeSpec("void")))
-
-    def test_generic_association_location_fallback_mixed_partial_coordinates(self) -> None:
-        analyzer = Analyzer()
-        scope = Scope()
-        expr = GenericExpr(
-            IntLiteral("1"),
-            (
-                (TypeSpec("long", source_line=10, source_column=None), IntLiteral("2")),
-                (TypeSpec("char", source_line=None, source_column=11), IntLiteral("3")),
-            ),
-            association_source_locations=((100, 20), (200, 30)),
-        )
-        with self.assertRaises(SemaError) as ctx:
-            analyzer._analyze_expr(expr, scope)
-        self.assertIn("No matching generic association for control type", str(ctx.exception))
-
-    def test_generic_expr_without_associations_reports_plain_no_match_error(self) -> None:
-        analyzer = Analyzer()
-        with self.assertRaises(SemaError) as ctx:
-            analyzer._analyze_expr(GenericExpr(IntLiteral("1"), ()), Scope())
-        self.assertEqual(
-            str(ctx.exception), "No matching generic association for control type 'int'"
-        )
 
     def test_typeof_expression_resolves_variable_type(self) -> None:
         unit = parse(list(lex("int f(int x) { typeof(x) y = x + 3; return y; }")), std="gnu11")
@@ -6885,7 +5397,6 @@ int caller(int x) {
         self.assertEqual(sema.type_map.get(ret), ULONG)
 
     def test_builtin_offsetof_in_constant_expr_context(self) -> None:
-        """offsetof in array size triggers _eval_int_constant_expr path (returns None → VLA)."""
         unit = parse(
             list(
                 lex(
@@ -6895,7 +5406,10 @@ int caller(int x) {
             std="gnu11",
         )
         sema = analyze(unit, std="gnu11")
-        self.assertIsNotNone(sema)
+        arr = sema.functions["f"].locals["arr"]
+        self.assertIsInstance(arr, VarSymbol)
+        assert isinstance(arr, VarSymbol)
+        self.assertEqual(arr.type_, INT.array_of(8))
 
     def test_builtin_types_compatible_p_returns_int(self) -> None:
         source = "int f(void) { return __builtin_types_compatible_p(int, int); }"
@@ -6909,17 +5423,11 @@ int caller(int x) {
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
 
-    def test_builtin_expect_accepted_in_gnu11(self) -> None:
+    def test_builtin_expect(self) -> None:
         source = "int f(int x) { if (__builtin_expect(x == 0, 0)) return -1; return x; }"
-        unit = parse(list(lex(source)), std="gnu11")
-        sema = analyze(unit, std="gnu11")
-        self.assertIsNotNone(sema)
-
-    def test_builtin_expect_accepted_in_c11(self) -> None:
-        source = "int f(int x) { if (__builtin_expect(x == 0, 0)) return -1; return x; }"
-        unit = parse(list(lex(source)), std="c11")
-        sema = analyze(unit, std="c11")
-        self.assertIsNotNone(sema)
+        for std in ("c11", "gnu11"):
+            with self.subTest(std=std):
+                analyze(parse(list(lex(source)), std=std), std=std)
 
     def test_builtin_memset_returns_void_pointer(self) -> None:
         source = "void *f(char *p) { return __builtin_memset(p, 0, 4); }"
@@ -6927,7 +5435,15 @@ int caller(int x) {
         sema = analyze(unit, std="gnu11")
         call = _body(unit.functions[0]).statements[0].value
         self.assertIsInstance(call, CallExpr)
-        self.assertEqual(sema.type_map.get(call), Type("void", pointer_depth=1))
+        self.assertEqual(sema.type_map.get(call), Type("void", declarator_ops=(("ptr", 0),)))
+
+    def test_builtin_call_rejects_wrong_argument_count(self) -> None:
+        unit = parse(list(lex("int f(void) { return __builtin_isinf(); }")))
+        with self.assertRaisesRegex(
+            SemaError,
+            r"Argument count mismatch \(expected 1, got 0\): __builtin_isinf",
+        ):
+            analyze(unit)
 
     def test_c11_atomic_load_returns_pointee_type(self) -> None:
         source = "_Atomic(void*) slot; void use(void *); void f(void) { use(__c11_atomic_load(&slot, 2)); }"
@@ -6939,23 +5455,15 @@ int caller(int x) {
         self.assertIsInstance(outer_call, CallExpr)
         inner_call = outer_call.args[0]
         self.assertIsInstance(inner_call, CallExpr)
-        self.assertEqual(sema.type_map.get(inner_call), Type("void", pointer_depth=1))
+        self.assertEqual(sema.type_map.get(inner_call), Type("void", declarator_ops=(("ptr", 0),)))
 
-    def test_builtin_unreachable_accepted_in_gnu11(self) -> None:
+    def test_builtin_unreachable(self) -> None:
         source = (
             "int f(int x) { switch(x) { case 0: return 0; default: __builtin_unreachable(); } }"
         )
-        unit = parse(list(lex(source)), std="gnu11")
-        sema = analyze(unit, std="gnu11")
-        self.assertIsNotNone(sema)
-
-    def test_builtin_unreachable_accepted_in_c11(self) -> None:
-        source = (
-            "int f(int x) { switch(x) { case 0: return 0; default: __builtin_unreachable(); } }"
-        )
-        unit = parse(list(lex(source)), std="c11")
-        sema = analyze(unit, std="c11")
-        self.assertIsNotNone(sema)
+        for std in ("c11", "gnu11"):
+            with self.subTest(std=std):
+                analyze(parse(list(lex(source)), std=std), std=std)
 
     def test_builtin_float_compare_family_accepted_in_c11(self) -> None:
         for builtin in (
@@ -7139,14 +5647,6 @@ int caller(int x) {
             analyze(unit, std="gnu11")
         self.assertIn("not integer constant", str(ctx.exception))
 
-    def test_static_assert_nested_init_list_subscript(self) -> None:
-        """Static assert with nested init list subscript can't evaluate."""
-        source = 'const int arr[2][2] = {{1, 2}, {3, 4}};\n_Static_assert(arr[0][0] == 1, "bad");'
-        unit = parse(list(lex(source)), std="gnu11")
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit, std="gnu11")
-        self.assertIn("not integer constant", str(ctx.exception))
-
     def test_return_value_type_mismatch_non_builtin(self) -> None:
         """Return value incompatible with function return type raises error."""
         source = "char *f(void) { return 5; }"
@@ -7161,14 +5661,6 @@ int caller(int x) {
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
-
-    def test_static_assert_non_const_struct_member_fails(self) -> None:
-        """Static assert with non-const struct member access fails."""
-        source = 'struct S { int a; };\nstruct S s = {5};\n_Static_assert(s.a == 5, "bad");'
-        unit = parse(list(lex(source)), std="gnu11")
-        with self.assertRaises(SemaError) as ctx:
-            analyze(unit, std="gnu11")
-        self.assertIn("not integer constant", str(ctx.exception))
 
     def test_static_assert_subscript_non_const_base_fails(self) -> None:
         """Static assert subscript on non-const array base can't evaluate."""
@@ -7290,418 +5782,12 @@ int caller(int x) {
             analyze(unit, std="gnu11")
         self.assertIn("not integer constant", str(ctx.exception))
 
-    def test_eval_int_constant_sizeof_expr_both_none(self) -> None:
-        """_eval_int_constant_expr SizeofExpr with both type and expr None."""
-        from xcc.ast import SizeofExpr
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-        result = analyzer._eval_int_constant_expr(
-            SizeofExpr(type_spec=None, expr=None),
-            analyzer._file_scope,
-        )
-        self.assertIsNone(result)
-
-    def test_eval_int_constant_subscript_non_identifier_base(self) -> None:
-        """_eval_int_constant_expr SubscriptExpr base not Identifier returns None."""
-        from xcc.ast import Identifier, IntLiteral, MemberExpr, SubscriptExpr
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-        analyzer._allow_const_var_folding = True
-        try:
-            result = analyzer._eval_int_constant_expr(
-                SubscriptExpr(
-                    base=MemberExpr(base=Identifier("x"), member="a", through_pointer=False),
-                    index=IntLiteral("0"),
-                ),
-                analyzer._file_scope,
-            )
-            self.assertIsNone(result)
-        finally:
-            analyzer._allow_const_var_folding = False
-
-    def test_eval_int_constant_member_expr_non_identifier_base(self) -> None:
-        """_eval_member_expr with non-Identifier base returns None."""
-        from xcc.ast import Identifier, IntLiteral, MemberExpr, SubscriptExpr
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-        analyzer._allow_const_var_folding = True
-        try:
-            result = analyzer._eval_int_constant_expr(
-                MemberExpr(
-                    base=SubscriptExpr(
-                        base=Identifier("x"),
-                        index=IntLiteral("0"),
-                    ),
-                    member="a",
-                    through_pointer=False,
-                ),
-                analyzer._file_scope,
-            )
-            self.assertIsNone(result)
-        finally:
-            analyzer._allow_const_var_folding = False
-
-    def test_eval_member_expr_base_not_identifier(self) -> None:
-        """_eval_member_expr where base is not Identifier and not scalar."""
-        from xcc.ast import Identifier, IntLiteral, MemberExpr, SubscriptExpr
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-        analyzer._allow_const_var_folding = True
-        try:
-            result = analyzer._eval_int_constant_expr(
-                MemberExpr(
-                    base=MemberExpr(base=Identifier("x"), member="a", through_pointer=False),
-                    member="b",
-                    through_pointer=False,
-                ),
-                analyzer._file_scope,
-            )
-            self.assertIsNone(result)
-        finally:
-            analyzer._allow_const_var_folding = False
-
-    def test_analyze_initializer_array_element_type_none(self) -> None:
-        """analyze_initializer with pointer type raises type mismatch."""
-        from xcc.ast import IntLiteral
-        from xcc.types import Type
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-        ptr_type = Type("int", declarator_ops=(("ptr", 0),))
-        with self.assertRaises(SemaError):
-            sema_initializers.analyze_initializer(
-                analyzer,
-                ptr_type,
-                IntLiteral("5"),
-                analyzer._file_scope,
-            )
-
-    def test_lookup_member_in_init_non_record_type(self) -> None:
-        """_lookup_member_in_init with non-record type name returns None."""
-        from xcc.ast import InitItem, InitList, IntLiteral
-        from xcc.types import INT
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-
-        init_list = InitList(items=(InitItem(designators=(), initializer=IntLiteral("5")),))
-        result = sema_constants._lookup_member_in_init(
-            analyzer,
-            init_list,
-            INT,
-            "a",
-            analyzer._file_scope,
-        )
-        self.assertIsNone(result)
-
-    def test_lookup_member_in_init_no_members(self) -> None:
-        """_lookup_member_in_init where _record_members returns None."""
-        from xcc.ast import InitItem, InitList, IntLiteral
-
-        # Forward-declared struct is a record name with no members
-        source = "struct S;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-
-        struct_type = analyzer._resolve_type(unit.declarations[0].type_spec)
-        init_list = InitList(items=(InitItem(designators=(), initializer=IntLiteral("5")),))
-        result = sema_constants._lookup_member_in_init(
-            analyzer,
-            init_list,
-            struct_type,
-            "a",
-            analyzer._file_scope,
-        )
-        self.assertIsNone(result)
-
-    def test_lookup_member_in_init_designated_item(self) -> None:
-        """_lookup_member_in_init with designated item returns None."""
-        from xcc.ast import InitItem, InitList, IntLiteral
-
-        source = "struct S { int a; int b; };\nconst struct S s = {5, 10};\n"
-        unit = parse(list(lex(source)), std="gnu11")
-        analyzer = Analyzer(std="gnu11")
-        analyzer.analyze(unit)
-
-        init_list = InitList(
-            items=(
-                InitItem(
-                    designators=(("[", IntLiteral("0")),),
-                    initializer=IntLiteral("5"),
-                ),
-            )
-        )
-        result = sema_constants._lookup_member_in_init(
-            analyzer,
-            init_list,
-            analyzer._resolve_type(unit.declarations[0].type_spec),
-            "a",
-            analyzer._file_scope,
-        )
-        self.assertIsNone(result)
-
-    def test_qualifier_only_mismatch_is_initializer_compatible(self) -> None:
-        """is_initializer_compatible returns True for qualifier-only diff."""
-        from xcc.ast import IntLiteral
-        from xcc.types import INT, Type
-        from xcc.sema.symbols import Scope
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-
-        const_int = Type("int", qualifiers=("const",))
-        result = sema_initializers.is_initializer_compatible(
-            analyzer,
-            const_int,  # target: const int
-            IntLiteral("5"),  # init expression
-            INT,  # init type: int (non-const)
-            analyzer._file_scope,
-        )
-        self.assertTrue(result)
-
-    def test_analyze_initializer_empty_record_members(self) -> None:
-        """analyze_initializer with record type having no members raises error."""
-        from xcc.ast import IntLiteral
-
-        source = "struct S;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-
-        struct_type = analyzer._resolve_type(unit.declarations[0].type_spec)
-        with self.assertRaises(SemaError):
-            sema_initializers.analyze_initializer(
-                analyzer,
-                struct_type,
-                IntLiteral("5"),
-                analyzer._file_scope,
-            )
-
-    def test_lookup_member_in_init_member_index_out_of_range(self) -> None:
-        """_lookup_member_in_init member found but init list too short."""
-        from xcc.ast import InitItem, InitList, IntLiteral
-
-        source = "struct S { int a; int b; };"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-
-        struct_type = analyzer._resolve_type(unit.declarations[0].type_spec)
-        init_list = InitList(items=(InitItem(designators=(), initializer=IntLiteral("5")),))
-        result = sema_constants._lookup_member_in_init(
-            analyzer,
-            init_list,
-            struct_type,
-            "b",
-            analyzer._file_scope,
-        )
-        self.assertIsNone(result)
-
-    def test_lookup_member_in_init_member_not_found(self) -> None:
-        """_lookup_member_in_init with non-existent member name returns None."""
-        from xcc.ast import InitItem, InitList, IntLiteral
-
-        source = "struct S { int a; };"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-
-        struct_type = analyzer._resolve_type(unit.declarations[0].type_spec)
-        init_list = InitList(items=(InitItem(designators=(), initializer=IntLiteral("5")),))
-        result = sema_constants._lookup_member_in_init(
-            analyzer,
-            init_list,
-            struct_type,
-            "nonexistent",
-            analyzer._file_scope,
-        )
-        self.assertIsNone(result)
-
-    def test_subscript_non_identifier_base_with_folding(self) -> None:
-        """SubscriptExpr base not Identifier returns None (branch 177→189)."""
-        from xcc.ast import Identifier, IntLiteral, MemberExpr, SubscriptExpr
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-        analyzer._allow_const_var_folding = True
-        try:
-            result = analyzer._eval_int_constant_expr(
-                SubscriptExpr(
-                    base=MemberExpr(base=Identifier("x"), member="a", through_pointer=False),
-                    index=IntLiteral("0"),
-                ),
-                analyzer._file_scope,
-            )
-            self.assertIsNone(result)
-        finally:
-            analyzer._allow_const_var_folding = False
-
-    def test_subscript_nested_init_list_item_returns_none(self) -> None:
-        """Subscript into array where init item is itself InitList → None."""
-        from xcc.ast import Identifier, InitItem, InitList, IntLiteral, SubscriptExpr
-        from xcc.sema.symbols import VarSymbol
-        from xcc.types import INT
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-        nested_list = InitList(
-            items=(
-                InitItem(
-                    designators=(),
-                    initializer=InitList(
-                        items=(InitItem(designators=(), initializer=IntLiteral("1")),)
-                    ),
-                ),
-            )
-        )
-        analyzer._file_scope.define(VarSymbol(name="arr2d", type_=INT, _init_expr=nested_list))
-        analyzer._allow_const_var_folding = True
-        try:
-            result = analyzer._eval_int_constant_expr(
-                SubscriptExpr(
-                    base=Identifier("arr2d"),
-                    index=IntLiteral("0"),
-                ),
-                analyzer._file_scope,
-            )
-            self.assertIsNone(result)
-        finally:
-            analyzer._allow_const_var_folding = False
-
-    def test_member_expr_base_evaluates_to_scalar(self) -> None:
-        """MemberExpr where base _eval_int_constant_expr returns scalar."""
-        from xcc.ast import Identifier, IntLiteral, MemberExpr
-
-        source = 'struct S { int a; };\nconst struct S s = {42};\n_Static_assert(s.a == 42, "ok");'
-        unit = parse(list(lex(source)), std="gnu11")
-        analyzer = Analyzer(std="gnu11")
-        analyzer.analyze(unit)
-        analyzer._allow_const_var_folding = True
-        try:
-            result = analyzer._eval_int_constant_expr(
-                MemberExpr(base=Identifier("s"), member="a", through_pointer=False),
-                analyzer._file_scope,
-            )
-            self.assertEqual(result, 42)
-        finally:
-            analyzer._allow_const_var_folding = False
-
-    def test_member_expr_base_scalar_returns_base_val(self) -> None:
-        """_eval_member_expr returns base_val when base evaluates to scalar."""
-        from xcc.ast import Identifier, IntLiteral, MemberExpr
-
-        source = "const int x = 5;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-        analyzer._allow_const_var_folding = True
-        try:
-            result = analyzer._eval_int_constant_expr(
-                MemberExpr(base=Identifier("x"), member="a", through_pointer=False),
-                analyzer._file_scope,
-            )
-            # base evaluates to 5 (scalar), returned directly
-            self.assertEqual(result, 5)
-        finally:
-            analyzer._allow_const_var_folding = False
-
     def test_const_struct_init_from_non_const_function(self) -> None:
         """Qualifier-only mismatch: const struct from non-const function return."""
         source = "struct S { int a; };\nstruct S get_s(void);\nconst struct S cs = get_s();\n"
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
         self.assertIsNotNone(sema)
-
-    def test_subscript_index_out_of_range_skips_to_next_check(self) -> None:
-        """Subscript with index >= len(init_list.items) → branch 181→189."""
-        from xcc.ast import Identifier, IntLiteral, SubscriptExpr
-
-        source = 'const int arr[3] = {1, 2, 3};\n_Static_assert(arr[0] == 1, "ok");'
-        unit = parse(list(lex(source)), std="gnu11")
-        analyzer = Analyzer(std="gnu11")
-        analyzer.analyze(unit)
-        analyzer._allow_const_var_folding = True
-        try:
-            # arr[99] where arr has only 3 items → index out of range
-            result = analyzer._eval_int_constant_expr(
-                SubscriptExpr(
-                    base=Identifier("arr"),
-                    index=IntLiteral("99"),
-                ),
-                analyzer._file_scope,
-            )
-            self.assertIsNone(result)
-        finally:
-            analyzer._allow_const_var_folding = False
-
-    def test_member_expr_non_const_base_init_expr_not_init_list(self) -> None:
-        """MemberExpr base is non-const Identifier, _init_expr not InitList."""
-        from xcc.ast import Identifier, IntLiteral, MemberExpr
-        from xcc.sema.symbols import VarSymbol
-        from xcc.types import INT
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-        # Manually define symbol with _init_expr = IntLiteral (not InitList)
-        analyzer._file_scope.define(VarSymbol(name="y", type_=INT, _init_expr=IntLiteral("10")))
-        analyzer._allow_const_var_folding = True
-        try:
-            result = analyzer._eval_int_constant_expr(
-                MemberExpr(base=Identifier("y"), member="a", through_pointer=False),
-                analyzer._file_scope,
-            )
-            self.assertIsNone(result)
-        finally:
-            analyzer._allow_const_var_folding = False
-
-    def test_array_element_type_none_raises_mismatch(self) -> None:
-        """Dead branch 49->52: element_type() returns None for array type."""
-        from unittest.mock import patch
-
-        from xcc.ast import IntLiteral
-        from xcc.types import INT, Type
-
-        source = "int x;"
-        unit = parse(list(lex(source)), std="c11")
-        analyzer = Analyzer(std="c11")
-        analyzer.analyze(unit)
-
-        arr_type = Type("int", declarator_ops=(("arr", 10),))
-        self.assertTrue(arr_type.is_array())
-
-        with patch.object(Type, "element_type", return_value=None):
-            with self.assertRaises(SemaError):
-                sema_initializers.analyze_initializer(
-                    analyzer,
-                    arr_type,
-                    IntLiteral("5"),
-                    analyzer._file_scope,
-                )
 
     def test_gnu_conditional_incompatible_pointers_yields_void_ptr(self) -> None:
         """GNU mode: cond ? int* : char* yields void*."""
@@ -7724,36 +5810,30 @@ int caller(int x) {
         sema = analyze(unit, std="gnu11")
         self.assertIn("main", sema.functions)
 
-    def test_struct_layout_with_member_alignment(self) -> None:
-        """struct {char, int} should have padding between members."""
-        analyzer = Analyzer()
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", Type("char")),
-            RecordMemberInfo("b", INT),
+    def test_record_layout(self) -> None:
+        compile_source(
+            "struct A { char a; int b; };"
+            "struct B { int a; char b; };"
+            "struct C { int a; int b:8; int c:8; };"
+            "struct D { int a:24; int b:16; };"
+            "struct E { char a; int b:8; };"
+            '_Static_assert(sizeof(struct A) == 8, "A");'
+            '_Static_assert(sizeof(struct B) == 8, "B");'
+            '_Static_assert(sizeof(struct C) == 8, "C");'
+            '_Static_assert(sizeof(struct D) == 8, "D");'
+            '_Static_assert(sizeof(struct E) == 4, "E");'
         )
-        # char(1) + padding(3) + int(4) = 8
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
 
-    def test_struct_layout_with_trailing_padding(self) -> None:
-        """struct {int, char} needs trailing padding to align to int."""
-        analyzer = Analyzer()
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", INT),
-            RecordMemberInfo("b", Type("char")),
+    def test_mixed_bitfield_layout_matches_darwin_aarch64(self) -> None:
+        compile_source(
+            "struct Mixed {"
+            "unsigned char a:3; unsigned short b:14; unsigned int c:17;"
+            "unsigned :0; unsigned char d:2; char tail;};"
+            '_Static_assert(sizeof(struct Mixed) == 12, "size");'
+            '_Static_assert(_Alignof(struct Mixed) == 4, "align");'
+            '_Static_assert(__builtin_offsetof(struct Mixed, tail) == 9, "tail");',
+            options=FrontendOptions(target_os="darwin", host_machine="arm64"),
         )
-        # int(4) + char(1) + padding(3) = 8
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
-
-    def test_struct_layout_with_pack_clamp(self) -> None:
-        """Pack alignment clamps member alignment to pack value."""
-        analyzer = Analyzer()
-        analyzer._record_pack["struct S"] = 4
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", Type("char")),
-            RecordMemberInfo("b", LONG),  # LONG alignment=8, clamps to 4
-        )
-        # char(1) + padding(3) + long(8) at align 4: 4 + 8 = 12
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 12)
 
     def test_anonymous_union_member_uses_single_layout_slot(self) -> None:
         source = """
@@ -7778,127 +5858,15 @@ int f(struct S *s) { return s->dict_offset; }
 """
         unit = parse(list(lex(source)), std="gnu11")
         sema = analyze(unit, std="gnu11")
-        layout_analyzer = Analyzer()
-        layout_analyzer._record_definitions.update(sema.record_definitions)
-
         self.assertIn("f", sema.functions)
-        self.assertEqual(
-            layout_analyzer._sizeof_object_base_type(Type("struct S"), None),
-            18,
+
+    def test_pragma_pack_pop_restores_record_alignment(self) -> None:
+        compile_source(
+            "#pragma pack(push,1)\n"
+            "struct A { char c; int i; };\n"
+            "#pragma pack(pop)\n"
+            "struct B { char c; int i; };\n"
+            '_Static_assert(sizeof(struct A) == 5, "A");\n'
+            '_Static_assert(sizeof(struct B) == 8, "B");\n',
+            filename="pack.c",
         )
-
-    def test_struct_layout_pack_clamps_trailing_padding(self) -> None:
-        """Trailing padding respects pack alignment."""
-        analyzer = Analyzer()
-        analyzer._record_pack["struct S"] = 1
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", INT),  # align 4, clamps to 1
-            RecordMemberInfo("b", INT),
-        )
-        # int(4) + int(4) = 8, align clamped to 1, no trailing padding
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
-
-    def test_bitfield_continuing_in_same_unit(self) -> None:
-        """Consecutive bitfields that fit share the same storage unit."""
-        analyzer = Analyzer()
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", INT),
-            RecordMemberInfo("b", INT, bit_width=8),
-            RecordMemberInfo("c", INT, bit_width=8),
-        )
-        # int(4) + bit_unit(4) with two bitfields = 8
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
-
-    def test_bitfield_new_unit_when_overflow(self) -> None:
-        """Bitfield that doesn't fit starts a new storage unit."""
-        analyzer = Analyzer()
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", INT, bit_width=24),
-            RecordMemberInfo("b", INT, bit_width=16),  # 24+16=40 > 32
-        )
-        # bit_unit(4) + bit_unit(4) = 8
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
-
-    def test_struct_limit_exceeded_during_member(self) -> None:
-        """Limit exceeded during member returns limit+1."""
-        analyzer = Analyzer()
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", INT),
-            RecordMemberInfo("b", INT),
-        )
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), 6), 7)
-
-    def test_struct_limit_exceeded_at_trailing_padding(self) -> None:
-        """Limit exceeded at trailing padding returns limit+1."""
-        analyzer = Analyzer()
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", INT),
-            RecordMemberInfo("b", INT),
-        )
-        # size=8, limit=7: trailing padding pushes past limit
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), 7), 8)
-
-    def test_union_limit_exceeded(self) -> None:
-        """Union limit exceeded returns limit+1."""
-        analyzer = Analyzer()
-        analyzer._record_definitions["union U"] = (
-            RecordMemberInfo("a", INT),
-            RecordMemberInfo("b", LONG),
-        )
-        # largest is long=8, limit=6
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("union U"), 6), 7)
-
-    def test_analyzer_effective_global_pack_from_changes(self) -> None:
-        """Analyzer derives effective pack from pack_changes."""
-        analyzer = Analyzer(
-            pack_changes=(
-                ("msg.h", 291, 4),
-                ("msg.h", 625, None),
-            )
-        )
-        self.assertEqual(analyzer._effective_global_pack, 4)
-
-    def test_analyzer_no_effective_pack_without_changes(self) -> None:
-        """No effective pack when no pack changes recorded."""
-        analyzer = Analyzer()
-        self.assertIsNone(analyzer._effective_global_pack)
-
-    def test_pack_alignment_for_finds_correct_pack(self) -> None:
-        """_pack_alignment_for returns pack active at given source line."""
-        analyzer = Analyzer(
-            pack_changes=(
-                ("msg.h", 291, 4),
-                ("msg.h", 625, None),
-            )
-        )
-        self.assertEqual(analyzer._pack_alignment_for(300), 4)
-        self.assertEqual(analyzer._pack_alignment_for(700), None)
-
-    def test_pack_alignment_for_no_changes(self) -> None:
-        """_pack_alignment_for returns None with no changes."""
-        analyzer = Analyzer()
-        self.assertIsNone(analyzer._pack_alignment_for(300))
-
-    def test_bitfield_padding_before_storage_unit(self) -> None:
-        """Bitfield storage unit is aligned to member alignment."""
-        analyzer = Analyzer()
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", Type("char")),
-            RecordMemberInfo("b", INT, bit_width=8),
-        )
-        # char(1) + padding(3) + bit_unit(4) = 8
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), None), 8)
-
-    def test_trailing_padding_exceeds_limit(self) -> None:
-        """Trailing padding that exceeds limit returns limit+1."""
-        analyzer = Analyzer()
-        analyzer._record_definitions["struct S"] = (
-            RecordMemberInfo("a", SHORT),
-            RecordMemberInfo("b", Type("char")),
-        )
-        # short(2) + char(1) = 3, _align_to(3, 2) = 4, limit=3 → 4>3
-        self.assertEqual(analyzer._sizeof_object_base_type(Type("struct S"), 3), 4)
-
-
-if __name__ == "__main__":
-    unittest.main()

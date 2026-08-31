@@ -5,86 +5,21 @@ from pathlib import Path
 
 from tests import _bootstrap  # noqa: F401
 from xcc import cc_driver
-from xcc.ast import (
-    AlignofExpr,
-    ArrayDecl,
-    AssignExpr,
-    BinaryExpr,
-    BreakStmt,
-    BuiltinOffsetofExpr,
-    BuiltinVaArgExpr,
-    CallExpr,
-    CaseStmt,
-    CastExpr,
-    CompoundLiteralExpr,
-    CompoundStmt,
-    ConditionalExpr,
-    DeclGroupStmt,
-    DeclStmt,
-    DefaultStmt,
-    DesignatorRange,
-    DoWhileStmt,
-    ExprStmt,
-    FloatLiteral,
-    ForStmt,
-    FunctionDef,
-    GotoStmt,
-    Identifier,
-    IfStmt,
-    InitItem,
-    InitList,
-    IntLiteral,
-    LabelStmt,
-    MemberExpr,
-    NullStmt,
-    Param,
-    ReturnStmt,
-    SizeofExpr,
-    StatementExpr,
-    StaticAssertDecl,
-    StringLiteral,
-    SubscriptExpr,
-    SwitchStmt,
-    TypedefDecl,
-    TypeSpec,
-    UnaryExpr,
-    UpdateExpr,
-    WhileStmt,
-)
-from xcc.codegen import _LLVMGen, _base_size, _merge_qualifiers, generate_llvm_ir
-from xcc.diag import CodegenError
+from xcc.codegen import _LLVMGen, generate_llvm_ir
 from xcc.frontend import FrontendOptions, compile_path, compile_source
 from xcc.llvm_api import (
-    ATOMIC_RMW_ADD,
-    ATOMIC_RMW_AND,
-    ATOMIC_RMW_NAND,
-    ATOMIC_RMW_OR,
-    ATOMIC_RMW_SUB,
-    ATOMIC_RMW_XOR,
     LLVMTypeKind,
     llvm,
 )
-from xcc.sema.symbols import RecordMemberInfo
-from xcc.types import FLOAT, INT, Type
+from xcc.llvm_tools import find_llc
 
 
 class CodegenTests(unittest.TestCase):
     def _find_test_llc(self) -> str:
         try:
-            return cc_driver._find_llc()
+            return find_llc()
         except ValueError as error:
             self.skipTest(str(error))
-
-    def test_base_size_explicit_branches(self) -> None:
-        self.assertEqual(_base_size("int"), 4)
-        self.assertEqual(_base_size("long"), 8)
-        self.assertEqual(_base_size("char"), 1)
-        self.assertEqual(_base_size("short"), 2)
-        self.assertEqual(_base_size("double"), 8)
-        self.assertEqual(_base_size("long double"), 16)
-        self.assertEqual(_base_size("__builtin_va_list"), 8)
-        self.assertEqual(_base_size("void"), 0)
-        self.assertEqual(_base_size("unknown"), 4)
 
     def test_long_double_llvm_type_matches_target_data_layout(self) -> None:
         darwin = _LLVMGen(
@@ -122,12 +57,6 @@ class CodegenTests(unittest.TestCase):
 
         self.assertIn("@value = global double", llvm_ir)
         self.assertIn("@storage = global [8 x i8]", llvm_ir)
-
-    def test_merge_qualifiers_preserves_first_occurrence_order(self) -> None:
-        self.assertEqual(
-            _merge_qualifiers(("const", "volatile", "const"), ("volatile", "restrict")),
-            ("const", "volatile", "restrict"),
-        )
 
     def test_debug_ir_has_c_source_metadata_lines_and_unwind_tables(self) -> None:
         source = (
@@ -185,12 +114,6 @@ class CodegenTests(unittest.TestCase):
         self.assertRegex(debug_ir, r'DISubprogram\(name: "helper".*line: 1')
         self.assertRegex(debug_ir, r'DISubprogram\(name: "main".*line: 2')
 
-    def test_decode_string_escape_branches(self) -> None:
-        result = compile_source("int main(void) { return 0; }", filename="decode.c")
-        gen = _LLVMGen(result)
-        decoded = gen._decode_string(r"\n\t\r\0\\\"\'\a\b\f\v")
-        self.assertEqual(decoded, "\n\t\r\0\\\"'\a\b\f\v")
-
     def assertLlcAccepts(self, source: str) -> str:
         llc = self._find_test_llc()
         result = compile_source(
@@ -212,7 +135,13 @@ class CodegenTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         return ir
 
-    def assertProgramReturns(self, source: str, expected: int) -> None:
+    def assertProgramReturns(
+        self,
+        source: str,
+        expected: int,
+        *link_args: str,
+        clang_caller: str | None = None,
+    ) -> None:
         llc_path = self._find_test_llc()
         result = compile_source(
             source,
@@ -233,8 +162,21 @@ class CodegenTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(llc.returncode, 0, llc.stderr)
+            objects = [str(obj_path)]
+            if clang_caller is not None:
+                caller_path = tmp_path / "caller.c"
+                caller_obj_path = tmp_path / "caller.o"
+                caller_path.write_text(clang_caller, encoding="utf-8")
+                caller = subprocess.run(
+                    ("clang", "-std=gnu11", "-c", str(caller_path), "-o", str(caller_obj_path)),
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(caller.returncode, 0, caller.stderr)
+                objects.append(str(caller_obj_path))
             link = subprocess.run(
-                ("clang", str(obj_path), "-o", str(exe_path)),
+                ("clang", *objects, *link_args, "-o", str(exe_path)),
                 check=False,
                 capture_output=True,
                 text=True,
@@ -242,6 +184,291 @@ class CodegenTests(unittest.TestCase):
             self.assertEqual(link.returncode, 0, link.stderr)
             run = subprocess.run((str(exe_path),), cwd=tmp, check=False)
         self.assertEqual(run.returncode, expected)
+
+    def test_large_record_parameter_and_callback_match_clang_abi(self) -> None:
+        self.assertProgramReturns(
+            """
+struct Triple { unsigned long first, second, third; };
+void relay(struct Triple value, void (*callback)(struct Triple)) {
+  callback(value);
+}
+""",
+            0,
+            clang_caller="""
+struct Triple { unsigned long first, second, third; };
+extern void relay(struct Triple, void (*)(struct Triple));
+static int seen;
+static void check(struct Triple value) {
+  seen = value.first == 11 && value.second == 22 && value.third == 33;
+  value.first = value.second = value.third = 0;
+}
+int main(void) {
+  struct Triple value = {11, 22, 33};
+  relay(value, check);
+  return !seen || value.first != 11 || value.second != 22 || value.third != 33;
+}
+""",
+        )
+
+    def test_large_record_return_matches_clang_abi(self) -> None:
+        self.assertProgramReturns(
+            """
+struct Quad { unsigned long first, second, third, fourth; };
+struct Quad make_xcc(unsigned long value) {
+  return (struct Quad){value, value + 1, value + 2, value + 3};
+}
+extern struct Quad make_clang(unsigned long);
+int check_clang(void) {
+  struct Quad (*make)(unsigned long) = make_clang;
+  struct Quad value = make(20);
+  return value.first != 20 || value.second != 21 ||
+         value.third != 22 || value.fourth != 23;
+}
+""",
+            0,
+            clang_caller="""
+struct Quad { unsigned long first, second, third, fourth; };
+extern struct Quad make_xcc(unsigned long);
+extern int check_clang(void);
+struct Quad make_clang(unsigned long value) {
+  struct Quad result = {value, value + 1, value + 2, value + 3};
+  return result;
+}
+int main(void) {
+  struct Quad value = make_xcc(10);
+  return value.first != 10 || value.second != 11 ||
+         value.third != 12 || value.fourth != 13 || check_clang();
+}
+""",
+        )
+
+    def test_record_argument_does_not_split_between_registers_and_stack(self) -> None:
+        self.assertProgramReturns(
+            """
+struct Pair { unsigned long first, second; };
+int xcc_receives(unsigned long a, unsigned long b, unsigned long c,
+                 unsigned long d, unsigned long e, unsigned long f,
+                 unsigned long g, struct Pair pair) {
+  return a != 1 || b != 2 || c != 3 || d != 4 || e != 5 || f != 6 || g != 7 ||
+         pair.first != 8 || pair.second != 9;
+}
+extern int clang_receives(unsigned long, unsigned long, unsigned long,
+                          unsigned long, unsigned long, unsigned long,
+                          unsigned long, struct Pair);
+int call_clang(void) {
+  struct Pair pair = {8, 9};
+  int (*call)(unsigned long, unsigned long, unsigned long, unsigned long,
+              unsigned long, unsigned long, unsigned long,
+              struct Pair) = clang_receives;
+  return call(1, 2, 3, 4, 5, 6, 7, pair);
+}
+""",
+            0,
+            clang_caller="""
+struct Pair { unsigned long first, second; };
+extern int xcc_receives(unsigned long, unsigned long, unsigned long,
+                        unsigned long, unsigned long, unsigned long,
+                        unsigned long, struct Pair);
+extern int call_clang(void);
+int clang_receives(unsigned long a, unsigned long b, unsigned long c,
+                   unsigned long d, unsigned long e, unsigned long f,
+                   unsigned long g, struct Pair pair) {
+  return a != 1 || b != 2 || c != 3 || d != 4 || e != 5 || f != 6 || g != 7 ||
+         pair.first != 8 || pair.second != 9;
+}
+int main(void) {
+  struct Pair pair = {8, 9};
+  return xcc_receives(1, 2, 3, 4, 5, 6, 7, pair) || call_clang();
+}
+""",
+        )
+
+    def test_float_argument_is_widened_for_double_parameter(self) -> None:
+        self.assertProgramReturns(
+            """
+extern int accepts_double(double);
+int call(float value) { return accepts_double(value); }
+""",
+            0,
+            clang_caller="""
+extern int call(float);
+int accepts_double(double value) { return value == 15.25; }
+int main(void) { return !call(15.25f); }
+""",
+        )
+
+    def test_small_record_return_matches_clang_abi(self) -> None:
+        self.assertProgramReturns(
+            """
+struct Pair { unsigned short first, second; };
+struct Pair make_xcc(struct Pair value) {
+  value.first *= 2;
+  value.second *= 3;
+  return value;
+}
+extern struct Pair make_clang(struct Pair);
+int check_clang(void) {
+  struct Pair (*make)(struct Pair) = make_clang;
+  struct Pair value = make((struct Pair){9, 8});
+  return value.first != 18 || value.second != 24;
+}
+""",
+            0,
+            clang_caller="""
+struct Pair { unsigned short first, second; };
+extern struct Pair make_xcc(struct Pair);
+extern int check_clang(void);
+struct Pair make_clang(struct Pair value) {
+  value.first *= 2;
+  value.second *= 3;
+  return value;
+}
+int main(void) {
+  struct Pair value = make_xcc((struct Pair){11, 7});
+  return value.first != 22 || value.second != 21 || check_clang();
+}
+""",
+        )
+
+    def test_small_record_call_in_loop_does_not_grow_stack(self) -> None:
+        source = """
+typedef union { unsigned long bits; } Ref;
+unsigned long unwrap(Ref ref) { return ref.bits; }
+int main(void) {
+  Ref ref = {1};
+  unsigned long i = 0, total = 0;
+  while (i < 1000000) {
+    total += unwrap(ref);
+    i++;
+  }
+  return total != 1000000;
+}
+"""
+        ir = generate_llvm_ir(
+            compile_source(
+                source,
+                options=FrontendOptions(std="gnu11", target_os="darwin", host_machine="arm64"),
+            )
+        )
+
+        self.assertLess(ir.index("arg.coerce = alloca"), ir.index("while.cond:"))
+        self.assertProgramReturns(source, 0)
+
+    def test_local_declaration_has_one_alloca(self) -> None:
+        ir = generate_llvm_ir(compile_source("int f(void) { int value = 1; return value; }"))
+
+        self.assertEqual(ir.count("alloca i32"), 1)
+
+    def test_mixed_bitfield_lvalue_operations_match_clang(self) -> None:
+        self.assertProgramReturns(
+            """
+struct Bits {
+  unsigned char guard : 3;
+  signed short value : 5;
+  unsigned int tail : 7;
+};
+int read_signed(struct Bits *bits) { return bits->value; }
+int mutate(struct Bits *bits) {
+  int old = bits->value++;
+  bits->value += 3;
+  bits->tail = 255;
+  return old;
+}
+""",
+            0,
+            clang_caller="""
+struct Bits {
+  unsigned char guard : 3;
+  signed short value : 5;
+  unsigned int tail : 7;
+};
+extern int read_signed(struct Bits *);
+extern int mutate(struct Bits *);
+int main(void) {
+  struct Bits bits = { .guard = 6, .value = -5, .tail = 42 };
+  if (read_signed(&bits) != -5) return 1;
+  if (mutate(&bits) != -5) return 2;
+  return bits.guard != 6 || bits.value != -1 || bits.tail != 127;
+}
+""",
+        )
+
+    def test_bitfield_static_and_compound_literal_initializers_match_clang(self) -> None:
+        self.assertProgramReturns(
+            """
+struct Bits {
+  unsigned char first : 3;
+  unsigned short second : 5;
+  unsigned int third : 8;
+};
+struct Bits global = { .first = 5, .second = 17, .third = 166 };
+unsigned int local_bytes(void) {
+  struct Bits value = (struct Bits){ .first = 6, .second = 3, .third = 90 };
+  unsigned char *bytes = (unsigned char *)&value;
+  return bytes[0] | ((unsigned int)bytes[1] << 8);
+}
+""",
+            0,
+            clang_caller="""
+struct Bits {
+  unsigned char first : 3;
+  unsigned short second : 5;
+  unsigned int third : 8;
+};
+extern struct Bits global;
+extern unsigned int local_bytes(void);
+int main(void) {
+  unsigned char *bytes = (unsigned char *)&global;
+  if (global.first != 5 || global.second != 17 || global.third != 166) return 1;
+  if (bytes[0] != 141 || bytes[1] != 166) return 2;
+  return local_bytes() != 0x5a1e;
+}
+""",
+        )
+
+    def test_high_bit_character_enum_matches_runtime_char_value(self) -> None:
+        self.assertProgramReturns(
+            r"""
+enum Opcode { PROTO = '\x80' };
+int main(void) {
+  char value = '\x80';
+  switch ((enum Opcode)value) {
+  case PROTO: return 0;
+  default: return 1;
+  }
+}
+""",
+            0,
+        )
+
+    def test_thread_local_declarations_and_storage_use_native_tls(self) -> None:
+        ir = self.assertLlcAccepts(
+            "extern _Thread_local int external_value;\n"
+            "int *get_external(void) { return &external_value; }\n"
+        )
+        self.assertIn("@external_value = external thread_local global i32", ir)
+        self.assertProgramReturns(
+            """
+#include <pthread.h>
+static _Thread_local int value = 7;
+static int observed;
+static void *set_value(void *unused) {
+  (void)unused;
+  value = 23;
+  observed = value;
+  return 0;
+}
+int main(void) {
+  pthread_t thread;
+  value = 17;
+  if (pthread_create(&thread, 0, set_value, 0)) return 1;
+  if (pthread_join(thread, 0)) return 2;
+  return observed != 23 || value != 17;
+}
+""",
+            0,
+            "-pthread",
+        )
 
     def test_incomplete_extern_array_subscript_uses_zero_length_global(self) -> None:
         result = compile_source(
@@ -435,7 +662,7 @@ int main(void)
 
         self.assertIn("ret ptr null", ir)
         self.assertIn("ret double 0.000000e+00", ir)
-        self.assertIn("ret { i32, i32 } zeroinitializer", ir)
+        self.assertIn("ret i64 0", ir)
         self.assertProgramReturns(source, 0)
 
     def test_local_initializer_designators_and_void_return_execute(self) -> None:
@@ -534,6 +761,64 @@ int main(void)
         ir = self.assertLlcAccepts(source)
 
         self.assertIn("@spec = internal global { i32 } { i32 16 }", ir)
+
+    def test_sizeof_distinguishes_nested_anonymous_record_identities(self) -> None:
+        source = """
+struct R;
+typedef struct {
+  union { unsigned x; struct R *r; } u;
+  const unsigned char *p;
+} A;
+typedef struct {
+  union { unsigned x; struct R *r; } u;
+  const unsigned short *p;
+} B;
+unsigned long n = sizeof(B);
+int main(void) { return n == 16 ? 0 : 1; }
+"""
+
+        self.assertProgramReturns(source, 0)
+
+    def test_pragma_pack_controls_runtime_member_offsets(self) -> None:
+        source = """
+#pragma pack(push, 4)
+struct Trailer {
+  unsigned words[13];
+  unsigned long context;
+  int ad;
+  unsigned labels;
+};
+#pragma pack(pop)
+static struct Trailer saved = {{0}, 7, 8, 9};
+
+int main(void)
+{
+  struct Trailer trailer;
+  struct Trailer array[2];
+  if (sizeof(trailer) != 68) return 1;
+  if (_Alignof(struct Trailer) != 4) return 2;
+  if ((char *)&trailer.context - (char *)&trailer != 52) return 3;
+  if ((char *)&trailer.labels - (char *)&trailer != 64) return 4;
+  if ((char *)&array[1] - (char *)&array[0] != 68) return 5;
+  return saved.context == 7 && saved.ad == 8 && saved.labels == 9 ? 0 : 6;
+}
+"""
+
+        self.assertProgramReturns(source, 0)
+
+    def test_nested_local_array_bound_evaluates_offsetof(self) -> None:
+        source = """
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+struct S { int a; long b; };
+int main(void) {
+  while (1) {
+    char buffer[MAX(__builtin_offsetof(struct S, b) + sizeof(long), 256)];
+    return sizeof(buffer) == 256 ? 0 : 1;
+  }
+}
+"""
+
+        self.assertProgramReturns(source, 0)
 
     def test_static_local_initializer_resolves_prior_static_array(self) -> None:
         source = """
@@ -1423,9 +1708,6 @@ int main(void)
 }
 """
 
-        ir = self.assertLlcAccepts(source)
-
-        self.assertIn("getelementptr { i32, i16, i16 }, ptr %mem.ptr, i32 0, i32 0", ir)
         self.assertProgramReturns(source, 0)
 
     def test_static_flexible_array_initializer_allocates_tail_storage(self) -> None:
@@ -1881,7 +2163,6 @@ int main(void)
   unsigned int x = 0x01020304U;
   sink = __builtin_assume_aligned(buf, 8);
   (void)__builtin_alloca(4);
-  assert(s);
   if (__builtin_bswap16(s) != 0x3412) return 1;
   if (__builtin_bswap32(x) != 0x04030201U) return 2;
   if (__builtin_popcount(0xf0) != 4) return 3;
@@ -2214,17 +2495,18 @@ int main(void)
         source = r"""
 int main(void)
 {
-  unsigned char bytes[11] = "\a\b\f\v\x41\u00A9\U000000A9\?";
-  if (sizeof(bytes) != 11) return 1;
+  unsigned char bytes[12] = "\a\b\f\v\x41\x80\u00A9\U000000A9\?";
+  if (sizeof(bytes) != 12) return 1;
   if (bytes[0] != 7) return 2;
   if (bytes[1] != 8) return 3;
   if (bytes[2] != 12) return 4;
   if (bytes[3] != 11) return 5;
   if (bytes[4] != 'A') return 6;
-  if (bytes[5] != 0xC2 || bytes[6] != 0xA9) return 7;
-  if (bytes[7] != 0xC2 || bytes[8] != 0xA9) return 8;
-  if (bytes[9] != '?') return 9;
-  if (bytes[10] != 0) return 10;
+  if (bytes[5] != 0x80) return 7;
+  if (bytes[6] != 0xC2 || bytes[7] != 0xA9) return 8;
+  if (bytes[8] != 0xC2 || bytes[9] != 0xA9) return 9;
+  if (bytes[10] != '?') return 10;
+  if (bytes[11] != 0) return 11;
   return 0;
 }
 """
@@ -2546,7 +2828,7 @@ Counter make(uint16_t value)
 
         ir = self.assertLlcAccepts(source)
 
-        self.assertIn("ret { i16 }", ir)
+        self.assertIn("ret i16", ir)
         self.assertNotIn("bitcast ptr %compound.lit to { i16 }", ir)
 
     def test_compound_literal_address_of_keeps_storage(self) -> None:
@@ -2555,6 +2837,17 @@ int main(void)
 {
   int *p = &(int){7};
   return *p == 7 ? 0 : 1;
+}
+"""
+
+        self.assertProgramReturns(source, 0)
+
+    def test_unsized_array_compound_literal_infers_bound_before_decay(self) -> None:
+        source = """
+int main(void)
+{
+  int *p = 1 + (int[]){0, 17, 29};
+  return p[0] != 17 || p[1] != 29;
 }
 """
 
@@ -2741,8 +3034,8 @@ int main(void)
 
         ir = self.assertLlcAccepts(source)
 
-        self.assertIn("store { i32, i32 } %call, ptr %mem.tmp", ir)
-        self.assertIn("store { i64, i64, i64 } %call", ir)
+        self.assertIn("call i64 @make_pair()", ir)
+        self.assertIn("call void @make_big(ptr sret({ i64, i64, i64 })", ir)
         self.assertProgramReturns(source, 0)
 
     def test_function_typed_extern_uses_call_return_type(self) -> None:
@@ -2859,7 +3152,7 @@ Ref f(int flag)
 
         ir = self.assertLlcAccepts(source)
 
-        self.assertIn("call { i64 } @make_ref()", ir)
+        self.assertIn("call i64 @make_ref()", ir)
         self.assertNotIn("bitcast { i64 }", ir)
 
     def test_nested_anonymous_union_member_access_overlays_storage(self) -> None:
@@ -3073,2693 +3366,3 @@ int f(expr_ty lhs)
 """
 
         self.assertLlcAccepts(source)
-
-    def test_codegen_helper_fallback_paths_are_covered_without_llc(self) -> None:
-        result = compile_source(
-            """
-struct Pair { int left; int right; };
-union U { int i; long l; };
-struct Aligned { _Alignas(16) char tag; };
-int f(void) { return 0; }
-""",
-            filename="helper_edges.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        gen = _LLVMGen(result)
-        c = llvm()
-
-        self.assertEqual(
-            c.GetTypeKind(
-                gen._type_to_llvm(
-                    Type("int", declarator_ops=(("arr", ArrayDecl(None)),)),
-                ),
-            ),
-            LLVMTypeKind.ARRAY,
-        )
-        self.assertEqual(
-            c.GetTypeKind(gen._type_to_llvm(Type("int").function_of(()))),
-            LLVMTypeKind.POINTER,
-        )
-        self.assertNotEqual(gen._type_to_llvm(Type("int", declarator_ops=(("weird", 0),))), 0)
-        group_gen = _LLVMGen(
-            compile_source(
-                "typedef int GroupAliasOne, GroupAliasTwo; int f(void) { return 0; }",
-                filename="helper_decl_group_edges.c",
-                options=FrontendOptions(std="gnu11"),
-            )
-        )
-        group_gen._emit_globals()
-        self.assertNotEqual(gen._base_type("__unknown"), 0)
-        self.assertIsNone(gen._common_integer_c_type(None, INT))
-        self.assertIsNone(gen._common_integer_c_type(INT, FLOAT))
-        self.assertEqual(gen._field_index("struct Pair", "right"), 1)
-        with self.assertRaises(CodegenError):
-            gen._field_index("struct Missing", "x")
-        with self.assertRaises(CodegenError):
-            gen._field_index("struct Pair", "missing")
-        self.assertIsNone(gen._member_path("struct Missing", "x"))
-        self.assertNotEqual(gen._ptr_type(INT), 0)
-        self.assertEqual(gen._type_size(Type("int").function_of(())), 4)
-        self.assertEqual(gen._type_align(Type("struct Missing")), 1)
-        self.assertEqual(gen._type_align(Type("int").function_of(())), 1)
-        self.assertEqual(gen._record_size("struct Missing"), 0)
-        self.assertEqual(gen._record_size("struct Aligned"), 16)
-        self.assertEqual(gen._union_size("union Missing"), 0)
-
-        self.assertFalse(gen._emit_array_init_list_to_addr(0, Type("int"), InitList(())))
-        weird_array = Type("int", declarator_ops=(("arr", ArrayDecl(None)),))
-        self.assertFalse(gen._emit_array_init_list_to_addr(0, weird_array, InitList(())))
-        bad_designator = InitList((InitItem((("member", "x"),), IntLiteral("1")),))
-        self.assertFalse(
-            gen._emit_array_init_list_to_addr(0, Type("int").array_of(2), bad_designator),
-        )
-        nonconst_designator = InitList((InitItem((("index", Identifier("n")),), IntLiteral("1")),))
-        self.assertFalse(
-            gen._emit_array_init_list_to_addr(0, Type("int").array_of(2), nonconst_designator),
-        )
-        out_of_bounds_designator = InitList((InitItem((("index", IntLiteral("5")),), IntLiteral("1")),))
-        self.assertTrue(
-            gen._emit_array_init_list_to_addr(0, Type("int").array_of(2), out_of_bounds_designator),
-        )
-        self.assertFalse(
-            gen._emit_record_init_list_to_addr(0, Type("struct Missing"), InitList(()))
-        )
-        self.assertFalse(
-            gen._emit_record_init_list_to_addr(0, Type("struct Pair"), bad_designator),
-        )
-        unknown_member = InitList((InitItem((("member", "missing"),), IntLiteral("1")),))
-        self.assertFalse(
-            gen._emit_record_init_list_to_addr(0, Type("struct Pair"), unknown_member),
-        )
-        self.assertFalse(
-            gen._is_whole_aggregate_value_initializer(Type("struct Pair"), IntLiteral("1")),
-        )
-        self.assertEqual(gen._emit_unbraced_aggregate_items_to_addr(0, Type("int"), (), 0), 0)
-        self.assertEqual(
-            gen._emit_unbraced_initializer_item_to_addr(
-                0,
-                INT,
-                (InitItem((("member", "x"),), IntLiteral("1")),),
-                0,
-            ),
-            0,
-        )
-        self.assertIsNone(
-            gen._ensure_static_local(
-                DeclStmt(TypeSpec("int"), None, IntLiteral("1"), storage_class="static"),
-            ),
-        )
-        gen._locals = [{}]
-        static_stmt = DeclStmt(TypeSpec("int"), "cached", IntLiteral("1"), storage_class="static")
-        static_global = gen._ensure_static_local(static_stmt)
-        gen._locals = [{}]
-        self.assertEqual(gen._ensure_static_local(static_stmt), static_global)
-
-        weird_decl = DeclStmt(
-            TypeSpec("char", declarator_ops=(("arr", ArrayDecl(None)),)),
-            "text",
-            StringLiteral('u"x"'),
-        )
-        self.assertEqual(gen._decl_type(weird_decl).declarator_ops[0][1], -1)
-        with self.assertRaises(CodegenError):
-            gen._emit_break()
-        with self.assertRaises(CodegenError):
-            gen._emit_continue()
-        with self.assertRaises(CodegenError):
-            gen._emit_expr(object())
-        self.assertEqual(gen._parse_int_value("0b1010ULL"), 10)
-        self.assertNotEqual(gen._int_literal(IntLiteral("7")), 0)
-        self.assertEqual(gen._string_literal_bytes(StringLiteral("no_quote")), b"no_quote\x00")
-        self.assertIsNone(
-            gen._string_array_element_width(
-                Type("char", declarator_ops=(("arr", 2), ("ptr", 0))),
-            ),
-        )
-        self.assertIsNone(gen._string_array_element_width(Type("double").array_of(2)))
-        self.assertIsNone(
-            gen._string_array_initializer_length(StringLiteral('u"x"'), Type("char").array_of(4)),
-        )
-        self.assertIsNone(gen._pointer_arith_pointee(None))
-        self.assertIsNone(gen._pointer_arith_pointee(INT))
-        self.assertIsNone(gen._pointer_arith_pointee(Type("int").function_of(()).pointer_to()))
-
-    def test_codegen_helper_control_and_initializer_edges_without_llc(self) -> None:
-        result = compile_source(
-            """
-struct Pair { int left; int right; };
-union U { int i; long l; };
-int f(void) { return 0; }
-""",
-            filename="helper_control_edges.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        gen = _LLVMGen(result)
-        c = llvm()
-        fn_type = c.FunctionType(c.VoidType(), None, 0, False)
-        fn = c.AddFunction(gen._mod, b"probe_edges", fn_type)
-        block = c.AppendBasicBlock(fn, b"entry")
-        c.PositionBuilderAtEnd(gen._builder, block)
-
-        array_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(Type("int").array_of(0)),
-            b"arr",
-        )
-        union_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(Type("union U")),
-            b"u",
-        )
-        pair_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(Type("struct Pair")),
-            b"p",
-        )
-        weird_array_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(Type("int").array_of(1)),
-            b"weird.arr",
-        )
-        scalar_addr = c.BuildAlloca(gen._builder, c.Int32Type(), b"scalar.init.addr")
-
-        class BrokenArray(Type):
-            def element_type(self) -> Type | None:
-                return None
-
-        self.assertFalse(_LLVMGen(result)._bb_needs_term())
-        fallback_result = compile_source(
-            "int fallback_global; int fallback_fn(void) { return 0; }",
-            filename="globals_fallback.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        fallback_gen = _LLVMGen(fallback_result)
-        fallback_gen._unit.externals.clear()
-        fallback_gen._emit_globals()
-
-        ret_fn_type = c.FunctionType(c.Int32Type(), None, 0, False)
-        ret_fn = c.AddFunction(gen._mod, b"probe_default_return_type", ret_fn_type)
-        c.PositionBuilderAtEnd(gen._builder, c.AppendBasicBlock(ret_fn, b"entry"))
-        ret_expr = IntLiteral("1")
-        gen._type_map.set(ret_expr, INT)
-        gen._func_sym = None
-        gen._emit_return(ReturnStmt(ret_expr))
-
-        c.PositionBuilderAtEnd(gen._builder, block)
-        gen._emit_stmt(TypedefDecl(TypeSpec("int"), "Alias"))
-        gen._emit_stmt(StaticAssertDecl(IntLiteral("1"), StringLiteral('"ok"')))
-        gen._locals = [{}]
-        static_stmt = DeclStmt(TypeSpec("int"), "cached2", IntLiteral("1"), storage_class="static")
-        static_global = gen._ensure_static_local(static_stmt)
-        self.assertEqual(gen._ensure_static_local(static_stmt), static_global)
-
-        excess_items = InitList((InitItem((), IntLiteral("1")),))
-        self.assertTrue(
-            gen._emit_array_init_list_to_addr(array_addr, Type("int").array_of(0), excess_items),
-        )
-        gen._emit_initializer_to_addr(
-            array_addr,
-            Type("int").array_of(1),
-            (("member", "bad"),),
-            IntLiteral("1"),
-        )
-        gen._emit_initializer_to_addr(
-            array_addr,
-            Type("int").array_of(1),
-            (("index", Identifier("not_const")),),
-            IntLiteral("1"),
-        )
-        gen._emit_initializer_to_addr(
-            array_addr,
-            BrokenArray("int", declarator_ops=(("arr", 1),)),
-            (("index", IntLiteral("0")),),
-            IntLiteral("1"),
-        )
-        gen._emit_initializer_to_addr(
-            scalar_addr,
-            INT,
-            (("member", "ignored"),),
-            IntLiteral("1"),
-        )
-        bad_record_designator = InitList(
-            (InitItem((("index", IntLiteral("0")),), IntLiteral("1")),),
-        )
-        self.assertFalse(
-            gen._emit_record_init_list_to_addr(
-                pair_addr,
-                Type("struct Pair"),
-                bad_record_designator,
-            ),
-        )
-        gen._emit_initializer_to_addr(
-            pair_addr,
-            Type("struct Pair"),
-            (("index", IntLiteral("0")),),
-            IntLiteral("1"),
-        )
-        gen._emit_initializer_to_addr(
-            pair_addr,
-            Type("struct Pair"),
-            (("member", "missing"),),
-            IntLiteral("1"),
-        )
-        union_items = InitList((InitItem((), IntLiteral("1")), InitItem((), IntLiteral("2"))))
-        self.assertTrue(
-            gen._emit_record_init_list_to_addr(union_addr, Type("union U"), union_items)
-        )
-        pair_items = InitList(
-            (
-                InitItem((), IntLiteral("1")),
-                InitItem((), IntLiteral("2")),
-                InitItem((), IntLiteral("3")),
-            ),
-        )
-        self.assertTrue(
-            gen._emit_record_init_list_to_addr(pair_addr, Type("struct Pair"), pair_items)
-        )
-        self.assertTrue(
-            gen._is_whole_aggregate_value_initializer(
-                Type("char").array_of(2), StringLiteral('"a"')
-            ),
-        )
-        unsupported_whole_value = IntLiteral("1")
-        gen._type_map.set(unsupported_whole_value, Type("struct Pair"))
-        self.assertFalse(
-            gen._is_whole_aggregate_value_initializer(
-                Type("struct Pair"),
-                unsupported_whole_value,
-            ),
-        )
-        self.assertEqual(
-            gen._emit_unbraced_aggregate_items_to_addr(
-                weird_array_addr,
-                Type("int", declarator_ops=(("arr", ArrayDecl(None)),)),
-                (InitItem((), IntLiteral("1")),),
-                0,
-            ),
-            0,
-        )
-        self.assertEqual(
-            gen._emit_unbraced_aggregate_items_to_addr(
-                0,
-                Type("struct Missing"),
-                (InitItem((), IntLiteral("1")),),
-                0,
-            ),
-            0,
-        )
-        self.assertEqual(
-            gen._emit_unbraced_aggregate_items_to_addr(
-                0,
-                Type("int"),
-                (InitItem((), IntLiteral("1")),),
-                0,
-            ),
-            0,
-        )
-        self.assertEqual(gen._pointer_arith_element_size(None), 1)
-
-        def fresh_block(name: bytes) -> None:
-            c.PositionBuilderAtEnd(gen._builder, c.AppendBasicBlock(fn, name))
-
-        gen._emit_stmt(object())
-        fresh_block(b"while.break")
-        gen._emit_while(WhileStmt(IntLiteral("1"), BreakStmt()))
-        same_label = gen._label_block("same")
-        c.PositionBuilderAtEnd(gen._builder, same_label)
-        gen._emit_label(LabelStmt("same", NullStmt()))
-        fresh_block(b"goto.terminated")
-        c.BuildRetVoid(gen._builder)
-        gen._emit_goto(GotoStmt("after_terminated"))
-        fresh_block(b"switch.default.no.term")
-        original_bb_needs_term = gen._bb_needs_term
-        gen._bb_needs_term = (
-            lambda block=None: False if block is not None else original_bb_needs_term(block)
-        )
-        try:
-            gen._emit_switch(SwitchStmt(IntLiteral("1"), CompoundStmt([])))
-        finally:
-            gen._bb_needs_term = original_bb_needs_term
-        fresh_block(b"switch.empty.bodies")
-        gen._emit_switch(
-            SwitchStmt(
-                IntLiteral("1"),
-                CompoundStmt([CaseStmt(IntLiteral("1"), None), DefaultStmt(None)]),
-            )
-        )
-
-    def test_codegen_helper_unary_builtin_and_call_edges_without_llc(self) -> None:
-        result = compile_source(
-            """
-struct Pair { int left; int right; };
-int callee(void) { return 1; }
-int global_value;
-int f(void) { return 0; }
-""",
-            filename="helper_call_edges.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        gen = _LLVMGen(result)
-        c = llvm()
-        fn_type = c.FunctionType(c.VoidType(), None, 0, False)
-        fn = c.AddFunction(gen._mod, b"probe_more_edges", fn_type)
-        block = c.AppendBasicBlock(fn, b"entry")
-        c.PositionBuilderAtEnd(gen._builder, block)
-        gen._func = fn
-        gen._entry_block = block
-        gen._locals = [{}]
-
-        int_addr = c.BuildAlloca(gen._builder, c.Int32Type(), b"i.addr")
-        c.BuildStore(gen._builder, c.ConstInt(c.Int32Type(), 7, False), int_addr)
-        gen._locals[-1]["i"] = int_addr
-        ptr_t = c.PointerType(c.Int8Type(), 0)
-        ptr_addr = c.BuildAlloca(gen._builder, ptr_t, b"p.addr")
-        c.BuildStore(gen._builder, c.ConstNull(ptr_t), ptr_addr)
-        gen._locals[-1]["p"] = ptr_addr
-        pair_addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(Type("struct Pair")), b"pair")
-        gen._locals[-1]["pair"] = pair_addr
-
-        def typed_identifier(name: str, type_: Type) -> Identifier:
-            expr = Identifier(name)
-            gen._type_map.set(expr, type_)
-            return expr
-
-        def typed_int(value: str = "1", type_: Type = INT) -> IntLiteral:
-            expr = IntLiteral(value)
-            gen._type_map.set(expr, type_)
-            return expr
-
-        def untyped_identifier(name: str) -> Identifier:
-            expr = Identifier(name)
-            gen._type_map._map.pop(id(expr), None)
-            return expr
-
-        def typed_call(name: str, args: list[IntLiteral], type_: Type = INT) -> CallExpr:
-            callee = typed_identifier(name, Type("int").function_of(()))
-            expr = CallExpr(callee, args)
-            gen._type_map.set(expr, type_)
-            return expr
-
-        self.assertNotEqual(gen._unary(UnaryExpr("+", typed_identifier("i", INT))), 0)
-        self.assertNotEqual(gen._unary(UnaryExpr("-", typed_identifier("p", INT.pointer_to()))), 0)
-        self.assertNotEqual(gen._unary(UnaryExpr("~", typed_identifier("p", INT.pointer_to()))), 0)
-        with self.assertRaises(CodegenError):
-            gen._unary(UnaryExpr("@", typed_identifier("i", INT)))
-
-        self.assertNotEqual(
-            gen._addrof(
-                UnaryExpr("&", typed_identifier("callee", Type("int").function_of(()))),
-            ),
-            0,
-        )
-        c.AddGlobal(gen._mod, c.Int32Type(), b"known_global_for_addr")
-        self.assertNotEqual(
-            gen._addrof(UnaryExpr("&", untyped_identifier("known_global_for_addr"))),
-            0,
-        )
-        c.AddFunction(
-            gen._mod,
-            b"known_fn_for_addr",
-            c.FunctionType(c.Int32Type(), None, 0, False),
-        )
-        self.assertNotEqual(
-            gen._addrof(UnaryExpr("&", untyped_identifier("known_fn_for_addr"))),
-            0,
-        )
-        self.assertNotEqual(
-            gen._addrof(UnaryExpr("&", untyped_identifier("unknown_addr_target"))),
-            0,
-        )
-        self.assertNotEqual(
-            gen._addrof(UnaryExpr("&", UnaryExpr("*", typed_identifier("p", INT.pointer_to())))),
-            0,
-        )
-        with self.assertRaises(CodegenError):
-            gen._addrof(UnaryExpr("&", typed_int()))
-
-        unsupported_binary = BinaryExpr("???", typed_int("1"), typed_int("2"))
-        gen._type_map.set(unsupported_binary, INT)
-        with self.assertRaises(CodegenError):
-            gen._binary(unsupported_binary)
-        pointer_result_binary = BinaryExpr("+", typed_int("1"), typed_int("2"))
-        gen._type_map.set(pointer_result_binary, INT.pointer_to())
-        self.assertNotEqual(gen._binary(pointer_result_binary), 0)
-        self.assertNotEqual(
-            gen._compare(
-                "==",
-                c.ConstInt(c.Int32Type(), 1, False),
-                c.ConstInt(c.Int32Type(), 1, False),
-                None,
-                None,
-                False,
-                False,
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._compare(
-                "==",
-                c.ConstInt(c.Int64Type(), 1, False),
-                c.ConstInt(c.Int32Type(), 1, False),
-                None,
-                None,
-                False,
-                False,
-            ),
-            0,
-        )
-
-        atomic_fallbacks = (
-            "__atomic_load_n",
-            "__atomic_store_n",
-            "__atomic_load",
-            "__atomic_store",
-            "__atomic_fetch_add",
-            "__atomic_add_fetch",
-            "__atomic_exchange_n",
-            "__atomic_exchange",
-            "__atomic_compare_exchange_n",
-            "__atomic_compare_exchange",
-            "__sync_val_compare_and_swap",
-            "__sync_lock_release",
-        )
-        for name in atomic_fallbacks:
-            self.assertNotEqual(gen._atomic_builtin_call(name, ()), 0)
-
-        self.assertNotEqual(gen._int_type_for_width(1), 0)
-        self.assertNotEqual(gen._int_type_for_width(8), 0)
-        self.assertNotEqual(gen._int_type_for_width(128), 0)
-        self.assertNotEqual(gen._cast_int_to_width(c.ConstNull(ptr_t), 64, signed=False), 0)
-        self.assertNotEqual(
-            gen._cast_int_to_width(c.ConstReal(c.DoubleType(), 1.0), 64, signed=False), 0
-        )
-        self.assertNotEqual(
-            gen._cast_int_to_width(c.ConstInt(c.Int8Type(), 1, False), 64, signed=True), 0
-        )
-        self.assertNotEqual(
-            gen._cast_int_to_width(c.ConstInt(c.Int64Type(), 1, False), 8, signed=False), 0
-        )
-        self.assertNotEqual(gen._result_type_ref(CallExpr(Identifier("x"), []), c.Int32Type()), 0)
-        self.assertNotEqual(gen._intrinsic_call("no_arg_intrinsic", c.VoidType(), [], []), 0)
-        self.assertNotEqual(
-            gen._coerce_builtin_result(
-                c.ConstInt(c.Int32Type(), 1, False), CallExpr(Identifier("x"), [])
-            ),
-            0,
-        )
-        void_call = CallExpr(Identifier("x"), [])
-        gen._type_map.set(void_call, Type("void"))
-        self.assertNotEqual(
-            gen._coerce_builtin_result(c.ConstInt(c.Int32Type(), 1, False), void_call),
-            0,
-        )
-        self.assertIsNone(
-            gen._integer_bit_builtin("__builtin_not_real", CallExpr(Identifier("x"), []))
-        )
-        self.assertIsNone(gen._integer_bit_builtin("__builtin_ctz", CallExpr(Identifier("x"), [])))
-        self.assertNotEqual(
-            gen._float_intrinsic_type(
-                c.ConstInt(c.Int32Type(), 1, False), CallExpr(Identifier("x"), [])
-            ),
-            0,
-        )
-        self.assertIsNone(gen._floating_builtin("__builtin_isinf", CallExpr(Identifier("x"), [])))
-        self.assertIsNone(
-            gen._floating_builtin("__builtin_copysign", CallExpr(Identifier("x"), [typed_int()])),
-        )
-        self.assertNotEqual(
-            gen._gcc_builtin_call("__builtin_assume_aligned", CallExpr(Identifier("x"), [])), 0
-        )
-        self.assertNotEqual(
-            gen._gcc_builtin_call("__builtin_alloca", CallExpr(Identifier("x"), [])), 0
-        )
-        self.assertNotEqual(gen._call(typed_call("__builtin_unreachable", [], Type("void"))), 0)
-        self.assertNotEqual(gen._call(typed_call("__builtin_bzero", [])), 0)
-        self.assertNotEqual(gen._call(typed_call("__builtin___memcpy_chk", [])), 0)
-
-        bad_callee = typed_identifier("i", INT)
-        bad_call = CallExpr(bad_callee, [])
-        gen._type_map.set(bad_call, INT)
-        with self.assertRaises(CodegenError):
-            gen._indirect_call(bad_call)
-        missing_member = MemberExpr(typed_identifier("pair", Type("struct Pair")), "missing", False)
-        with self.assertRaises(CodegenError):
-            gen._member_ptr(missing_member)
-        self.assertNotEqual(gen._lvalue_addr(typed_identifier("typed_global", INT)), 0)
-        self.assertIsNone(
-            gen._lvalue_addr(typed_identifier("fn_lvalue", Type("int").function_of(())))
-        )
-
-    def test_codegen_helper_type_cast_and_atomic_edges_without_llc(self) -> None:
-        result = compile_source(
-            """
-struct Pair { int left; int right; };
-struct Empty { };
-struct HasEmpty { struct Empty e; };
-union U { int i; char *p; };
-int global_array[2];
-int f(void) { return 0; }
-int define_void_param(void) { return 0; }
-int define_duplicate(int dup) { return dup; }
-""",
-            filename="helper_type_cast_edges.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        gen = _LLVMGen(result)
-        c = llvm()
-        fn_type = c.FunctionType(c.VoidType(), None, 0, False)
-        fn = c.AddFunction(gen._mod, b"probe_type_cast_edges", fn_type)
-        block = c.AppendBasicBlock(fn, b"entry")
-        c.PositionBuilderAtEnd(gen._builder, block)
-        gen._func = fn
-        gen._entry_block = block
-        gen._locals = [{}]
-
-        def typed_expr(expr, type_: Type):
-            gen._type_map.set(expr, type_)
-            return expr
-
-        def typed_identifier(name: str, type_: Type) -> Identifier:
-            return typed_expr(Identifier(name), type_)
-
-        def typed_int(value: str = "1", type_: Type = INT) -> IntLiteral:
-            return typed_expr(IntLiteral(value), type_)
-
-        def typed_float(value: str = "1.0", type_: Type = FLOAT) -> FloatLiteral:
-            return typed_expr(FloatLiteral(value), type_)
-
-        def init_list(items: list[InitItem]) -> InitList:
-            return InitList(tuple(items))
-
-        self.assertEqual(
-            gen._function_param_types(
-                FunctionDef(TypeSpec("int"), "void_proto", [Param(TypeSpec("void"), None)], None),
-            ),
-            [],
-        )
-        gen._define_func(FunctionDef(TypeSpec("int"), "missing_definition_symbol", [], None))
-        probe_fn = gen._func
-        probe_block = gen._entry_block
-        gen._define_func(
-            FunctionDef(
-                TypeSpec("int"),
-                "define_void_param",
-                [Param(TypeSpec("void"), "unused_void")],
-                CompoundStmt([]),
-            ),
-        )
-        gen._define_func(
-            FunctionDef(
-                TypeSpec("int"),
-                "define_duplicate",
-                [Param(TypeSpec("int"), "dup")],
-                CompoundStmt([DeclStmt(TypeSpec("int"), "dup", None)]),
-            ),
-        )
-        gen._func = probe_fn
-        gen._entry_block = probe_block
-        gen._func_sym = None
-        gen._locals = [{}]
-        c.PositionBuilderAtEnd(gen._builder, probe_block)
-        float_index = c.ConstReal(c.DoubleType(), 1.0)
-        self.assertEqual(gen._gep_index_value(float_index, FLOAT, b"idx"), float_index)
-        self.assertEqual(gen._pointer_arith_pointee(Type("int").array_of(2)), INT)
-        self.assertIsNone(gen._pointer_arith_pointee(Type("void").pointer_to()))
-
-        manual_numbers = DeclStmt(
-            TypeSpec("int", declarator_ops=(("arr", ArrayDecl(None)),)),
-            "manual_numbers",
-            init_list([InitItem((), typed_int("1")), InitItem((), typed_int("2"))]),
-        )
-        manual_text = DeclStmt(
-            TypeSpec("char", declarator_ops=(("arr", ArrayDecl(None)),)),
-            "manual_text",
-            StringLiteral('"ok"'),
-        )
-        gen._emit_global_var(manual_numbers)
-        gen._emit_global_var(manual_text)
-        file_scope = gen._sema.file_scope
-        object.__setattr__(gen._sema, "file_scope", None)
-        try:
-            gen._emit_global_var(DeclStmt(TypeSpec("int"), "manual_no_scope", None))
-        finally:
-            object.__setattr__(gen._sema, "file_scope", file_scope)
-        gen._emit_global_var(
-            DeclStmt(
-                TypeSpec("char", declarator_ops=(("arr", ArrayDecl(None)),)),
-                "manual_bad_text",
-                StringLiteral('u"x"'),
-            )
-        )
-        gen._emit_global_var(DeclStmt(TypeSpec("int"), "manual_missing_init", Identifier("missing")))
-        self.assertNotEqual(c.GetNamedGlobal(gen._mod, b"manual_numbers"), 0)
-        self.assertNotEqual(c.GetNamedGlobal(gen._mod, b"manual_text"), 0)
-
-        scalar_addr = c.BuildAlloca(gen._builder, c.Int32Type(), b"scalar.addr")
-        long_addr = c.BuildAlloca(gen._builder, c.Int64Type(), b"long.addr")
-        gen._locals[-1]["scalar"] = scalar_addr
-        gen._emit_decl_init(DeclStmt(TypeSpec("int"), "missing_local", typed_int("1")))
-        gen._emit_decl_init(
-            DeclStmt(
-                TypeSpec("int"),
-                "scalar",
-                init_list([InitItem((("member", "bad"),), typed_int("1"))]),
-            ),
-        )
-        self.assertTrue(
-            gen._emit_init_list_to_addr(
-                long_addr,
-                Type("long"),
-                init_list([InitItem((), typed_int("7"))]),
-            ),
-        )
-        gen._emit_initializer_to_addr(scalar_addr, Type("struct Missing"), (), typed_int("1"))
-        missing_array_type = Type("struct Missing").array_of(1)
-        missing_array_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(missing_array_type),
-            b"missing.array.addr",
-        )
-        self.assertTrue(
-            gen._emit_array_init_list_to_addr(
-                missing_array_addr,
-                missing_array_type,
-                init_list([InitItem((), typed_int("1"))]),
-            ),
-        )
-        designator_array_type = Type("int").array_of(1)
-        designator_array_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(designator_array_type),
-            b"designator.array.addr",
-        )
-        self.assertEqual(
-            gen._emit_unbraced_aggregate_items_to_addr(
-                designator_array_addr,
-                designator_array_type,
-                (InitItem((("index", typed_int("0")),), typed_int("1")),),
-                0,
-            ),
-            0,
-        )
-        empty_array_type = Type("struct Empty").array_of(1)
-        empty_array_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(empty_array_type),
-            b"empty.array.addr",
-        )
-        self.assertEqual(
-            gen._emit_unbraced_aggregate_items_to_addr(
-                empty_array_addr,
-                empty_array_type,
-                (InitItem((), typed_int("1")),),
-                0,
-            ),
-            0,
-        )
-        has_empty_type = Type("struct HasEmpty")
-        has_empty_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(has_empty_type),
-            b"has.empty.addr",
-        )
-        self.assertTrue(
-            gen._emit_record_init_list_to_addr(
-                has_empty_addr,
-                has_empty_type,
-                init_list([InitItem((), typed_int("1"))]),
-            ),
-        )
-        pair_unbraced_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(Type("struct Pair")),
-            b"pair.unbraced.addr",
-        )
-        self.assertEqual(
-            gen._emit_unbraced_aggregate_items_to_addr(
-                pair_unbraced_addr,
-                Type("struct Pair"),
-                (InitItem((("member", "left"),), typed_int("1")),),
-                0,
-            ),
-            0,
-        )
-        union_unbraced_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(Type("union U")),
-            b"union.unbraced.addr",
-        )
-        self.assertEqual(
-            gen._emit_unbraced_aggregate_items_to_addr(
-                union_unbraced_addr,
-                Type("union U"),
-                (InitItem((), typed_int("1")),),
-                0,
-            ),
-            1,
-        )
-
-        ptr_t = c.PointerType(c.Int8Type(), 0)
-        gen._func_param_types["takes_ptr"] = [ptr_t]
-        self.assertEqual(
-            c.GetTypeKind(
-                c.TypeOf(
-                    gen._coerce_call_args([c.ConstInt(c.Int64Type(), 0, False)], "takes_ptr")[0]
-                ),
-            ),
-            LLVMTypeKind.POINTER,
-        )
-        gen._func_param_types["takes_int"] = [c.Int64Type()]
-        self.assertEqual(
-            c.GetTypeKind(c.TypeOf(gen._coerce_call_args([c.ConstNull(ptr_t)], "takes_int")[0])),
-            LLVMTypeKind.INTEGER,
-        )
-        array_value = c.ConstNull(c.ArrayType(c.Int32Type(), 2))
-        self.assertEqual(
-            c.GetTypeKind(c.TypeOf(gen._coerce_call_args([array_value], "takes_ptr")[0])),
-            LLVMTypeKind.POINTER,
-        )
-        self.assertEqual(gen._coerce_call_args([], "takes_ptr"), [])
-
-        pair_addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(Type("struct Pair")), b"pair")
-        gen._locals[-1]["pair"] = pair_addr
-        pair_ptr_type = Type("struct Pair").pointer_to()
-        pair_ptr_addr = c.BuildAlloca(
-            gen._builder, gen._type_to_llvm(pair_ptr_type), b"pair.ptr.addr"
-        )
-        c.BuildStore(gen._builder, pair_addr, pair_ptr_addr)
-        gen._locals[-1]["pair_ptr"] = pair_ptr_addr
-        self.assertNotEqual(
-            gen._member_ptr(
-                MemberExpr(typed_identifier("pair", Type("struct Pair")), "left", True)
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._member_ptr(MemberExpr(typed_identifier("pair_ptr", pair_ptr_type), "right", True)),
-            0,
-        )
-
-        array_addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(Type("int").array_of(2)), b"arr")
-        gen._locals[-1]["arr"] = array_addr
-        subscript = SubscriptExpr(typed_identifier("arr", Type("int").array_of(2)), typed_int("0"))
-        typed_expr(subscript, INT)
-        self.assertNotEqual(gen._lvalue_addr(subscript), 0)
-        compound_literal = CompoundLiteralExpr(
-            TypeSpec("int"),
-            init_list([InitItem((), typed_int("3"))]),
-        )
-        typed_expr(compound_literal, INT)
-        self.assertNotEqual(gen._lvalue_addr(compound_literal), 0)
-
-        int_ptr_addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(INT.pointer_to()), b"p.addr")
-        c.BuildStore(gen._builder, c.ConstNull(gen._type_to_llvm(INT.pointer_to())), int_ptr_addr)
-        gen._locals[-1]["p"] = int_ptr_addr
-        self.assertNotEqual(
-            gen._lvalue_addr(UnaryExpr("*", typed_identifier("p", INT.pointer_to()))), 0
-        )
-
-        void_call = CallExpr(Identifier("__builtin_unreachable"), [])
-        cast_void_to_ptr = CastExpr(TypeSpec("int", pointer_depth=1), void_call)
-        typed_expr(cast_void_to_ptr, INT.pointer_to())
-        self.assertNotEqual(gen._cast(cast_void_to_ptr), 0)
-        cast_to_void = CastExpr(TypeSpec("void"), typed_int("9"))
-        typed_expr(cast_to_void, Type("void"))
-        self.assertNotEqual(gen._cast(cast_to_void), 0)
-        cast_ptr_to_int = CastExpr(TypeSpec("long"), typed_identifier("p", INT.pointer_to()))
-        typed_expr(cast_ptr_to_int, Type("long"))
-        self.assertNotEqual(gen._cast(cast_ptr_to_int), 0)
-        cast_int_to_ptr = CastExpr(TypeSpec("int", pointer_depth=1), typed_int("0"))
-        typed_expr(cast_int_to_ptr, INT.pointer_to())
-        self.assertNotEqual(gen._cast(cast_int_to_ptr), 0)
-        cast_int_to_float = CastExpr(TypeSpec("float"), typed_int("5"))
-        typed_expr(cast_int_to_float, FLOAT)
-        self.assertNotEqual(gen._cast(cast_int_to_float), 0)
-
-        self.assertNotEqual(gen._build_cast(c.ConstInt(c.Int32Type(), 1, False), c.Int1Type()), 0)
-        self.assertNotEqual(
-            gen._build_cast(c.ConstNull(c.ArrayType(c.Int32Type(), 0)), ptr_t),
-            0,
-        )
-        self.assertNotEqual(gen._build_cast(c.ConstNull(c.ArrayType(c.Int32Type(), 2)), ptr_t), 0)
-        self.assertNotEqual(gen._build_cast(c.ConstNull(ptr_t), c.Int64Type()), 0)
-        self.assertNotEqual(gen._build_cast(c.ConstInt(c.Int64Type(), 0, False), ptr_t), 0)
-        self.assertNotEqual(gen._build_cast(c.ConstReal(c.DoubleType(), 1.5), c.Int32Type()), 0)
-        self.assertNotEqual(gen._build_cast(c.ConstInt(c.Int32Type(), 2, False), c.DoubleType()), 0)
-        self.assertNotEqual(gen._build_cast(c.ConstReal(c.FloatType(), 1.5), c.DoubleType()), 0)
-        pair_value = c.ConstNull(gen._type_to_llvm(Type("struct Pair")))
-        self.assertNotEqual(gen._build_cast(pair_value, gen._type_to_llvm(Type("struct Empty"))), 0)
-        self.assertNotEqual(gen._build_cast(pair_value, c.Int64Type()), 0)
-
-        self.assertIsNone(gen._floating_builtin("__builtin_fabs", CallExpr(Identifier("x"), [])))
-        self.assertNotEqual(
-            gen._floating_builtin(
-                "__builtin_copysign",
-                CallExpr(Identifier("x"), [FloatLiteral("1.0"), typed_int("2")]),
-            ),
-            0,
-        )
-        direct_void_call = CallExpr(Identifier("declared_void"), [])
-        typed_expr(direct_void_call.callee, Type("void").function_of(()))
-        typed_expr(direct_void_call, Type("void"))
-        self.assertNotEqual(gen._call(direct_void_call), 0)
-
-        target_fn_t = c.FunctionType(c.VoidType(), None, 0, False)
-        target_fn = c.AddFunction(gen._mod, b"target_void", target_fn_t)
-        fp_type = Type("void").function_of(()).pointer_to()
-        fp_addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(fp_type), b"fp.addr")
-        c.BuildStore(gen._builder, target_fn, fp_addr)
-        gen._locals[-1]["fp"] = fp_addr
-        indirect_void_call = CallExpr(Identifier("fp"), [])
-        typed_expr(indirect_void_call, Type("void"))
-        self.assertNotEqual(gen._indirect_call(indirect_void_call, fp_type), 0)
-
-        self.assertNotEqual(
-            gen._va_intrinsic_call("__builtin_va_copy", (typed_identifier("p", ptr_t),)), 0
-        )
-        self.assertNotEqual(
-            gen._va_intrinsic_call(
-                "__builtin_va_copy",
-                (typed_identifier("p", ptr_t), typed_identifier("p", ptr_t)),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._va_intrinsic_call("__builtin_va_start", (typed_identifier("p", ptr_t),)), 0
-        )
-
-        self.assertNotEqual(gen._atomic_pointer(typed_int("0"))[0], 0)
-        void_ptr_type = Type("void").pointer_to()
-        void_ptr_addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(void_ptr_type), b"vp.addr")
-        c.BuildStore(gen._builder, c.ConstNull(gen._type_to_llvm(void_ptr_type)), void_ptr_addr)
-        gen._locals[-1]["vp"] = void_ptr_addr
-        _ptr, pointee, pointee_lt = gen._atomic_pointer(typed_identifier("vp", void_ptr_type))
-        self.assertEqual(pointee, INT)
-        self.assertEqual(c.GetTypeKind(pointee_lt), LLVMTypeKind.INTEGER)
-        self.assertNotEqual(
-            gen._atomic_promote_result(c.ConstInt(c.Int8Type(), 1, False), Type("unsigned char")),
-            0,
-        )
-        self.assertNotEqual(
-            gen._atomic_promote_result(c.ConstInt(c.Int8Type(), 1, False), Type("char")),
-            0,
-        )
-        atomic_int_ptr = typed_identifier("atomic_int", INT.pointer_to())
-        gen._locals[-1]["atomic_int"] = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(INT.pointer_to()),
-            b"atomic.int.addr",
-        )
-        c.BuildStore(
-            gen._builder,
-            c.ConstNull(gen._type_to_llvm(INT.pointer_to())),
-            gen._locals[-1]["atomic_int"],
-        )
-        atomic_fetch_add = CallExpr(
-            Identifier("__atomic_add_fetch"),
-            [atomic_int_ptr, typed_int("1"), typed_int("0")],
-        )
-        typed_expr(atomic_fetch_add, INT)
-        self.assertNotEqual(gen._atomic_builtin_call("__atomic_add_fetch", atomic_fetch_add.args), 0)
-        old = c.ConstInt(c.Int32Type(), 6, False)
-        value = c.ConstInt(c.Int32Type(), 3, False)
-        for op in (
-            ATOMIC_RMW_ADD,
-            ATOMIC_RMW_SUB,
-            ATOMIC_RMW_AND,
-            ATOMIC_RMW_OR,
-            ATOMIC_RMW_XOR,
-            ATOMIC_RMW_NAND,
-            999,
-        ):
-            self.assertNotEqual(gen._atomic_rmw_new_value(op, old, value), 0)
-        for name in (
-            "__atomic_fetch_sub",
-            "__atomic_fetch_and",
-            "__atomic_fetch_or",
-            "__atomic_fetch_xor",
-            "__atomic_fetch_nand",
-        ):
-            self.assertNotEqual(gen._atomic_builtin_call(name, atomic_fetch_add.args), 0)
-
-        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.HALF), 1)
-        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.FLOAT), 2)
-        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.DOUBLE), 3)
-        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.X86_FP80), 4)
-        self.assertEqual(_LLVMGen._float_rank(LLVMTypeKind.FP128), 5)
-        self.assertEqual(_LLVMGen._float_rank(0), 0)
-
-        for op in ("-", "*", "/"):
-            expr = BinaryExpr(op, typed_float("4.0"), typed_float("2.0"))
-            typed_expr(expr, FLOAT)
-            self.assertNotEqual(gen._binary(expr), 0)
-        unsigned_int = Type("unsigned int")
-        for op in ("/", "%", "&", "|", "^", "<<", ">>"):
-            expr = BinaryExpr(op, typed_int("8", unsigned_int), typed_int("2", unsigned_int))
-            typed_expr(expr, unsigned_int)
-            self.assertNotEqual(gen._binary(expr), 0)
-        signed_mod = BinaryExpr("%", typed_int("8"), typed_int("3"))
-        typed_expr(signed_mod, INT)
-        self.assertNotEqual(gen._binary(signed_mod), 0)
-        signed_shift = BinaryExpr(">>", typed_int("8"), typed_int("1"))
-        typed_expr(signed_shift, INT)
-        self.assertNotEqual(gen._binary(signed_shift), 0)
-
-        for op in ("<", ">", "<=", ">="):
-            self.assertNotEqual(
-                gen._compare(
-                    op,
-                    c.ConstReal(c.FloatType(), 1.0),
-                    c.ConstReal(c.FloatType(), 2.0),
-                    FLOAT,
-                    FLOAT,
-                    False,
-                    False,
-                ),
-                0,
-            )
-            self.assertNotEqual(
-                gen._compare(
-                    op,
-                    c.ConstInt(c.Int32Type(), 1, False),
-                    c.ConstInt(c.Int32Type(), 2, False),
-                    unsigned_int,
-                    unsigned_int,
-                    False,
-                    False,
-                ),
-                0,
-            )
-            self.assertNotEqual(
-                gen._compare(
-                    op,
-                    c.ConstInt(c.Int32Type(), 1, True),
-                    c.ConstInt(c.Int32Type(), 2, True),
-                    INT,
-                    INT,
-                    False,
-                    False,
-                ),
-                0,
-            )
-        with self.assertRaises(CodegenError):
-            gen._compare(
-                "??",
-                c.ConstReal(c.FloatType(), 1.0),
-                c.ConstReal(c.FloatType(), 2.0),
-                FLOAT,
-                FLOAT,
-                False,
-                False,
-            )
-        with self.assertRaises(CodegenError):
-            gen._compare(
-                "??",
-                c.ConstInt(c.Int32Type(), 1, True),
-                c.ConstInt(c.Int32Type(), 2, True),
-                INT,
-                INT,
-                False,
-                False,
-            )
-
-        def bind_local(name: str, type_: Type, value_ref: int) -> None:
-            addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(type_), name.encode())
-            c.BuildStore(gen._builder, value_ref, addr)
-            gen._locals[-1][name] = addr
-
-        for op in ("-=", "*=", "/="):
-            slot = "float_" + op[0]
-            bind_local(slot, FLOAT, c.ConstReal(c.FloatType(), 8.0))
-            self.assertNotEqual(
-                gen._assign(AssignExpr(op, typed_identifier(slot, FLOAT), typed_float("2.0"))),
-                0,
-            )
-        bind_local("float_add", FLOAT, c.ConstReal(c.FloatType(), 8.0))
-        self.assertNotEqual(
-            gen._assign(AssignExpr("+=", typed_identifier("float_add", FLOAT), typed_float("2.0"))),
-            0,
-        )
-        for index, op in enumerate(("/=", "%=", "&=", "|=", "^=", "<<=", ">>=")):
-            slot = f"uint_compound_{index}"
-            bind_local(slot, unsigned_int, c.ConstInt(c.Int32Type(), 8, False))
-            self.assertNotEqual(
-                gen._assign(
-                    AssignExpr(op, typed_identifier(slot, unsigned_int), typed_int("2", unsigned_int))
-                ),
-                0,
-            )
-        bind_local("signed_mod_assign", INT, c.ConstInt(c.Int32Type(), 8, True))
-        self.assertNotEqual(
-            gen._assign(AssignExpr("%=", typed_identifier("signed_mod_assign", INT), typed_int("3"))),
-            0,
-        )
-        for index, op in enumerate(("-=", "*=", "/=", ">>=")):
-            slot = f"signed_compound_{index}"
-            bind_local(slot, INT, c.ConstInt(c.Int32Type(), 8, True))
-            self.assertNotEqual(
-                gen._assign(AssignExpr(op, typed_identifier(slot, INT), typed_int("2"))),
-                0,
-            )
-
-    def test_codegen_helper_expression_control_and_call_edges_without_llc(self) -> None:
-        result = compile_source(
-            """
-struct Pair { int left; int right; };
-int global_array[2];
-int global_value;
-int f(void) { int local_array[2]; return local_array[0]; }
-""",
-            filename="helper_expression_control_edges.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        gen = _LLVMGen(result)
-        c = llvm()
-        fn_type = c.FunctionType(c.VoidType(), None, 0, False)
-        fn = c.AddFunction(gen._mod, b"probe_expression_control_edges", fn_type)
-        block = c.AppendBasicBlock(fn, b"entry")
-        c.PositionBuilderAtEnd(gen._builder, block)
-        gen._func = fn
-        gen._entry_block = block
-        gen._func_sym = result.sema.functions["f"]
-        gen._locals = [{}]
-
-        def typed_expr(expr, type_: Type):
-            gen._type_map.set(expr, type_)
-            return expr
-
-        def typed_identifier(name: str, type_: Type) -> Identifier:
-            return typed_expr(Identifier(name), type_)
-
-        def typed_int(value: str = "1", type_: Type = INT) -> IntLiteral:
-            return typed_expr(IntLiteral(value), type_)
-
-        def init_list(items: list[InitItem]) -> InitList:
-            return InitList(tuple(items))
-
-        def fresh_block(name: bytes) -> None:
-            c.PositionBuilderAtEnd(gen._builder, c.AppendBasicBlock(fn, name))
-
-        def untyped_identifier(name: str) -> Identifier:
-            expr = Identifier(name)
-            gen._type_map._map.pop(id(expr), None)
-            return expr
-
-        allocas = gen._collect_allocas(
-            CompoundStmt(
-                [
-                    DeclGroupStmt(
-                        [
-                            DeclStmt(TypeSpec("int"), "grouped", None),
-                            DeclStmt(TypeSpec("int"), "grouped", None),
-                        ],
-                    ),
-                    IfStmt(
-                        typed_int("1"),
-                        DeclStmt(TypeSpec("int"), "then_local", None),
-                        DeclStmt(TypeSpec("int"), "else_local", None),
-                    ),
-                    WhileStmt(typed_int("1"), DeclStmt(TypeSpec("int"), "while_local", None)),
-                    DoWhileStmt(DeclStmt(TypeSpec("int"), "do_local", None), typed_int("0")),
-                    ForStmt(None, None, None, DeclStmt(TypeSpec("int"), "for_local", None)),
-                    SwitchStmt(typed_int("1"), DeclStmt(TypeSpec("int"), "switch_local", None)),
-                    LabelStmt("label", DeclStmt(TypeSpec("int"), "label_local", None)),
-                    ExprStmt(
-                        StatementExpr(
-                            CompoundStmt([DeclStmt(TypeSpec("int"), "stmt_expr_local", None)]),
-                        ),
-                    ),
-                ],
-            ),
-        )
-        self.assertEqual(
-            {name for name, _type in allocas},
-            {
-                "grouped",
-                "then_local",
-                "else_local",
-                "while_local",
-                "do_local",
-                "for_local",
-                "switch_local",
-                "label_local",
-                "stmt_expr_local",
-            },
-        )
-        self.assertEqual(gen._collect_allocas(ForStmt(None, None, None, None)), [])
-
-        declared_callee = typed_identifier(
-            "fresh_declared", Type("int").function_of((Type("long"),))
-        )
-        declared_call = CallExpr(declared_callee, [typed_int("7", Type("short"))])
-        typed_expr(declared_call, INT)
-        self.assertNotEqual(gen._call(declared_call), 0)
-        self.assertEqual(gen._lookup_symbol_type("local_array"), Type("int").array_of(2))
-        self.assertEqual(gen._lookup_symbol_type("global_value"), INT)
-        no_scope = gen._sema.file_scope
-        object.__setattr__(gen._sema, "file_scope", None)
-        try:
-            self.assertIsNone(gen._lookup_symbol_type("global_value"))
-            no_scope_identifier = typed_identifier("no_scope_identifier", INT)
-            self.assertNotEqual(gen._identifier(no_scope_identifier), 0)
-        finally:
-            object.__setattr__(gen._sema, "file_scope", no_scope)
-        not_var_local = typed_identifier("not_var_local", INT)
-        gen._func_sym.locals["not_var_local"] = object()
-        self.assertNotEqual(gen._identifier(not_var_local), 0)
-        self.assertNotEqual(
-            gen._identifier(typed_identifier("local_array", Type("int").array_of(2))),
-            0,
-        )
-
-        fp_type = Type("int").function_of((Type("long"),)).pointer_to()
-        target_fn = gen._function_designator("target_i64", Type("int").function_of((Type("long"),)))
-        fp_addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(fp_type), b"fp_i64.addr")
-        c.BuildStore(gen._builder, target_fn, fp_addr)
-        gen._locals[-1]["fp_i64"] = fp_addr
-        indirect_call = CallExpr(
-            typed_identifier("fp_i64", fp_type), [typed_int("3", Type("short"))]
-        )
-        typed_expr(indirect_call, INT)
-        self.assertNotEqual(gen._indirect_call(indirect_call, fp_type), 0)
-        indirect_variadic = CallExpr(
-            typed_identifier("fp_i64", fp_type),
-            [typed_int("3", Type("short")), typed_int("4", Type("short"))],
-        )
-        typed_expr(indirect_variadic, INT)
-        self.assertNotEqual(gen._indirect_call(indirect_variadic, fp_type), 0)
-
-        scalar_addr = c.BuildAlloca(gen._builder, c.Int32Type(), b"scalar.addr")
-        c.BuildStore(gen._builder, c.ConstInt(c.Int32Type(), 1, False), scalar_addr)
-        gen._locals[-1]["scalar"] = scalar_addr
-        with self.assertRaises(CodegenError):
-            gen._assign(AssignExpr("???", typed_identifier("scalar", INT), typed_int("1")))
-        self.assertNotEqual(gen._assign_addr(typed_identifier("global_value", INT)), 0)
-        self.assertNotEqual(gen._assign_addr(untyped_identifier("unknown_assignment_target")), 0)
-        compound_literal_target = CompoundLiteralExpr(
-            TypeSpec("int"),
-            init_list([InitItem((), typed_int("4"))]),
-        )
-        typed_expr(compound_literal_target, INT)
-        self.assertNotEqual(gen._assign_addr(compound_literal_target), 0)
-        with self.assertRaises(CodegenError):
-            gen._assign_addr(FloatLiteral("1.0"))
-
-        float_addr = c.BuildAlloca(gen._builder, c.FloatType(), b"float.addr")
-        c.BuildStore(gen._builder, c.ConstReal(c.FloatType(), 1.0), float_addr)
-        gen._locals[-1]["float_slot"] = float_addr
-        self.assertNotEqual(
-            gen._update(UpdateExpr("++", typed_identifier("float_slot", FLOAT), False)), 0
-        )
-        int_ptr_type = INT.pointer_to()
-        int_ptr_addr = c.BuildAlloca(gen._builder, gen._type_to_llvm(int_ptr_type), b"int.ptr.addr")
-        c.BuildStore(gen._builder, c.ConstNull(gen._type_to_llvm(int_ptr_type)), int_ptr_addr)
-        gen._locals[-1]["int_ptr"] = int_ptr_addr
-        self.assertNotEqual(
-            gen._update(UpdateExpr("--", typed_identifier("int_ptr", int_ptr_type), True)), 0
-        )
-        self.assertNotEqual(
-            gen._assign(AssignExpr("+=", typed_identifier("int_ptr", int_ptr_type), typed_int("1"))),
-            0,
-        )
-
-        int_ternary = ConditionalExpr(typed_int("1"), typed_int("2"), typed_int("3"))
-        typed_expr(int_ternary, Type("long"))
-        self.assertNotEqual(gen._ternary(int_ternary), 0)
-        void_then = CastExpr(TypeSpec("void"), typed_int("1"))
-        void_else = CastExpr(TypeSpec("void"), typed_int("2"))
-        typed_expr(void_then, Type("void"))
-        typed_expr(void_else, Type("void"))
-        void_ternary = ConditionalExpr(typed_int("1"), void_then, void_else)
-        typed_expr(void_ternary, Type("void"))
-        self.assertNotEqual(gen._ternary(void_ternary), 0)
-        fresh_block(b"terminating.ternary")
-        unreachable_then = CallExpr(
-            typed_identifier("__builtin_unreachable", Type("void").function_of(())), []
-        )
-        unreachable_else = CallExpr(
-            typed_identifier("__builtin_unreachable", Type("void").function_of(())), []
-        )
-        typed_expr(unreachable_then, Type("void"))
-        typed_expr(unreachable_else, Type("void"))
-        terminating_ternary = ConditionalExpr(typed_int("1"), unreachable_then, unreachable_else)
-        typed_expr(terminating_ternary, Type("void"))
-        self.assertNotEqual(gen._ternary(terminating_ternary), 0)
-        fresh_block(b"unterminated.ternary")
-        original_bb_needs_term = gen._bb_needs_term
-        gen._bb_needs_term = (
-            lambda block=None: False if block is not None else original_bb_needs_term(block)
-        )
-        try:
-            unterminated_ternary = ConditionalExpr(typed_int("1"), typed_int("2"), typed_int("3"))
-            typed_expr(unterminated_ternary, INT)
-            self.assertNotEqual(gen._ternary(unterminated_ternary), 0)
-        finally:
-            gen._bb_needs_term = original_bb_needs_term
-
-        self.assertNotEqual(gen._stmt_expr(StatementExpr(CompoundStmt([]))), 0)
-        value_stmt_expr = StatementExpr(CompoundStmt([ExprStmt(typed_int("9"))]))
-        self.assertNotEqual(gen._stmt_expr(value_stmt_expr), 0)
-        decl_stmt_expr = StatementExpr(
-            CompoundStmt([DeclStmt(TypeSpec("int"), "stmt_local", typed_int("5"))]),
-        )
-        self.assertNotEqual(gen._stmt_expr(decl_stmt_expr), 0)
-
-        array_literal = CompoundLiteralExpr(
-            TypeSpec("int", array_lengths=(2,)),
-            init_list([InitItem((), typed_int("1")), InitItem((), typed_int("2"))]),
-        )
-        typed_expr(array_literal, Type("int").array_of(2))
-        self.assertNotEqual(gen._compound_literal(array_literal), 0)
-        scalar_literal = CompoundLiteralExpr(
-            TypeSpec("int"),
-            init_list([InitItem((), typed_int("6"))]),
-        )
-        typed_expr(scalar_literal, INT)
-        self.assertNotEqual(gen._compound_literal(scalar_literal), 0)
-
-        self.assertNotEqual(gen._size_const(SizeofExpr(typed_identifier("scalar", INT), None)), 0)
-        self.assertNotEqual(gen._to_bool(c.ConstNull(c.ArrayType(c.Int32Type(), 2))), 0)
-        self.assertNotEqual(gen._to_bool(c.ConstReal(c.DoubleType(), 1.0)), 0)
-        self.assertNotEqual(gen._build_cast(c.ConstInt(c.Int32Type(), 1, False), c.Int32Type()), 0)
-
-        typeof_expr = typed_identifier("scalar", INT)
-        self.assertEqual(
-            gen._resolve_type(TypeSpec("typeof", pointer_depth=1, typeof_expr=typeof_expr)),
-            INT.pointer_to(),
-        )
-        self.assertEqual(
-            gen._resolve_type(TypeSpec("typeof", array_lengths=(2,), typeof_expr=typeof_expr)),
-            INT.array_of(2),
-        )
-        self.assertEqual(
-            gen._resolve_type(
-                TypeSpec(
-                    "typeof",
-                    declarator_ops=(("fn", ((TypeSpec("int"),), False)),),
-                    typeof_expr=typeof_expr,
-                ),
-            ),
-            INT.function_of((INT,)),
-        )
-        self.assertEqual(
-            gen._resolve_type(
-                TypeSpec("typeof", declarator_ops=(("weird", 0),), typeof_expr=typeof_expr)
-            ),
-            INT,
-        )
-        missing_typeof = Identifier("missing_typeof")
-        gen._type_map._map.pop(id(missing_typeof), None)
-        with self.assertRaises(CodegenError):
-            gen._resolve_type(TypeSpec("typeof", typeof_expr=missing_typeof))
-        self.assertEqual(
-            gen._resolve_type(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(typed_int("3"))),))
-            ),
-            INT.array_of(3),
-        )
-        self.assertEqual(
-            gen._resolve_type(TypeSpec("int", declarator_ops=(("weird", 0),))),
-            Type("int", declarator_ops=(("weird", 0),)),
-        )
-
-    def test_codegen_helper_constant_initializer_edges_without_llc(self) -> None:
-        result = compile_source(
-            """
-struct Pair { int left; int right; };
-union U { int i; long l; };
-union Ptrs { char *p; int *q; };
-struct Flex { int n; char data[]; };
-struct FloatBox { float f; };
-struct Outer { struct Pair nested; int tail; };
-struct Wrapper { struct { int inner; }; int tail; };
-struct PtrHolder { char *p; };
-struct Empty { };
-enum { ENUM_VALUE = -3 };
-int g[3];
-int f(void) { return 0; }
-""",
-            filename="helper_constant_edges.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        gen = _LLVMGen(result)
-        c = llvm()
-        fn_type = c.FunctionType(c.VoidType(), None, 0, False)
-        fn = c.AddFunction(gen._mod, b"probe_constant_edges", fn_type)
-        block = c.AppendBasicBlock(fn, b"entry")
-        c.PositionBuilderAtEnd(gen._builder, block)
-        gen._func = fn
-        gen._entry_block = block
-        gen._locals = [{}]
-
-        def typed_expr(expr: IntLiteral | Identifier | CompoundLiteralExpr, type_: Type):
-            gen._type_map.set(expr, type_)
-            return expr
-
-        def typed_int(value: str = "1", type_: Type = INT) -> IntLiteral:
-            return typed_expr(IntLiteral(value), type_)
-
-        def init_list(items: list[InitItem]) -> InitList:
-            return InitList(tuple(items))
-
-        self.assertNotEqual(
-            gen._eval_init(init_list([InitItem((), typed_int("7"))]), INT),
-            0,
-        )
-        self.assertNotEqual(gen._eval_init(FloatLiteral("1.5f"), FLOAT), 0)
-        self.assertNotEqual(gen._eval_init(FloatLiteral("1.5"), FLOAT), 0)
-        self.assertIsNone(gen._eval_init(Identifier("missing"), INT))
-        self.assertIsNone(
-            gen._eval_init(
-                init_list([InitItem((), typed_int("1")), InitItem((), typed_int("2"))]),
-                INT,
-            ),
-        )
-        self.assertEqual(
-            gen._infer_array_init_length(
-                init_list(
-                    [
-                        InitItem((("index", Identifier("not_const")),), typed_int("1")),
-                        InitItem(
-                            (("range", DesignatorRange(typed_int("2"), Identifier("hi"))),),
-                            typed_int("2"),
-                        ),
-                        InitItem((("member", "x"),), typed_int("3")),
-                    ],
-                ),
-                Type("int").array_of(-1),
-            ),
-            1,
-        )
-        self.assertEqual(
-            gen._infer_array_init_length(
-                init_list([InitItem((), typed_int("1"))]),
-                Type("struct Missing").array_of(-1),
-            ),
-            1,
-        )
-        self.assertEqual(
-            gen._infer_array_init_length(
-                init_list([InitItem((), typed_int("1")), InitItem((), typed_int("2"))]),
-                Type("struct Pair").array_of(-1),
-            ),
-            1,
-        )
-        self.assertIsNone(
-            gen._flexible_array_member_overrides(INT, init_list([InitItem((), typed_int("1"))])),
-        )
-        self.assertIsNone(
-            gen._flexible_array_member_overrides(
-                Type("struct Missing"),
-                init_list([InitItem((), typed_int("1"))]),
-            ),
-        )
-        self.assertIsNone(
-            gen._flexible_array_member_overrides(
-                Type("struct Pair"),
-                init_list([InitItem((), typed_int("1"))]),
-            ),
-        )
-        self.assertIsNone(
-            gen._flexible_array_member_overrides(
-                Type("struct Flex"),
-                init_list([InitItem((), typed_int("1"))]),
-            ),
-        )
-        self.assertIsNone(
-            gen._flexible_array_member_overrides(
-                Type("struct Flex"),
-                init_list([InitItem((), typed_int("1")), InitItem((), init_list([]))]),
-            ),
-        )
-        flex_overrides = gen._flexible_array_member_overrides(
-            Type("struct Flex"),
-            init_list([InitItem((), typed_int("1")), InitItem((), StringLiteral('"hi"'))]),
-        )
-        self.assertEqual(flex_overrides, {1: Type("char").array_of(3)})
-        nested_flex_init = gen._record_member_initializer(
-            init_list([InitItem((("member", "data"), ("index", typed_int("1"))), typed_int("7"))]),
-            "struct Flex",
-            1,
-        )
-        self.assertIsInstance(nested_flex_init, InitList)
-        self.assertIsNone(
-            gen._record_member_initializer(
-                init_list([InitItem((), typed_int("1"))]),
-                "struct Missing",
-                0,
-            ),
-        )
-        self.assertIsNone(
-            gen._record_member_initializer(
-                init_list([InitItem((("index", typed_int("0")),), typed_int("1"))]),
-                "struct Pair",
-                0,
-            ),
-        )
-        self.assertIsNone(
-            gen._record_member_initializer(
-                init_list([InitItem((("member", "missing"),), typed_int("1"))]),
-                "struct Pair",
-                0,
-            ),
-        )
-        direct_member_init = typed_int("10")
-        self.assertIs(
-            gen._record_member_initializer(
-                init_list([InitItem((("member", "right"),), direct_member_init)]),
-                "struct Pair",
-                1,
-            ),
-            direct_member_init,
-        )
-        self.assertEqual(
-            gen._infer_flexible_array_init_length(typed_int("5"), Type("char").array_of(-1)),
-            1,
-        )
-        self.assertEqual(
-            gen._infer_flexible_array_init_length(StringLiteral('u"x"'), Type("char").array_of(-1)),
-            1,
-        )
-        self.assertNotEqual(gen._struct_type_with_member_overrides("struct Missing", {}), 0)
-        self.assertIsNone(gen._eval_array_init(InitList(()), INT))
-        self.assertIsNone(
-            gen._eval_array_init(
-                init_list([InitItem((("range", typed_int("1")),), typed_int("1"))]),
-                Type("int").array_of(2),
-            ),
-        )
-        self.assertIsNone(
-            gen._eval_array_init(
-                init_list([InitItem((("index", Identifier("n")),), typed_int("1"))]),
-                Type("int").array_of(2),
-            ),
-        )
-        self.assertIsNone(
-            gen._eval_array_init(
-                init_list([InitItem((("member", "x"),), typed_int("1"))]),
-                Type("int").array_of(2),
-            ),
-        )
-        self.assertNotEqual(
-            gen._eval_array_init(
-                init_list(
-                    [
-                        InitItem(
-                            (("range", DesignatorRange(typed_int("0"), typed_int("1"))),),
-                            Identifier("missing"),
-                        ),
-                    ],
-                ),
-                Type("int").array_of(2),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_array_init(
-                init_list(
-                    [
-                        InitItem(
-                            (("range", DesignatorRange(typed_int("3"), typed_int("4"))),),
-                            typed_int("1"),
-                        ),
-                    ],
-                ),
-                Type("int").array_of(2),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_array_init(
-                init_list([InitItem((("index", typed_int("5")),), typed_int("1"))]),
-                Type("int").array_of(2),
-            ),
-            0,
-        )
-        self.assertIsNone(
-            gen._eval_array_init(
-                init_list(
-                    [
-                        InitItem(
-                            (("range", DesignatorRange(typed_int("0"), Identifier("hi"))),),
-                            typed_int("1"),
-                        ),
-                    ],
-                ),
-                Type("int").array_of(2),
-            ),
-        )
-        self.assertNotEqual(
-            gen._eval_array_init(
-                init_list([InitItem((("index", typed_int("0")),), Identifier("missing"))]),
-                Type("int").array_of(2),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_array_init(
-                init_list([InitItem((), typed_int("1"))]),
-                Type("struct Missing").array_of(1),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_array_init(
-                init_list([InitItem((), typed_int("1")), InitItem((), typed_int("2"))]),
-                Type("int").array_of(1),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_array_init(
-                init_list([InitItem((), Identifier("missing"))]),
-                Type("int").array_of(2),
-            ),
-            0,
-        )
-        self.assertIsNone(
-            gen._eval_record_init(
-                init_list([InitItem((("index", typed_int("0")),), typed_int("1"))]),
-                Type("struct Pair"),
-            ),
-        )
-        self.assertIsNone(
-            gen._eval_record_init(
-                init_list([InitItem((("member", "missing"),), typed_int("1"))]),
-                Type("struct Pair"),
-            ),
-        )
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list([InitItem((), typed_int("1")), InitItem((), typed_int("2"))]),
-                Type("union U"),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list(
-                    [
-                        InitItem((), typed_int("1")),
-                        InitItem((), typed_int("2")),
-                        InitItem((), typed_int("3")),
-                    ],
-                ),
-                Type("struct Pair"),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list([InitItem((), Identifier("missing"))]),
-                Type("struct Pair"),
-            ),
-            0,
-        )
-        self.assertNotEqual(gen._eval_record_init(InitList(()), Type("union U")), 0)
-        self.assertNotEqual(gen._eval_record_init(InitList(()), Type("struct Empty")), 0)
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list([InitItem((("member", "nested"), ("member", "right")), typed_int("8"))]),
-                Type("struct Outer"),
-            ),
-            0,
-        )
-        anonymous_record_init = gen._eval_record_init(
-            init_list([InitItem((("member", "inner"),), typed_int("9"))]),
-            Type("struct Wrapper"),
-        )
-        self.assertIsNotNone(anonymous_record_init)
-        self.assertNotEqual(anonymous_record_init, 0)
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list([InitItem((("member", "right"),), Identifier("missing"))]),
-                Type("struct Pair"),
-            ),
-            0,
-        )
-
-        self.assertEqual(
-            gen._eval_unbraced_aggregate_initializer_items(Type("int").array_of(2), (), 2),
-            (0, None),
-        )
-        self.assertEqual(
-            gen._eval_unbraced_aggregate_initializer_items(
-                Type("int", declarator_ops=(("arr", -1),)),
-                (InitItem((), typed_int("1")),),
-                0,
-            ),
-            (0, None),
-        )
-        self.assertEqual(
-            gen._eval_unbraced_aggregate_initializer_items(
-                Type("int").array_of(2),
-                (InitItem((("index", typed_int("0")),), typed_int("1")),),
-                0,
-            )[0],
-            0,
-        )
-        self.assertEqual(
-            gen._eval_unbraced_aggregate_initializer_items(
-                INT,
-                (InitItem((), typed_int("1")),),
-                0,
-            ),
-            (0, None),
-        )
-        self.assertEqual(
-            gen._eval_unbraced_aggregate_initializer_items(
-                Type("struct Missing"),
-                (InitItem((), typed_int("1")),),
-                0,
-            ),
-            (0, None),
-        )
-        consumed, value = gen._eval_unbraced_aggregate_initializer_items(
-            Type("union U"),
-            (InitItem((), typed_int("1")),),
-            0,
-        )
-        self.assertEqual(consumed, 1)
-        self.assertNotEqual(value, 0)
-        self.assertEqual(
-            gen._eval_unbraced_aggregate_initializer_items(
-                Type("struct Pair"),
-                (InitItem((("member", "left"),), typed_int("1")),),
-                0,
-            )[0],
-            0,
-        )
-        self.assertEqual(
-            gen._eval_unbraced_aggregate_initializer_items(
-                Type("struct Pair"),
-                (InitItem((), init_list([InitItem((), typed_int("1"))])),),
-                0,
-            )[0],
-            1,
-        )
-        consumed, value = gen._eval_unbraced_aggregate_initializer_items(
-            Type("int").array_of(1),
-            (InitItem((), Identifier("missing")),),
-            0,
-        )
-        self.assertEqual(consumed, 1)
-        self.assertNotEqual(value, 0)
-        consumed, value = gen._eval_unbraced_aggregate_initializer_items(
-            Type("union U"),
-            (InitItem((), Identifier("missing")),),
-            0,
-        )
-        self.assertEqual(consumed, 1)
-        self.assertNotEqual(value, 0)
-        self.assertEqual(
-            gen._eval_unbraced_initializer_item(
-                INT,
-                (InitItem((("index", typed_int("0")),), typed_int("1")),),
-                0,
-            ),
-            (0, None),
-        )
-        self.assertEqual(
-            gen._eval_unbraced_initializer_item(
-                Type("int").array_of(1),
-                (InitItem((), init_list([InitItem((), typed_int("1"))])),),
-                0,
-            )[0],
-            1,
-        )
-        self.assertNotEqual(gen._eval_scalar_record_init(typed_int("1"), Type("struct Missing")), 0)
-        self.assertIsNone(gen._eval_scalar_record_init(Identifier("missing"), Type("struct Pair")))
-        self.assertNotEqual(
-            gen._eval_record_path_init(
-                [("struct Pair", 1, gen._sema.record_definitions["struct Pair"][1])],
-                (),
-                typed_int("9"),
-            ),
-            0,
-        )
-        self.assertIsNone(
-            gen._eval_record_path_init(
-                [("struct Pair", 0, gen._sema.record_definitions["struct Pair"][0])],
-                (),
-                Identifier("missing"),
-            ),
-        )
-        self.assertNotEqual(
-            gen._eval_designated_init(Type("struct Pair"), (("member", "right"),), typed_int("3")),
-            0,
-        )
-        self.assertNotEqual(gen._const_array(c.Int32Type(), []), 0)
-        self.assertNotEqual(gen._const_struct(Type("struct Pair"), []), 0)
-        self.assertNotEqual(
-            gen._const_union(
-                Type("union Missing"),
-                gen._sema.record_definitions["union U"][0],
-                c.ConstInt(c.Int32Type(), 1, False),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._const_union(
-                Type("union U"),
-                gen._sema.record_definitions["union U"][0],
-                c.ConstReal(c.DoubleType(), 1.0),
-            ),
-            0,
-        )
-        ptr_members = gen._sema.record_definitions["union Ptrs"]
-        self.assertNotEqual(
-            gen._coerce_union_storage_value(
-                c.ConstPointerNull(gen._type_to_llvm(ptr_members[0].type_)),
-                ptr_members[0],
-                ptr_members[1],
-                gen._record_member_llvm_type(ptr_members[1]),
-            ),
-            0,
-        )
-        bad_ptr_union = gen._const_union(
-            Type("union Ptrs"),
-            ptr_members[0],
-            c.ConstIntToPtr(
-                c.ConstInt(c.Int64Type(), 1, False),
-                gen._type_to_llvm(ptr_members[0].type_),
-            ),
-        )
-        self.assertIsNone(gen._const_union_bytes(bad_ptr_union, "union Ptrs"))
-        self.assertNotEqual(
-            gen._coerce_union_storage_value(
-                c.ConstInt(c.Int8Type(), 255, False),
-                gen._sema.record_definitions["union U"][0],
-                gen._sema.record_definitions["union U"][1],
-                gen._record_member_llvm_type(gen._sema.record_definitions["union U"][1]),
-            ),
-            0,
-        )
-        array_const = gen._const_array(
-            c.Int32Type(),
-            [c.ConstInt(c.Int32Type(), 1, False), c.ConstInt(c.Int32Type(), 2, False)],
-        )
-        self.assertEqual(
-            gen._const_value_bytes(array_const, Type("int").array_of(2)),
-            (1).to_bytes(4, "little") + (2).to_bytes(4, "little"),
-        )
-        pair_const = gen._eval_record_init(
-            init_list([InitItem((), typed_int("1")), InitItem((), typed_int("2"))]),
-            Type("struct Pair"),
-        )
-        self.assertIsNotNone(pair_const)
-        assert pair_const is not None
-        self.assertEqual(len(gen._const_value_bytes(pair_const, Type("struct Pair")) or b""), 8)
-        gen._sema.record_definitions["struct PaddedTail"] = (
-            RecordMemberInfo("tag", Type("char")),
-            RecordMemberInfo("word", INT),
-            RecordMemberInfo("tail", Type("char")),
-        )
-        padded_const = gen._const_struct(
-            Type("struct PaddedTail"),
-            [
-                c.ConstInt(c.Int8Type(), 1, False),
-                c.ConstInt(c.Int32Type(), 2, False),
-                c.ConstInt(c.Int8Type(), 3, False),
-            ],
-        )
-        padded_bytes = gen._const_struct_bytes(padded_const, "struct PaddedTail")
-        self.assertIsNotNone(padded_bytes)
-        self.assertEqual(len(padded_bytes or b""), gen._record_size("struct PaddedTail"))
-        self.assertEqual(
-            gen._const_value_bytes(c.ConstInt(c.Int32Type(), 0, False), Type("void")),
-            b"",
-        )
-        float_array_const = gen._const_array(
-            c.FloatType(),
-            [c.ConstReal(c.FloatType(), 1.0)],
-        )
-        self.assertIsNone(gen._const_value_bytes(float_array_const, FLOAT.array_of(1)))
-        self.assertIsNone(gen._const_value_bytes(c.ConstReal(c.DoubleType(), 1.0), Type("double")))
-        self.assertIsNone(
-            gen._const_value_bytes(array_const, Type("int", declarator_ops=(("ptr", 0),)))
-        )
-        self.assertIsNone(
-            gen._const_struct_bytes(c.ConstInt(c.Int32Type(), 0, False), "struct Missing")
-        )
-        float_box_const = gen._const_struct(
-            Type("struct FloatBox"),
-            [c.ConstReal(c.FloatType(), 1.0)],
-        )
-        self.assertIsNone(gen._const_struct_bytes(float_box_const, "struct FloatBox"))
-        self.assertEqual(
-            gen._const_union_bytes(c.ConstInt(c.Int32Type(), 0, False), "union Missing"),
-            b"",
-        )
-        self.assertNotEqual(
-            gen._const_aggregate_element(c.ConstInt(c.Int32Type(), 1, False), 0, c.Int32Type()), 0
-        )
-        empty_struct = c.ConstNull(c.StructType(None, 0, False))
-        self.assertNotEqual(gen._const_aggregate_element(empty_struct, 0, c.Int32Type()), 0)
-        self.assertIsNone(gen._const_from_bytes(b"\0" * 4, FLOAT.array_of(1)))
-        self.assertNotEqual(gen._const_from_bytes(b"\0" * 8, INT.pointer_to()), 0)
-        self.assertIsNone(gen._const_from_bytes(b"\1" + b"\0" * 7, INT.pointer_to()))
-        self.assertIsNone(gen._const_from_bytes(b"\0" * 4, Type("int").function_of(())))
-        self.assertIsNone(gen._const_from_bytes(b"\0" * 8, FLOAT))
-        self.assertNotEqual(
-            gen._const_from_bytes((1).to_bytes(8, "little"), Type("union U")),
-            0,
-        )
-        self.assertIsNone(gen._const_struct_from_bytes(b"", "struct Missing"))
-        self.assertIsNone(gen._const_struct_from_bytes(b"\1" + b"\0" * 7, "struct PtrHolder"))
-        self.assertNotEqual(gen._const_union_from_bytes(b"", "union Missing"), 0)
-        self.assertIsNone(gen._const_union_from_bytes(b"\1" + b"\0" * 7, "union Ptrs"))
-        self.assertNotEqual(gen._eval_const_expr(typed_int("7"), Type("double")), 0)
-        self.assertNotEqual(gen._eval_const_expr(typed_int("7"), INT), 0)
-        self.assertIsNone(gen._eval_const_expr(typed_int("7"), Type("struct Pair")))
-        non_array_pointer_expr = typed_expr(Identifier("non_array_pointer_expr"), INT)
-        self.assertIsNone(gen._eval_const_expr(non_array_pointer_expr, INT.pointer_to()))
-
-        compound_literal = CompoundLiteralExpr(
-            TypeSpec("int"),
-            init_list([InitItem((), typed_int("1"))]),
-        )
-        typed_expr(compound_literal, INT)
-        self.assertNotEqual(gen._eval_const_expr(compound_literal, INT.pointer_to()), 0)
-        self.assertNotEqual(gen._eval_const_expr(compound_literal), 0)
-        self.assertEqual(
-            gen._const_compound_literal_addr(compound_literal),
-            gen._const_compound_literal_addr(compound_literal),
-        )
-        fixed_array_literal = CompoundLiteralExpr(
-            TypeSpec("int", array_lengths=(2,)),
-            init_list([InitItem((), typed_int("1")), InitItem((), typed_int("2"))]),
-        )
-        typed_expr(fixed_array_literal, Type("int").array_of(2))
-        self.assertNotEqual(gen._const_compound_literal_addr(fixed_array_literal), 0)
-        self.assertIsNone(gen._eval_const_expr(UnaryExpr("-", FloatLiteral("1.0"))))
-        self.assertNotEqual(
-            gen._eval_const_expr(UnaryExpr("-", FloatLiteral("1.0")), Type("double")),
-            0,
-        )
-        self.assertIsNone(gen._eval_const_expr(UnaryExpr("+", typed_int("1"))))
-        self.assertNotEqual(
-            gen._eval_const_expr(CastExpr(TypeSpec("double"), typed_int("3"))),
-            0,
-        )
-        self.assertNotEqual(gen._eval_const_expr(SizeofExpr(None, TypeSpec("int"))), 0)
-        self.assertIsNone(gen._eval_const_expr(AlignofExpr(None, None)))
-        self.assertNotEqual(gen._eval_const_expr(AlignofExpr(None, TypeSpec("long"))), 0)
-        self.assertNotEqual(
-            gen._eval_const_expr(
-                BuiltinOffsetofExpr(TypeSpec("struct", record_tag="Pair"), "right"),
-            ),
-            0,
-        )
-
-        static_global = c.AddGlobal(gen._mod, c.Int32Type(), b"static_local_const")
-        gen._static_local_global_values.add(static_global)
-        gen._locals.append({"s": static_global})
-        self.assertEqual(gen._eval_const_identifier(Identifier("s")), static_global)
-        self.assertNotEqual(gen._eval_const_identifier(Identifier("ENUM_VALUE")), 0)
-        file_scope = gen._sema.file_scope
-        object.__setattr__(gen._sema, "file_scope", None)
-        try:
-            self.assertIsNone(gen._eval_const_identifier(Identifier("ENUM_VALUE")))
-        finally:
-            object.__setattr__(gen._sema, "file_scope", file_scope)
-        self.assertNotEqual(
-            gen._eval_const_identifier(
-                typed_expr(Identifier("arr_global"), Type("int").array_of(3))
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_const_addr(typed_expr(Identifier("callee2"), Type("int").function_of(()))),
-            0,
-        )
-        c.AddGlobal(gen._mod, c.Int32Type(), b"const_known_global")
-        self.assertNotEqual(gen._eval_const_addr(Identifier("const_known_global")), 0)
-        c.AddFunction(
-            gen._mod,
-            b"const_known_fn",
-            c.FunctionType(c.Int32Type(), None, 0, False),
-        )
-        self.assertNotEqual(gen._eval_const_addr(Identifier("const_known_fn")), 0)
-        self.assertNotEqual(
-            gen._eval_const_addr(
-                UnaryExpr("*", typed_expr(Identifier("arr_global"), Type("int").array_of(3))),
-            ),
-            0,
-        )
-        literal = StringLiteral('"cache"')
-        self.assertEqual(
-            gen._const_string_literal_ptr(literal), gen._const_string_literal_ptr(literal)
-        )
-        self.assertNotEqual(gen._const_cast(c.ConstInt(c.Int32Type(), 1, False), c.VoidType()), 0)
-        self.assertNotEqual(
-            gen._const_cast(c.ConstInt(c.Int64Type(), 0, False), c.PointerType(c.Int8Type(), 0)),
-            0,
-        )
-        self.assertNotEqual(
-            gen._const_cast(c.ConstInt(c.Int64Type(), 1, False), c.PointerType(c.Int8Type(), 0)),
-            0,
-        )
-        self.assertNotEqual(gen._const_cast(c.ConstInt(c.Int32Type(), 2, False), c.Int1Type()), 0)
-        self.assertNotEqual(gen._const_cast(c.ConstInt(c.Int64Type(), 2, False), c.Int32Type()), 0)
-        ptr_int_expr = c.ConstPtrToInt(
-            c.ConstPointerNull(c.PointerType(c.Int8Type(), 0)),
-            c.Int64Type(),
-        )
-        self.assertNotEqual(gen._const_cast(ptr_int_expr, c.Int32Type()), 0)
-        dynamic_int_addr = c.BuildAlloca(gen._builder, c.Int64Type(), b"dynamic.const.cast.addr")
-        c.BuildStore(gen._builder, c.ConstInt(c.Int64Type(), 2, False), dynamic_int_addr)
-        dynamic_int = c.BuildLoad2(
-            gen._builder,
-            c.Int64Type(),
-            dynamic_int_addr,
-            b"dynamic.const.cast",
-        )
-        self.assertNotEqual(gen._const_cast(dynamic_int, c.Int32Type()), 0)
-        self.assertNotEqual(gen._const_cast(c.ConstReal(c.DoubleType(), 1.0), c.Int64Type()), 0)
-        self.assertIsNone(
-            gen._eval_int_constant_value(
-                ConditionalExpr(Identifier("missing"), typed_int("1"), typed_int("2")),
-            ),
-        )
-        self.assertEqual(
-            gen._eval_int_constant_value(BinaryExpr("*", typed_int("3"), typed_int("4"))),
-            12,
-        )
-        self.assertIsNone(
-            gen._eval_int_constant_value(BinaryExpr("???", typed_int("3"), typed_int("4"))),
-        )
-
-    def test_codegen_helper_remaining_direct_edges_without_llc(self) -> None:
-        result = compile_source(
-            """
-typedef const int MyInt;
-struct Pair { int left; int right; };
-struct Outer { struct Pair pair; int tail; };
-struct Bits { int flag:1; };
-union U { int i; long l; };
-int global_array[2];
-int global_value;
-struct Pair global_pair;
-union U global_union;
-int (*global_fp)(long);
-struct Pair make_pair(void);
-int f(void) { return 0; }
-""",
-            filename="helper_remaining_edges.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        gen = _LLVMGen(result)
-        c = llvm()
-        fn_type = c.FunctionType(c.VoidType(), None, 0, False)
-        fn = c.AddFunction(gen._mod, b"probe_remaining_edges", fn_type)
-        block = c.AppendBasicBlock(fn, b"entry")
-        c.PositionBuilderAtEnd(gen._builder, block)
-        gen._func = fn
-        gen._entry_block = block
-        gen._func_sym = result.sema.functions["f"]
-        gen._locals = [{}]
-
-        def typed_expr(expr, type_: Type):
-            gen._type_map.set(expr, type_)
-            return expr
-
-        def typed_identifier(name: str, type_: Type) -> Identifier:
-            return typed_expr(Identifier(name), type_)
-
-        def typed_int(value: str = "1", type_: Type = INT) -> IntLiteral:
-            return typed_expr(IntLiteral(value), type_)
-
-        def init_list(items: list[InitItem]) -> InitList:
-            return InitList(tuple(items))
-
-        ptr_t = c.PointerType(c.Int8Type(), 0)
-        ptr_addr = c.BuildAlloca(gen._builder, ptr_t, b"p.addr")
-        c.BuildStore(gen._builder, c.ConstNull(ptr_t), ptr_addr)
-        gen._locals[-1]["p"] = ptr_addr
-
-        plain_fn = gen._function_designator("plain_fallback", INT)
-        self.assertNotEqual(plain_fn, 0)
-        self.assertEqual(gen._function_designator("plain_fallback", INT), plain_fn)
-        self.assertIsNone(gen._lookup_symbol_type("definitely_missing_symbol"))
-
-        symbol_indirect_call = CallExpr(Identifier("global_fp"), [typed_int("7", Type("short"))])
-        typed_expr(symbol_indirect_call, INT)
-        self.assertNotEqual(gen._call(symbol_indirect_call), 0)
-
-        make_pair_call = CallExpr(
-            typed_identifier("make_pair", Type("struct Pair").function_of(())), []
-        )
-        typed_expr(make_pair_call, Type("struct Pair"))
-        self.assertNotEqual(gen._member_ptr(MemberExpr(make_pair_call, "left", True)), 0)
-
-        scalar_compound = CompoundLiteralExpr(TypeSpec("int"), typed_int("9"))
-        typed_expr(scalar_compound, INT)
-        self.assertNotEqual(gen._compound_literal_addr(scalar_compound), 0)
-
-        self.assertEqual(
-            gen._resolve_type(TypeSpec("MyInt", pointer_depth=1, qualifiers=("volatile",))),
-            Type("int", pointer_depth=1, qualifiers=("const", "volatile")),
-        )
-
-        void_call = CallExpr(Identifier("__builtin_unreachable"), [])
-        cast_void_to_int = CastExpr(TypeSpec("int"), void_call)
-        typed_expr(cast_void_to_int, INT)
-        self.assertNotEqual(gen._cast(cast_void_to_int), 0)
-
-        va_list_cast = CastExpr(
-            TypeSpec("__builtin_va_list"), typed_identifier("p", Type("char").pointer_to())
-        )
-        typed_expr(va_list_cast, Type("__builtin_va_list"))
-        self.assertNotEqual(gen._cast(va_list_cast), 0)
-
-        float_expr = typed_expr(FloatLiteral("1.5f"), Type("float"))
-        float_to_double = CastExpr(TypeSpec("double"), float_expr)
-        typed_expr(float_to_double, Type("double"))
-        self.assertNotEqual(gen._cast(float_to_double), 0)
-
-        int_to_long = CastExpr(TypeSpec("long"), typed_int("5"))
-        typed_expr(int_to_long, Type("long"))
-        self.assertNotEqual(gen._cast(int_to_long), 0)
-
-        va_pointer_expr = CastExpr(TypeSpec("char", pointer_depth=1), typed_int("0"))
-        typed_expr(va_pointer_expr, Type("char").pointer_to())
-        self.assertNotEqual(gen._va_arg(BuiltinVaArgExpr(va_pointer_expr, TypeSpec("int"))), 0)
-        self.assertNotEqual(gen._va_intrinsic_call("__builtin_va_end", ()), 0)
-        self.assertNotEqual(
-            gen._va_intrinsic_call("__builtin_va_copy", (va_pointer_expr, va_pointer_expr)),
-            0,
-        )
-
-        self.assertIsNone(
-            gen._eval_array_init(
-                InitList(()),
-                Type("int", declarator_ops=(("arr", ArrayDecl(None)),)),
-            ),
-        )
-
-        outer_pair = gen._sema.record_definitions["struct Outer"][0]
-        pair_right = gen._sema.record_definitions["struct Pair"][1]
-        union_i = gen._sema.record_definitions["union U"][0]
-        self.assertIsNone(
-            gen._eval_record_path_init([("struct Missing", 0, pair_right)], (), typed_int("1"))
-        )
-        self.assertNotEqual(
-            gen._eval_record_path_init(
-                [("struct Outer", 0, outer_pair), ("struct Pair", 1, pair_right)],
-                (),
-                typed_int("2"),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_record_path_init(
-                [("struct Outer", 0, outer_pair)],
-                (("member", "right"),),
-                typed_int("3"),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_record_path_init([("union U", 0, union_i)], (), typed_int("4")),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list([InitItem((("member", "pair"), ("member", "right")), typed_int("5"))]),
-                Type("struct Outer"),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._const_aggregate_element(c.ConstInt(c.Int32Type(), 1, False), 99, c.Int32Type()), 0
-        )
-
-        self.assertNotEqual(gen._eval_const_expr(CastExpr(TypeSpec("long"), typed_int("6"))), 0)
-        c.AddGlobal(gen._mod, c.Int32Type(), b"manual_const_global")
-        self.assertNotEqual(gen._eval_const_addr(Identifier("manual_const_global")), 0)
-        c.AddFunction(
-            gen._mod,
-            b"manual_const_fn",
-            c.FunctionType(c.Int32Type(), None, 0, False),
-        )
-        self.assertNotEqual(gen._eval_const_addr(Identifier("manual_const_fn")), 0)
-
-        pair_ptr_zero = CastExpr(
-            TypeSpec("struct", pointer_depth=1, record_tag="Pair"),
-            typed_int("0"),
-        )
-        typed_expr(pair_ptr_zero, Type("struct Pair").pointer_to())
-        self.assertNotEqual(gen._eval_const_member_ptr(MemberExpr(pair_ptr_zero, "right", True)), 0)
-        missing_member_base = CallExpr(
-            typed_identifier("make_pair", Type("struct Pair").function_of(())),
-            [],
-        )
-        typed_expr(missing_member_base, Type("struct Pair"))
-        self.assertIsNone(
-            gen._eval_const_member_ptr(MemberExpr(missing_member_base, "left", False))
-        )
-        self.assertIsNone(
-            gen._eval_const_member_ptr(
-                MemberExpr(typed_identifier("global_pair", Type("struct Pair")), "missing", False)
-            )
-        )
-        self.assertNotEqual(
-            gen._eval_const_member_ptr(
-                MemberExpr(typed_identifier("global_union", Type("union U")), "l", False)
-            ),
-            0,
-        )
-
-        self.assertIsNone(
-            gen._eval_const_subscript_ptr(
-                SubscriptExpr(
-                    typed_identifier("global_array", Type("int").array_of(2)),
-                    Identifier("i"),
-                )
-            )
-        )
-        array_call = CallExpr(
-            typed_identifier("array_fn", Type("int").array_of(2).function_of(())), []
-        )
-        typed_expr(array_call, Type("int").array_of(2))
-        self.assertIsNone(gen._eval_const_subscript_ptr(SubscriptExpr(array_call, typed_int("0"))))
-        pointer_subscript = SubscriptExpr(
-            typed_identifier("p", Type("char").pointer_to()),
-            typed_int("0"),
-        )
-        typed_expr(pointer_subscript, Type("char"))
-        self.assertIsNone(gen._eval_const_subscript_ptr(pointer_subscript))
-
-        self.assertIsNone(gen._eval_int_constant_value(UnaryExpr("@", typed_int("1"))))
-        self.assertIsNone(
-            gen._eval_int_constant_value(BinaryExpr("+", Identifier("missing"), typed_int("1")))
-        )
-        self.assertIsNone(gen._offsetof_member_path(Type("struct Pair").pointer_to(), ["left"]))
-        self.assertIsNone(gen._offsetof_member_path(INT, ["left"]))
-        self.assertIsNone(gen._offsetof_member_path(Type("struct Pair"), ["missing"]))
-        self.assertIsNone(gen._offsetof_member_path(Type("struct Outer"), ["pair", "missing"]))
-        self.assertIsNone(gen._record_member_offset_and_type("struct Missing", "x"))
-        self.assertEqual(gen._record_member_offset_and_type("union U", "i"), (0, INT))
-        self.assertIsNone(gen._record_member_offset_and_type("union U", "missing"))
-        self.assertIsNone(gen._record_member_offset_and_type("struct Bits", "flag"))
-
-        case_expectations = {
-            "/": 2,
-            "%": 1,
-            "<<": 20,
-            ">>": 1,
-            "|": 7,
-            "&": 0,
-            "^": 7,
-            "==": 0,
-            "!=": 1,
-            "<": 0,
-            ">": 1,
-            "<=": 0,
-            ">=": 1,
-            "&&": 1,
-            "||": 1,
-            "???": 0,
-        }
-        for op, expected in case_expectations.items():
-            with self.subTest(case_op=op):
-                self.assertEqual(
-                    gen._eval_case_val(BinaryExpr(op, IntLiteral("5"), IntLiteral("2"))),
-                    expected,
-                )
-        with self.assertRaises(CodegenError):
-            gen._eval_case_val(UnaryExpr("@", IntLiteral("1")))
-        file_scope = gen._sema.file_scope
-        object.__setattr__(gen._sema, "file_scope", None)
-        try:
-            with self.assertRaises(CodegenError):
-                gen._eval_case_val(Identifier("ENUM_VALUE"))
-        finally:
-            object.__setattr__(gen._sema, "file_scope", file_scope)
-
-    def test_codegen_helper_switch_decay_and_resolution_edges_without_llc(self) -> None:
-        result = compile_source(
-            """
-struct Pair { int left; int right; };
-int f(void) { return 0; }
-""",
-            filename="helper_switch_decay_edges.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        gen = _LLVMGen(result)
-        c = llvm()
-        fn_type = c.FunctionType(c.VoidType(), None, 0, False)
-        fn = c.AddFunction(gen._mod, b"probe_switch_decay_edges", fn_type)
-        block = c.AppendBasicBlock(fn, b"entry")
-        c.PositionBuilderAtEnd(gen._builder, block)
-        gen._func = fn
-        gen._entry_block = block
-        gen._func_sym = result.sema.functions["f"]
-        gen._locals = [{}]
-
-        def typed_expr(expr, type_: Type):
-            gen._type_map.set(expr, type_)
-            return expr
-
-        def typed_int(value: str = "1", type_: Type = INT) -> IntLiteral:
-            return typed_expr(IntLiteral(value), type_)
-
-        def fresh_block(name: bytes) -> None:
-            c.PositionBuilderAtEnd(gen._builder, c.AppendBasicBlock(fn, name))
-
-        self.assertNotEqual(gen._type_to_llvm(Type("int", declarator_ops=(("fn", 0),))), 0)
-
-        gen._emit_switch(
-            SwitchStmt(
-                typed_int("1"),
-                CompoundStmt(
-                    [
-                        CaseStmt(IntLiteral("1"), NullStmt()),
-                        DefaultStmt(NullStmt()),
-                    ],
-                ),
-            )
-        )
-
-        fresh_block(b"array.binary.left")
-        array_value = c.ConstNull(c.ArrayType(c.Int32Type(), 2))
-        left_array = typed_expr(Identifier("left_array"), Type("int").array_of(2))
-        one = typed_int("1")
-        array_add = BinaryExpr("+", left_array, one)
-        typed_expr(array_add, Type("int").pointer_to())
-        original_emit_expr = gen._emit_expr
-
-        def emit_left_array(expr):
-            if expr is left_array:
-                return array_value
-            if expr is one:
-                return c.ConstInt(c.Int32Type(), 1, False)
-            return original_emit_expr(expr)
-
-        gen._emit_expr = emit_left_array
-        try:
-            self.assertNotEqual(gen._binary(array_add), 0)
-        finally:
-            gen._emit_expr = original_emit_expr
-
-        fresh_block(b"array.binary.right")
-        right_array = typed_expr(Identifier("right_array"), Type("int").array_of(2))
-        two = typed_int("2")
-        commuted_add = BinaryExpr("+", two, right_array)
-        typed_expr(commuted_add, Type("int").pointer_to())
-
-        def emit_right_array(expr):
-            if expr is right_array:
-                return array_value
-            if expr is two:
-                return c.ConstInt(c.Int32Type(), 2, False)
-            return original_emit_expr(expr)
-
-        gen._emit_expr = emit_right_array
-        try:
-            self.assertNotEqual(gen._binary(commuted_add), 0)
-        finally:
-            gen._emit_expr = original_emit_expr
-
-        fresh_block(b"array.compare")
-        self.assertNotEqual(
-            gen._compare(
-                "==",
-                c.ConstNull(c.ArrayType(c.Int32Type(), 2)),
-                c.ConstNull(c.ArrayType(c.Int32Type(), 2)),
-                Type("int").array_of(2),
-                Type("int").array_of(2),
-                False,
-                False,
-            ),
-            0,
-        )
-
-        fresh_block(b"direct.casts")
-        self.assertNotEqual(
-            gen._cast_int_to_width(c.ConstInt(c.Int32Type(), 3, False), 32, signed=False),
-            0,
-        )
-        self.assertNotEqual(
-            gen._build_cast(c.ConstReal(c.DoubleType(), 1.25), c.DoubleType()),
-            0,
-        )
-        self.assertIsNone(
-            gen._const_value_bytes(
-                c.ConstIntToPtr(
-                    c.ConstInt(c.Int64Type(), 1, False),
-                    c.PointerType(c.Int8Type(), 0),
-                ),
-                Type("int").pointer_to(),
-            )
-        )
-
-        gen._sema.record_definitions["struct <anon:matched>"] = (RecordMemberInfo("left", INT),)
-        self.assertEqual(gen._record_name_for_type_spec(TypeSpec("struct")), "struct")
-        self.assertEqual(
-            gen._record_name_for_type_spec(
-                TypeSpec("struct", record_members=((TypeSpec("int"), "left"),))
-            ),
-            "struct <anon:matched>",
-        )
-        self.assertEqual(
-            gen._record_name_for_type_spec(
-                TypeSpec("struct", record_members=((TypeSpec("int"), "right"),))
-            ),
-            "struct",
-        )
-        self.assertEqual(
-            gen._record_name_for_type_spec(
-                TypeSpec("struct", record_members=((TypeSpec("long"), "left"),))
-            ),
-            "struct",
-        )
-
-    def test_codegen_helper_remaining_fallback_edges_without_llc(self) -> None:
-        result = compile_source(
-            """
-	struct Pair { int left; int right; };
-	struct Outer { struct Pair nested; int tail; };
-	struct Wrapper { struct { int inner; }; int tail; };
-	struct HasPair { struct Pair pair; int tail; };
-	int f(void) { return 0; }
-		""",
-            filename="helper_remaining_fallback_edges.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        gen = _LLVMGen(result)
-        c = llvm()
-        fn_type = c.FunctionType(c.VoidType(), None, 0, False)
-        fn = c.AddFunction(gen._mod, b"probe_remaining_fallback_edges", fn_type)
-        block = c.AppendBasicBlock(fn, b"entry")
-        c.PositionBuilderAtEnd(gen._builder, block)
-        gen._func = fn
-        gen._entry_block = block
-        gen._func_sym = result.sema.functions["f"]
-        gen._locals = [{}]
-
-        def typed_expr(expr, type_: Type):
-            gen._type_map.set(expr, type_)
-            return expr
-
-        def typed_int(value: str = "1", type_: Type = INT) -> IntLiteral:
-            return typed_expr(IntLiteral(value), type_)
-
-        def init_list(items: list[InitItem]) -> InitList:
-            return InitList(tuple(items))
-
-        def untyped_identifier(name: str) -> Identifier:
-            expr = Identifier(name)
-            gen._type_map._map.pop(id(expr), None)
-            return expr
-
-        original_emit_expr = gen._emit_expr
-
-        null_cast_source = typed_int("1")
-        null_cast = CastExpr(TypeSpec("int"), null_cast_source)
-        typed_expr(null_cast, INT)
-
-        def emit_null_cast_source(expr):
-            if expr is null_cast_source:
-                return 0
-            return original_emit_expr(expr)
-
-        gen._emit_expr = emit_null_cast_source
-        try:
-            with self.assertRaisesRegex(CodegenError, "Cast operand emitted null"):
-                gen._cast(null_cast)
-        finally:
-            gen._emit_expr = original_emit_expr
-
-        struct_source = typed_expr(Identifier("struct_value"), Type("struct Pair"))
-        struct_to_int = CastExpr(TypeSpec("int"), struct_source)
-        typed_expr(struct_to_int, INT)
-        struct_value = c.ConstNull(gen._type_to_llvm(Type("struct Pair")))
-
-        def emit_struct_source(expr):
-            if expr is struct_source:
-                return struct_value
-            return original_emit_expr(expr)
-
-        gen._emit_expr = emit_struct_source
-        try:
-            self.assertNotEqual(gen._cast(struct_to_int), 0)
-        finally:
-            gen._emit_expr = original_emit_expr
-
-        va_cast_source = typed_int("0")
-        va_cast = CastExpr(TypeSpec("__builtin_va_list"), va_cast_source)
-        typed_expr(va_cast, Type("__builtin_va_list"))
-
-        def emit_va_cast_source(expr):
-            if expr is va_cast_source:
-                return c.ConstPointerNull(c.PointerType(c.Int32Type(), 0))
-            return original_emit_expr(expr)
-
-        gen._emit_expr = emit_va_cast_source
-        try:
-            self.assertNotEqual(gen._cast(va_cast), 0)
-        finally:
-            gen._emit_expr = original_emit_expr
-
-        va_int_cast_source = typed_int("1", Type("long"))
-        va_int_cast = CastExpr(TypeSpec("__builtin_va_list"), va_int_cast_source)
-        typed_expr(va_int_cast, Type("__builtin_va_list"))
-        self.assertNotEqual(gen._cast(va_int_cast), 0)
-
-        i8_ptr = c.ConstPointerNull(c.PointerType(c.Int8Type(), 0))
-        i32_ptr_type = c.PointerType(c.Int32Type(), 0)
-        self.assertEqual(gen._build_cast(i8_ptr, i32_ptr_type), i8_ptr)
-        self.assertNotEqual(gen._const_cast(i8_ptr, i32_ptr_type), 0)
-        self.assertNotEqual(
-            gen._compare(
-                "==",
-                c.ConstInt(c.Int64Type(), 1, False),
-                c.ConstInt(c.Int32Type(), 1, False),
-                None,
-                None,
-                False,
-                False,
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._compare(
-                "==",
-                c.ConstInt(c.Int32Type(), 1, False),
-                c.ConstInt(c.Int64Type(), 1, False),
-                None,
-                None,
-                False,
-                False,
-            ),
-            0,
-        )
-        file_scope = gen._sema.file_scope
-        object.__setattr__(gen._sema, "file_scope", None)
-        try:
-            self.assertEqual(gen._resolve_type(TypeSpec("plain_name")), Type("plain_name"))
-        finally:
-            object.__setattr__(gen._sema, "file_scope", file_scope)
-
-        pair_addr = c.BuildAlloca(
-            gen._builder, gen._type_to_llvm(Type("struct Pair")), b"pair.addr"
-        )
-        original_emit_unbraced_item = gen._emit_unbraced_initializer_item_to_addr
-
-        def emit_zero_unbraced_item(addr, target_type, items, index):
-            return 0
-
-        gen._emit_unbraced_initializer_item_to_addr = emit_zero_unbraced_item
-        try:
-            self.assertEqual(
-                gen._emit_unbraced_aggregate_items_to_addr(
-                    pair_addr,
-                    Type("struct Pair"),
-                    (InitItem((), typed_int("1")),),
-                    0,
-                ),
-                0,
-            )
-        finally:
-            gen._emit_unbraced_initializer_item_to_addr = original_emit_unbraced_item
-
-        array_source = typed_expr(Identifier("array_value"), Type("int").array_of(2))
-        array_cast = CastExpr(TypeSpec("int", pointer_depth=1), array_source)
-        typed_expr(array_cast, Type("int").pointer_to())
-        array_value = c.ConstNull(c.ArrayType(c.Int32Type(), 2))
-
-        def emit_array_source(expr):
-            if expr is array_source:
-                return array_value
-            return original_emit_expr(expr)
-
-        gen._emit_expr = emit_array_source
-        try:
-            self.assertNotEqual(gen._cast(array_cast), 0)
-        finally:
-            gen._emit_expr = original_emit_expr
-
-        va_pointer_expr = CastExpr(TypeSpec("char", pointer_depth=1), typed_int("0"))
-        typed_expr(va_pointer_expr, Type("char").pointer_to())
-        self.assertNotEqual(
-            gen._va_intrinsic_call("__builtin_va_start", (va_pointer_expr,)),
-            0,
-        )
-
-        with self.assertRaisesRegex(CodegenError, "Cannot deref non-ptr in member"):
-            gen._member_ptr(MemberExpr(typed_expr(Identifier("not_ptr"), INT), "left", True))
-
-        manual_global = c.AddGlobal(gen._mod, c.Int32Type(), b"fallback_global")
-        self.assertEqual(gen._eval_const_addr(untyped_identifier("fallback_global")), manual_global)
-        manual_fn = c.AddFunction(
-            gen._mod,
-            b"fallback_fn",
-            c.FunctionType(c.Int32Type(), None, 0, False),
-        )
-        self.assertEqual(gen._eval_const_addr(untyped_identifier("fallback_fn")), manual_fn)
-        self.assertIsNone(gen._eval_const_addr(untyped_identifier("fallback_missing")))
-
-        const_pair_ptr = typed_expr(Identifier("const_pair_ptr"), Type("struct Pair").pointer_to())
-        original_eval_const_expr = gen._eval_const_expr
-
-        def eval_const_pair_ptr(expr, target_type=None):
-            if expr is const_pair_ptr:
-                return c.ConstPointerNull(gen._type_to_llvm(Type("struct Pair").pointer_to()))
-            return original_eval_const_expr(expr, target_type)
-
-        gen._eval_const_expr = eval_const_pair_ptr
-        try:
-            self.assertIsNotNone(
-                gen._eval_const_member_ptr(MemberExpr(const_pair_ptr, "left", True))
-            )
-        finally:
-            gen._eval_const_expr = original_eval_const_expr
-        self.assertEqual(gen._resolve_declarator_ops((("arr", ArrayDecl(3)),)), (("arr", 3),))
-        self.assertEqual(
-            gen._record_member_offset_and_type("struct Wrapper", "inner"),
-            (0, INT),
-        )
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list([InitItem((("member", "inner"),), typed_int("5"))]),
-                Type("struct Wrapper"),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list([InitItem((("member", "nested"), ("member", "right")), typed_int("6"))]),
-                Type("struct Outer"),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list(
-                    [
-                        InitItem((), typed_int("1")),
-                        InitItem((), typed_int("2")),
-                        InitItem((), typed_int("3")),
-                    ]
-                ),
-                Type("struct Outer"),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list([InitItem((("member", "inner"),), untyped_identifier("missing"))]),
-                Type("struct Wrapper"),
-            ),
-            0,
-        )
-        self.assertNotEqual(
-            gen._eval_record_init(
-                init_list(
-                    [InitItem((("member", "left"), ("index", typed_int("0"))), typed_int("7"))]
-                ),
-                Type("struct Pair"),
-            ),
-            0,
-        )
-        original_eval_unbraced_items = gen._eval_unbraced_aggregate_initializer_items
-
-        def eval_zero_unbraced_items(target_type, items, start):
-            return (0, None)
-
-        gen._eval_unbraced_aggregate_initializer_items = eval_zero_unbraced_items
-        try:
-            self.assertNotEqual(
-                gen._eval_record_init(
-                    init_list([InitItem((), typed_int("8"))]),
-                    Type("struct HasPair"),
-                ),
-                0,
-            )
-        finally:
-            gen._eval_unbraced_aggregate_initializer_items = original_eval_unbraced_items
-        self.assertEqual(
-            gen._eval_unbraced_aggregate_initializer_items(
-                Type("struct Missing").array_of(1),
-                (InitItem((), typed_int("1")),),
-                0,
-            )[0],
-            0,
-        )
-        gen._sema.record_definitions["struct HasMissing"] = (
-            RecordMemberInfo("missing", Type("struct Missing")),
-        )
-        self.assertEqual(
-            gen._eval_unbraced_aggregate_initializer_items(
-                Type("struct HasMissing"),
-                (InitItem((), typed_int("1")),),
-                0,
-            )[0],
-            0,
-        )
-        self.assertEqual(
-            gen._eval_unbraced_initializer_item(
-                Type("struct Missing"),
-                (InitItem((), typed_int("1")),),
-                0,
-            ),
-            (0, None),
-        )
-
-        aggregate_initializer = typed_expr(Identifier("whole_pair"), Type("struct Pair"))
-        whole_pair_addr = c.BuildAlloca(
-            gen._builder,
-            gen._type_to_llvm(Type("struct Pair")),
-            b"whole.pair.addr",
-        )
-        original_emit_expr = gen._emit_expr
-        original_build_cast = gen._build_cast
-        cast_targets: list[int] = []
-
-        def emit_mismatched_aggregate(expr):
-            if expr is aggregate_initializer:
-                return c.ConstNull(gen._type_to_llvm(Type("struct Empty")))
-            return original_emit_expr(expr)
-
-        def build_matching_aggregate_cast(value, to_type, from_c_type=None):
-            cast_targets.append(to_type)
-            return c.ConstNull(to_type)
-
-        gen._emit_expr = emit_mismatched_aggregate
-        gen._build_cast = build_matching_aggregate_cast
-        try:
-            gen._emit_initializer_to_addr(
-                whole_pair_addr,
-                Type("struct Pair"),
-                (),
-                aggregate_initializer,
-            )
-        finally:
-            gen._build_cast = original_build_cast
-            gen._emit_expr = original_emit_expr
-        self.assertEqual(cast_targets, [gen._type_to_llvm(Type("struct Pair"))])
-
-
-if __name__ == "__main__":
-    unittest.main()

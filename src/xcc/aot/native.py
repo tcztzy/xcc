@@ -5,13 +5,14 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from xcc.aot import py_ast as ast
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.llvm_text import emit_llvm_text
 from xcc.aot.lower import lower_source_to_ir
 from xcc.aot.module import parse_source
 from xcc.aot.slice import core_entry_wrapper, lower_core_entry_slice
 from xcc.llvm_tools import find_llc
+
+from . import py_ast as ast
 
 
 @dataclass(frozen=True)

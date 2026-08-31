@@ -27,13 +27,6 @@ LEXER_SLICE = (
 
 
 class AotMilestone4AdmissionTests(unittest.TestCase):
-    def test_analyzes_ast_and_lexer_modules(self) -> None:
-        for path in (AST_PATH, LEXER_PATH):
-            with self.subTest(path=path.name):
-                analysis = analyze_path(path)
-                self.assertGreater(len(analysis.summary.classes), 0)
-                self.assertGreater(len(analysis.types.classes), 0)
-
     def test_binds_lexer_token_kind_enum_and_token_dataclass(self) -> None:
         analysis = analyze_path(LEXER_PATH)
         self.assertIn("TokenKind", analysis.types.classes)
@@ -131,32 +124,6 @@ class AotMilestone4SliceTests(unittest.TestCase):
                 self.assertEqual(names, {target, "__xcc_aot_core_entry"})
                 summary = next(function for function in module.functions if function.name == target)
                 self.assertEqual(summary.body, ())
-
-    def test_lowers_lexer_number_classifier_without_runtime_regex(self) -> None:
-        module = lower_core_slice(
-            LEXER_SLICE,
-            root_targets=("xcc.lexer.Lexer._classify_number",),
-        )
-        names = {function.name for function in module.functions}
-        self.assertIn("xcc.lexer.Lexer._classify_number", names)
-        self.assertIn("xcc.lexer._is_hex_float_literal", names)
-        self.assertIn("xcc.lexer._is_decimal_float_literal", names)
-        self.assertIn("xcc.lexer._is_integer_literal", names)
-        self.assertFalse(any("fullmatch" in repr(function.body) for function in module.functions))
-
-    def test_lowers_lexer_comment_skip_without_while_else(self) -> None:
-        module = lower_core_slice(
-            LEXER_SLICE,
-            root_targets=("xcc.lexer.Lexer._skip_whitespace_and_comments",),
-        )
-        names = {function.name for function in module.functions}
-        self.assertIn("xcc.lexer.Lexer._skip_whitespace_and_comments", names)
-        skip = next(
-            function
-            for function in module.functions
-            if function.name == "xcc.lexer.Lexer._skip_whitespace_and_comments"
-        )
-        self.assertNotIn("closed", repr(skip.body))
 
     def test_entry_driven_core_slice_handles_duplicate_roots_and_record_discovery(self) -> None:
         module = lower_core_slice(

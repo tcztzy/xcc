@@ -68,26 +68,20 @@ End of search list.
             )
         run.assert_called_once()
 
-    def test_host_system_include_dirs_linux_falls_back_when_cc_fails(self) -> None:
+    def test_host_system_include_dirs_linux_returns_empty_when_cc_fails(self) -> None:
         with (
             patch("xcc.host_includes.sys.platform", "linux"),
             patch("xcc.host_includes.subprocess.run", side_effect=OSError("cc missing")),
         ):
-            self.assertEqual(
-                host_includes.host_system_include_dirs(),
-                ("/usr/local/include", "/usr/include"),
-            )
+            self.assertEqual(host_includes.host_system_include_dirs(), ())
 
-    def test_host_system_include_dirs_linux_falls_back_without_search_list(self) -> None:
+    def test_host_system_include_dirs_linux_returns_empty_without_search_list(self) -> None:
         completed = subprocess.CompletedProcess(("cc",), 0, stdout="", stderr="cc verbose")
         with (
             patch("xcc.host_includes.sys.platform", "linux"),
             patch("xcc.host_includes.subprocess.run", return_value=completed),
         ):
-            self.assertEqual(
-                host_includes.host_system_include_dirs(),
-                ("/usr/local/include", "/usr/include"),
-            )
+            self.assertEqual(host_includes.host_system_include_dirs(), ())
 
     def test_host_system_include_dirs_darwin_uses_sdkroot_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -113,7 +107,7 @@ End of search list.
                 dirs = host_includes.host_system_include_dirs()
         self.assertEqual(
             dirs,
-            ("/RES/include", str(sdk_root / "usr" / "include"), "/usr/include"),
+            ("/RES/include", str(sdk_root / "usr" / "include")),
         )
         self.assertEqual(len(calls), 1)
 
@@ -154,7 +148,6 @@ End of search list.
             (
                 "/LLVM_RES/include",
                 str(sdk_root / "usr" / "include"),
-                "/usr/include",
             ),
         )
         self.assertEqual(calls, [(str(clang), "-print-resource-dir")])
@@ -195,7 +188,7 @@ End of search list.
 
         self.assertEqual(
             dirs,
-            ("/RES/include", str(sdk_root / "usr" / "include"), "/usr/include"),
+            ("/RES/include", str(sdk_root / "usr" / "include")),
         )
         self.assertEqual(calls, [("xcrun", "--sdk", "macosx", "clang", "-print-resource-dir")])
 
@@ -237,7 +230,7 @@ End of search list.
 
         self.assertEqual(
             dirs,
-            ("/RES/include", str(sdk_root / "usr" / "include"), "/usr/include"),
+            ("/RES/include", str(sdk_root / "usr" / "include")),
         )
         self.assertEqual(
             calls,
@@ -264,7 +257,7 @@ End of search list.
             patch("xcc.host_includes.subprocess.run", side_effect=fake_run),
         ):
             dirs = host_includes.host_system_include_dirs()
-        self.assertEqual(dirs, ("/RES/include", "/SDK/usr/include", "/usr/include"))
+        self.assertEqual(dirs, ("/RES/include", "/SDK/usr/include"))
         self.assertEqual(
             calls,
             [
@@ -273,7 +266,7 @@ End of search list.
             ],
         )
 
-    def test_host_system_include_dirs_darwin_xcrun_failure_falls_back_to_usr_include(self) -> None:
+    def test_host_system_include_dirs_darwin_without_tools_returns_empty(self) -> None:
         def fail_run(*args: object, **kwargs: object) -> None:
             raise OSError("xcrun missing")
 
@@ -281,44 +274,5 @@ End of search list.
             patch("xcc.host_includes.sys.platform", "darwin"),
             patch.dict("os.environ", {}, clear=True),
             patch("xcc.host_includes.subprocess.run", side_effect=fail_run),
-            patch.object(Path, "is_dir", return_value=False),
         ):
-            self.assertEqual(host_includes.host_system_include_dirs(), ("/usr/include",))
-
-    def test_host_system_include_dirs_darwin_uses_xcode_filesystem_fallback(self) -> None:
-        xcode_base = Path(
-            "/Applications/Xcode.app/Contents/Developer/Toolchains/"
-            "XcodeDefault.xctoolchain/usr/lib/clang"
-        )
-        clang_version = xcode_base / "21.0.0"
-        sdk_base = Path(
-            "/Applications/Xcode.app/Contents/Developer/Platforms/"
-            "MacOSX.platform/Developer/SDKs/MacOSX.sdk"
-        )
-        existing_dirs = {xcode_base, clang_version, sdk_base}
-
-        def fail_run(*args: object, **kwargs: object) -> None:
-            raise OSError("xcrun missing")
-
-        def fake_is_dir(path: Path) -> bool:
-            return path in existing_dirs
-
-        def fake_iterdir(path: Path):
-            self.assertEqual(path, xcode_base)
-            return iter((clang_version,))
-
-        with (
-            patch("xcc.host_includes.sys.platform", "darwin"),
-            patch.dict("os.environ", {}, clear=True),
-            patch("xcc.host_includes.subprocess.run", side_effect=fail_run),
-            patch.object(Path, "is_dir", fake_is_dir),
-            patch.object(Path, "iterdir", fake_iterdir),
-        ):
-            self.assertEqual(
-                host_includes.host_system_include_dirs(),
-                (
-                    str(clang_version / "include"),
-                    str(sdk_base / "usr" / "include"),
-                    "/usr/include",
-                ),
-            )
+            self.assertEqual(host_includes.host_system_include_dirs(), ())

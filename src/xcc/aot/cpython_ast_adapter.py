@@ -1,6 +1,6 @@
 import ast as cpython_ast
 
-from xcc.aot import py_ast
+from . import py_ast
 
 
 def parse_cpython_source(source: str, *, filename: str) -> py_ast.Module:

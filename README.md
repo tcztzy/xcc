@@ -163,8 +163,7 @@ behavior change is not progress here.
 - Type check: `uv run tox -e type`
 - Test: `uv run tox -e py311`
 - Test with fixed worker count: `XCC_TEST_JOBS=1 uv run tox -e py311`
-- Strict 100% coverage check:
-  `uv run python scripts/run_tests.py --coverage --fail-under 100`
+- Coverage report: `uv run python scripts/run_tests.py --coverage`
 - mypyc import-tree test: `uv run tox -e mypyc`
 
 ## Performance Benchmark

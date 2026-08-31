@@ -13,6 +13,8 @@ CPython, libpython, a CPython AST, or pre-generated AST/IR as a required input.
 - Accepted syntax is a strict CPython 3.11 subset. Custom syntax, marker
   decorators, AOT pragmas, comment directives, and annotation directives are
   forbidden.
+- Chained assignment to local names evaluates its right-hand side once and
+  binds that value to every target in source order.
 - Width names such as `int32`, `int64`, `uint64`, and `usize` remain ordinary
   Python-visible annotations or aliases with valid CPython behavior.
 - Stage 0 may use `ast.parse` through the hosted adapter. Native stages parse
@@ -125,6 +127,18 @@ Python module is forbidden.
   immutable lowered module and LLVM text, native behavior fixtures reuse one
   executable per configuration, and the native behavior matrix runs outside
   Python line tracing while hosted build orchestration remains coverage-visible.
+- AOT-V3: Every module selected by the bootstrap source manifest is accepted by
+  the project-owned Python-subset parser before lowering. A refactor of
+  bootstrap-reachable compiler code must not introduce syntax outside that
+  subset.
+- AOT-V4: The first `append` to an unannotated empty list establishes its
+  homogeneous element type from the appended expression, including unary
+  numeric expressions.
+- AOT-V5: Every function reachable from the native compiler entry lowers using
+  implemented subset operations; hosted execution alone is not admission to
+  the bootstrap closure.
+- AOT-V6: The complete lowered compiler closure renders to LLVM with concrete
+  scalar operation types, and `llc` accepts that LLVM.
 
 ## Implementation Boundaries
 

@@ -1,9 +1,10 @@
 from typing import NoReturn
 
-from xcc.aot import py_ast as ast
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.module import AotModule
 from xcc.aot.py_lexer import PyToken, lex_python
+
+from . import py_ast as ast
 
 _AUGMENTED_OPERATORS = {
     "+=": ast.Add,

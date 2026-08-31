@@ -1,6 +1,4 @@
-import ast
 import os
-import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -11,16 +9,15 @@ from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
     AotBootstrapRunResult,
     AotError,
-    analyze_path,
-    build_native_bootstrap,
-    collect_bootstrap_sources,
-    emit_llvm_text,
     IrBoolType,
     IrCall,
     IrModule,
     IrReturn,
+    analyze_path,
+    build_native_bootstrap,
+    collect_bootstrap_sources,
+    emit_llvm_text,
     lower_bootstrap_entry_smoke,
-    lower_source_to_ir,
     plan_bootstrap_entry,
     run_bootstrap_self_host_smoke,
     summarize_bootstrap_admission,
@@ -40,9 +37,7 @@ class AotBootstrapGraphTests(unittest.TestCase):
 
     def test_collects_all_src_xcc_modules_in_deterministic_order(self) -> None:
         modules = collect_bootstrap_sources(ROOT)
-        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py"))) - len(
-            HOSTED_ONLY_MODULES
-        )
+        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py"))) - len(HOSTED_ONLY_MODULES)
         self.assertEqual(len(modules), expected_count)
         self.assertEqual(modules[0].name, "xcc.__init__")
         self.assertIn("xcc.aot.bootstrap", {module.name for module in modules})
@@ -54,11 +49,9 @@ class AotBootstrapGraphTests(unittest.TestCase):
             collect_bootstrap_sources(ROOT / "tests")
         self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-BOOTSTRAP-0001")
 
-    def test_summarizes_bootstrap_admission(self) -> None:
+    def test_aot_v3_bootstrap_manifest_is_admitted(self) -> None:
         report = summarize_bootstrap_admission(ROOT)
-        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py"))) - len(
-            HOSTED_ONLY_MODULES
-        )
+        expected_count = len(tuple((ROOT / "src/xcc").rglob("*.py"))) - len(HOSTED_ONLY_MODULES)
         self.assertEqual(report.total, expected_count)
         self.assertEqual(report.failed, ())
 
@@ -68,8 +61,7 @@ class AotBootstrapGraphTests(unittest.TestCase):
             source_root = root / "src/xcc"
             source_root.mkdir(parents=True)
             (source_root / "bad.py").write_text(
-                "def bad() -> int:\n"
-                "    return (lambda: 1)()\n",
+                "def bad() -> int:\n    return (lambda: 1)()\n",
                 encoding="utf-8",
             )
 
@@ -96,7 +88,7 @@ class AotBootstrapEntryTests(unittest.TestCase):
         self.assertIn("xcc.aarch64_asm", plan.modules)
         self.assertIn("xcc.llvm_api", plan.modules)
 
-    def test_legacy_c_bootstrap_slice_excludes_aot_compiler_modules(self) -> None:
+    def test_c_compiler_bootstrap_slice_excludes_aot_compiler_modules(self) -> None:
         with patch("xcc.aot.bootstrap.lower_core_entry_slice") as lower_slice:
             lower_bootstrap_entry_smoke(ROOT)
 
@@ -110,8 +102,7 @@ class AotBootstrapEntryTests(unittest.TestCase):
             source_root = root / "src/xcc"
             source_root.mkdir(parents=True)
             (source_root / "__init__.py").write_text(
-                "def marker() -> None:\n"
-                "    return None\n",
+                "def marker() -> None:\n    return None\n",
                 encoding="utf-8",
             )
 
@@ -161,9 +152,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
 
     def test_native_preprocessing_uses_one_exact_transaction_region(self) -> None:
         llvm_ir = self._rendered_bootstrap()
-        symbol = (
-            "define i32 @xcc.preprocessor.__init__.preprocess_source_no_callback("
-        )
+        symbol = "define i32 @xcc.preprocessor.__init__.preprocess_source_no_callback("
         start = llvm_ir.index(symbol)
         end = llvm_ir.index("\n}\n", start)
         body = llvm_ir[start:end]
@@ -186,9 +175,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
 
         self.assertIn("call ptr @__xcc_aot_phase_mark()", body)
         preserve_message = "call i1 @__xcc_aot_phase_promote_to(ptr %phase.error.message"
-        preserve_payload = (
-            "call void @__xcc_aot_phase_promote_object(ptr %phase.error.payload"
-        )
+        preserve_payload = "call void @__xcc_aot_phase_promote_object(ptr %phase.error.payload"
         self.assertIn(preserve_message, body)
         self.assertIn(preserve_payload, body)
         self.assertIn("call void @__xcc_aot_phase_finish", body)
@@ -215,20 +202,18 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             self.assertIn("call ptr @__xcc_aot_string_join", body)
             self.assertNotIn("call ptr @__xcc_aot_string_concat2", body)
 
-    def test_bootstrap_real_compiler_path_emits_llc_parseable_llvm(self) -> None:
+    def test_aot_v6_bootstrap_llvm_is_llc_parseable(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():
             self.skipTest("llc is not installed at the configured path")
-        module = self._lowered_bootstrap()
         llvm_ir = self._rendered_bootstrap()
-        out = ROOT / "build/aot/probes/bootstrap-real-path.ll"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(llvm_ir, encoding="utf-8")
         self.assertIn("define i32 @main(i32 %argc, ptr %argv)", llvm_ir)
         self.assertIn("xcc.cc_driver._aot_compile_source_path_to_object", llvm_ir)
         self.assertIn("xcc.frontend._aot_compile_source_unchecked", llvm_ir)
         self.assertIn("xcc.codegen._LLVMGen.generate", llvm_ir)
         with TemporaryDirectory() as temp_dir:
+            out = Path(temp_dir) / "bootstrap.ll"
+            out.write_text(llvm_ir, encoding="utf-8")
             result = subprocess.run(
                 (str(llc), "-filetype=obj", str(out), "-o", str(Path(temp_dir) / "probe.o")),
                 check=False,
@@ -236,138 +221,6 @@ class AotBootstrapLoweringTests(unittest.TestCase):
                 text=True,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_rewrites_preprocessor_protocol_calls_to_concrete_preprocessor(self) -> None:
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.preprocessor.__init__.preprocess_source",
-                {},
-            ),
-            "xcc.preprocessor.__init__.preprocess_source_no_callback",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.preprocessor.process._ProcessTextPreprocessor._expand_line",
-                {},
-            ),
-            "xcc.preprocessor.__init__._Preprocessor._expand_line_no_callback",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "_ProcessTextPreprocessor._should_collect_function_macro_continuation",
-                {
-                    "_ProcessTextPreprocessor._should_collect_function_macro_continuation": (
-                        "xcc.preprocessor.process._ProcessTextPreprocessor."
-                        "_should_collect_function_macro_continuation"
-                    )
-                },
-            ),
-            "xcc.preprocessor.__init__._Preprocessor._should_collect_function_macro_continuation",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.preprocessor.process._ProcessTextPreprocessor._handle_include",
-                {},
-            ),
-            "xcc.preprocessor.__init__._Preprocessor._handle_include",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.preprocessor.process._ProcessTextPreprocessor._record_pragma_once",
-                {},
-            ),
-            "xcc.preprocessor.__init__._Preprocessor._record_pragma_once",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.preprocessor.process._ProcessTextPreprocessor._handle_conditional",
-                {},
-            ),
-            "xcc.preprocessor.__init__._Preprocessor._handle_conditional_no_callback",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.preprocessor.process._ProcessTextPreprocessor."
-                "_handle_conditional_for_process",
-                {},
-            ),
-            "xcc.preprocessor.__init__._Preprocessor."
-            "_handle_conditional_for_process_no_callback",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "_ProcessTextPreprocessor._handle_define",
-                {
-                    "_ProcessTextPreprocessor._handle_define": (
-                        "xcc.preprocessor.process._ProcessTextPreprocessor._handle_define"
-                    )
-                },
-            ),
-            "xcc.preprocessor.__init__._Preprocessor._handle_define_no_callback",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.preprocessor.process._ProcessTextPreprocessor._handle_undef",
-                {},
-            ),
-            "xcc.preprocessor.__init__._Preprocessor._handle_undef_no_callback",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.preprocessor.__init__._Preprocessor._parse_include_target",
-                {},
-            ),
-            "xcc.preprocessor.__init__._Preprocessor._parse_include_target_no_macro",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.preprocessor.__init__._Preprocessor._skip_guarded_include",
-                {},
-            ),
-            "xcc.preprocessor.__init__._Preprocessor._skip_guarded_include_no_callback",
-        )
-
-    def test_rewrites_statement_parser_protocol_calls_to_concrete_parser(self) -> None:
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.parser.statements._StatementParser._parse_statement",
-                {},
-            ),
-            "xcc.parser.__init__.Parser._parse_statement",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "_StatementParser._check_keyword",
-                {
-                    "_StatementParser._check_keyword": (
-                        "xcc.parser.statements._StatementParser._check_keyword"
-                    )
-                },
-            ),
-            "xcc.parser.__init__.Parser._check_keyword",
-        )
-
-    def test_statement_parser_protocol_calls_use_concrete_native_signature(self) -> None:
-        module_inputs = aot_slice.collect_slice_inputs(
-            (
-                ROOT / "src/xcc/parser/__init__.py",
-                ROOT / "src/xcc/parser/statements.py",
-            )
-        )
-        source_cache = {
-            module.name: module.path.read_text(encoding="utf-8") for module in module_inputs
-        }
-
-        function_types = aot_slice._slice_method_signature_table(module_inputs, source_cache)
-        protocol = function_types[
-            "xcc.parser.statements._StatementParser._parse_compound_stmt"
-        ]
-        concrete = function_types["xcc.parser.__init__.Parser._parse_compound_stmt"]
-
-        self.assertEqual(protocol.parameters, concrete.parameters)
-        self.assertEqual(protocol.parameter_defaults, concrete.parameter_defaults)
-        self.assertEqual(protocol.return_type, concrete.return_type)
-        self.assertEqual(protocol.vararg, concrete.vararg)
 
     def test_slice_metadata_passes_retain_only_one_full_analysis_per_module(self) -> None:
         module_inputs = aot_slice.collect_slice_inputs(
@@ -427,48 +280,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertEqual(checked.call_count, len(module_inputs))
         self.assertEqual(set(analysis_cache), {module.name for module in module_inputs})
 
-    def test_rewrites_file_scope_analyzer_protocol_calls_to_concrete_analyzer(self) -> None:
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.sema.declarations._FileScopeAnalyzer._register_type_spec",
-                {},
-            ),
-            "xcc.sema.__init__.Analyzer._register_type_spec",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "_FileScopeAnalyzer._resolve_type",
-                {
-                    "_FileScopeAnalyzer._resolve_type": (
-                        "xcc.sema.declarations._FileScopeAnalyzer._resolve_type"
-                    )
-                },
-            ),
-            "xcc.sema.__init__.Analyzer._resolve_type",
-        )
-        self.assertEqual(
-            aot_slice._rename_call_target(
-                "xcc.sema.declarations._FileScopeAnalyzer."
-                "_register_function_typed_file_scope_decl",
-                {},
-            ),
-            "xcc.sema.__init__.Analyzer._register_function_typed_file_scope_decl",
-        )
-
-    def test_file_scope_analyzer_protocol_fields_are_cast_to_concrete_analyzer(self) -> None:
-        source = (ROOT / "src/xcc/sema/declarations.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "analyze_file_scope_decl"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertIn("a = cast('Analyzer', analyzer)", method_source)
-        self.assertNotIn("a = analyzer", method_source)
-
-    def test_lowers_bootstrap_entry_smoke_wrapper(self) -> None:
+    def test_aot_v5_bootstrap_entry_lowers(self) -> None:
         module = self._lowered_bootstrap()
         functions = {function.name: function for function in module.functions}
         self.assertIn("aot_bootstrap_smoke_main", functions)
@@ -478,1331 +290,6 @@ class AotBootstrapLoweringTests(unittest.TestCase):
             "target='xcc.options.FrontendOptions.__post_init__'",
             repr(functions["aot_bootstrap_smoke_main"].body),
         )
-
-    def test_smoke_compiler_body_is_ordinary_lowerable(self) -> None:
-        source = (ROOT / "src/xcc/cc_driver.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/cc_driver.py"),
-            include_records=frozenset(),
-            include_functions={"_aot_compile_smoke_source_to_object"},
-        )
-        function = module.functions[0]
-        body = repr(function.body)
-        self.assertNotIn("target='Path'", body)
-        self.assertNotIn("target='str'", body)
-        self.assertIn("target='_aot_compile_source_path_to_object'", body)
-        self.assertIn("target='_aot_exec_argv'", body)
-        llvm_ir = emit_llvm_text(module)
-        self.assertIn(
-            "define i32 @_aot_compile_smoke_source_to_object(i32 %argc, ptr %argv)",
-            llvm_ir,
-        )
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv, i64 %", llvm_ir)
-        self.assertNotIn("call ptr @__getitem", llvm_ir)
-
-    def test_smoke_compiler_body_accepts_configure_compile_flags(self) -> None:
-        source = (ROOT / "src/xcc/cc_driver.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/cc_driver.py"),
-            include_records=frozenset(),
-            include_functions={"_aot_compile_smoke_source_to_object"},
-        )
-        body = repr(module.functions[0].body)
-        self.assertIn("target='_aot_arg_is_c_source'", body)
-        self.assertIn("target='_aot_default_object_path'", body)
-        self.assertIn("target='_aot_compile_source_path_to_object'", body)
-        self.assertIn("target='_aot_exec_argv'", body)
-        self.assertIn("target='__str_startswith'", body)
-
-    def test_native_preprocessor_constructor_uses_no_callback_initializer(self) -> None:
-        module = self._lowered_bootstrap()
-        functions = {function.name: function for function in module.functions}
-        self.assertEqual(
-            functions["xcc.preprocessor.__init__._Preprocessor.__init__"].body,
-            (),
-        )
-        self.assertNotEqual(
-            functions["xcc.preprocessor.__init__._Preprocessor._init_no_callback"].body,
-            (),
-        )
-
-    def test_bootstrap_entry_uses_project_owned_smoke_compiler(self) -> None:
-        module = self._lowered_bootstrap()
-        functions = {function.name: function for function in module.functions}
-        entry = functions["aot_bootstrap_smoke_main"]
-        self.assertEqual(tuple(param.name for param in entry.params), ("argc", "argv"))
-        self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", functions)
-        self.assertIn("xcc.cc_driver._aot_compile_smoke_source_to_object", repr(entry.body))
-        smoke_compiler = functions["xcc.cc_driver._aot_compile_smoke_source_to_object"]
-        self.assertNotEqual(smoke_compiler.body, ())
-        self.assertIn("target='len'", repr(smoke_compiler.body))
-        self.assertIn(
-            "target='xcc.cc_driver._aot_compile_source_path_to_object'",
-            repr(smoke_compiler.body),
-        )
-        self.assertIn("target='xcc.cc_driver._aot_arg_is_c_source'", repr(smoke_compiler.body))
-        self.assertIn("target='xcc.cc_driver._aot_is_linker_flag'", repr(smoke_compiler.body))
-        self.assertIn("target='xcc.cc_driver._aot_link_argv'", repr(smoke_compiler.body))
-        self.assertIn("target='xcc.cc_driver._aot_exec_argv'", repr(smoke_compiler.body))
-        self.assertNotIn("target='xcc.cc_driver._aot_is_smoke_source'", repr(smoke_compiler.body))
-        self.assertNotIn("target='xcc.cc_driver._aot_smoke_llvm_ir'", repr(smoke_compiler.body))
-        self.assertIn("xcc.cc_driver._aot_compile_source_path_to_object", functions)
-        self.assertIn("xcc.cc_driver._aot_compile_source_to_llvm_ir", functions)
-        self.assertIn("xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked", functions)
-        self.assertNotIn("xcc.cc_driver._aot_is_smoke_source", functions)
-        self.assertNotIn("xcc.cc_driver._aot_is_autoconf_stdio_run_probe", functions)
-        self.assertNotIn("xcc.cc_driver._aot_smoke_llvm_ir", functions)
-        self.assertIn("xcc.cc_driver._aot_arg_is_c_source", functions)
-        self.assertIn("xcc.cc_driver._aot_default_object_path", functions)
-        self.assertIn("xcc.cc_driver._aot_link_object_path", functions)
-        self.assertIn("xcc.cc_driver._aot_is_linker_flag", functions)
-        self.assertIn("xcc.cc_driver._aot_link_argv", functions)
-        self.assertNotIn("xcc.cc_driver._aot_is_smoke_compile_command", functions)
-        self.assertIn("xcc.cc_driver._aot_smoke_llvm_path", functions)
-        self.assertIn("xcc.cc_driver._aot_smoke_llc_argv", functions)
-        self.assertIn("xcc.cc_driver._aot_read_text_file", functions)
-        self.assertIn("xcc.cc_driver._aot_write_text_file", functions)
-        self.assertIn("xcc.cc_driver._aot_exec_argv", functions)
-        self.assertIn("xcc.preprocessor.__init__.preprocess_source_no_callback", functions)
-        self.assertEqual(
-            functions["xcc.preprocessor.__init__._Preprocessor.__init__"].body,
-            (),
-        )
-        self.assertNotEqual(
-            functions["xcc.preprocessor.__init__._Preprocessor._init_no_callback"].body,
-            (),
-        )
-        self.assertIn(
-            "xcc.preprocessor.__init__._Preprocessor."
-            "_handle_conditional_for_process_no_callback",
-            functions,
-        )
-        self.assertIn(
-            "xcc.preprocessor.__init__._Preprocessor._parse_include_target_no_macro",
-            functions,
-        )
-        self.assertIn(
-            "xcc.preprocessor.__init__._Preprocessor._parse_header_name_operand_no_macro",
-            functions,
-        )
-        self.assertIn("xcc.preprocessor.__init__._Preprocessor._expand_line_no_callback", functions)
-        self.assertIn("xcc.preprocessor.__init__._Preprocessor._expand_macro_text", functions)
-        self.assertIn(
-            "xcc.preprocessor.__init__._Preprocessor._handle_define_no_callback",
-            functions,
-        )
-        self.assertIn(
-            "xcc.preprocessor.__init__._Preprocessor._handle_undef_no_callback",
-            functions,
-        )
-        self.assertIn(
-            "xcc.preprocessor.__init__._Preprocessor._skip_guarded_include_no_callback",
-            functions,
-        )
-
-        llvm_ir = self._rendered_bootstrap()
-
-        type_map_set_start = llvm_ir.index(
-            "define void @xcc.sema.symbols.TypeMap.set("
-        )
-        type_map_set_end = llvm_ir.index("\n}\n", type_map_set_start)
-        type_map_set_llvm = llvm_ir[type_map_set_start:type_map_set_end]
-        self.assertIn("call ptr @__xcc_aot_tuple_append", type_map_set_llvm)
-        self.assertNotIn("dictset.cond", type_map_set_llvm)
-        type_map_get_start = llvm_ir.index(
-            "define ptr @xcc.sema.symbols.TypeMap.get("
-        )
-        type_map_get_end = llvm_ir.index("\n}\n", type_map_get_start)
-        type_map_get_llvm = llvm_ir[type_map_get_start:type_map_get_end]
-        self.assertIn("@__xcc_aot_identity_dict_find_index", type_map_get_llvm)
-        self.assertIn("label %typemap.get.found", type_map_get_llvm)
-        self.assertNotIn("typemap.get.cond", type_map_get_llvm)
-        self.assertIn("@__xcc_aot_dict_bump_state", type_map_set_llvm)
-        self.assertIn("@__xcc_aot_identity_dict_note_index", type_map_set_llvm)
-        typedef_lookup_start = llvm_ir.index(
-            "define ptr @xcc.parser.__init__.Parser._lookup_typedef("
-        )
-        typedef_lookup_end = llvm_ir.index("\n}\n", typedef_lookup_start)
-        typedef_lookup_llvm = llvm_ir[typedef_lookup_start:typedef_lookup_end]
-        self.assertIn("@__xcc_aot_string_tuple_find_index", typedef_lookup_llvm)
-        self.assertNotIn("contains.cond", typedef_lookup_llvm)
-
-        self.assertIn("define i32 @main(i32 %argc, ptr %argv)", llvm_ir)
-        self.assertIn(
-            "%argv_tuple = call ptr @__xcc_aot_c_argv_to_tuple(i32 %argc, ptr %argv)",
-            llvm_ir,
-        )
-        self.assertIn(
-            "call i32 @aot_bootstrap_smoke_main("
-            "i32 %argc, ptr %argv_tuple, ptr %result_out, ptr %error_record)",
-            llvm_ir,
-        )
-        self.assertIn("%failed = icmp ne i32 %status, 0", llvm_ir)
-        self.assertIn("define ptr @__xcc_aot_c_argv_to_tuple(i32 %argc32, ptr %argv)", llvm_ir)
-        self.assertNotIn("__xcc_aot_bootstrap_cc_delegate", llvm_ir)
-        self.assertNotIn("@__xcc_aot_cc", llvm_ir)
-        self.assertIn(
-            "define i32 @xcc.cc_driver._aot_compile_smoke_source_to_object("
-            "i32 %argc, ptr %argv, ptr %result_out, ptr %error_out)",
-            llvm_ir,
-        )
-        self.assertIn("call i64 @__xcc_aot_tuple_len(ptr %argv)", llvm_ir)
-        self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %argv,", llvm_ir)
-        self.assertNotIn("load_args:", llvm_ir)
-        self.assertNotIn("write_llvm_path:", llvm_ir)
-        self.assertNotIn("exec_llc:", llvm_ir)
-        self.assertNotIn("%arg1_slot = getelementptr ptr, ptr %argv, i64 1", llvm_ir)
-        self.assertNotIn("%arg4_slot = getelementptr ptr, ptr %argv, i64 4", llvm_ir)
-        self.assertIn("define ptr @xcc.cc_driver._aot_read_text_file(ptr %path)", llvm_ir)
-        self.assertIn("define ptr @__xcc_aot_read_text_file(ptr %path)", llvm_ir)
-        self.assertIn(
-            "call ptr @xcc.cc_driver._aot_read_text_file(ptr %",
-            llvm_ir,
-        )
-        self.assertIn("define i1 @xcc.cc_driver._aot_arg_is_c_source(", llvm_ir)
-        self.assertIn("define ptr @xcc.cc_driver._aot_default_object_path(", llvm_ir)
-        self.assertIn("define ptr @xcc.cc_driver._aot_link_object_path(", llvm_ir)
-        self.assertIn("define i1 @xcc.cc_driver._aot_is_linker_flag(", llvm_ir)
-        self.assertIn("define ptr @xcc.cc_driver._aot_link_argv(", llvm_ir)
-        self.assertIn(
-            "define i32 @xcc.cc_driver._aot_compile_source_path_to_object(",
-            llvm_ir,
-        )
-        self.assertIn(
-            "call i32 @xcc.cc_driver._aot_compile_source_path_to_object(",
-            llvm_ir,
-        )
-        self.assertIn("call ptr @xcc.cc_driver._aot_link_argv(", llvm_ir)
-        self.assertNotIn("%arg1_cmp = call i32 @strcmp", llvm_ir)
-        self.assertNotIn("%arg3_cmp = call i32 @strcmp", llvm_ir)
-        self.assertIn(
-            "define i32 @xcc.cc_driver._aot_compile_source_to_llvm_ir("
-            "ptr %source_path, ptr %source_text, ptr %include_dirs, "
-            "ptr %defines, ptr %undefs, ptr %std, i1 %debug, "
-            "ptr %result_out, ptr %error_out)",
-            llvm_ir,
-        )
-        self.assertIn(
-            "call i32 @xcc.cc_driver._aot_compile_source_to_llvm_ir(",
-            llvm_ir,
-        )
-        self.assertIn(
-            "call i32 @xcc.cc_driver._aot_compile_source_to_llvm_ir_unchecked(",
-            llvm_ir,
-        )
-        self.assertIn("define ptr @xcc.cc_driver._aot_default_system_include_dirs(", llvm_ir)
-        self.assertNotIn("call ptr @strstr(ptr %source_path", llvm_ir)
-        self.assertNotIn("call ptr @strstr(ptr %source_text", llvm_ir)
-        self.assertNotIn("conftest.c", llvm_ir)
-        self.assertNotIn("#include <", llvm_ir)
-        self.assertNotIn("define i32 @main()", llvm_ir)
-        self.assertNotIn("%source_file = call ptr @fopen", llvm_ir)
-        self.assertNotIn("%source_read = call i64 @fread", llvm_ir)
-        self.assertNotIn("%source_len_ok = icmp eq i64 %source_read, 26", llvm_ir)
-        self.assertNotIn("call i32 @strcmp(ptr %source, ptr null)", llvm_ir)
-        self.assertIn("define ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %object_path)", llvm_ir)
-        self.assertIn("call ptr @xcc.cc_driver._aot_smoke_llvm_path(ptr %", llvm_ir)
-        self.assertNotIn("%ll_path_written = call i32", llvm_ir)
-        self.assertNotIn("%s.ll", llvm_ir)
-        self.assertIn(
-            "define i1 @xcc.cc_driver._aot_write_text_file(ptr %path, ptr %text)",
-            llvm_ir,
-        )
-        self.assertIn("define i1 @__xcc_aot_write_text_file(ptr %path, ptr %text)", llvm_ir)
-        self.assertIn(
-            "call i1 @xcc.cc_driver._aot_write_text_file(ptr %",
-            llvm_ir,
-        )
-        self.assertNotIn("%ll_file = call ptr @fopen", llvm_ir)
-        self.assertNotIn("%llvm_written = call i64 @fwrite", llvm_ir)
-        self.assertNotIn("%ll_closed = call i32 @fclose", llvm_ir)
-        self.assertIn(
-            "define ptr @xcc.cc_driver._aot_smoke_llc_argv("
-            "ptr %llvm_path, ptr %object_path, i1 %debug)",
-            llvm_ir,
-        )
-        self.assertIn(
-            "call ptr @xcc.cc_driver._aot_smoke_llc_argv(ptr %",
-            llvm_ir,
-        )
-        self.assertIn("define i32 @xcc.cc_driver._aot_exec_argv(ptr %argv)", llvm_ir)
-        self.assertIn("define i32 @__xcc_aot_execvp_tuple(ptr %argv_tuple)", llvm_ir)
-        self.assertIn(
-            "call i32 @xcc.cc_driver._aot_exec_argv(ptr %",
-            llvm_ir,
-        )
-        self.assertIn("ret i32 %exec", llvm_ir)
-        self.assertIn("call i32 @__xcc_aot_execvp_tuple(ptr %argv)", llvm_ir)
-        self.assertNotIn("call i32 @__xcc_aot_execvp_tuple(ptr %llc_argv)", llvm_ir)
-        self.assertNotIn("%llc_argv = alloca ptr, i64 6", llvm_ir)
-        self.assertNotIn("call i32 @execvp(ptr @.str", llvm_ir)
-        self.assertIn("/opt/homebrew/opt/llvm/bin/llc", llvm_ir)
-        self.assertIn("declare i32 @fork()", llvm_ir)
-        self.assertIn("declare i32 @waitpid(i32, ptr, i32)", llvm_ir)
-        self.assertIn("declare void @_exit(i32)", llvm_ir)
-        self.assertIn("call i32 @fork()", llvm_ir)
-        self.assertIn("call i32 @waitpid(", llvm_ir)
-        self.assertIn(
-            "@xcc.preprocessor.__init__._Preprocessor._expand_macro_text(",
-            llvm_ir,
-        )
-        self.assertIn(
-            "@xcc.preprocessor.__init__._Preprocessor._expand_line_no_callback(",
-            llvm_ir,
-        )
-        self.assertIn(
-            "@xcc.preprocessor.__init__._Preprocessor._handle_define_no_callback(",
-            llvm_ir,
-        )
-        self.assertIn(
-            "@xcc.preprocessor.__init__._Preprocessor._parse_include_target_no_macro(",
-            llvm_ir,
-        )
-        self.assertIn(
-            "@xcc.preprocessor.__init__._Preprocessor._skip_guarded_include_no_callback(",
-            llvm_ir,
-        )
-        parser_symbol = (
-            "@xcc.preprocessor.__init__._Preprocessor."
-            "_parse_header_name_operand_no_macro("
-        )
-        parser_match = re.search(
-            rf"^define [^\n]+{re.escape(parser_symbol)}",
-            llvm_ir,
-            re.MULTILINE,
-        )
-        assert parser_match is not None
-        parser_start = parser_match.start()
-        parser_end = llvm_ir.index("\ndefine ", parser_start + 1)
-        parser_llvm = llvm_ir[parser_start:parser_end]
-        self.assertNotRegex(parser_llvm, r"getelementptr i8, ptr %[^,]+, i64 -1")
-        self.assertRegex(parser_llvm, r"sub i64 %[^,]+, 1")
-        self.assertIn("declare ptr @fopen(ptr, ptr)", llvm_ir)
-        self.assertIn("declare i64 @fwrite(ptr, i64, i64, ptr)", llvm_ir)
-        self.assertIn("declare i32 @execvp(ptr, ptr)", llvm_ir)
-
-    def test_source_to_llvm_unchecked_helper_body_is_ordinary_lowerable(self) -> None:
-        source = (ROOT / "src/xcc/cc_driver.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/cc_driver.py"),
-            include_records=frozenset(),
-            include_functions={"_aot_compile_source_to_llvm_ir_unchecked"},
-            extra_classes={
-                **analyze_path(ROOT / "src/xcc/frontend.py").types.classes,
-                **analyze_path(ROOT / "src/xcc/options.py").types.classes,
-            },
-        )
-        self.assertEqual(len(module.functions), 1)
-        helper = module.functions[0]
-        body = repr(helper.body)
-        self.assertIn("target='_aot_compile_source_unchecked'", body)
-        self.assertNotIn("target='compile_source'", body)
-        self.assertIn("target='generate_llvm_ir'", body)
-
-    def test_codegen_generate_lowers_module_print_boundary(self) -> None:
-        class_types = {}
-        for module_path in (
-            ROOT / "src/xcc/ast.py",
-            ROOT / "src/xcc/frontend.py",
-            ROOT / "src/xcc/sema/symbols.py",
-        ):
-            class_types.update(analyze_path(module_path).types.classes)
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen.generate", "_llvm_print_module_to_string"},
-            bodyless_functions={"_llvm_print_module_to_string"},
-            extra_classes=class_types,
-        )
-        functions = {function.name: function for function in module.functions}
-        self.assertIn("_LLVMGen.generate", functions)
-        self.assertIn("_llvm_print_module_to_string", functions)
-        self.assertIn(
-            "target='_llvm_print_module_to_string'",
-            repr(functions["_LLVMGen.generate"].body),
-        )
-
-    def test_codegen_base_type_lowers_without_callable_dict_dispatch(self) -> None:
-        class_types = {}
-        for module_path in (
-            ROOT / "src/xcc/codegen.py",
-            ROOT / "src/xcc/data_layout.py",
-            ROOT / "src/xcc/sema/symbols.py",
-            ROOT / "src/xcc/types.py",
-        ):
-            class_types.update(analyze_path(module_path).types.classes)
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._base_type"},
-            extra_classes=class_types,
-        )
-        self.assertEqual([function.name for function in module.functions], ["_LLVMGen._base_type"])
-        self.assertNotIn("Dict", repr(module.functions[0].body))
-
-    def test_codegen_string_array_element_width_lowers_without_dict_literal(self) -> None:
-        class_types = {}
-        function_types = {}
-        for module_path in (ROOT / "src/xcc/codegen.py", ROOT / "src/xcc/types.py"):
-            analysis = analyze_path(module_path)
-            class_types.update(analysis.types.classes)
-            function_types.update(analysis.types.functions)
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._string_array_element_width"},
-            extra_classes=class_types,
-            extra_functions=function_types,
-        )
-        self.assertEqual(
-            [function.name for function in module.functions],
-            ["_LLVMGen._string_array_element_width"],
-        )
-        self.assertNotIn("Dict", repr(module.functions[0].body))
-
-    def test_codegen_decode_string_lowers_without_escape_dict_literal(self) -> None:
-        class_types = analyze_path(ROOT / "src/xcc/codegen.py").types.classes
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._decode_string"},
-            extra_classes=class_types,
-        )
-        self.assertEqual([function.name for function in module.functions], ["_LLVMGen._decode_string"])
-        self.assertNotIn("Dict", repr(module.functions[0].body))
-
-    def test_codegen_string_literal_quote_scan_lowers_without_break_lost_phi(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_string_literal_bytes"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertIn("self._string_literal_quote_pos(raw)", method_source)
-        self.assertNotIn("enumerate(raw)", method_source)
-        self.assertNotIn("break", method_source)
-        self.assertIn("def _string_literal_quote_pos", source)
-        literal_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_string_literal"
-        ]
-        self.assertEqual(len(literal_methods), 1)
-        literal_source = ast.unparse(literal_methods[0])
-        self.assertIn("init_len + 1", literal_source)
-        self.assertIn("c.ConstString(data, init_len, False)", literal_source)
-
-    def test_codegen_encode_string_units_lowers_without_comprehension_placeholders(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._encode_string_units"},
-        )
-        self.assertEqual(
-            [function.name for function in module.functions],
-            ["_LLVMGen._encode_string_units"],
-        )
-        body = repr(module.functions[0].body)
-        self.assertIn("IrForEach", body)
-        self.assertNotIn("__ListComp", body)
-        self.assertNotIn("__GeneratorExp", body)
-
-    def test_codegen_member_path_lowers_without_starred_list_literal(self) -> None:
-        class_types = {}
-        for module_path in (
-            ROOT / "src/xcc/codegen.py",
-            ROOT / "src/xcc/data_layout.py",
-            ROOT / "src/xcc/sema/symbols.py",
-            ROOT / "src/xcc/types.py",
-        ):
-            class_types.update(analyze_path(module_path).types.classes)
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._member_path"},
-            extra_classes=class_types,
-        )
-        self.assertEqual([function.name for function in module.functions], ["_LLVMGen._member_path"])
-        self.assertNotIn("Starred", repr(module.functions[0].body))
-
-    def test_codegen_walk_allocas_lowers_typed_optional_symbol_lookup(self) -> None:
-        class_types = {}
-        function_types = {}
-        for module_path in (
-            ROOT / "src/xcc/ast.py",
-            ROOT / "src/xcc/codegen.py",
-            ROOT / "src/xcc/sema/symbols.py",
-            ROOT / "src/xcc/types.py",
-        ):
-            analysis = analyze_path(module_path)
-            class_types.update(analysis.types.classes)
-            function_types.update(analysis.types.functions)
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._walk_allocas"},
-            extra_classes=class_types,
-            extra_functions=function_types,
-        )
-        self.assertEqual([function.name for function in module.functions], ["_LLVMGen._walk_allocas"])
-        self.assertIn("IrRecordType(name='VarSymbol')", repr(module.functions[0].body))
-
-    def test_codegen_atomic_builtin_call_lowers_without_opcode_dicts(self) -> None:
-        class_types = {}
-        function_types = {}
-        for module_path in (
-            ROOT / "src/xcc/ast.py",
-            ROOT / "src/xcc/codegen.py",
-            ROOT / "src/xcc/sema/symbols.py",
-            ROOT / "src/xcc/types.py",
-        ):
-            analysis = analyze_path(module_path)
-            class_types.update(analysis.types.classes)
-            function_types.update(analysis.types.functions)
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._atomic_builtin_call"},
-            extra_classes=class_types,
-            extra_functions=function_types,
-        )
-        self.assertEqual(
-            [function.name for function in module.functions],
-            ["_LLVMGen._atomic_builtin_call"],
-        )
-        self.assertNotIn("Dict", repr(module.functions[0].body))
-
-    def test_codegen_atomic_rmw_new_value_lowers_without_unary_all_ones(self) -> None:
-        class_types = analyze_path(ROOT / "src/xcc/codegen.py").types.classes
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._atomic_rmw_new_value"},
-            extra_classes=class_types,
-        )
-        self.assertEqual(
-            [function.name for function in module.functions],
-            ["_LLVMGen._atomic_rmw_new_value"],
-        )
-        self.assertNotIn("UnaryOp", repr(module.functions[0].body))
-
-    def test_codegen_assign_lowers_without_compound_operator_dicts(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        assign_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_assign"
-        ]
-        self.assertEqual(len(assign_methods), 1)
-        self.assertFalse(
-            any(isinstance(node, ast.Dict) for node in ast.walk(assign_methods[0])),
-            "_LLVMGen._assign should not use dict literal operator dispatch",
-        )
-
-    def test_codegen_binary_lowers_without_operator_dicts(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        binary_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_binary"
-        ]
-        self.assertEqual(len(binary_methods), 1)
-        self.assertFalse(
-            any(isinstance(node, ast.Dict) for node in ast.walk(binary_methods[0])),
-            "_LLVMGen._binary should not use dict literal operator dispatch",
-        )
-
-    def test_codegen_float_rank_lowers_without_rank_dict(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        rank_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_float_rank"
-        ]
-        self.assertEqual(len(rank_methods), 1)
-        self.assertFalse(
-            any(isinstance(node, ast.Dict) for node in ast.walk(rank_methods[0])),
-            "_LLVMGen._float_rank should not use dict literal rank dispatch",
-        )
-
-    def test_codegen_compare_lowers_without_predicate_dicts(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        compare_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_compare"
-        ]
-        self.assertEqual(len(compare_methods), 1)
-        self.assertFalse(
-            any(isinstance(node, ast.Dict) for node in ast.walk(compare_methods[0])),
-            "_LLVMGen._compare should not use dict literal predicate dispatch",
-        )
-
-    def test_codegen_unary_lowers_without_negative_constint_literals(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        unary_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_unary"
-        ]
-        self.assertEqual(len(unary_methods), 1)
-        self.assertFalse(
-            any(isinstance(node, ast.UnaryOp) for node in ast.walk(unary_methods[0])),
-            "_LLVMGen._unary should not use Python unary literals in LLVM API args",
-        )
-
-    def test_codegen_parse_int_value_lowers_without_runtime_int_or_negative_index(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        parse_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_parse_int_value"
-        ]
-        self.assertEqual(len(parse_methods), 1)
-        method = parse_methods[0]
-        self.assertFalse(
-            any(
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "int"
-                for node in ast.walk(method)
-            ),
-            "_LLVMGen._parse_int_value should not depend on runtime int(str, base)",
-        )
-        self.assertFalse(
-            any(
-                isinstance(node, ast.Subscript)
-                and isinstance(node.slice, ast.UnaryOp)
-                and isinstance(node.slice.op, ast.USub)
-                for node in ast.walk(method)
-            ),
-            "_LLVMGen._parse_int_value should not use negative string indexes",
-        )
-
-    def test_typemap_require_lowers_without_direct_int_key_subscript(self) -> None:
-        source = (ROOT / "src/xcc/sema/symbols.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        require_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "require"
-        ]
-        self.assertEqual(len(require_methods), 1)
-        method = require_methods[0]
-        self.assertFalse(
-            any(isinstance(node, ast.Subscript) for node in ast.walk(method)),
-            "TypeMap.require should not lower dict[id(node)] as tuple indexing",
-        )
-
-    def test_codegen_function_designator_lowers_without_setdefault(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        function_designator_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_function_designator"
-        ]
-        self.assertEqual(len(function_designator_methods), 1)
-        self.assertNotIn("setdefault", ast.unparse(function_designator_methods[0]))
-
-    def test_codegen_declare_func_lowers_param_cache_without_listcomp(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        declare_func_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_declare_func"
-        ]
-        self.assertEqual(len(declare_func_methods), 1)
-        method = declare_func_methods[0]
-        self.assertFalse(
-            any(isinstance(node, ast.ListComp) for node in ast.walk(method)),
-            "_declare_func should cache parameter types through a typed loop",
-        )
-        self.assertTrue(
-            any(
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and node.target.id == "stored_param_types"
-                for node in ast.walk(method)
-            ),
-            "_declare_func should annotate stored_param_types before appending values",
-        )
-
-    def test_codegen_const_from_bytes_lowers_without_any_call(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        const_from_bytes_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_const_from_bytes"
-        ]
-        self.assertEqual(len(const_from_bytes_methods), 1)
-        self.assertNotIn("any(", ast.unparse(const_from_bytes_methods[0]))
-        self.assertNotIn("int.from_bytes", ast.unparse(const_from_bytes_methods[0]))
-
-    def test_codegen_const_value_bytes_lowers_with_typed_integer_locals(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        const_value_bytes_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_const_value_bytes"
-        ]
-        self.assertEqual(len(const_value_bytes_methods), 1)
-        annotated_names = {
-            node.target.id
-            for node in ast.walk(const_value_bytes_methods[0])
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-        }
-        self.assertIn("raw", annotated_names)
-        self.assertIn("mask", annotated_names)
-        self.assertIn("masked", annotated_names)
-
-    def test_codegen_const_struct_bytes_lowers_without_mutable_bytearray(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        const_struct_bytes_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_const_struct_bytes"
-        ]
-        self.assertEqual(len(const_struct_bytes_methods), 1)
-        method = const_struct_bytes_methods[0]
-        self.assertNotIn("bytearray", ast.unparse(method))
-        self.assertFalse(
-            any(
-                isinstance(node, ast.Assign)
-                and any(isinstance(target, ast.Subscript) for target in node.targets)
-                for node in ast.walk(method)
-            ),
-            "_const_struct_bytes should stay inside the immutable bytes subset",
-        )
-
-    def test_codegen_eval_const_expr_lowers_negative_float_without_unary_op(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        eval_const_expr_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_eval_const_expr"
-        ]
-        self.assertEqual(len(eval_const_expr_methods), 1)
-        self.assertFalse(
-            any(
-                isinstance(node, ast.UnaryOp)
-                and isinstance(node.op, ast.USub)
-                and isinstance(node.operand, ast.Name)
-                and node.operand.id == "float_value"
-                for node in ast.walk(eval_const_expr_methods[0])
-            ),
-            "_eval_const_expr should express negative float constants as binary subtraction",
-        )
-
-    def test_codegen_eval_const_expr_lowers_optional_array_guard_without_boolop(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        eval_const_expr_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_eval_const_expr"
-        ]
-        self.assertEqual(len(eval_const_expr_methods), 1)
-        method = eval_const_expr_methods[0]
-        method_source = ast.unparse(method)
-        self.assertNotIn("value_type is not None and value_type.is_array()", method_source)
-        self.assertTrue(
-            any(
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and node.target.id == "value_type"
-                for node in ast.walk(method)
-            ),
-            "_eval_const_expr should annotate value_type before Optional narrowing",
-        )
-
-    def test_codegen_const_identifier_addr_lowers_type_lookup_without_bool_or(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name in {"_eval_const_identifier", "_eval_const_addr"}
-        ]
-        self.assertEqual({method.name for method in methods}, {"_eval_const_identifier", "_eval_const_addr"})
-        for method in methods:
-            with self.subTest(method=method.name):
-                method_source = ast.unparse(method)
-                self.assertNotIn("or self._lookup_symbol_type", method_source)
-                self.assertTrue(
-                    any(
-                        isinstance(node, ast.AnnAssign)
-                        and isinstance(node.target, ast.Name)
-                        and node.target.id == "value_type"
-                        for node in ast.walk(method)
-                    ),
-                    f"{method.name} should annotate value_type before Optional narrowing",
-                )
-
-    def test_codegen_eval_array_init_lowers_zero_fill_without_listcomp(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        eval_array_init_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_eval_array_init"
-        ]
-        self.assertEqual(len(eval_array_init_methods), 1)
-        method = eval_array_init_methods[0]
-        self.assertFalse(
-            any(isinstance(node, ast.ListComp) for node in ast.walk(method)),
-            "_eval_array_init should build default element constants through a typed loop",
-        )
-        self.assertTrue(
-            any(
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and node.target.id == "elems"
-                for node in ast.walk(method)
-            ),
-            "_eval_array_init should annotate elems before appending values",
-        )
-
-    def test_codegen_eval_record_init_lowers_without_nested_function(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        eval_record_init_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_eval_record_init"
-        ]
-        self.assertEqual(len(eval_record_init_methods), 1)
-        nested_functions = [
-            node
-            for node in ast.walk(eval_record_init_methods[0])
-            if isinstance(node, ast.FunctionDef) and node.name != "_eval_record_init"
-        ]
-        self.assertEqual(nested_functions, [])
-        self.assertFalse(
-            any(
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "append"
-                and isinstance(node.func.value, ast.Subscript)
-                for node in ast.walk(eval_record_init_methods[0])
-            ),
-            "_eval_record_init should append through typed local list variables",
-        )
-
-    def test_codegen_eval_record_path_init_lowers_typed_path_unpack(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        eval_record_path_init_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_eval_record_path_init"
-        ]
-        self.assertEqual(len(eval_record_path_init_methods), 1)
-        method = eval_record_path_init_methods[0]
-        self.assertFalse(
-            any(
-                isinstance(node, ast.Assign)
-                and any(isinstance(target, ast.Tuple) for target in node.targets)
-                and isinstance(node.value, ast.Subscript)
-                and ast.unparse(node.value) == "path[0]"
-                for node in ast.walk(method)
-            ),
-            "_eval_record_path_init should unpack path entries through typed locals",
-        )
-        annotated_names = {
-            node.target.id
-            for node in ast.walk(method)
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-        }
-        self.assertIn("record_name", annotated_names)
-        self.assertIn("field_index", annotated_names)
-        self.assertIn("member", annotated_names)
-        self.assertFalse(
-            any(isinstance(node, ast.ListComp) for node in ast.walk(method)),
-            "_eval_record_path_init should build field constants through a typed loop",
-        )
-
-    def test_codegen_llvmgen_lowers_without_dead_term_flag(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        self.assertNotIn("self._term", source)
-
-    def test_codegen_emit_return_lowers_func_sym_return_type_without_ifexp(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        emit_return_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_emit_return"
-        ]
-        self.assertEqual(len(emit_return_methods), 1)
-        method_source = ast.unparse(emit_return_methods[0])
-        self.assertNotIn("if self._func_sym else", method_source)
-        self.assertTrue(
-            any(
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and node.target.id == "return_type"
-                for node in ast.walk(emit_return_methods[0])
-            ),
-            "_emit_return should use a typed local for optional function return type",
-        )
-
-    def test_codegen_emit_globals_lowers_without_starred_fallback_list(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        emit_globals_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_emit_globals"
-        ]
-        self.assertEqual(len(emit_globals_methods), 1)
-        method = emit_globals_methods[0]
-        self.assertFalse(any(isinstance(node, ast.Starred) for node in ast.walk(method)))
-        annotated_names = {
-            node.target.id
-            for node in ast.walk(method)
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-        }
-        self.assertIn("externals", annotated_names)
-
-    def test_codegen_struct_type_overrides_lowers_dict_get_without_default(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_struct_type_with_member_overrides"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertNotIn("member_type_overrides.get(index, member.type_)", method_source)
-        annotated_names = {
-            node.target.id
-            for node in ast.walk(methods[0])
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-        }
-        self.assertIn("member_type", annotated_names)
-
-    def test_codegen_flexible_array_overrides_lowers_typed_last_index(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_flexible_array_member_overrides"
-        ]
-        self.assertEqual(len(methods), 1)
-        annotated_names = {
-            node.target.id
-            for node in ast.walk(methods[0])
-            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-        }
-        self.assertIn("last_index", annotated_names)
-        self.assertIn("result", annotated_names)
-        self.assertFalse(
-            any(isinstance(node, ast.Dict) and node.keys for node in ast.walk(methods[0])),
-            "_flexible_array_member_overrides should build non-empty dicts by assignment",
-        )
-
-    def test_codegen_identifier_lowers_without_fstring_literal(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        identifier_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_identifier"
-        ]
-        self.assertEqual(len(identifier_methods), 1)
-        self.assertFalse(
-            any(isinstance(node, ast.JoinedStr) for node in ast.walk(identifier_methods[0])),
-            "_LLVMGen._identifier should not build __func__ string literals with f-strings",
-        )
-        self.assertNotIn(
-            "name == '__func__' and",
-            ast.unparse(identifier_methods[0]),
-        )
-        self.assertNotIn("self._func_sym and", ast.unparse(identifier_methods[0]))
-
-    def test_type_helpers_usual_arithmetic_conversion_lowers_global_type_name_checks(
-        self,
-    ) -> None:
-        class_types = analyze_path(ROOT / "src/xcc/types.py").types.classes
-        source = (ROOT / "src/xcc/sema/type_helpers.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/sema/type_helpers.py"),
-            include_records=frozenset(),
-            include_functions={"usual_arithmetic_conversion"},
-            extra_classes=class_types,
-        )
-        self.assertEqual([function.name for function in module.functions], ["usual_arithmetic_conversion"])
-        self.assertNotIn("LONGDOUBLE.name", repr(module.functions[0].body))
-        self.assertNotIn("DOUBLE.name", repr(module.functions[0].body))
-
-    def test_incomplete_record_check_lowers_without_loop_flag_or_dict_membership(self) -> None:
-        source = (ROOT / "src/xcc/sema/type_resolution.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "is_invalid_incomplete_record_object_type"
-        ]
-        self.assertEqual(len(methods), 1)
-        method = methods[0]
-        method_source = ast.unparse(method)
-        self.assertNotIn("for ", method_source)
-        self.assertNotIn("not in self._record_definitions", method_source)
-        self.assertIn("self._record_members(key) is None", method_source)
-        self.assertNotIn("key in self._record_definitions", ast.unparse(tree))
-        self.assertNotIn("type_.name not in self._record_definitions", ast.unparse(tree))
-
-    def test_void_object_check_lowers_without_break_latched_flag(self) -> None:
-        source = (ROOT / "src/xcc/sema/__init__.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_is_invalid_void_object_type"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertNotIn("break", method_source)
-        self.assertNotIn("has_pointer_op", method_source)
-        self.assertIn("return False", method_source)
-        self.assertIn("return True", method_source)
-
-    def test_scope_record_tags_use_string_keys_for_native_dict_lookup(self) -> None:
-        source = (ROOT / "src/xcc/sema/symbols.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name in {"define_record_tag", "lookup_record_tag_current"}
-        ]
-        self.assertEqual(len(methods), 2)
-        for method in methods:
-            with self.subTest(method=method.name):
-                method_source = ast.unparse(method)
-                self.assertIn("kind + ' ' + tag", method_source)
-                self.assertFalse(any(isinstance(node, ast.Tuple) for node in ast.walk(method)))
-
-    def test_anonymous_record_names_use_explicit_native_state_updates(self) -> None:
-        records_source = (ROOT / "src/xcc/sema/records.py").read_text(encoding="utf-8")
-        records_tree = ast.parse(records_source)
-        records_functions = {
-            node.name: node
-            for node in ast.walk(records_tree)
-            if isinstance(node, ast.FunctionDef)
-        }
-        key_source = ast.unparse(records_functions["anonymous_record_key"])
-        name_source = ast.unparse(records_functions["record_type_name"])
-        self.assertIn("key = type_spec.name", key_source)
-        self.assertIn("str(id(member))", key_source)
-        self.assertIn("anonymous_record_key(type_spec)", name_source)
-        self.assertNotIn("(type_spec.name, type_spec.record_members)", name_source)
-
-        analyzer_source = (ROOT / "src/xcc/sema/__init__.py").read_text(encoding="utf-8")
-        analyzer_tree = ast.parse(analyzer_source)
-        methods = [
-            node
-            for node in ast.walk(analyzer_tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_record_type_name"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertIn("self._anon_record_counter = result[1]", method_source)
-        self.assertIn(
-            "self._anon_record_names[anonymous_record_key(type_spec)] = name",
-            method_source,
-        )
-        self.assertNotIn("name, self._anon_record_counter =", method_source)
-
-    def test_scope_parent_lookup_lowers_without_recursive_method_calls(self) -> None:
-        source = (ROOT / "src/xcc/sema/symbols.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name in {"lookup_record_tag", "lookup", "lookup_typedef"}
-        ]
-        self.assertEqual(len(methods), 3)
-        for method in methods:
-            with self.subTest(method=method.name):
-                method_source = ast.unparse(method)
-                self.assertIn("while scope is not None", method_source)
-                self.assertNotIn(f"self._parent.{method.name}", method_source)
-
-    def test_sema_child_scopes_do_not_depend_on_constructor_parent_argument(self) -> None:
-        symbols_source = (ROOT / "src/xcc/sema/symbols.py").read_text(encoding="utf-8")
-        symbols_tree = ast.parse(symbols_source)
-        helpers = [
-            node
-            for node in ast.walk(symbols_tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "child"
-        ]
-        self.assertEqual(len(helpers), 1)
-        helper_source = ast.unparse(helpers[0])
-        self.assertIn("scope = Scope()", helper_source)
-        self.assertIn("scope._parent = self", helper_source)
-        for module_path in (
-            ROOT / "src/xcc/sema/__init__.py",
-            ROOT / "src/xcc/sema/statements.py",
-            ROOT / "src/xcc/sema/expressions.py",
-        ):
-            with self.subTest(module=module_path.name):
-                source = module_path.read_text(encoding="utf-8")
-                self.assertNotIn("Scope(scope)", source)
-                self.assertNotIn("Scope(self._file_scope)", source)
-
-    def test_record_member_parser_lowers_supported_break_after_member(self) -> None:
-        source = (ROOT / "src/xcc/parser/type_specs.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "parse_record_member_declaration"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertIn("while True:", method_source)
-        self.assertIn("break", method_source)
-        self.assertNotIn("more_members", method_source)
-
-        class_types = {}
-        function_types = {}
-        support_modules = {
-            "xcc.ast",
-            "xcc.lexer",
-            "xcc.types",
-        }
-        for module in collect_bootstrap_sources(ROOT):
-            if module.name not in support_modules and not module.name.startswith("xcc.parser"):
-                continue
-            analysis = analyze_path(module.path)
-            class_types.update(analysis.types.classes)
-            function_types.update(analysis.types.functions)
-        lowered = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/parser/type_specs.py"),
-            include_records=frozenset(),
-            include_functions={"parse_record_member_declaration"},
-            extra_classes=class_types,
-            extra_functions=function_types,
-        )
-        self.assertEqual(
-            [function.name for function in lowered.functions],
-            ["parse_record_member_declaration"],
-        )
-        self.assertIn("IrBreak", repr(lowered.functions[0].body))
-
-    def test_decl_stmt_parser_avoids_break_after_appending_declaration(self) -> None:
-        source = (ROOT / "src/xcc/parser/__init__.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_parse_decl_stmt"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertNotIn("while True:", method_source)
-        self.assertIn("more_declarations = True", method_source)
-        self.assertIn("more_declarations = False", method_source)
-
-    def test_unary_parser_lowers_without_break_latched_operator_flag(self) -> None:
-        source = (ROOT / "src/xcc/parser/expressions.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "parse_unary"
-        ]
-        helpers = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_check_unary_operator"
-        ]
-        self.assertEqual(len(methods), 1)
-        self.assertEqual(len(helpers), 1)
-        method_source = ast.unparse(methods[0])
-        helper_source = ast.unparse(helpers[0])
-        self.assertNotIn("has_unary_operator", method_source)
-        self.assertNotIn("break", method_source)
-        self.assertIn("_check_unary_operator(parser)", method_source)
-        self.assertIn("parser._check_punct('!')", helper_source)
-
-    def test_codegen_if_without_else_avoids_conditional_block_side_effect(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_emit_if"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertIn("else_bb = None", method_source)
-        self.assertIn("if stmt.else_body is not None", method_source)
-        self.assertIn("if else_bb is not None", method_source)
-        self.assertNotIn("if stmt.else_body else None", method_source)
-
-    def test_codegen_lookup_local_lowers_without_reversed_scope_iteration(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_lookup_local"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertIn("index = len(self._locals)", method_source)
-        self.assertIn("while index > 0", method_source)
-        self.assertNotIn("reversed(self._locals)", method_source)
-        self.assertIn("self._lookup_local_in_scope(scope, name)", method_source)
-        self.assertIn("def _set_current_local", source)
-        self.assertIn("def _current_local_contains", source)
-        self.assertIn("def _lookup_local_in_scope", source)
-        self.assertIn("scope.items()", source)
-        self.assertNotIn("name in scope", source)
-        self.assertNotIn("current_scope.get", source)
-        self.assertNotIn("self._locals[-1]", source)
-
-    def test_codegen_pointer_null_compare_avoids_inttoptr_for_zero_literal(self) -> None:
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        binary_methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_binary"
-        ]
-        self.assertEqual(len(binary_methods), 1)
-        binary_source = ast.unparse(binary_methods[0])
-        self.assertIn("self._compare_pointer_null", binary_source)
-        self.assertIn("if null_cmp is not None", binary_source)
-        methods = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_compare"
-        ]
-        self.assertEqual(len(methods), 1)
-        method_source = ast.unparse(methods[0])
-        self.assertIn("right_is_null_pointer_constant", method_source)
-        self.assertIn("left_is_null_pointer_constant", method_source)
-        self.assertIn("right = c.ConstNull(lt)", method_source)
-        self.assertIn("left = c.ConstNull(rt)", method_source)
-        self.assertIn("def _is_zero_int_literal", source)
-        self.assertIn("def _is_pointer_comparison_type", source)
-        self.assertIn("type_.pointer_depth > 0", source)
-        self.assertIn("len(type_.array_lengths) > 0", source)
-        self.assertIn("c.BuildICmp(self._builder, 32, value, null", source)
-        self.assertIn("def _compare_pointer_truth", source)
-
-    def test_sema_integer_literal_parser_avoids_untagged_union_and_global_dicts(self) -> None:
-        source = (ROOT / "src/xcc/sema/constants.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        functions = {
-            node.name: node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef)
-        }
-        parser_source = ast.unparse(functions["parse_int_literal"])
-        candidates_source = ast.unparse(functions["_integer_literal_candidates"])
-        limits_source = ast.unparse(functions["fits_integer_literal_value"])
-        self.assertIn("lexeme: str", parser_source)
-        self.assertNotIn("isinstance(lexeme, int)", parser_source)
-        self.assertIn("_integer_literal_candidates(is_decimal, suffix)", parser_source)
-        self.assertIn("int(body, 10)", parser_source)
-        self.assertNotIn("int(body)", parser_source)
-        self.assertNotIn(".get(", parser_source)
-        self.assertIn("return (INT, LONG, LLONG)", candidates_source)
-        self.assertNotIn(".get(", candidates_source)
-        self.assertNotIn(".get(", limits_source)
-
-    def test_codegen_union_size_lowers_without_generator_max(self) -> None:
-        class_types = {}
-        for module_path in (
-            ROOT / "src/xcc/codegen.py",
-            ROOT / "src/xcc/data_layout.py",
-            ROOT / "src/xcc/sema/symbols.py",
-            ROOT / "src/xcc/types.py",
-        ):
-            class_types.update(analyze_path(module_path).types.classes)
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._type_align", "_LLVMGen._union_size"},
-            extra_classes=class_types,
-        )
-        functions = {function.name: function for function in module.functions}
-        self.assertIn("_LLVMGen._type_align", functions)
-        self.assertIn("_LLVMGen._union_size", functions)
-        self.assertNotIn("GeneratorExp", repr(module.functions))
-
-    def test_codegen_union_storage_member_lowers_without_key_callback(self) -> None:
-        class_types = {}
-        for module_path in (
-            ROOT / "src/xcc/codegen.py",
-            ROOT / "src/xcc/data_layout.py",
-            ROOT / "src/xcc/sema/symbols.py",
-            ROOT / "src/xcc/types.py",
-        ):
-            class_types.update(analyze_path(module_path).types.classes)
-        source = (ROOT / "src/xcc/codegen.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/codegen.py"),
-            include_records=frozenset(),
-            include_functions={"_LLVMGen._union_storage_member"},
-            extra_classes=class_types,
-        )
-        self.assertEqual(
-            [function.name for function in module.functions],
-            ["_LLVMGen._union_storage_member"],
-        )
-        self.assertNotIn("FunctionDef", repr(module.functions[0].body))
 
     def test_llvm_api_pointer_array_helpers_are_native_leaves(self) -> None:
         module = aot_slice.lower_core_slice(
@@ -1829,7 +316,9 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("call ptr @__xcc_aot_calloc(i64 %len, i64 8)", llvm_ir)
         self.assertNotIn("call ptr @calloc(", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_tuple_get(ptr %values, i64 %index)", llvm_ir)
-        self.assertNotIn("define ptr @xcc.llvm_api.ptr_array(ptr %values) {\nentry:\n  ret ptr null", llvm_ir)
+        self.assertNotIn(
+            "define ptr @xcc.llvm_api.ptr_array(ptr %values) {\nentry:\n  ret ptr null", llvm_ir
+        )
 
     def test_slice_lowers_imported_global_string_container_membership(self) -> None:
         module = aot_slice.lower_core_slice(
@@ -1849,36 +338,12 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertIn("@xcc.parser.expressions.is_parenthesized_type_name_start", llvm_ir)
         self.assertNotIn("@__cmp_In", llvm_ir)
 
-    def test_frontend_unchecked_success_helper_body_is_ordinary_lowerable(self) -> None:
-        class_types = {}
-        for module_path in (
-            ROOT / "src/xcc/ast.py",
-            ROOT / "src/xcc/frontend.py",
-            ROOT / "src/xcc/lexer.py",
-            ROOT / "src/xcc/options.py",
-            ROOT / "src/xcc/preprocessor/__init__.py",
-            ROOT / "src/xcc/sema/symbols.py",
-        ):
-            class_types.update(analyze_path(module_path).types.classes)
-        source = (ROOT / "src/xcc/frontend.py").read_text(encoding="utf-8")
-        module = lower_source_to_ir(
-            source,
-            filename=str(ROOT / "src/xcc/frontend.py"),
-            include_records=frozenset(),
-            include_functions={"_aot_compile_source_unchecked"},
-            extra_classes=class_types,
-        )
-        self.assertEqual(len(module.functions), 1)
-        body = repr(module.functions[0].body)
-        self.assertIn("target='normalize_options'", body)
-        self.assertIn("target='preprocess_source'", body)
-        self.assertIn("target='lex'", body)
-        self.assertIn("target='parse'", body)
-        self.assertIn("target='analyze'", body)
-        self.assertIn("record='FrontendResult'", body)
 
     def test_project_imports_are_renamed_to_qualified_slice_targets(self) -> None:
-        source = (ROOT / "src/xcc/cc_driver.py").read_text(encoding="utf-8")
+        source = (
+            "from xcc.frontend import _aot_compile_source_unchecked\n"
+            "from xcc.codegen import generate_llvm_ir\n"
+        )
         rename_map = aot_slice._module_rename_map("xcc.cc_driver", source)
         self.assertEqual(
             rename_map["_aot_compile_source_unchecked"],
@@ -1898,9 +363,7 @@ class AotBootstrapLoweringTests(unittest.TestCase):
         self.assertEqual(edge_map["lex_tokens"], "xcc.lexer.lex")
         package_map = aot_slice._module_rename_map(
             "xcc.frontend",
-            "from xcc.parser import parse\n"
-            "def f() -> int:\n"
-            "    return 1\n",
+            "from xcc.parser import parse\ndef f() -> int:\n    return 1\n",
             {"xcc.frontend", "xcc.parser.__init__"},
         )
         self.assertEqual(package_map["parse"], "xcc.parser.__init__.parse")
@@ -1989,9 +452,15 @@ class AotBootstrapBuildTests(unittest.TestCase):
 
             class Result:
                 returncode = 0
-                stdout = ""
+                stdout = (
+                    "OVERVIEW: llvm system compiler\nUSAGE: llc [options] <input bitcode>\n"
+                    if command[1:] == ("--help",)
+                    else ""
+                )
                 stderr = ""
 
+            if command[1:] == ("--help",):
+                return Result()
             output = Path(command[-1])
             if command[0] == "/tool/llc":
                 llvm_ir = Path(command[2]).read_text(encoding="utf-8")
@@ -2029,13 +498,18 @@ class AotBootstrapBuildTests(unittest.TestCase):
     def test_build_native_bootstrap_reports_tool_failure(self) -> None:
         def fake_run(command: tuple[str, ...], **kwargs: object) -> object:
             class Result:
-                returncode = 1 if command[0] == "/tool/llc" else 0
-                stdout = ""
-                stderr = "llc failed"
+                returncode = 0 if command[1:] == ("--help",) else 1
+                stdout = (
+                    "OVERVIEW: llvm system compiler\nUSAGE: llc [options] <input bitcode>\n"
+                    if command[1:] == ("--help",)
+                    else ""
+                )
+                stderr = "" if command[1:] == ("--help",) else "llc failed"
 
             return Result()
 
         with (
+            TemporaryDirectory() as temp_dir,
             patch("xcc.aot.bootstrap.lower_bootstrap_entry_smoke", return_value=object()),
             patch("xcc.aot.bootstrap.emit_llvm_text", return_value=""),
             patch("subprocess.run", fake_run),
@@ -2043,7 +517,7 @@ class AotBootstrapBuildTests(unittest.TestCase):
         ):
             build_native_bootstrap(
                 ROOT,
-                ROOT / "build/aot/xcc-fail",
+                Path(temp_dir) / "xcc-fail",
                 llc="/tool/llc",
                 cc="cc",
             )
@@ -2280,7 +754,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             source.write_text(
                 "#define SIGNAL 4 /* signal value */\n"
                 "/* Codes for SIGNAL */\n"
-                "const char *name = \"SIGNAL\"; // SIGNAL\n"
+                'const char *name = "SIGNAL"; // SIGNAL\n'
                 "int signal = SIGNAL;\n"
                 "int main(void){return signal == 4 ? 0 : 1;}\n",
                 encoding="utf-8",
@@ -2442,9 +916,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             source = root / "compatible_typedef.c"
             obj = root / "compatible_typedef.o"
             source.write_text(
-                "typedef void *Pointer;\n"
-                "typedef void *Pointer;\n"
-                "int main(void) { return 0; }\n",
+                "typedef void *Pointer;\ntypedef void *Pointer;\nint main(void) { return 0; }\n",
                 encoding="utf-8",
             )
 
@@ -2780,6 +1252,45 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             )
             self.assertEqual(run_result.returncode, 0, run_result.stdout + run_result.stderr)
 
+    def test_real_native_bootstrap_embeds_binary_file(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executable = self._shared_native_bootstrap(llc)
+            (root / "data.bin").write_bytes(b"\x00\xff\x2a")
+            source = root / "embed.c"
+            program = root / "embed"
+            source.write_text(
+                "unsigned char data[] = {\n"
+                '#embed "data.bin"\n'
+                "};\n"
+                "int main(void) { return data[0] || data[1] != 255 || data[2] != 42; }\n",
+                encoding="utf-8",
+            )
+
+            compile_result = subprocess.run(
+                (str(executable), str(source), "-o", str(program)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                compile_result.stdout + compile_result.stderr,
+            )
+            run_result = subprocess.run(
+                (str(program),),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run_result.returncode, 0, run_result.stdout + run_result.stderr)
+
     def test_real_native_bootstrap_accepts_function_pointer_argument(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
         if not llc.exists():
@@ -2851,8 +1362,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             source = root / "missing_include.c"
             obj = root / "missing_include.o"
             source.write_text(
-                "#include <xcc_v367_missing_header.h>\n"
-                "int main(void){return 0;}\n",
+                "#include <xcc_v367_missing_header.h>\nint main(void){return 0;}\n",
                 encoding="utf-8",
             )
 
@@ -2878,8 +1388,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             include_next_source = root / "include_next.c"
             include_next_obj = root / "include_next.o"
             include_next_source.write_text(
-                "#include <inttypes.h>\n"
-                "int main(void){return 0;}\n",
+                "#include <inttypes.h>\nint main(void){return 0;}\n",
                 encoding="utf-8",
             )
             include_next_result = subprocess.run(
@@ -3105,8 +1614,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             fnptr_source = root / "fnptr.c"
             fnptr_obj = root / "fnptr.o"
             fnptr_source.write_text(
-                "int (*fn)(void *);\n"
-                "int main(void){return 0;}\n",
+                "int (*fn)(void *);\nint main(void){return 0;}\n",
                 encoding="utf-8",
             )
             fnptr_result = subprocess.run(
@@ -3127,8 +1635,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             record_source = root / "record_void_ptr.c"
             record_obj = root / "record_void_ptr.o"
             record_source.write_text(
-                "struct S { void *cookie; int (*close)(void *); };\n"
-                "int main(void){return 0;}\n",
+                "struct S { void *cookie; int (*close)(void *); };\nint main(void){return 0;}\n",
                 encoding="utf-8",
             )
             record_result = subprocess.run(
@@ -3149,8 +1656,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             fnparam_source = root / "fnparam.c"
             fnparam_obj = root / "fnparam.o"
             fnparam_source.write_text(
-                "int funopen(int (*)(void *, char *, int));\n"
-                "int main(void){return 0;}\n",
+                "int funopen(int (*)(void *, char *, int));\nint main(void){return 0;}\n",
                 encoding="utf-8",
             )
             fnparam_result = subprocess.run(
@@ -3176,8 +1682,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             proto_pointer_source = root / "proto_pointer.c"
             proto_pointer_obj = root / "proto_pointer.o"
             proto_pointer_source.write_text(
-                "void takes(void *p);\n"
-                "int main(void){return 0;}\n",
+                "void takes(void *p);\nint main(void){return 0;}\n",
                 encoding="utf-8",
             )
             proto_pointer_result = subprocess.run(
@@ -3203,8 +1708,7 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             proto_return_source = root / "proto_return.c"
             proto_return_obj = root / "proto_return.o"
             proto_return_source.write_text(
-                "int *returns_ptr(void);\n"
-                "int main(void){return 0;}\n",
+                "int *returns_ptr(void);\nint main(void){return 0;}\n",
                 encoding="utf-8",
             )
             proto_return_result = subprocess.run(

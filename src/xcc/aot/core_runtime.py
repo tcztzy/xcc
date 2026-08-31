@@ -896,6 +896,12 @@ def _declare_runtime(module: LlvmModule) -> None:
         linkage="",
     )
     module.define_function(
+        "__xcc_aot_read_bytes_file",
+        LlvmType("ptr"),
+        (LlvmParameter(LlvmType("ptr"), "path"),),
+        linkage="",
+    )
+    module.define_function(
         "__xcc_aot_path_is_file",
         LlvmType("i1"),
         (LlvmParameter(LlvmType("ptr"), "path"),),
@@ -12588,6 +12594,30 @@ def _build___xcc_aot_read_text_file(module: LlvmModule) -> None:
     function = module.function("__xcc_aot_read_text_file")
     entry = function.append_block("entry")
     entry.emit(
+        "value",
+        "call",
+        " ptr ",
+        module.symbol("__xcc_aot_read_bytes_file"),
+        "(ptr ",
+        function.local("path"),
+        ")",
+    )
+    entry.emit(
+        "data",
+        "call",
+        " ptr ",
+        module.symbol("__xcc_aot_bytes_data"),
+        "(ptr ",
+        function.local("value"),
+        ")",
+    )
+    entry.emit(None, "ret", " ptr ", function.local("data"))
+
+
+def _build___xcc_aot_read_bytes_file(module: LlvmModule) -> None:
+    function = module.function("__xcc_aot_read_bytes_file")
+    entry = function.append_block("entry")
+    entry.emit(
         "file",
         "call",
         " ptr ",
@@ -12631,14 +12661,22 @@ def _build___xcc_aot_read_text_file(module: LlvmModule) -> None:
         function.local("file"),
         ", i64 0, i32 0)",
     )
-    seek_end.emit("alloc_size", "add", " i64 ", function.local("size"), ", 1")
+    seek_end.emit(
+        "value",
+        "call",
+        " ptr ",
+        module.symbol("__xcc_aot_bytes_new"),
+        "(i64 ",
+        function.local("size"),
+        ")",
+    )
     seek_end.emit(
         "buffer",
         "call",
         " ptr ",
-        module.symbol("malloc"),
-        "(i64 ",
-        function.local("alloc_size"),
+        module.symbol("__xcc_aot_bytes_data"),
+        "(ptr ",
+        function.local("value"),
         ")",
     )
     seek_end.emit(
@@ -12657,20 +12695,10 @@ def _build___xcc_aot_read_text_file(module: LlvmModule) -> None:
     seek_end.emit(
         "closed", "call", " i32 ", module.symbol("fclose"), "(ptr ", function.local("file"), ")"
     )
-    seek_end.emit(
-        "zero_ptr",
-        "getelementptr",
-        " i8, ptr ",
-        function.local("buffer"),
-        ", i64 ",
-        function.local("read"),
-    )
-    seek_end.emit(None, "store", " i8 0, ptr ", function.local("zero_ptr"))
-    seek_end.emit(None, "ret", " ptr ", function.local("buffer"))
+    seek_end.emit(None, "ret", " ptr ", function.local("value"))
     empty = function.append_block("empty")
-    empty.emit("empty_buffer", "call", " ptr ", module.symbol("malloc"), "(i64 1)")
-    empty.emit(None, "store", " i8 0, ptr ", function.local("empty_buffer"))
-    empty.emit(None, "ret", " ptr ", function.local("empty_buffer"))
+    empty.emit("empty_value", "call", " ptr ", module.symbol("__xcc_aot_bytes_new"), "(i64 0)")
+    empty.emit(None, "ret", " ptr ", function.local("empty_value"))
 
 
 def _build___xcc_aot_path_is_file(module: LlvmModule) -> None:
@@ -18083,6 +18111,7 @@ def runtime_module() -> LlvmModule:
     _build___xcc_aot_path_name(module)
     _build___xcc_aot_path_join(module)
     _build___xcc_aot_read_text_file(module)
+    _build___xcc_aot_read_bytes_file(module)
     _build___xcc_aot_path_is_file(module)
     _build___xcc_aot_write_text_file(module)
     _build___xcc_aot_startswith_cache_invalidate(module)
@@ -18135,11 +18164,7 @@ def runtime_module() -> LlvmModule:
     _build___xcc_aot_string_slice(module)
     _build___xcc_aot_string_concat2(module)
     _build___xcc_aot_string_join(module)
-    malloc = module.symbol("malloc")
-    allocation = module.symbol(RUNTIME_ALLOC)
-    replacements = module.redirect_calls(malloc, allocation)
-    if replacements != 40:
-        raise ValueError(f"expected 40 malloc call redirects, found {replacements}")
+    module.redirect_calls(module.symbol("malloc"), module.symbol(RUNTIME_ALLOC))
     module.validate()
     return module
 

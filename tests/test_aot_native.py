@@ -28,7 +28,10 @@ class AotNativeHarnessTests(unittest.TestCase):
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             return subprocess.CompletedProcess(cmd, 42, stdout="", stderr="")
 
-        with patch("xcc.aot.native.subprocess.run", side_effect=fake_run):
+        with (
+            patch("xcc.aot.native.find_llc", return_value="/tool/llc"),
+            patch("xcc.aot.native.subprocess.run", side_effect=fake_run),
+        ):
             result = run_native_smoke(
                 "int64 = int\ndef answer() -> int64:\n    return 42\n",
                 entry="answer",
@@ -51,6 +54,7 @@ class AotNativeHarnessTests(unittest.TestCase):
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="failed")
 
         with (
+            patch("xcc.aot.native.find_llc", return_value="/tool/llc"),
             patch("xcc.aot.native.subprocess.run", side_effect=fake_run),
             self.assertRaises(AotError) as ctx,
         ):
@@ -69,12 +73,13 @@ class AotNativeHarnessTests(unittest.TestCase):
             ("", "", "CPython oracle failed"),
         ):
             with self.subTest(expected=expected):
-
-                def fake_run(cmd, **kwargs):
-                    return subprocess.CompletedProcess(cmd, 1, stdout=stdout, stderr=stderr)
-
                 with (
-                    patch("xcc.aot.native.subprocess.run", side_effect=fake_run),
+                    patch(
+                        "xcc.aot.native.subprocess.run",
+                        return_value=subprocess.CompletedProcess(
+                            (), 1, stdout=stdout, stderr=stderr
+                        ),
+                    ),
                     self.assertRaises(AotError) as ctx,
                 ):
                     run_native_smoke(
@@ -112,8 +117,7 @@ class AotNativeRealSmokeTests(unittest.TestCase):
     @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
     def test_real_integer_abs_native_smoke_matches_cpython(self) -> None:
         result = run_native_smoke(
-            "def magnitude_sum() -> int:\n"
-            "    return abs(-7) + abs(0) + abs(5)\n",
+            "def magnitude_sum() -> int:\n    return abs(-7) + abs(0) + abs(5)\n",
             entry="magnitude_sum",
             llc=_real_llc(),
         )
@@ -187,9 +191,7 @@ class AotNativeRealSmokeTests(unittest.TestCase):
     @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
     def test_real_tuple_negative_index_native_smoke_matches_cpython_stdout(self) -> None:
         result = run_native_smoke(
-            "def message() -> str:\n"
-            "    values = ('first', 'last')\n"
-            "    return values[-1]\n",
+            "def message() -> str:\n    values = ('first', 'last')\n    return values[-1]\n",
             entry="message",
             llc=_real_llc(),
         )
@@ -230,8 +232,7 @@ class AotNativeRealSmokeTests(unittest.TestCase):
     @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
     def test_real_int_to_bytes_native_smoke_matches_single_byte_stdout(self) -> None:
         result = run_native_smoke(
-            "def message() -> bytes:\n"
-            "    return (65).to_bytes(1, 'little')\n",
+            "def message() -> bytes:\n    return (65).to_bytes(1, 'little')\n",
             entry="message",
             llc=_real_llc(),
         )
@@ -242,8 +243,7 @@ class AotNativeRealSmokeTests(unittest.TestCase):
     @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
     def test_real_id_native_smoke_returns_truthy_pointer_identity(self) -> None:
         result = run_native_smoke(
-            "def check() -> bool:\n"
-            "    return id('x') != 0\n",
+            "def check() -> bool:\n    return id('x') != 0\n",
             entry="check",
             llc=_real_llc(),
         )

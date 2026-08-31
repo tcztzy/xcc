@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import TYPE_CHECKING
 
 from xcc.ast import (
     BreakStmt,
@@ -26,105 +26,22 @@ from xcc.ast import (
     TypeSpec,
     WhileStmt,
 )
-from xcc.lexer import Token, TokenKind
-from xcc.parser.type_specs import ParserError
+from xcc.lexer import TokenKind
 
 _EXTENSION_MARKER = "__extension__"
 _MS_DECLSPEC_KEYWORD = "__declspec"
 TYPE_QUALIFIER_KEYWORDS = {"const", "volatile", "restrict", "__restrict", "__restrict__"}
 _IGNORED_IDENT_TYPE_QUALIFIERS = {"__unaligned"}
 
-
-class _StatementParser(Protocol):
-    _index: int
-
-    def _advance(self) -> Token: ...
-
-    def _check_keyword(self, value: str) -> bool: ...
-
-    def _check_punct(self, value: str) -> bool: ...
-
-    def _current(self) -> Token: ...
-
-    def _expect(self, kind: TokenKind) -> Token: ...
-
-    def _expect_punct(self, value: str) -> None: ...
-
-    def _is_declaration_start(self) -> bool: ...
-
-    def _is_label_start(self) -> bool: ...
-
-    def _is_typedef_name(self, name: str) -> bool: ...
-
-    def _make_error(self, message: str, token: Token) -> ParserError: ...
-
-    def _parse_assignment(self) -> Expr: ...
-
-    def _parse_case_stmt(self) -> CaseStmt: ...
-
-    def _parse_compound_stmt(self) -> CompoundStmt: ...
-
-    def _parse_conditional(self) -> Expr: ...
-
-    def _parse_decl_stmt(self) -> Stmt: ...
-
-    def _parse_default_stmt(self) -> DefaultStmt: ...
-
-    def _parse_designator_list(
-        self,
-    ) -> tuple[tuple[str, Expr | str | DesignatorRange], ...]: ...
-
-    def _parse_do_while_stmt(self) -> DoWhileStmt: ...
-
-    def _parse_expression(self) -> Expr: ...
-
-    def _parse_for_stmt(self) -> ForStmt: ...
-
-    def _parse_goto_stmt(self) -> Stmt: ...
-
-    def _parse_if_stmt(self) -> IfStmt: ...
-
-    def _parse_initializer(self) -> Expr | InitList: ...
-
-    def _parse_initializer_list(self) -> InitList: ...
-
-    def _parse_label_stmt(self) -> LabelStmt: ...
-
-    def _parse_return_stmt(self) -> ReturnStmt: ...
-
-    def _parse_static_assert_decl(self) -> StaticAssertDecl: ...
-
-    def _parse_statement(self) -> Stmt: ...
-
-    def _parse_string_literal(self) -> StringLiteral: ...
-
-    def _parse_switch_stmt(self) -> SwitchStmt: ...
-
-    def _parse_while_stmt(self) -> WhileStmt: ...
-
-    def _peek_punct(self, value: str) -> bool: ...
-
-    def _pop_scope(self) -> None: ...
-
-    def _push_scope(
-        self,
-        names: set[str] | None = None,
-        types: dict[str, TypeSpec] | None = None,
-    ) -> None: ...
-
-    def _record_current_source_location(self) -> None: ...
-
-    def _skip_decl_attributes(self) -> bool: ...
-
-    def _skip_extension_markers(self) -> None: ...
+if TYPE_CHECKING:
+    from . import Parser
 
 
 def parse_compound_stmt(
-    parser: _StatementParser,
+    p: "Parser",
     initial_names: set[str] | None = None,
     initial_types: dict[str, TypeSpec] | None = None,
 ) -> CompoundStmt:
-    p = parser
     p._expect_punct("{")
     p._push_scope(initial_names, initial_types)
     try:
@@ -137,8 +54,7 @@ def parse_compound_stmt(
         p._pop_scope()
 
 
-def parse_statement(parser: _StatementParser) -> Stmt:
-    p = parser
+def parse_statement(p: "Parser") -> Stmt:
     p._skip_extension_markers()
     if p._check_punct(";"):
         p._advance()
@@ -182,8 +98,7 @@ def parse_statement(parser: _StatementParser) -> Stmt:
     return ExprStmt(expr)
 
 
-def is_declaration_start(parser: _StatementParser) -> bool:
-    p = parser
+def is_declaration_start(p: "Parser") -> bool:
     if p._check_keyword(_EXTENSION_MARKER):
         saved_index = p._index
         p._skip_extension_markers()
@@ -248,8 +163,7 @@ def is_declaration_start(parser: _StatementParser) -> bool:
     return p._is_typedef_name(token.lexeme)
 
 
-def parse_if_stmt(parser: _StatementParser) -> IfStmt:
-    p = parser
+def parse_if_stmt(p: "Parser") -> IfStmt:
     p._advance()
     p._expect_punct("(")
     condition = p._parse_expression()
@@ -262,8 +176,7 @@ def parse_if_stmt(parser: _StatementParser) -> IfStmt:
     return IfStmt(condition, then_body, else_body)
 
 
-def parse_while_stmt(parser: _StatementParser) -> WhileStmt:
-    p = parser
+def parse_while_stmt(p: "Parser") -> WhileStmt:
     p._advance()
     p._expect_punct("(")
     condition = p._parse_expression()
@@ -272,8 +185,7 @@ def parse_while_stmt(parser: _StatementParser) -> WhileStmt:
     return WhileStmt(condition, body)
 
 
-def parse_do_while_stmt(parser: _StatementParser) -> DoWhileStmt:
-    p = parser
+def parse_do_while_stmt(p: "Parser") -> DoWhileStmt:
     p._advance()
     body = p._parse_statement()
     if not p._check_keyword("while"):
@@ -286,8 +198,7 @@ def parse_do_while_stmt(parser: _StatementParser) -> DoWhileStmt:
     return DoWhileStmt(body, condition)
 
 
-def parse_for_stmt(parser: _StatementParser) -> ForStmt:
-    p = parser
+def parse_for_stmt(p: "Parser") -> ForStmt:
     p._advance()
     p._expect_punct("(")
     p._push_scope()
@@ -297,7 +208,6 @@ def parse_for_stmt(parser: _StatementParser) -> ForStmt:
             p._advance()
             init = None
         elif p._is_declaration_start():
-            p._record_current_source_location()
             init = p._parse_decl_stmt()
         else:
             init = p._parse_expression()
@@ -319,8 +229,7 @@ def parse_for_stmt(parser: _StatementParser) -> ForStmt:
         p._pop_scope()
 
 
-def parse_switch_stmt(parser: _StatementParser) -> SwitchStmt:
-    p = parser
+def parse_switch_stmt(p: "Parser") -> SwitchStmt:
     p._advance()
     p._expect_punct("(")
     condition = p._parse_expression()
@@ -329,8 +238,7 @@ def parse_switch_stmt(parser: _StatementParser) -> SwitchStmt:
     return SwitchStmt(condition, body)
 
 
-def parse_case_stmt(parser: _StatementParser) -> CaseStmt:
-    p = parser
+def parse_case_stmt(p: "Parser") -> CaseStmt:
     p._advance()
     value = p._parse_expression()
     p._expect_punct(":")
@@ -338,16 +246,14 @@ def parse_case_stmt(parser: _StatementParser) -> CaseStmt:
     return CaseStmt(value, body)
 
 
-def parse_default_stmt(parser: _StatementParser) -> DefaultStmt:
-    p = parser
+def parse_default_stmt(p: "Parser") -> DefaultStmt:
     p._advance()
     p._expect_punct(":")
     body = p._parse_statement()
     return DefaultStmt(body)
 
 
-def parse_label_stmt(parser: _StatementParser) -> LabelStmt:
-    p = parser
+def parse_label_stmt(p: "Parser") -> LabelStmt:
     token = p._expect(TokenKind.IDENT)
     assert isinstance(token.lexeme, str)
     p._expect_punct(":")
@@ -355,8 +261,7 @@ def parse_label_stmt(parser: _StatementParser) -> LabelStmt:
     return LabelStmt(token.lexeme, body)
 
 
-def parse_goto_stmt(parser: _StatementParser) -> Stmt:
-    p = parser
+def parse_goto_stmt(p: "Parser") -> Stmt:
     p._advance()
     if p._check_punct("*"):
         p._advance()
@@ -369,15 +274,13 @@ def parse_goto_stmt(parser: _StatementParser) -> Stmt:
     return GotoStmt(label.lexeme)
 
 
-def is_label_start(parser: _StatementParser) -> bool:
-    p = parser
+def is_label_start(p: "Parser") -> bool:
     token = p._current()
     return token.kind == TokenKind.IDENT and p._peek_punct(":")
 
 
-def _is_static_assert_keyword(parser: _StatementParser) -> bool:
+def _is_static_assert_keyword(p: "Parser") -> bool:
     """Check for _Static_assert or C23 static_assert (contextual keyword)."""
-    p = parser
     tok = p._current()
     if (
         tok.kind == TokenKind.IDENT
@@ -388,8 +291,7 @@ def _is_static_assert_keyword(parser: _StatementParser) -> bool:
     return p._check_keyword("_Static_assert")
 
 
-def parse_static_assert_decl(parser: _StatementParser) -> StaticAssertDecl:
-    p = parser
+def parse_static_assert_decl(p: "Parser") -> StaticAssertDecl:
     if not _is_static_assert_keyword(p):
         raise p._make_error("Expected _Static_assert", p._current())
     p._advance()
@@ -411,8 +313,7 @@ def parse_static_assert_decl(parser: _StatementParser) -> StaticAssertDecl:
     return StaticAssertDecl(condition, message)
 
 
-def parse_return_stmt(parser: _StatementParser) -> ReturnStmt:
-    p = parser
+def parse_return_stmt(p: "Parser") -> ReturnStmt:
     p._advance()
     if p._check_punct(";"):
         p._expect_punct(";")
@@ -422,15 +323,13 @@ def parse_return_stmt(parser: _StatementParser) -> ReturnStmt:
     return ReturnStmt(value)
 
 
-def parse_initializer(parser: _StatementParser) -> Expr | InitList:
-    p = parser
+def parse_initializer(p: "Parser") -> Expr | InitList:
     if p._check_punct("{"):
         return p._parse_initializer_list()
     return p._parse_assignment()
 
 
-def parse_initializer_list(parser: _StatementParser) -> InitList:
-    p = parser
+def parse_initializer_list(p: "Parser") -> InitList:
     p._expect_punct("{")
     if p._check_punct("}"):
         raise p._make_error("Expected initializer", p._current())
@@ -451,9 +350,8 @@ def parse_initializer_list(parser: _StatementParser) -> InitList:
 
 
 def parse_designator_list(
-    parser: _StatementParser,
+    p: "Parser",
 ) -> tuple[tuple[str, Expr | str | DesignatorRange], ...]:
-    p = parser
     designators: list[tuple[str, Expr | str | DesignatorRange]] = []
     while True:
         if p._check_punct("."):

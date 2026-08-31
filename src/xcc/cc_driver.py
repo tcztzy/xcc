@@ -21,13 +21,7 @@ from xcc.frontend import (
     read_source,
 )
 from xcc.lexer import LexerError
-from xcc.llvm_tools import (
-    find_llc,
-    is_llvm_llc,
-    llc_candidates,
-    llvm_config_bindir,
-    unique_tool_candidates,
-)
+from xcc.llvm_tools import find_llc
 from xcc.options import FrontendOptions, StdMode, TargetOS
 from xcc.parser import ParserError
 from xcc.preprocessor import PreprocessorError
@@ -128,10 +122,10 @@ def _take_joined_or_value(
 
 
 def _parse_std(arg: str) -> StdMode:
-    if arg.startswith("gnu"):
-        return "gnu11"
-    if arg.startswith("c") or arg in {"iso9899:1990", "iso9899:1999", "iso9899:2011"}:
+    if arg == "c11":
         return "c11"
+    if arg == "gnu11":
+        return "gnu11"
     raise ValueError(f"Unsupported language standard: {arg}")
 
 
@@ -165,26 +159,6 @@ def _frontend_target_identity(target: TargetName) -> tuple[TargetOS | None, str 
     if target == "evm":
         return "evm", "evm"
     return None, None
-
-
-def _llvm_config_bindir(llvm_config: str) -> str | None:
-    return llvm_config_bindir(llvm_config)
-
-
-def _unique_tool_candidates(candidates: list[str]) -> tuple[str, ...]:
-    return unique_tool_candidates(candidates)
-
-
-def _llc_candidates() -> tuple[str, ...]:
-    return llc_candidates()
-
-
-def _is_llvm_llc(path: str) -> bool:
-    return is_llvm_llc(path)
-
-
-def _find_llc() -> str:
-    return find_llc()
 
 
 def _llvm_target_triple(config: DriverConfig) -> str:
@@ -252,10 +226,6 @@ def _parse_driver_config(argv: tuple[str, ...] | list[str]) -> DriverConfig:
                 elif not rest.startswith("-"):
                     non_c_inputs.append(rest)
             break
-        if arg == "--backend" or arg.startswith("--backend="):
-            raise ValueError("--backend has been removed; use --target=llvm (default)")
-        if arg == "--no-backend-fallback":
-            raise ValueError("--no-backend-fallback has been removed; XCC no longer falls back")
         if arg == "--target":
             target_value, index = _take_value(argv, index, "--target")
             target = _parse_target(target_value)
@@ -469,27 +439,6 @@ def _delegate_tool(target: TargetName) -> str:
     return "cc" if target == "x86_64-linux-gnu" else "clang"
 
 
-def _drop_x86_64_linux_latomic(argv: list[str] | tuple[str, ...]) -> list[str]:
-    filtered: list[str] = []
-    index = 0
-    while index < len(argv):
-        arg = argv[index]
-        index += 1
-        if arg == "-latomic":
-            continue
-        if arg == "-l" and index < len(argv) and argv[index] == "atomic":
-            index += 1
-            continue
-        filtered.append(arg)
-    return filtered
-
-
-def _delegate_argv(config: DriverConfig) -> tuple[str, ...] | list[str]:
-    if config.target == "x86_64-linux-gnu":
-        return _drop_x86_64_linux_latomic(config.clang_argv)
-    return config.clang_argv
-
-
 def _aot_smoke_llvm_path(object_path: str) -> str:
     return object_path + ".ll"
 
@@ -653,9 +602,6 @@ def _aot_default_system_include_dirs() -> tuple[str, ...]:
         "XcodeDefault.xctoolchain/usr/lib/clang/21/include",
         "/Applications/Xcode.app/Contents/Developer/Platforms/"
         "MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include",
-        "/Applications/Xcode.app/Contents/Developer/Platforms/"
-        "MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk/usr/include",
-        "/usr/include",
     )
 
 
@@ -698,7 +644,7 @@ def _aot_compile_source_to_llvm_ir_timed(
     undefs: tuple[str, ...],
     std: str,
     debug: bool = False,
-) -> tuple[str, int, int, int, int, str]:
+) -> tuple[str, int, int, int, int, str, str]:
     options = _aot_bootstrap_frontend_options(include_dirs, defines, undefs, std)
     timings = AotFrontendTimings()
     try:
@@ -708,9 +654,9 @@ def _aot_compile_source_to_llvm_ir_timed(
             options,
             timings,
         )
-    except PreprocessorError:
-        return "", timings.preprocessing_ns, 0, 0, 0, "preprocessing"
-    except (LexerError, ParserError):
+    except PreprocessorError as error:
+        return "", timings.preprocessing_ns, 0, 0, 0, "preprocessing", str(error)
+    except (LexerError, ParserError) as error:
         return (
             "",
             timings.preprocessing_ns,
@@ -718,8 +664,9 @@ def _aot_compile_source_to_llvm_ir_timed(
             0,
             0,
             "parser",
+            str(error),
         )
-    except SemaError:
+    except SemaError as error:
         return (
             "",
             timings.preprocessing_ns,
@@ -727,11 +674,12 @@ def _aot_compile_source_to_llvm_ir_timed(
             timings.sema_ns,
             0,
             "sema",
+            str(error),
         )
     codegen_start = _aot_monotonic_ns()
     try:
         llvm_text = generate_llvm_ir(result, debug=debug)
-    except CodegenError:
+    except CodegenError as error:
         codegen_ns = _aot_monotonic_ns() - codegen_start
         return (
             "",
@@ -740,6 +688,7 @@ def _aot_compile_source_to_llvm_ir_timed(
             timings.sema_ns,
             codegen_ns,
             "codegen",
+            str(error),
         )
     codegen_ns = _aot_monotonic_ns() - codegen_start
     return (
@@ -748,6 +697,7 @@ def _aot_compile_source_to_llvm_ir_timed(
         timings.parser_ns,
         timings.sema_ns,
         codegen_ns,
+        "",
         "",
     )
 
@@ -761,18 +711,15 @@ def _aot_compile_source_to_llvm_ir(
     std: str,
     debug: bool = False,
 ) -> str:
-    try:
-        return _aot_compile_source_to_llvm_ir_unchecked(
-            source_path,
-            source_text,
-            include_dirs,
-            defines,
-            undefs,
-            std,
-            debug,
-        )
-    except (FrontendError, CodegenError, PreprocessorError, LexerError, ParserError, SemaError):
-        return ""
+    return _aot_compile_source_to_llvm_ir_unchecked(
+        source_path,
+        source_text,
+        include_dirs,
+        defines,
+        undefs,
+        std,
+        debug,
+    )
 
 
 def _aot_exec_argv(argv: tuple[str, ...]) -> int32:
@@ -802,6 +749,7 @@ def _aot_compile_source_path_to_object(
     sema_ns = 0
     codegen_ns = 0
     failed_stage = ""
+    diagnostic = ""
     if timing_path:
         timing_start = _aot_monotonic_ns()
         (
@@ -811,6 +759,7 @@ def _aot_compile_source_path_to_object(
             sema_ns,
             codegen_ns,
             failed_stage,
+            diagnostic,
         ) = _aot_compile_source_to_llvm_ir_timed(
             source_path,
             source_text,
@@ -832,6 +781,7 @@ def _aot_compile_source_path_to_object(
         )
     llvm_path: str = _aot_smoke_llvm_path(object_path)
     if llvm_text == "":
+        print(f"xcc: {diagnostic}")
         if timing_path and not _aot_write_text_file(
             timing_path,
             _aot_render_timing_json(
@@ -888,6 +838,24 @@ def _aot_compile_source_path_to_object(
 
 
 def _aot_compile_smoke_source_to_object(argc: int32, argv: tuple[str, ...]) -> int32:
+    try:
+        return _aot_compile_smoke_source_to_object_unchecked(argc, argv)
+    except (
+        FrontendError,
+        CodegenError,
+        PreprocessorError,
+        LexerError,
+        ParserError,
+        SemaError,
+    ) as error:
+        print(f"xcc: {error}")
+        return 1
+
+
+def _aot_compile_smoke_source_to_object_unchecked(
+    argc: int32,
+    argv: tuple[str, ...],
+) -> int32:
     count: int = len(argv)
     if argc < 2 or count < 2:
         return 1
@@ -1184,10 +1152,10 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         return 1
 
     if not config.c_inputs:
-        return _run_tool(_delegate_tool(config.target), _delegate_argv(config))
+        return _run_tool(_delegate_tool(config.target), config.clang_argv)
 
     if config.action == "delegate":
-        return _run_tool(_delegate_tool(config.target), _delegate_argv(config))
+        return _run_tool(_delegate_tool(config.target), config.clang_argv)
 
     if config.native_unsupported_flags:
         flags = " ".join(config.native_unsupported_flags)
@@ -1231,7 +1199,7 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
             if config.action == "assembly":
                 return _emit_assembly_outputs(config, results, generate_configured_llvm)
 
-            llc_path = _find_llc()
+            llc_path = find_llc()
 
             def llvm_object_cmd(source: Path, obj: Path) -> list[str]:
                 return _llvm_object_argv(config, llc_path, source, obj)
@@ -1256,7 +1224,7 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
         ):
             from xcc.codegen import generate_llvm_ir
 
-            llc_path = _find_llc()
+            llc_path = find_llc()
 
             def generate_debug_llvm(result: FrontendResult) -> str:
                 return generate_llvm_ir(
@@ -1270,9 +1238,7 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
 
             def debug_link_cmd(objects: list[str]) -> list[str]:
                 if config.target == "x86_64-linux-gnu":
-                    return _drop_x86_64_linux_latomic(
-                        _link_argv_with_objects(config, objects, linker="cc")
-                    )
+                    return _link_argv_with_objects(config, objects, linker="cc")
                 command = _link_argv_with_objects(config, objects)
                 command[1:1] = ["-target", config.target]
                 return command
@@ -1335,9 +1301,7 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                 ]
 
             def x86_64_link_cmd(objects: list[str]) -> list[str]:
-                return _drop_x86_64_linux_latomic(
-                    _link_argv_with_objects(config, objects, linker="cc")
-                )
+                return _link_argv_with_objects(config, objects, linker="cc")
 
             return _compile_or_link_generated_outputs(
                 config,
@@ -1375,7 +1339,7 @@ def main(argv: tuple[str, ...] | list[str], *, stdin: TextIO | None = None) -> i
                 results,
                 generate_evm_bytecode_text,
             )
-    except Exception as error:
+    except (CodegenError, OSError, ValueError) as error:
         print(f"xcc: {error}", file=sys.stderr)
         return 1
 

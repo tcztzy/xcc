@@ -6,14 +6,7 @@ from pathlib import Path
 
 
 def host_system_include_dirs() -> tuple[str, ...]:
-    # B661: os.environ may not be available in the AOT binary.
-    try:
-        _sdkroot = os.environ.get("SDKROOT", "")
-        _platform = sys.platform
-    except Exception:
-        _sdkroot = ""
-        _platform = "darwin"
-    return _host_system_include_dirs(_platform, _sdkroot)
+    return _host_system_include_dirs(sys.platform, os.environ.get("SDKROOT", ""))
 
 
 def _is_pathlike(value: str) -> bool:
@@ -33,7 +26,7 @@ def _command_stdout(command: tuple[str, ...]) -> str | None:
             text=True,
             timeout=5.0,
         )
-    except Exception:  # B661: AOT binary may raise unexpected exception types
+    except (OSError, subprocess.SubprocessError):
         return None
     stdout = proc.stdout.strip()
     return stdout or None
@@ -88,7 +81,7 @@ def _cc_system_include_dirs() -> tuple[str, ...]:
             timeout=5.0,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return ("/usr/local/include", "/usr/include")
+        return ()
     include_dirs: list[str] = []
     in_search_list = False
     for raw_line in proc.stderr.splitlines():
@@ -100,48 +93,20 @@ def _cc_system_include_dirs() -> tuple[str, ...]:
             break
         if in_search_list and line:
             include_dirs.append(line)
-    if not include_dirs:
-        include_dirs.extend(("/usr/local/include", "/usr/include"))
     return _dedupe_in_order(include_dirs)
 
 
-# B661: @cache uses functools internals not available in the AOT subset.
-# The function is cheap enough to call without caching.
 def _host_system_include_dirs(platform: str, sdkroot: str) -> tuple[str, ...]:
     if platform.startswith("linux"):
         return _cc_system_include_dirs()
     if platform != "darwin":
         return ()
 
-    # B661: The AOT binary may report a non-standard sys.platform and
-    # subprocess/xcrun is not in the AOT Python subset.  Use filesystem
-    # operations to locate Xcode SDK and Clang resource directories.
     include_dirs: list[str] = []
-    try:
-        sdk, sdk_path = _macos_sdk(sdkroot)
-        resource_include = _macos_clang_resource_include_dir(sdk)
-    except Exception:
-        sdk_path = None
-        resource_include = None
+    sdk, sdk_path = _macos_sdk(sdkroot)
+    resource_include = _macos_clang_resource_include_dir(sdk)
     if resource_include is not None:
         include_dirs.append(resource_include)
-    else:
-        _xcode_base = Path(
-            "/Applications/Xcode.app/Contents/Developer/Toolchains/"
-            "XcodeDefault.xctoolchain/usr/lib/clang"
-        )
-        if _xcode_base.is_dir():
-            _versions = sorted(p for p in _xcode_base.iterdir() if p.is_dir())
-            if _versions:
-                include_dirs.append(str(_versions[-1] / "include"))
     if sdk_path is not None:
         include_dirs.append(str(sdk_path / "usr" / "include"))
-    else:
-        _sdk_base = Path(
-            "/Applications/Xcode.app/Contents/Developer/Platforms/"
-            "MacOSX.platform/Developer/SDKs/MacOSX.sdk"
-        )
-        if _sdk_base.is_dir():
-            include_dirs.append(str(_sdk_base / "usr" / "include"))
-    include_dirs.append("/usr/include")
     return _dedupe_in_order(include_dirs)

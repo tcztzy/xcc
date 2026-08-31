@@ -47,6 +47,29 @@ and link behavior belong to the selected target spec.
 - V2: Every compilation uses one target data layout. Predefined size macros,
   parser integer-constant evaluation, semantic `sizeof`/`_Alignof` and backend
   storage decisions must agree for the selected target.
+- V3: `#pragma pack(n)` sets record packing, `#pragma pack()` resets it, and
+  `push`/`pop` restores the prior setting in source order; semantic and backend
+  size, alignment, and member offsets use that same packing.
+- V4: Semantic analysis assigns every record type specifier its exact identity;
+  backends consume that identity instead of matching anonymous records by shape.
+- V5: `offsetof` is an integer constant expression; array bounds use its exact
+  semantic record layout, including nested member paths.
+- V6: Parsing the 19 nested parenthesized expression levels emitted by CPython
+  headers does not exhaust the host call stack.
+- V7: An unsized array compound literal derives its bound from its initializer;
+  array decay and pointer arithmetic retain every initialized element.
+- V8: `_Thread_local` objects have distinct storage in each native thread;
+  definitions and external references both use thread-local storage.
+- V9: An ordinary one-byte character constant uses the signed execution
+  character value; constant folding and runtime conversion agree for bytes
+  such as `\x80`.
+- V10: Semantic analysis computes each record's physical layout once. `sizeof`,
+  `_Alignof`, `offsetof`, initializers, and every native backend consume that
+  same member-offset and bit-field map instead of recomputing layout rules.
+- V11: Narrow string literals are encoded once in the shared semantic layer.
+  Hexadecimal and octal escapes contribute their declared byte values without
+  UTF-8 re-encoding; source characters and universal character names use UTF-8.
+  Every backend consumes the same bytes.
 
 ## Regression Expectations
 

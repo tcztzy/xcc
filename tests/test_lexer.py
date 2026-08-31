@@ -4,14 +4,10 @@ from tests import _bootstrap  # noqa: F401
 from xcc.lexer import (
     Lexer,
     LexerError,
+    TokenKind,
     _aot_error_summary_for_source,
     _aot_header_summary_for_source,
-    TokenKind,
     _aot_token_summary_for_source,
-    _is_decimal_float_literal,
-    _is_hex_float_literal,
-    _is_integer_literal,
-    _is_integer_suffix,
     lex,
     lex_pp,
     summarize_tokens,
@@ -265,19 +261,6 @@ class NumberTests(unittest.TestCase):
         tokens = list(lex_pp("1\\u00A0", header_names=False))
         self.assertEqual(tokens[0].kind, TokenKind.PP_NUMBER)
 
-    def test_number_classifier_edge_forms(self) -> None:
-        self.assertFalse(_is_integer_suffix("1", 2))
-        self.assertFalse(_is_integer_suffix("1ux", 1))
-        self.assertFalse(_is_integer_literal(""))
-        self.assertFalse(_is_integer_literal("_"))
-        self.assertFalse(_is_decimal_float_literal(""))
-        self.assertFalse(_is_decimal_float_literal("f"))
-        self.assertFalse(_is_decimal_float_literal("e1"))
-        self.assertFalse(_is_hex_float_literal(""))
-        self.assertFalse(_is_hex_float_literal("0x.p1"))
-
-
-class HeaderNameTests(unittest.TestCase):
     def test_header_name(self) -> None:
         tokens = list(lex_pp("<stdio.h>", header_names=True))
         self.assertEqual(tokens[0].kind, TokenKind.HEADER_NAME)

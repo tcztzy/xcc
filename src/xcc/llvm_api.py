@@ -7,12 +7,13 @@ AST-to-LLVM lowering stays in xcc.codegen.
 import ctypes
 from typing import Any
 
+from xcc.llvm_tools import find_libllvm
+
 # ── libLLVM loading ─────────────────────────────────────────
 
 
 def _load_llvm() -> ctypes.CDLL:
-    path = "/opt/homebrew/opt/llvm/lib/libLLVM-C.dylib"
-    return ctypes.CDLL(path)
+    return ctypes.CDLL(find_libllvm())
 
 
 class _LLVMState:
@@ -45,6 +46,7 @@ _LLVMTypeRef = _c_void_p
 _LLVMTypeKind = ctypes.c_int
 _LLVMValueRef = _c_void_p
 _LLVMMetadataRef = _c_void_p
+_LLVMAttributeRef = _c_void_p
 
 
 class LLVMTypeKind:
@@ -141,6 +143,16 @@ class _LLVMC:
         )
         self.PrintModuleToString = self._bind("LLVMPrintModuleToString", _c_char_p, _LLVMModuleRef)
         self.DisposeModule = self._bind("LLVMDisposeModule", None, _LLVMModuleRef)
+        self.GetEnumAttributeKindForName = self._bind(
+            "LLVMGetEnumAttributeKindForName", _c_uint, _c_char_p, _c_size_t
+        )
+        self.CreateTypeAttribute = self._bind(
+            "LLVMCreateTypeAttribute",
+            _LLVMAttributeRef,
+            _LLVMContextRef,
+            _c_uint,
+            _LLVMTypeRef,
+        )
 
         # Types
         self.VoidType = self._bind("LLVMVoidType", _LLVMTypeRef)
@@ -152,6 +164,7 @@ class _LLVMC:
         self.Int16Type = self._bind("LLVMInt16Type", _LLVMTypeRef)
         self.Int32Type = self._bind("LLVMInt32Type", _LLVMTypeRef)
         self.Int64Type = self._bind("LLVMInt64Type", _LLVMTypeRef)
+        self.IntType = self._bind("LLVMIntType", _LLVMTypeRef, _c_uint)
         self.FloatType = self._bind("LLVMFloatType", _LLVMTypeRef)
         self.DoubleType = self._bind("LLVMDoubleType", _LLVMTypeRef)
         self.X86FP80Type = self._bind("LLVMX86FP80Type", _LLVMTypeRef)
@@ -240,6 +253,7 @@ class _LLVMC:
         )
         self.SetInitializer = self._bind("LLVMSetInitializer", None, _LLVMValueRef, _LLVMValueRef)
         self.SetLinkage = self._bind("LLVMSetLinkage", None, _LLVMValueRef, _c_uint)
+        self.SetThreadLocal = self._bind("LLVMSetThreadLocal", None, _LLVMValueRef, _c_bool)
         self.GetNamedGlobal = self._bind(
             "LLVMGetNamedGlobal", _LLVMValueRef, _LLVMModuleRef, _c_char_p
         )
@@ -720,6 +734,20 @@ class _LLVMC:
             ctypes.POINTER(_LLVMValueRef),
             _c_uint,
             _c_char_p,
+        )
+        self.AddAttributeAtIndex = self._bind(
+            "LLVMAddAttributeAtIndex",
+            None,
+            _LLVMValueRef,
+            _c_uint,
+            _LLVMAttributeRef,
+        )
+        self.AddCallSiteAttribute = self._bind(
+            "LLVMAddCallSiteAttribute",
+            None,
+            _LLVMValueRef,
+            _c_uint,
+            _LLVMAttributeRef,
         )
         self.BuildVAArg = self._bind(
             "LLVMBuildVAArg",

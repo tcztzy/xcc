@@ -1,8 +1,8 @@
 from datetime import datetime
 from pathlib import Path
 
-from . import PreprocessorError
 from .macros import _Macro, _render_macro_tokens
+from .model import PreprocessorError
 
 _ASM_QUALIFIERS = ("volatile", "__volatile__", "inline", "__inline__")
 _CONTROL_STATEMENT_PREFIXES = ("if", "for", "switch", "while")

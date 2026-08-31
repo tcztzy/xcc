@@ -6,14 +6,11 @@ from typing import NoReturn
 
 from xcc.lexer import TokenKind
 
-from . import PreprocessorError, _SourceLocation
+from .expressions import _is_identifier
 from .macros import _MacroToken, _tokenize_macro_text
+from .model import PreprocessorError, _SourceLocation
 
 _INCLUDE_RE = re.compile(r"^(?:\"(?P<quote>[^\"\n]+)\"|<(?P<angle>[^>\n]+)>)$")
-_EMBED_FILENAME_RE = re.compile(
-    r'^\s*(?:"(?P<quote>[^\"\n]+)"|<(?P<angle>[^>\n]+)>)\s*(?P<tail>.*)$'
-)
-_EMBED_PARAM_RE = re.compile(r"\s*(?P<name>[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*\(")
 
 
 def _env_path_list(name: str) -> tuple[str, ...]:
@@ -184,34 +181,33 @@ def _framework_include_candidate(root: Path, include_name: str) -> Path | None:
     return None
 
 
-def _parse_embed_body(body: str) -> tuple[str, bool, dict[str, str]]:
-    """Parse #embed body into (filename, is_angled, params).
+def _is_embed_parameter_name(name: str) -> bool:
+    for part in name.split("::"):  # noqa: SIM110 - avoid generator lowering in AOT code.
+        if not _is_identifier(part):
+            return False
+    return True
 
-    Returns the filename, whether it's angle-bracketed, and a dict of
-    parameter name -> raw argument text (the tokens between parens).
-    """
-    m = _EMBED_FILENAME_RE.match(body)
-    if m is None:
+
+def _parse_embed_body(body: str) -> tuple[str, bool, dict[str, str]]:
+    tail = body.lstrip()
+    if not tail or tail[0] not in {'"', "<"}:
         raise ValueError('expected "FILENAME" or <FILENAME>')
-    quoted = m.group("quote")
-    if quoted is not None:
-        filename = quoted
-        is_angled = False
-    else:
-        filename = m.group("angle")
-        assert filename is not None
-        is_angled = True
-    tail = m.group("tail") or ""
+    is_angled = tail[0] == "<"
+    end = tail.find(">" if is_angled else '"', 1)
+    if end < 2 or "\n" in tail[:end]:
+        raise ValueError('expected "FILENAME" or <FILENAME>')
+    filename = tail[1:end]
+    tail = tail[end + 1 :]
 
     params: dict[str, str] = {}
     while tail.strip():
-        pm = _EMBED_PARAM_RE.match(tail)
-        if pm is None:
+        tail = tail.lstrip()
+        open_index = tail.find("(")
+        param_name = tail[:open_index].strip() if open_index >= 0 else ""
+        if not param_name or not _is_embed_parameter_name(param_name):
             token = tail.strip().split(None, 1)[0]
             raise ValueError(f"unknown embed preprocessor parameter '{token}'")
-        param_name = pm.group("name")
-        tail = tail[pm.end() :]
-        # Find matching close paren for the argument list
+        tail = tail[open_index + 1 :]
         depth = 1
         close_idx = 0
         while close_idx < len(tail) and depth > 0:

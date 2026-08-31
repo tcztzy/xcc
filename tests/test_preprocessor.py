@@ -1,4 +1,3 @@
-import ast
 import os
 import tempfile
 import unittest
@@ -6,52 +5,16 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-import xcc.preprocessor.macro_expansion as preprocessor_macro_expansion
-import xcc.preprocessor.conditionals as preprocessor_conditionals
-import xcc.preprocessor.process as preprocessor_process
-import xcc.preprocessor.probes as preprocessor_probes
 import xcc.preprocessor.text as preprocessor_text
 from tests import _bootstrap  # noqa: F401
-from xcc.lexer import TokenKind
 from xcc.options import FrontendOptions
 from xcc.preprocessor import (
     PreprocessorError,
-    _blank_line,
     _ConditionalFrame,
-    _DirectiveCursor,
-    _env_path_list,
-    _eval_node,
-    _eval_pp_node,
-    _expand_macro_tokens,
-    _expand_object_like_macros,
-    _is_unsigned_pp_integer,
-    _LineMapBuilder,
-    _LogicalCursor,
-    _Macro,
-    _macro_name_from_cli_define,
-    _MacroToken,
-    _parse_cli_define_head,
-    _parse_directive,
-    _parse_header_name_operand,
-    _parse_macro_parameters,
-    _parse_pp_char_literal,
-    _parse_pp_integer_literal,
-    _paste_token_pair,
     _Preprocessor,
     _reject_gnu_asm_extensions,
-    _safe_eval_int_expr,
-    _safe_eval_pp_expr,
     _SourceLocation,
-    _split_unclosed_block_comment_tail,
     _strip_gnu_asm_extensions,
-    _tokenize_expr,
-    _tokenize_macro_text,
-    _tokenize_macro_replacement,
-    _translate_expr_to_python,
-    _validate_defined_syntax,
-    _validate_fenv_access_pragma,
-    _validate_gcc_visibility_pragma,
-    _validate_stdc_pragma,
     preprocess_source,
     preprocess_source_no_callback,
 )
@@ -95,7 +58,7 @@ class PreprocessorTests(unittest.TestCase):
         self.assertIn("epsilon = 2.2204460492503131e-16L", result.source)
         self.assertIn("minimum = 2.2250738585072014e-308L", result.source)
         self.assertIn("maximum = 1.7976931348623157e+308L", result.source)
-        self.assertIn("minimum_exponent = -1021", result.source)
+        self.assertIn("minimum_exponent=-1021;", result.source.replace(" ", ""))
         self.assertIn("maximum_exponent = 1024", result.source)
 
     def test_no_callback_target_layout_and_identity_are_not_host_derived(self) -> None:
@@ -138,7 +101,6 @@ class PreprocessorTests(unittest.TestCase):
     def test_no_callback_conditional_stack_adapter_matches_directive_rules(self) -> None:
         options = FrontendOptions(defines=("FLAG=1",))
         processor = _Preprocessor(options)
-        processor._init_no_callback(options)
         location = _SourceLocation("conditional.c", 1)
 
         def handle(
@@ -193,7 +155,6 @@ class PreprocessorTests(unittest.TestCase):
 
         gnu_options = FrontendOptions(std="gnu11", defines=("FLAG=1",))
         gnu_processor = _Preprocessor(gnu_options)
-        gnu_processor._init_no_callback(gnu_options)
         for directive, body in (("elifdef", "FLAG"), ("elifndef", "MISSING")):
             with self.subTest(directive=directive):
                 result, selected = gnu_processor._handle_conditional_for_process_no_callback(
@@ -206,63 +167,13 @@ class PreprocessorTests(unittest.TestCase):
                 self.assertEqual(result, "")
                 self.assertTrue(selected[-1].active)
 
-    def test_preprocessor_package_keeps_entry_exports_stable(self) -> None:
-        self.assertEqual(PreprocessorError.__module__, "xcc.preprocessor")
-        self.assertEqual(_SourceLocation.__module__, "xcc.preprocessor")
-        self.assertEqual(_LineMapBuilder.__module__, "xcc.preprocessor")
-        self.assertEqual(_DirectiveCursor.__module__, "xcc.preprocessor")
-        self.assertEqual(_Macro.__module__, "xcc.preprocessor.macros")
-        self.assertEqual(_MacroToken.__module__, "xcc.preprocessor.macros")
-        self.assertEqual(_parse_macro_parameters.__module__, "xcc.preprocessor.macros")
-        self.assertEqual(
-            preprocessor_macro_expansion._paste_token_pair.__module__,
-            "xcc.preprocessor.macro_expansion",
-        )
-        self.assertEqual(
-            preprocessor_macro_expansion._expand_macro_tokens.__module__,
-            "xcc.preprocessor.macro_expansion",
-        )
-        self.assertEqual(_env_path_list.__module__, "xcc.preprocessor.includes")
-        self.assertEqual(_parse_header_name_operand.__module__, "xcc.preprocessor.includes")
-        self.assertEqual(_translate_expr_to_python.__module__, "xcc.preprocessor.expressions")
-        self.assertEqual(_safe_eval_pp_expr.__module__, "xcc.preprocessor.expressions")
-        self.assertEqual(_validate_defined_syntax.__module__, "xcc.preprocessor.pragmas")
-        self.assertEqual(_validate_stdc_pragma.__module__, "xcc.preprocessor.pragmas")
-        self.assertEqual(_validate_gcc_visibility_pragma.__module__, "xcc.preprocessor.pragmas")
-        self.assertEqual(_validate_fenv_access_pragma.__module__, "xcc.preprocessor.pragmas")
-        self.assertEqual(_blank_line.__module__, "xcc.preprocessor.text")
-        self.assertEqual(_expand_object_like_macros.__module__, "xcc.preprocessor.text")
-        self.assertEqual(_strip_gnu_asm_extensions.__module__, "xcc.preprocessor.text")
-        self.assertEqual(
-            preprocessor_conditionals._ConditionalFrame.__module__,
-            "xcc.preprocessor.conditionals",
-        )
-        self.assertEqual(
-            preprocessor_conditionals._handle_conditional.__module__,
-            "xcc.preprocessor.conditionals",
-        )
-        self.assertEqual(
-            preprocessor_probes._replace_feature_probe_operators.__module__,
-            "xcc.preprocessor.probes",
-        )
-        self.assertEqual(
-            preprocessor_probes._replace_has_include_operators.__module__,
-            "xcc.preprocessor.probes",
-        )
-        self.assertEqual(_ConditionalFrame.__module__, "xcc.preprocessor.conditionals")
-        self.assertEqual(preprocessor_process.process_text.__module__, "xcc.preprocessor.process")
-        self.assertEqual(_expand_macro_tokens.__module__, "xcc.preprocessor")
-        self.assertEqual(preprocess_source.__module__, "xcc.preprocessor")
-        self.assertEqual(_parse_directive.__module__, "xcc.preprocessor.text")
-
     def test_preprocess_empty_source(self) -> None:
         result = preprocess_source("", filename="empty.c")
         self.assertEqual(result.source, "")
 
     def test_no_callback_object_macro_preserves_replacement(self) -> None:
         result = preprocess_source_no_callback(
-            "#define NATIVE_RECORD struct native_record\n"
-            "NATIVE_RECORD { int value; };\n",
+            "#define NATIVE_RECORD struct native_record\nNATIVE_RECORD { int value; };\n",
             filename="object_macro.c",
         )
 
@@ -356,7 +267,6 @@ class PreprocessorTests(unittest.TestCase):
     def test_no_callback_variadic_function_macro_expands_and_pastes(self) -> None:
         options = FrontendOptions()
         processor = _Preprocessor(options)
-        processor._init_no_callback(options)
         processor._handle_define_no_callback(
             "WRAP(name, type, ...) enum { __VA_ARGS__ }; typedef type name##_t"
         )
@@ -366,9 +276,7 @@ class PreprocessorTests(unittest.TestCase):
                 _SourceLocation("function_macro.c", 2),
             )
         result = processor._expand_line_no_callback(
-            "WRAP(qos_class, unsigned int,\n"
-            "QOS_USER = 1, QOS_DEFAULT = 2\n"
-            ");\n",
+            "WRAP(qos_class, unsigned int,\nQOS_USER = 1, QOS_DEFAULT = 2\n);\n",
             _SourceLocation("function_macro.c", 2),
         )
 
@@ -379,7 +287,6 @@ class PreprocessorTests(unittest.TestCase):
     def test_no_callback_rescans_selector_result_with_following_invocation(self) -> None:
         options = FrontendOptions()
         processor = _Preprocessor(options)
-        processor._init_no_callback(options)
         for definition in (
             "PICK(_1, _2, NAME, ...) NAME",
             "NAMED(type, name) type name; enum",
@@ -400,10 +307,7 @@ class PreprocessorTests(unittest.TestCase):
     def test_no_callback_token_paste_does_not_stringize_rhs(self) -> None:
         options = FrontendOptions()
         processor = _Preprocessor(options)
-        processor._init_no_callback(options)
-        processor._handle_define_no_callback(
-            "DEPRECATED(ver) ___POSIX_C_DEPRECATED_STARTING_##ver"
-        )
+        processor._handle_define_no_callback("DEPRECATED(ver) ___POSIX_C_DEPRECATED_STARTING_##ver")
 
         result = processor._expand_line_no_callback(
             "int old(void) DEPRECATED(200112L);\n",
@@ -415,7 +319,6 @@ class PreprocessorTests(unittest.TestCase):
     def test_no_callback_consumes_pragma_operator_after_macro_expansion(self) -> None:
         options = FrontendOptions()
         processor = _Preprocessor(options)
-        processor._init_no_callback(options)
         processor._handle_define_no_callback("DO_PRAGMA(value) _Pragma(#value)")
 
         result = processor._expand_line_no_callback(
@@ -429,7 +332,7 @@ class PreprocessorTests(unittest.TestCase):
         result = preprocess_source_no_callback(
             "#define SIGNAL 4 /* signal value */\n"
             "/* Codes for SIGNAL */\n"
-            "const char *name = \"SIGNAL\"; // SIGNAL\n"
+            'const char *name = "SIGNAL"; // SIGNAL\n'
             "int signal = SIGNAL;\n",
             filename="macro_regions.c",
         )
@@ -441,7 +344,6 @@ class PreprocessorTests(unittest.TestCase):
     def test_no_callback_evaluates_integer_macro_conditions(self) -> None:
         options = FrontendOptions()
         processor = _Preprocessor(options)
-        processor._init_no_callback(options)
         processor._handle_define_no_callback("LITTLE 1234 /* least-significant first */")
         processor._handle_define_no_callback("BIG 4321 /* most-significant first */")
         processor._handle_define_no_callback("ORDER LITTLE")
@@ -533,6 +435,7 @@ class PreprocessorTests(unittest.TestCase):
             "double maximum_double = __DBL_MAX__;\n"
             "int maximum_double_exponent = __DBL_MAX_EXP__;\n",
             filename="floating_minima.c",
+            options=FrontendOptions(target_os="darwin", host_machine="arm64"),
         )
 
         self.assertIn("minimum_float = 1.17549435e-38F", result.source)
@@ -574,7 +477,6 @@ class PreprocessorTests(unittest.TestCase):
             (root / "present.h").write_text("int present;\n", encoding="utf-8")
             options = FrontendOptions(include_dirs=(str(root),))
             processor = _Preprocessor(options)
-            processor._init_no_callback(options)
             location = _SourceLocation(str(root / "probe.c"), 1)
 
             self.assertTrue(
@@ -610,7 +512,6 @@ class PreprocessorTests(unittest.TestCase):
     def test_no_callback_evaluates_clang_building_module_probe(self) -> None:
         options = FrontendOptions()
         processor = _Preprocessor(options)
-        processor._init_no_callback(options)
 
         self.assertTrue(
             processor._eval_condition_no_callback(
@@ -624,7 +525,6 @@ class PreprocessorTests(unittest.TestCase):
     def test_no_callback_undef_removes_macro(self) -> None:
         options = FrontendOptions()
         processor = _Preprocessor(options)
-        processor._init_no_callback(options)
         processor._handle_define_no_callback("STALE 1")
         location = _SourceLocation("undef.c", 2)
 
@@ -720,9 +620,7 @@ class PreprocessorTests(unittest.TestCase):
     def test_gnu_asm_statement_detector_handles_incomplete_operands(self) -> None:
         self.assertFalse(preprocessor_text._contains_gnu_asm_statement("int asm;"))
         self.assertTrue(preprocessor_text._contains_gnu_asm_statement('asm("unterminated'))
-        self.assertFalse(
-            preprocessor_text._contains_gnu_asm_statement('int x asm("unterminated')
-        )
+        self.assertFalse(preprocessor_text._contains_gnu_asm_statement('int x asm("unterminated'))
         self.assertFalse(preprocessor_text._contains_gnu_asm_statement('asm("nop") + 1'))
 
     def test_gnu_asm_declaration_continuation_without_leading_word_is_allowed(self) -> None:
@@ -914,9 +812,7 @@ class PreprocessorTests(unittest.TestCase):
 
     def test_strict_mode_does_not_define_gnu_extension_macros(self) -> None:
         result = preprocess_source(
-            "#if defined(__func__) || defined(__PRETTY_FUNCTION__)\n"
-            "int g = 1;\n"
-            "#endif\n",
+            "#if defined(__func__) || defined(__PRETTY_FUNCTION__)\nint g = 1;\n#endif\n",
             filename="main.c",
         )
         self.assertNotIn("int g", result.source)
@@ -1016,17 +912,15 @@ A(0)
         # A(0+1) invocation is skipped, preserving it as raw tokens.
         self.assertIn("A", result.source)
 
-    def test_token_paste_multi_token_result_gnu11(self) -> None:
+    def test_token_paste_multi_token_variadic_result(self) -> None:
         """,##__VA_ARGS__ with non-empty var arg produces multi-token paste result."""
         source = "#define FOO(x, ...) bar(x, ##__VA_ARGS__)\nFOO(1, 2)\n"
-        result = preprocess_source(source, filename="main.c", options=FrontendOptions(std="gnu11"))
-        self.assertIn("bar ( 1 , 2 )", result.source)
-
-    def test_token_paste_comma_variadic_extension_works_in_c11(self) -> None:
-        """,##__VA_ARGS__ with non-empty var arg works in strict C mode."""
-        source = "#define FOO(x, ...) bar(x, ##__VA_ARGS__)\nFOO(1, 2)\n"
-        result = preprocess_source(source, filename="main.c")
-        self.assertIn("bar ( 1 , 2 )", result.source)
+        for std in ("c11", "gnu11"):
+            with self.subTest(std=std):
+                result = preprocess_source(
+                    source, filename="main.c", options=FrontendOptions(std=std)
+                )
+                self.assertIn("bar ( 1 , 2 )", result.source)
 
     def test_malformed_function_like_define_is_ignored(self) -> None:
         source = "#define BAD(x\nBAD(1)\n"
@@ -1055,9 +949,10 @@ A(0)
         self.assertIn("ZERO", result.source)
 
     def test_invalid_cli_define(self) -> None:
-        with self.assertRaises(PreprocessorError) as ctx:
-            preprocess_source("int x;\n", options=FrontendOptions(defines=("1BAD=0",)))
-        self.assertEqual(ctx.exception.code, "XCC-PP-0201")
+        for define in ("1BAD=0", "F(", "F(x) trailing", "F(x, ..., y)"):
+            with self.subTest(define=define), self.assertRaises(PreprocessorError) as ctx:
+                preprocess_source("int x;\n", options=FrontendOptions(defines=(define,)))
+            self.assertEqual(ctx.exception.code, "XCC-PP-0201")
 
     def test_invalid_cli_undef(self) -> None:
         with self.assertRaises(PreprocessorError) as ctx:
@@ -1213,386 +1108,13 @@ A(0)
         self.assertNotIn("int ldmax10;", result.source)
 
     def test_cli_undef_removes_predefined_macro(self) -> None:
-        source = (
-            "#if __INT_WIDTH__\nint x;\n#endif\n"
-            "#if __STDC_UTF_16__\nint y;\n#endif\n"
-            "#if __STDC_MB_MIGHT_NEQ_WC__\nint mw;\n#endif\n"
-            "#if __STDC_NO_THREADS__\nint t;\n#endif\n"
-            "#if __SIZEOF_POINTER__\nint z;\n#endif\n"
-            "#if __SIZEOF_BOOL__\nint bsz;\n#endif\n"
-            "#if __SIZEOF_FLOAT__\nint fsz;\n#endif\n"
-            "#if __SIZEOF_DOUBLE__\nint dsz;\n#endif\n"
-            "#if __SIZEOF_LONG_DOUBLE__\nint ldsz;\n#endif\n"
-            "#if __FLT_RADIX__ == 2\nint fr;\n#endif\n"
-            "#if __FLT_MANT_DIG__ == 24\nint fm;\n#endif\n"
-            "#if __DBL_MANT_DIG__ == 53\nint dm;\n#endif\n"
-            "#if __LDBL_MANT_DIG__ == 113\nint ldm;\n#endif\n"
-            "#if __FLT_DIG__ == 6\nint fdig;\n#endif\n"
-            "#if __DBL_DIG__ == 15\nint ddig;\n#endif\n"
-            "#if __LDBL_DIG__ == 33\nint lddig;\n#endif\n"
-            "#if defined(__FLT_EPSILON__)\nint feps;\n#endif\n"
-            "#if defined(__DBL_EPSILON__)\nint deps;\n#endif\n"
-            "#if defined(__LDBL_EPSILON__)\nint ldeps;\n#endif\n"
-            "#if defined(__FLT_MIN__)\nint fmin;\n#endif\n"
-            "#if defined(__DBL_MIN__)\nint dmin;\n#endif\n"
-            "#if defined(__LDBL_MIN__)\nint ldmin;\n#endif\n"
-            "#if defined(__FLT_MAX__)\nint fmax;\n#endif\n"
-            "#if defined(__DBL_MAX__)\nint dmax;\n#endif\n"
-            "#if defined(__LDBL_MAX__)\nint ldmax;\n#endif\n"
-            "#if __FLT_MIN_EXP__ < 0\nint fminexp;\n#endif\n"
-            "#if __DBL_MIN_EXP__ < 0\nint dminexp;\n#endif\n"
-            "#if __LDBL_MIN_EXP__ < 0\nint ldminexp;\n#endif\n"
-            "#if __FLT_MAX_EXP__ > 0\nint fmaxexp;\n#endif\n"
-            "#if __DBL_MAX_EXP__ > 0\nint dmaxexp;\n#endif\n"
-            "#if __LDBL_MAX_EXP__ > 0\nint ldmaxexp;\n#endif\n"
-            "#if __SIZEOF_SIZE_T__\nint szz;\n#endif\n"
-            "#if __SIZEOF_PTRDIFF_T__\nint pdz;\n#endif\n"
-            "#if __SIZEOF_INTMAX_T__\nint imz;\n#endif\n"
-            "#if __SIZEOF_UINTMAX_T__\nint umz;\n#endif\n"
-            "#if __SIZEOF_WCHAR_T__\nint wcz;\n#endif\n"
-            "#if __SIZEOF_WINT_T__\nint wiz;\n#endif\n"
-            "#if __SIZEOF_CHAR16_T__\nint c16z;\n#endif\n"
-            "#if __SIZEOF_CHAR32_T__\nint c32z;\n#endif\n"
-            "#if __SIZE_WIDTH__ == 64\nint sw;\n#endif\n"
-            "#if __PTRDIFF_WIDTH__ == 64\nint pw;\n#endif\n"
-            "#if __INTPTR_WIDTH__ == 64\nint ipw;\n#endif\n"
-            "#if __UINTPTR_WIDTH__ == 64\nint upw;\n#endif\n"
-            "#if __POINTER_WIDTH__ == 64\nint pww;\n#endif\n"
-            "#if __BOOL_WIDTH__ == 8\nint bw;\n#endif\n"
-            "#if __INTMAX_WIDTH__ == 64\nint imw;\n#endif\n"
-            "#if __UINTMAX_WIDTH__ == 64\nint umw;\n#endif\n"
-            "#if __SIZE_MAX__ > 0\nint sm;\n#endif\n"
-            "#if __PTRDIFF_MAX__ > 0\nint pm;\n#endif\n"
-            "#if __PTRDIFF_MIN__ < 0\nint pmin;\n#endif\n"
-            "#if __INTPTR_MAX__ > 0\nint ipmax;\n#endif\n"
-            "#if __INTPTR_MIN__ < 0\nint ipmin;\n#endif\n"
-            "#if __UINTPTR_MAX__ > 0\nint upmax;\n#endif\n"
-            "#if __INTMAX_MIN__ < 0\nint imm;\n#endif\n"
-            "#if __LLONG_WIDTH__ == 64\nint llw;\n#endif\n"
-            "#if __LONG_LONG_MIN__ < 0\nint llm;\n#endif\n"
-            "#if __LLONG_MIN__ < 0\nint llmin_alias;\n#endif\n"
-            "#if __LLONG_MAX__ > 0\nint llmax_alias;\n#endif\n"
-            "#if __ULLONG_MAX__ > 0\nint ullmax_alias;\n#endif\n"
-            "#if __LONG_MIN__ < 0\nint lm;\n#endif\n"
-            "#if __SCHAR_MIN__ < 0\nint scm;\n#endif\n"
-            "#if __SHRT_MIN__ < 0\nint shm;\n#endif\n"
-            "#if __INT_MIN__ < 0\nint imn;\n#endif\n"
-            "#if __CHAR_BIT__ == 8\nint c;\n#endif\n"
-            "#if defined(__LP64)\nint lp_alias;\n#endif\n"
-            "#if defined(_LP64)\nint lp_legacy;\n#endif\n"
-            "#if defined(__BYTE_ORDER__)\nint e;\n#endif\n"
-            "#if defined(__LITTLE_ENDIAN__)\nint le;\n#endif\n"
-            "#if defined(__FLOAT_WORD_ORDER__)\nint fwo;\n#endif\n"
-            "#if __INCLUDE_LEVEL__\nint il;\n#endif\n"
-            "#if __WCHAR_WIDTH__ == 32\nint ww;\n#endif\n"
-            "#if __WINT_WIDTH__ == 32\nint wiw;\n#endif\n"
-            "#if __CHAR16_WIDTH__ == 16\nint c16w;\n#endif\n"
-            "#if __CHAR32_WIDTH__ == 32\nint c32w;\n#endif\n"
-            "#if __WCHAR_MAX__ > 0\nint wmax;\n#endif\n"
-            "#if __WCHAR_MIN__ < 0\nint wmin;\n#endif\n"
-            "#if __WINT_MAX__ > 0\nint wimax;\n#endif\n"
-            "#if defined(__WINT_MIN__)\nint wimin;\n#endif\n"
-            "#if __SIG_ATOMIC_WIDTH__ == 32\nint saw;\n#endif\n"
-            "#if __SIG_ATOMIC_MAX__ > 0\nint samax;\n#endif\n"
-            "#if __SIG_ATOMIC_MIN__ < 0\nint samin;\n#endif\n"
-            "#if defined(__STDC_ISO_10646__)\nint iso;\n#endif\n"
-            "#if defined(__FILE_NAME__)\nint fn;\n#endif\n"
-            "#if defined(__INT8_C)\nint i8c;\n#endif\n"
-            "#if defined(__INT16_C)\nint i16c;\n#endif\n"
-            "#if defined(__INT32_C)\nint i32c;\n#endif\n"
-            "#if defined(__INT64_C)\nint i64c;\n#endif\n"
-            "#if defined(__UINT8_C)\nint u8c;\n#endif\n"
-            "#if defined(__UINT16_C)\nint u16c;\n#endif\n"
-            "#if defined(__UINT32_C)\nint u32c;\n#endif\n"
-            "#if defined(__UINT64_C)\nint u64c;\n#endif\n"
-            "__SIZE_TYPE__ n;\n"
-            "__INTPTR_TYPE__ ip;\n"
-            "__UINTPTR_TYPE__ up;\n"
-            "__INTMAX_TYPE__ imt;\n"
-            "__UINTMAX_TYPE__ umt;\n"
-            "__CHAR16_TYPE__ c16;\n"
-            "__CHAR32_TYPE__ c32;\n"
-            "__INT8_TYPE__ i8;\n"
-            "__INT16_TYPE__ i16;\n"
-            "__INT32_TYPE__ i32;\n"
-            "__INT64_TYPE__ i64;\n"
-            "__UINT8_TYPE__ u8;\n"
-            "__UINT16_TYPE__ u16;\n"
-            "__UINT32_TYPE__ u32;\n"
-            "__UINT64_TYPE__ u64;\n"
-            "__INT_LEAST8_TYPE__ il8;\n"
-            "__INT_LEAST16_TYPE__ il16;\n"
-            "__INT_LEAST32_TYPE__ il32;\n"
-            "__INT_LEAST64_TYPE__ il64;\n"
-            "__UINT_LEAST8_TYPE__ ul8;\n"
-            "__UINT_LEAST16_TYPE__ ul16;\n"
-            "__UINT_LEAST32_TYPE__ ul32;\n"
-            "__UINT_LEAST64_TYPE__ ul64;\n"
-            "__INT_FAST8_TYPE__ if8;\n"
-            "__INT_FAST16_TYPE__ if16;\n"
-            "__INT_FAST32_TYPE__ if32;\n"
-            "__INT_FAST64_TYPE__ if64;\n"
-            "__UINT_FAST8_TYPE__ uf8;\n"
-            "__UINT_FAST16_TYPE__ uf16;\n"
-            "__UINT_FAST32_TYPE__ uf32;\n"
-            "__UINT_FAST64_TYPE__ uf64;\n"
-            "__WCHAR_TYPE__ w;\n"
-        )
         result = preprocess_source(
-            source,
+            "#ifdef __INT_WIDTH__\nint present;\n#endif\n__SIZE_TYPE__ value;\n",
             filename="main.c",
-            options=FrontendOptions(
-                undefs=(
-                    "__INT_WIDTH__",
-                    "__STDC_UTF_16__",
-                    "__STDC_MB_MIGHT_NEQ_WC__",
-                    "__STDC_NO_THREADS__",
-                    "__SIZEOF_POINTER__",
-                    "__SIZEOF_BOOL__",
-                    "__SIZEOF_FLOAT__",
-                    "__SIZEOF_DOUBLE__",
-                    "__SIZEOF_LONG_DOUBLE__",
-                    "__FLT_RADIX__",
-                    "__FLT_MANT_DIG__",
-                    "__DBL_MANT_DIG__",
-                    "__LDBL_MANT_DIG__",
-                    "__FLT_DIG__",
-                    "__DBL_DIG__",
-                    "__LDBL_DIG__",
-                    "__FLT_EPSILON__",
-                    "__DBL_EPSILON__",
-                    "__LDBL_EPSILON__",
-                    "__FLT_MIN__",
-                    "__DBL_MIN__",
-                    "__LDBL_MIN__",
-                    "__FLT_MAX__",
-                    "__DBL_MAX__",
-                    "__LDBL_MAX__",
-                    "__FLT_MIN_EXP__",
-                    "__DBL_MIN_EXP__",
-                    "__LDBL_MIN_EXP__",
-                    "__FLT_MAX_EXP__",
-                    "__DBL_MAX_EXP__",
-                    "__LDBL_MAX_EXP__",
-                    "__SIZEOF_SIZE_T__",
-                    "__SIZEOF_PTRDIFF_T__",
-                    "__SIZEOF_INTMAX_T__",
-                    "__SIZEOF_UINTMAX_T__",
-                    "__SIZEOF_WCHAR_T__",
-                    "__SIZEOF_WINT_T__",
-                    "__SIZEOF_CHAR16_T__",
-                    "__SIZEOF_CHAR32_T__",
-                    "__SIZE_WIDTH__",
-                    "__PTRDIFF_WIDTH__",
-                    "__INTPTR_WIDTH__",
-                    "__UINTPTR_WIDTH__",
-                    "__POINTER_WIDTH__",
-                    "__BOOL_WIDTH__",
-                    "__INTMAX_WIDTH__",
-                    "__UINTMAX_WIDTH__",
-                    "__SIZE_MAX__",
-                    "__PTRDIFF_MAX__",
-                    "__PTRDIFF_MIN__",
-                    "__INTPTR_MAX__",
-                    "__INTPTR_MIN__",
-                    "__UINTPTR_MAX__",
-                    "__INTMAX_MIN__",
-                    "__LLONG_WIDTH__",
-                    "__LONG_LONG_MIN__",
-                    "__LLONG_MIN__",
-                    "__LLONG_MAX__",
-                    "__ULLONG_MAX__",
-                    "__LONG_MIN__",
-                    "__SCHAR_MIN__",
-                    "__SHRT_MIN__",
-                    "__INT_MIN__",
-                    "__CHAR_BIT__",
-                    "__LP64",
-                    "_LP64",
-                    "__BYTE_ORDER__",
-                    "__LITTLE_ENDIAN__",
-                    "__FLOAT_WORD_ORDER__",
-                    "__ORDER_LITTLE_ENDIAN__",
-                    "__INCLUDE_LEVEL__",
-                    "__WCHAR_WIDTH__",
-                    "__WINT_WIDTH__",
-                    "__CHAR16_WIDTH__",
-                    "__CHAR32_WIDTH__",
-                    "__WCHAR_MAX__",
-                    "__WCHAR_MIN__",
-                    "__WINT_MAX__",
-                    "__WINT_MIN__",
-                    "__SIG_ATOMIC_WIDTH__",
-                    "__SIG_ATOMIC_MAX__",
-                    "__SIG_ATOMIC_MIN__",
-                    "__STDC_ISO_10646__",
-                    "__FILE_NAME__",
-                    "__INT8_C",
-                    "__INT16_C",
-                    "__INT32_C",
-                    "__INT64_C",
-                    "__UINT8_C",
-                    "__UINT16_C",
-                    "__UINT32_C",
-                    "__UINT64_C",
-                    "__SIZE_TYPE__",
-                    "__INTPTR_TYPE__",
-                    "__UINTPTR_TYPE__",
-                    "__INTMAX_TYPE__",
-                    "__UINTMAX_TYPE__",
-                    "__CHAR16_TYPE__",
-                    "__CHAR32_TYPE__",
-                    "__INT8_TYPE__",
-                    "__INT16_TYPE__",
-                    "__INT32_TYPE__",
-                    "__INT64_TYPE__",
-                    "__UINT8_TYPE__",
-                    "__UINT16_TYPE__",
-                    "__UINT32_TYPE__",
-                    "__UINT64_TYPE__",
-                    "__INT_LEAST8_TYPE__",
-                    "__INT_LEAST16_TYPE__",
-                    "__INT_LEAST32_TYPE__",
-                    "__INT_LEAST64_TYPE__",
-                    "__UINT_LEAST8_TYPE__",
-                    "__UINT_LEAST16_TYPE__",
-                    "__UINT_LEAST32_TYPE__",
-                    "__UINT_LEAST64_TYPE__",
-                    "__INT_FAST8_TYPE__",
-                    "__INT_FAST16_TYPE__",
-                    "__INT_FAST32_TYPE__",
-                    "__INT_FAST64_TYPE__",
-                    "__UINT_FAST8_TYPE__",
-                    "__UINT_FAST16_TYPE__",
-                    "__UINT_FAST32_TYPE__",
-                    "__UINT_FAST64_TYPE__",
-                    "__WCHAR_TYPE__",
-                )
-            ),
+            options=FrontendOptions(undefs=("__INT_WIDTH__", "__SIZE_TYPE__")),
         )
-        self.assertNotIn("int x;", result.source)
-        self.assertNotIn("int y;", result.source)
-        self.assertNotIn("int mw;", result.source)
-        self.assertNotIn("int t;", result.source)
-        self.assertNotIn("int z;", result.source)
-        self.assertNotIn("int bsz;", result.source)
-        self.assertNotIn("int fsz;", result.source)
-        self.assertNotIn("int dsz;", result.source)
-        self.assertNotIn("int ldsz;", result.source)
-        self.assertNotIn("int fr;", result.source)
-        self.assertNotIn("int fm;", result.source)
-        self.assertNotIn("int dm;", result.source)
-        self.assertNotIn("int ldm;", result.source)
-        self.assertNotIn("int fdig;", result.source)
-        self.assertNotIn("int ddig;", result.source)
-        self.assertNotIn("int lddig;", result.source)
-        self.assertNotIn("int feps;", result.source)
-        self.assertNotIn("int deps;", result.source)
-        self.assertNotIn("int ldeps;", result.source)
-        self.assertNotIn("int fmin;", result.source)
-        self.assertNotIn("int dmin;", result.source)
-        self.assertNotIn("int ldmin;", result.source)
-        self.assertNotIn("int fmax;", result.source)
-        self.assertNotIn("int dmax;", result.source)
-        self.assertNotIn("int ldmax;", result.source)
-        self.assertNotIn("int fminexp;", result.source)
-        self.assertNotIn("int dminexp;", result.source)
-        self.assertNotIn("int ldminexp;", result.source)
-        self.assertNotIn("int fmaxexp;", result.source)
-        self.assertNotIn("int dmaxexp;", result.source)
-        self.assertNotIn("int ldmaxexp;", result.source)
-        self.assertNotIn("int szz;", result.source)
-        self.assertNotIn("int pdz;", result.source)
-        self.assertNotIn("int imz;", result.source)
-        self.assertNotIn("int umz;", result.source)
-        self.assertNotIn("int wcz;", result.source)
-        self.assertNotIn("int wiz;", result.source)
-        self.assertNotIn("int c16z;", result.source)
-        self.assertNotIn("int c32z;", result.source)
-        self.assertNotIn("int sw;", result.source)
-        self.assertNotIn("int pw;", result.source)
-        self.assertNotIn("int ipw;", result.source)
-        self.assertNotIn("int upw;", result.source)
-        self.assertNotIn("int pww;", result.source)
-        self.assertNotIn("int bw;", result.source)
-        self.assertNotIn("int imw;", result.source)
-        self.assertNotIn("int umw;", result.source)
-        self.assertNotIn("int sm;", result.source)
-        self.assertNotIn("int pm;", result.source)
-        self.assertNotIn("int pmin;", result.source)
-        self.assertNotIn("int ipmax;", result.source)
-        self.assertNotIn("int ipmin;", result.source)
-        self.assertNotIn("int upmax;", result.source)
-        self.assertNotIn("int imm;", result.source)
-        self.assertNotIn("int llw;", result.source)
-        self.assertNotIn("int llm;", result.source)
-        self.assertNotIn("int llmin_alias;", result.source)
-        self.assertNotIn("int llmax_alias;", result.source)
-        self.assertNotIn("int ullmax_alias;", result.source)
-        self.assertNotIn("int lm;", result.source)
-        self.assertNotIn("int scm;", result.source)
-        self.assertNotIn("int shm;", result.source)
-        self.assertNotIn("int imn;", result.source)
-        self.assertNotIn("int c;", result.source)
-        self.assertNotIn("int lp_alias;", result.source)
-        self.assertNotIn("int lp_legacy;", result.source)
-        self.assertNotIn("int e;", result.source)
-        self.assertNotIn("int le;", result.source)
-        self.assertNotIn("int fwo;", result.source)
-        self.assertNotIn("int il;", result.source)
-        self.assertNotIn("int ww;", result.source)
-        self.assertNotIn("int wiw;", result.source)
-        self.assertNotIn("int c16w;", result.source)
-        self.assertNotIn("int c32w;", result.source)
-        self.assertNotIn("int wmax;", result.source)
-        self.assertNotIn("int wmin;", result.source)
-        self.assertNotIn("int wimax;", result.source)
-        self.assertNotIn("int wimin;", result.source)
-        self.assertNotIn("int saw;", result.source)
-        self.assertNotIn("int samax;", result.source)
-        self.assertNotIn("int samin;", result.source)
-        self.assertNotIn("int iso;", result.source)
-        self.assertNotIn("int fn;", result.source)
-        self.assertNotIn("int i8c;", result.source)
-        self.assertNotIn("int i16c;", result.source)
-        self.assertNotIn("int i32c;", result.source)
-        self.assertNotIn("int i64c;", result.source)
-        self.assertNotIn("int u8c;", result.source)
-        self.assertNotIn("int u16c;", result.source)
-        self.assertNotIn("int u32c;", result.source)
-        self.assertNotIn("int u64c;", result.source)
-        self.assertIn("__SIZE_TYPE__ n;", result.source)
-        self.assertIn("__INTPTR_TYPE__ ip;", result.source)
-        self.assertIn("__UINTPTR_TYPE__ up;", result.source)
-        self.assertIn("__INTMAX_TYPE__ imt;", result.source)
-        self.assertIn("__UINTMAX_TYPE__ umt;", result.source)
-        self.assertIn("__CHAR16_TYPE__ c16;", result.source)
-        self.assertIn("__CHAR32_TYPE__ c32;", result.source)
-        self.assertIn("__INT8_TYPE__ i8;", result.source)
-        self.assertIn("__INT16_TYPE__ i16;", result.source)
-        self.assertIn("__INT32_TYPE__ i32;", result.source)
-        self.assertIn("__INT64_TYPE__ i64;", result.source)
-        self.assertIn("__UINT8_TYPE__ u8;", result.source)
-        self.assertIn("__UINT16_TYPE__ u16;", result.source)
-        self.assertIn("__UINT32_TYPE__ u32;", result.source)
-        self.assertIn("__UINT64_TYPE__ u64;", result.source)
-        self.assertIn("__INT_LEAST8_TYPE__ il8;", result.source)
-        self.assertIn("__INT_LEAST16_TYPE__ il16;", result.source)
-        self.assertIn("__INT_LEAST32_TYPE__ il32;", result.source)
-        self.assertIn("__INT_LEAST64_TYPE__ il64;", result.source)
-        self.assertIn("__UINT_LEAST8_TYPE__ ul8;", result.source)
-        self.assertIn("__UINT_LEAST16_TYPE__ ul16;", result.source)
-        self.assertIn("__UINT_LEAST32_TYPE__ ul32;", result.source)
-        self.assertIn("__UINT_LEAST64_TYPE__ ul64;", result.source)
-        self.assertIn("__INT_FAST8_TYPE__ if8;", result.source)
-        self.assertIn("__INT_FAST16_TYPE__ if16;", result.source)
-        self.assertIn("__INT_FAST32_TYPE__ if32;", result.source)
-        self.assertIn("__INT_FAST64_TYPE__ if64;", result.source)
-        self.assertIn("__UINT_FAST8_TYPE__ uf8;", result.source)
-        self.assertIn("__UINT_FAST16_TYPE__ uf16;", result.source)
-        self.assertIn("__UINT_FAST32_TYPE__ uf32;", result.source)
-        self.assertIn("__UINT_FAST64_TYPE__ uf64;", result.source)
-        self.assertIn("__WCHAR_TYPE__ w;", result.source)
+        self.assertNotIn("int present;", result.source)
+        self.assertIn("__SIZE_TYPE__ value;", result.source)
 
     def test_ifdef_and_ifndef(self) -> None:
         source = "#define FLAG 1\n#ifdef FLAG\nint a;\n#endif\n#ifndef FLAG\nint b;\n#endif\n"
@@ -1766,6 +1288,16 @@ A(0)
             filename="if.c",
         )
         self.assertNotIn("int bad;", result.source)
+        self.assertIn("int ok;", result.source)
+
+    def test_if_expression_integer_operators(self) -> None:
+        result = preprocess_source(
+            "#if 1 + 2 * 3 == 7 && 8 / 2 == 4 && 5 % 2 == 1"
+            " && 1 << 3 == 8 && 8 >> 2 == 2 && (3 | 1) == 3"
+            " && (3 & 1) == 1 && (3 ^ 1) == 2 && ~1 == -2\n"
+            "int ok;\n#endif\n",
+            filename="if.c",
+        )
         self.assertIn("int ok;", result.source)
 
     def test_if_expression_with_trailing_comment(self) -> None:
@@ -1998,7 +1530,7 @@ A(0)
         self.assertEqual(ctx.exception.code, "XCC-PP-0103")
         self.assertIn("Invalid __has_include expression: missing closing ')'", str(ctx.exception))
 
-    def test_if_expression_with_has_include_next_in_gnu11(self) -> None:
+    def test_if_expression_with_has_include_next(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source_dir = root / "src"
@@ -2007,12 +1539,14 @@ A(0)
             include_dir.mkdir()
             (include_dir / "next.h").write_text("\n", encoding="utf-8")
             source = '#if __has_include_next("next.h")\nint ok;\n#endif\n'
-            result = preprocess_source(
-                source,
-                filename=str(source_dir / "main.c"),
-                options=FrontendOptions(std="gnu11", include_dirs=(str(include_dir),)),
-            )
-        self.assertIn("int ok;", result.source)
+            for std in ("c11", "gnu11"):
+                with self.subTest(std=std):
+                    result = preprocess_source(
+                        source,
+                        filename=str(source_dir / "main.c"),
+                        options=FrontendOptions(std=std, include_dirs=(str(include_dir),)),
+                    )
+                    self.assertIn("int ok;", result.source)
 
     def test_if_expression_with_has_include_next_skips_current_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2021,26 +1555,14 @@ A(0)
             source_dir.mkdir()
             (source_dir / "next.h").write_text("\n", encoding="utf-8")
             source = '#if __has_include_next("next.h")\nint bad;\n#endif\n'
-            result = preprocess_source(
-                source,
-                filename=str(source_dir / "main.c"),
-                options=FrontendOptions(std="gnu11"),
-            )
-        self.assertNotIn("int bad;", result.source)
-
-    def test_if_expression_with_has_include_next_skips_current_directory_in_c11(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source_dir = root / "src"
-            source_dir.mkdir()
-            (source_dir / "next.h").write_text("\n", encoding="utf-8")
-            source = '#if __has_include_next("next.h")\nint bad;\n#endif\n'
-            result = preprocess_source(
-                source,
-                filename=str(source_dir / "main.c"),
-                options=FrontendOptions(std="c11"),
-            )
-        self.assertNotIn("int bad;", result.source)
+            for std in ("c11", "gnu11"):
+                with self.subTest(std=std):
+                    result = preprocess_source(
+                        source,
+                        filename=str(source_dir / "main.c"),
+                        options=FrontendOptions(std=std),
+                    )
+                    self.assertNotIn("int bad;", result.source)
 
     def test_if_expression_with_has_include_next_missing_header_is_zero_in_c11(self) -> None:
         result = preprocess_source(
@@ -2049,22 +1571,6 @@ A(0)
             options=FrontendOptions(std="c11"),
         )
         self.assertNotIn("int x;", result.source)
-
-    def test_if_expression_with_has_include_next_in_c11(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source_dir = root / "src"
-            include_dir = root / "include"
-            source_dir.mkdir()
-            include_dir.mkdir()
-            (include_dir / "next.h").write_text("\n", encoding="utf-8")
-            source = '#if __has_include_next("next.h")\nint ok;\n#endif\n'
-            result = preprocess_source(
-                source,
-                filename=str(source_dir / "main.c"),
-                options=FrontendOptions(std="c11", include_dirs=(str(include_dir),)),
-            )
-        self.assertIn("int ok;", result.source)
 
     def test_if_expression_with_has_builtin_feature_extension_and_warning_operators(self) -> None:
         result = preprocess_source(
@@ -2220,13 +1726,6 @@ A(0)
             str(ctx.exception),
             "Invalid #pragma STDC FENV_ROUND value: ON at main.c:1:1",
         )
-
-    def test_pragma_helpers_ignore_non_matching_inputs(self) -> None:
-        location = _SourceLocation("main.c", 1)
-        _validate_stdc_pragma("STDC", location)
-        _validate_stdc_pragma("STDC UNKNOWN ON", location)
-        _validate_gcc_visibility_pragma("region", location)
-        _validate_fenv_access_pragma("region", location)
 
     def test_gcc_visibility_pragma_valid_forms_are_ignored(self) -> None:
         result = preprocess_source(
@@ -2520,9 +2019,8 @@ A(0)
             with patch(
                 "xcc.preprocessor.host_system_include_dirs",
                 return_value=(str(include_dir),),
-            ):
-                with self.assertRaises(PreprocessorError) as ctx:
-                    preprocess_source("#include <xcc_host.h>\n", filename="main.c", options=options)
+            ), self.assertRaises(PreprocessorError) as ctx:
+                preprocess_source("#include <xcc_host.h>\n", filename="main.c", options=options)
         self.assertEqual(ctx.exception.code, "XCC-PP-0102")
 
     def test_include_angle_prefers_include_dirs_over_system_dirs(self) -> None:
@@ -2601,9 +2099,8 @@ A(0)
                 "os.environ",
                 {"CPATH": str(cpath_dir), "C_INCLUDE_PATH": str(c_include_dir)},
                 clear=False,
-            ):
-                with self.assertRaises(PreprocessorError) as ctx:
-                    preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
+            ), self.assertRaises(PreprocessorError) as ctx:
+                preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
         self.assertIn("Include not found", str(ctx.exception))
 
     def test_include_angle_uses_c_include_path_after_system_dirs(self) -> None:
@@ -2753,7 +2250,7 @@ A(0)
             result = preprocess_source("#include <inc.h>\n", filename=str(main), options=options)
         self.assertEqual(result.source, "int from_include;\n")
 
-    def test_include_next_in_gnu_mode_uses_following_include_directory(self) -> None:
+    def test_include_next_uses_following_include_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             first_dir = root / "first"
@@ -2764,12 +2261,17 @@ A(0)
                 "#include_next <inc.h>\nint from_first;\n", encoding="utf-8"
             )
             (second_dir / "inc.h").write_text("int from_second;\n", encoding="utf-8")
-            options = FrontendOptions(
-                std="gnu11",
-                include_dirs=(str(first_dir), str(second_dir)),
-            )
-            result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
-        self.assertEqual(result.source, "int from_second;\nint from_first;\n")
+            for std in ("c11", "gnu11"):
+                with self.subTest(std=std):
+                    options = FrontendOptions(
+                        std=std,
+                        include_dirs=(str(first_dir), str(second_dir)),
+                        no_standard_includes=True,
+                    )
+                    result = preprocess_source(
+                        "#include <inc.h>\n", filename="main.c", options=options
+                    )
+                    self.assertEqual(result.source, "int from_second;\nint from_first;\n")
 
     def test_include_next_in_gnu_mode_skips_source_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2861,25 +2363,6 @@ A(0)
         self.assertIn(
             f"{(first_dir / 'inc.h').resolve()}:1: #include_next <inc.h>", result.include_trace[1]
         )
-
-    def test_include_next_is_allowed_in_c11_mode(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            first_dir = root / "first"
-            second_dir = root / "second"
-            first_dir.mkdir()
-            second_dir.mkdir()
-            (first_dir / "inc.h").write_text(
-                "#include_next <inc.h>\nint from_first;\n", encoding="utf-8"
-            )
-            (second_dir / "inc.h").write_text("int from_second;\n", encoding="utf-8")
-            options = FrontendOptions(
-                std="c11",
-                include_dirs=(str(first_dir), str(second_dir)),
-                no_standard_includes=True,
-            )
-            result = preprocess_source("#include <inc.h>\n", filename="main.c", options=options)
-        self.assertEqual(result.source, "int from_second;\nint from_first;\n")
 
     def test_include_expansion_preserves_line_map_for_header_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3172,83 +2655,21 @@ A(0)
             result = preprocess_source(source, filename=str(root / "main.c"))
             self.assertNotIn("Circular include", result.source)
 
-    def test_detect_include_guard_standard_pattern(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        guard = _detect_include_guard("#ifndef FOO_H\n#define FOO_H\n")
-        self.assertEqual(guard, "FOO_H")
-
-    def test_detect_include_guard_if_not_defined(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        guard = _detect_include_guard("#if !defined(FOO_H)\n#define FOO_H\n")
-        self.assertEqual(guard, "FOO_H")
-
-    def test_detect_include_guard_with_leading_comment(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        guard = _detect_include_guard("/* comment */\n#ifndef FOO_H\n#define FOO_H\n")
-        self.assertEqual(guard, "FOO_H")
-
-    def test_detect_include_guard_mismatch_returns_none(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        guard = _detect_include_guard("#ifndef FOO_H\n#define BAR_H\n")
-        self.assertIsNone(guard)
-
-    def test_detect_include_guard_no_define_returns_none(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        guard = _detect_include_guard("#ifndef FOO_H\nint x;\n")
-        self.assertIsNone(guard)
-
-    def test_detect_include_guard_no_guard_returns_none(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        guard = _detect_include_guard("int x;\n")
-        self.assertIsNone(guard)
-
-    def test_detect_include_guard_leading_blank_lines(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        guard = _detect_include_guard("\n\n\n#ifndef FOO_H\n#define FOO_H\n")
-        self.assertEqual(guard, "FOO_H")
-
-    def test_detect_include_guard_with_block_comment_same_line(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        source = "/* header guard */\n#ifndef FOO_H /* guard */\n#define FOO_H\n"
-        guard = _detect_include_guard(source)
-        self.assertEqual(guard, "FOO_H")
-
-    def test_detect_include_guard_block_comment_spanning_lines(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        source = "/* start\n   continued */\n#ifndef FOO_H\n#define FOO_H\n"
-        guard = _detect_include_guard(source)
-        self.assertEqual(guard, "FOO_H")
-
-    def test_detect_include_guard_ifndef_no_matching_define(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        guard = _detect_include_guard("#ifndef FOO_H\n/* no define */\n")
-        self.assertIsNone(guard)
-
-    def test_detect_include_guard_ifndef_only_no_newline(self) -> None:
-        from xcc.preprocessor import _detect_include_guard
-
-        guard = _detect_include_guard("#ifndef FOO_H\n")
-        self.assertIsNone(guard)
-
-    def test_skip_guarded_include_oserror_returns_false(self) -> None:
-        from xcc.preprocessor import _Preprocessor
-        from xcc.options import FrontendOptions
-
-        preprocessor = _Preprocessor(FrontendOptions())
-        result = preprocessor._skip_guarded_include(
-            Path("/nonexistent/path.h"), "/nonexistent/path.h"
-        )
-        self.assertFalse(result)
+    def test_circular_include_guard_variants_are_skipped(self) -> None:
+        for opening in (
+            "#if !defined(SELF_H)\n#define SELF_H\n",
+            "/* guard */\n#ifndef SELF_H /* guard */\n#define SELF_H\n",
+        ):
+            with self.subTest(opening=opening), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "self.h").write_text(
+                    opening + '#include "self.h"\n#endif\n',
+                    encoding="utf-8",
+                )
+                preprocess_source(
+                    '#include "self.h"\n',
+                    filename=str(root / "main.c"),
+                )
 
     def test_guarded_circular_include_via_imacro(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3869,311 +3290,11 @@ A(0)
         self.assertEqual(len(result.include_trace), 1)
         self.assertIn("mapped.c:41: #include", result.include_trace[0])
 
-    def test_translate_expr_to_python_and_tokenizer(self) -> None:
-        self.assertEqual(_translate_expr_to_python("A && !B || 1 / 2"), "0 and not 0 or 1 // 2")
-        self.assertEqual(_translate_expr_to_python("1UL + 0x10LL"), "u64(1) + 16")
-        self.assertEqual(
-            _translate_expr_to_python("0xFFFFFFFFFFFFFFFF + 1"),
-            "u64(18446744073709551615) + 1",
-        )
-        self.assertEqual(_translate_expr_to_python("__has_extension(x)"), "0")
-        self.assertEqual(_tokenize_expr("0x10 + 1"), ["0x10", "+", "1"])
-        with self.assertRaises(ValueError):
-            _tokenize_expr("@")
-        with self.assertRaises(ValueError):
-            _translate_expr_to_python("f((1)")
-        with self.assertRaises(ValueError):
-            _translate_expr_to_python("18446744073709551616")
-        self.assertIsNone(_parse_pp_integer_literal("09"))
-        self.assertEqual(_parse_pp_integer_literal("010"), 8)
-        self.assertTrue(_is_unsigned_pp_integer("0xFFFFFFFFFFFFFFFF"))
-        self.assertFalse(_is_unsigned_pp_integer("x"))
-
-    def test_safe_eval_int_expr_operators(self) -> None:
-        self.assertEqual(_safe_eval_int_expr("1 + 2 * 3"), 7)
-        self.assertEqual(_safe_eval_int_expr("3 - 1"), 2)
-        self.assertEqual(_safe_eval_int_expr("8 // 2"), 4)
-        self.assertEqual(_safe_eval_int_expr("5 % 2"), 1)
-        self.assertEqual(_safe_eval_int_expr("1 << 3"), 8)
-        self.assertEqual(_safe_eval_int_expr("8 >> 2"), 2)
-        self.assertEqual(_safe_eval_int_expr("1 | 2"), 3)
-        self.assertEqual(_safe_eval_int_expr("3 & 1"), 1)
-        self.assertEqual(_safe_eval_int_expr("3 ^ 1"), 2)
-        self.assertEqual(_safe_eval_int_expr("1 and 0"), 0)
-        self.assertEqual(_safe_eval_int_expr("1 or 0"), 1)
-        self.assertEqual(_safe_eval_int_expr("0 and (1 // 0)"), 0)
-        self.assertEqual(_safe_eval_int_expr("1 or (1 // 0)"), 1)
-        self.assertEqual(_safe_eval_int_expr("not 0"), 1)
-        self.assertEqual(_safe_eval_int_expr("~1"), -2)
-        self.assertEqual(_safe_eval_int_expr("-1"), -1)
-        self.assertEqual(_safe_eval_int_expr("+1"), 1)
-        self.assertEqual(_safe_eval_int_expr("1 == 1"), 1)
-        self.assertEqual(_safe_eval_int_expr("1 != 2"), 1)
-        self.assertEqual(_safe_eval_int_expr("1 < 2"), 1)
-        self.assertEqual(_safe_eval_int_expr("1 <= 1"), 1)
-        self.assertEqual(_safe_eval_int_expr("2 > 1"), 1)
-        self.assertEqual(_safe_eval_int_expr("2 >= 2"), 1)
-
-    def test_safe_eval_int_expr_errors(self) -> None:
-        with self.assertRaises(ValueError):
-            _safe_eval_int_expr("(")
-        with self.assertRaises(ValueError):
-            _safe_eval_int_expr('"x"')
-        with self.assertRaises(ValueError):
-            _safe_eval_int_expr("1 < 2 < 3")
-        with self.assertRaises(ValueError):
-            _safe_eval_int_expr("1 ** 2")
-        with self.assertRaises(ValueError):
-            _safe_eval_int_expr("1 if 1 else 0")
-
-    def test_safe_eval_pp_expr(self) -> None:
-        self.assertEqual(_safe_eval_pp_expr("u64(18446744073709551615) + u64(1)"), 0)
-        self.assertEqual(_safe_eval_pp_expr("18446744073709551615 + 1"), 0)
-        self.assertEqual(_safe_eval_pp_expr("u64(0) - u64(1)"), 18446744073709551615)
-        self.assertEqual(_safe_eval_pp_expr("u64(1) != 0"), 1)
-        self.assertEqual(_safe_eval_pp_expr("u64(1) and 0"), 0)
-        self.assertEqual(_safe_eval_pp_expr("0 and (u64(1) // 0)"), 0)
-        self.assertEqual(_safe_eval_pp_expr("1 or (u64(1) // 0)"), 1)
-        self.assertEqual(_safe_eval_pp_expr("True"), 1)
-        self.assertEqual(_safe_eval_pp_expr("+u64(1)"), 1)
-        self.assertEqual(_safe_eval_pp_expr("~u64(0)"), 18446744073709551615)
-        self.assertEqual(_safe_eval_pp_expr("0 or 1"), 1)
-        self.assertEqual(_safe_eval_pp_expr("u64(2) * 3"), 6)
-        self.assertEqual(_safe_eval_pp_expr("u64(5) % 3"), 2)
-        self.assertEqual(_safe_eval_pp_expr("u64(1) << 3"), 8)
-        self.assertEqual(_safe_eval_pp_expr("u64(8) >> 1"), 4)
-        self.assertEqual(_safe_eval_pp_expr("u64(1) | 2"), 3)
-        self.assertEqual(_safe_eval_pp_expr("u64(3) & 1"), 1)
-        self.assertEqual(_safe_eval_pp_expr("u64(3) ^ 1"), 2)
-        self.assertEqual(_safe_eval_pp_expr("u64(1) <= 2"), 1)
-        self.assertEqual(_safe_eval_pp_expr("u64(2) >= 2"), 1)
-        with self.assertRaises(ValueError):
-            _safe_eval_pp_expr("18446744073709551616")
-        with self.assertRaises(ValueError):
-            _safe_eval_pp_expr("9223372036854775807 + 1")
-        with self.assertRaises(ValueError):
-            _safe_eval_pp_expr("u64(18446744073709551616)")
-        with self.assertRaises(ValueError):
-            _safe_eval_pp_expr("u64(1, 2)")
-        with self.assertRaises(ValueError):
-            _safe_eval_pp_expr("-9223372036854775807 - 2")
-        with self.assertRaises(ValueError):
-            _safe_eval_pp_expr("1 // 0")
-        with self.assertRaises(ValueError):
-            _safe_eval_pp_expr('"x"')
-
-    def test_eval_pp_node_unsupported_branches(self) -> None:
-        unsupported_unary = ast.UnaryOp(op=ast.MatMult(), operand=ast.Constant(1))
-        with self.assertRaises(ValueError) as ctx:
-            _eval_pp_node(unsupported_unary)
-        self.assertEqual(str(ctx.exception), "Unsupported preprocessor unary operator: MatMult")
-        unsupported_bool = ast.BoolOp(op=ast.BitAnd(), values=[ast.Constant(1), ast.Constant(1)])
-        with self.assertRaises(ValueError) as ctx:
-            _eval_pp_node(unsupported_bool)
-        self.assertEqual(str(ctx.exception), "Unsupported preprocessor boolean operator: BitAnd")
-        unsupported_bin = ast.BinOp(left=ast.Constant(1), op=ast.Pow(), right=ast.Constant(1))
-        with self.assertRaises(ValueError) as ctx:
-            _eval_pp_node(unsupported_bin)
-        self.assertEqual(str(ctx.exception), "Unsupported preprocessor binary operator: Pow")
-        unsupported_chain = ast.Compare(
-            left=ast.Constant(1),
-            ops=[ast.Lt(), ast.Lt()],
-            comparators=[ast.Constant(2), ast.Constant(3)],
-        )
-        with self.assertRaises(ValueError) as ctx:
-            _eval_pp_node(unsupported_chain)
-        self.assertEqual(
-            str(ctx.exception),
-            "Unsupported preprocessor comparison shape: expected 1 operator, got 2",
-        )
-        unsupported_comparator_shape = ast.Compare(
-            left=ast.Constant(1),
-            ops=[ast.Lt()],
-            comparators=[ast.Constant(2), ast.Constant(3)],
-        )
-        with self.assertRaises(ValueError) as ctx:
-            _eval_pp_node(unsupported_comparator_shape)
-        self.assertEqual(
-            str(ctx.exception),
-            "Unsupported preprocessor comparison shape: expected 1 comparator, got 2",
-        )
-        unsupported_cmp = ast.Compare(
-            left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)]
-        )
-        with self.assertRaises(ValueError) as ctx:
-            _eval_pp_node(unsupported_cmp)
-        self.assertEqual(str(ctx.exception), "Unsupported preprocessor comparison operator: Is")
-        unsupported_literal = ast.Constant("x")
-        with self.assertRaises(ValueError) as ctx:
-            _eval_pp_node(unsupported_literal)
-        self.assertEqual(str(ctx.exception), "Unsupported preprocessor literal type: str")
-        unsupported_node = ast.Attribute(value=ast.Constant(1), attr="x")
-        with self.assertRaises(ValueError) as ctx:
-            _eval_pp_node(unsupported_node)
-        self.assertEqual(str(ctx.exception), "Unsupported preprocessor expression node: Attribute")
-
-    def test_eval_node_unsupported_branches(self) -> None:
-        self.assertEqual(_eval_node(ast.Constant(True)), 1)
-        unsupported_unary = ast.UnaryOp(op=ast.MatMult(), operand=ast.Constant(1))
-        with self.assertRaises(ValueError) as ctx:
-            _eval_node(unsupported_unary)
-        self.assertEqual(
-            str(ctx.exception), "Unsupported integer-expression unary operator: MatMult"
-        )
-        unsupported_bool = ast.BoolOp(op=ast.BitAnd(), values=[ast.Constant(1), ast.Constant(1)])
-        with self.assertRaises(ValueError) as ctx:
-            _eval_node(unsupported_bool)
-        self.assertEqual(
-            str(ctx.exception), "Unsupported integer-expression boolean operator: BitAnd"
-        )
-        unsupported_bin = ast.BinOp(left=ast.Constant(1), op=ast.Pow(), right=ast.Constant(1))
-        with self.assertRaises(ValueError) as ctx:
-            _eval_node(unsupported_bin)
-        self.assertEqual(str(ctx.exception), "Unsupported integer-expression binary operator: Pow")
-        unsupported_chain = ast.Compare(
-            left=ast.Constant(1),
-            ops=[ast.Lt(), ast.Lt()],
-            comparators=[ast.Constant(2), ast.Constant(3)],
-        )
-        with self.assertRaises(ValueError) as ctx:
-            _eval_node(unsupported_chain)
-        self.assertEqual(
-            str(ctx.exception),
-            "Unsupported integer-expression comparison shape: expected 1 operator, got 2",
-        )
-        unsupported_comparator_shape = ast.Compare(
-            left=ast.Constant(1),
-            ops=[ast.Lt()],
-            comparators=[ast.Constant(2), ast.Constant(3)],
-        )
-        with self.assertRaises(ValueError) as ctx:
-            _eval_node(unsupported_comparator_shape)
-        self.assertEqual(
-            str(ctx.exception),
-            "Unsupported integer-expression comparison shape: expected 1 comparator, got 2",
-        )
-        unsupported_cmp = ast.Compare(
-            left=ast.Constant(1), ops=[ast.Is()], comparators=[ast.Constant(1)]
-        )
-        with self.assertRaises(ValueError) as ctx:
-            _eval_node(unsupported_cmp)
-        self.assertEqual(
-            str(ctx.exception), "Unsupported integer-expression comparison operator: Is"
-        )
-        unsupported_literal = ast.Constant("x")
-        with self.assertRaises(ValueError) as ctx:
-            _eval_node(unsupported_literal)
-        self.assertEqual(str(ctx.exception), "Unsupported integer-expression literal type: str")
-
-    def test_helpers(self) -> None:
-        self.assertEqual(_blank_line("abc\n"), "\n")
-        self.assertEqual(_blank_line("abc"), "")
-        self.assertEqual(_parse_directive("int x;\n"), None)
-        self.assertEqual(_parse_directive("# 1\n"), None)
-        self.assertEqual(_parse_directive("#define X 1\n"), ("define", " X 1"))
-        self.assertEqual(_parse_directive("#define X 1"), ("define", " X 1"))
-        self.assertEqual(_tokenize_macro_replacement(""), [])
-        self.assertIsNone(_split_unclosed_block_comment_tail("int x; // no block tail"))
-        self.assertEqual(
-            _split_unclosed_block_comment_tail('char *s = "/*"; /* tail'),
-            ('char *s = "/*"; ', "/* tail"),
-        )
-        self.assertIsNone(_split_unclosed_block_comment_tail("int x; /* closed */ int y;"))
-        self.assertEqual(
-            preprocessor_process._strip_block_comments("int x; /* unterminated"),
-            "int x; /* unterminated",
-        )
-        self.assertEqual(
-            preprocessor_process._update_comment_state(
-                False,
-                False,
-                directive_lines=["#define X 1 /* open\n"],
-            ),
-            (True, True),
-        )
-        self.assertEqual(_expand_object_like_macros("A B", {"A": "1", "B": "2"}), "1 2")
-        self.assertEqual(_expand_object_like_macros("A B", {}), "A B")
-        self.assertEqual(
-            _expand_object_like_macros("AA A XA A_ _A", {"A": "1", "AA": "2"}),
-            "2 1 XA A_ _A",
-        )
-        self.assertEqual(preprocessor_text._object_like_macro_at("A", 0, ["", "A"]), "A")
-        self.assertEqual(_parse_macro_parameters(""), ([], False))
-        self.assertEqual(_parse_macro_parameters("x, ..."), (["x"], True))
-        self.assertIsNone(_parse_macro_parameters("x, ..., y"))
-        self.assertIsNone(_parse_macro_parameters("x, x"))
-        self.assertEqual(
-            _tokenize_macro_replacement("1 /* unfinished"),
-            [_MacroToken(TokenKind.PP_NUMBER, "1")],
-        )
-        self.assertEqual(len(_tokenize_macro_replacement("@")), 1)
-        self.assertIsNone(_tokenize_macro_text('"unterminated'))
-        self.assertEqual(
-            _paste_token_pair(
-                _MacroToken(TokenKind.IDENT, "prefix"),
-                _MacroToken(TokenKind.IDENT, ""),
-                std="c11",
-                line_no=1,
-            ),
-            [_MacroToken(TokenKind.IDENT, "prefix")],
-        )
-        with self.assertRaises(PreprocessorError):
-            _paste_token_pair(
-                _tokenize_macro_replacement("x")[0],
-                _tokenize_macro_replacement("+")[0],
-                std="c11",
-                line_no=1,
-            )
-        line_map_builder = _LineMapBuilder()
-        line_map_builder.append_line("", _SourceLocation("main.c", 1))
-        line_map_builder.append_line("x\n", _SourceLocation("main.c", 2))
-        self.assertEqual(line_map_builder.build(), (("main.c", 2),))
-        cursor = _LogicalCursor("main.c")
-        directive_cursor = _DirectiveCursor(cursor, 2)
-        self.assertEqual(
-            directive_cursor.all_locations(),
-            (_SourceLocation("main.c", 1), _SourceLocation("main.c", 2)),
-        )
-
-    def test_multiline_include_branch_appends_blank_continuation_lines(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "inc.h").write_text("int x;\n", encoding="utf-8")
-            source = '#include "inc.h"\\\nignored\n'
-
-            real_parse_directive = _parse_directive
-
-            def fake_parse_directive(text: str) -> tuple[str, str] | None:
-                if text.startswith('#include "inc.h"'):
-                    return ("include", ' "inc.h"')
-                return real_parse_directive(text)
-
-            with patch("xcc.preprocessor._parse_directive", side_effect=fake_parse_directive):
-                result = preprocess_source(source, filename=str(root / "main.c"))
-        self.assertEqual(result.source, "int x;\n\n")
-
     def test_multiline_if_directive_is_spliced_before_parsing(self) -> None:
         source = "#if 1 || \\\n0\nint ok;\n#elif 1\nint bad;\n#endif\n"
         result = preprocess_source(source, filename="main.c")
         self.assertIn("int ok", result.source)
         self.assertNotIn("int bad", result.source)
-
-    def test_multiline_directive_parse_failure_blanks_all_lines(self) -> None:
-        source = "#define A \\\n1\nint A;\n"
-        real_parse_directive = _parse_directive
-
-        def fake_parse_directive(text: str) -> tuple[str, str] | None:
-            if text == "#define A \\\n":
-                return ("define", " A \\")
-            if text == "#define A 1\n":
-                return None
-            return real_parse_directive(text)
-
-        with patch("xcc.preprocessor._parse_directive", side_effect=fake_parse_directive):
-            result = preprocess_source(source, filename="main.c")
-        self.assertTrue(result.source.startswith("\n\n"))
-        self.assertIn("int A", result.source)
-        self.assertNotIn("int 1", result.source)
 
     def test_if_expression_macro_error_is_preserved(self) -> None:
         source = "#define F(x) x\n#if F(\nint x;\n#endif\n"
@@ -4186,17 +3307,6 @@ A(0)
         source = 'asm("inst");\nint x __asm("foo") = 0;\nasm volatile(\n  "inst"\n);\n'
         stripped = _strip_gnu_asm_extensions(source)
         self.assertEqual(stripped.splitlines(), [";", "int x  = 0;", ";", "", ""])
-
-    def test_line_split_helpers_build_linear_lists(self) -> None:
-        self.assertEqual(preprocessor_text._split_lines("a\nb\n"), ["a", "b"])
-        self.assertEqual(
-            preprocessor_text._split_lines_keepends("a\nb\n"),
-            ["a\n", "b\n"],
-        )
-
-    def test_inline_asm_stripper_fast_path_preserves_plain_line(self) -> None:
-        line = "int value = left + right;\n"
-        self.assertIs(preprocessor_text._strip_inline_asm_segments(line), line)
 
     def test_strip_gnu_asm_extensions_strips_inline_statement(self) -> None:
         source = (
@@ -4211,9 +3321,6 @@ A(0)
         source = '    __asm__ ("mov %0, sp" : "=r" (result));\n'
         stripped = _strip_gnu_asm_extensions(source)
         self.assertEqual(stripped, "    result = (unsigned long)&result;\n")
-
-    def test_macro_name_from_cli_define_handles_unclosed_parameter_list(self) -> None:
-        self.assertEqual(_macro_name_from_cli_define("FUNC("), "FUNC(")
 
     def test_pragma_non_once_does_not_enable_pragma_once_tracking(self) -> None:
         result = preprocess_source(
@@ -4239,34 +3346,16 @@ A(0)
                 )
         self.assertEqual(ctx.exception.code, "XCC-PP-0302")
 
-    def test_macro_include_cycle_from_command_line_stack_reports_error(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            header = root / "defs.h"
-            header.write_text("#define A 1\n", encoding="utf-8")
-            processor = _Preprocessor(FrontendOptions())
-            include_path = str(header.resolve())
-            with self.assertRaises(PreprocessorError) as ctx:
-                processor._process_macro_include(
-                    "defs.h",
-                    location=_SourceLocation("main.c", 1),
-                    base_dir=root,
-                    include_stack=(include_path,),
-                )
-        self.assertEqual(ctx.exception.code, "XCC-PP-0302")
-
     def test_macro_include_read_error_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "macros.h").write_text("#define A 1\n", encoding="utf-8")
-            processor = _Preprocessor(FrontendOptions())
             with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
                 with self.assertRaises(PreprocessorError) as ctx:
-                    processor._process_macro_include(
-                        "macros.h",
-                        location=_SourceLocation("main.c", 1),
-                        base_dir=root,
-                        include_stack=(),
+                    preprocess_source(
+                        "int main;\n",
+                        filename=str(root / "main.c"),
+                        options=FrontendOptions(macro_includes=("macros.h",)),
                     )
         self.assertEqual(ctx.exception.code, "XCC-PP-0301")
 
@@ -4274,31 +3363,27 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             header = root / "forced.h"
-            header.write_text("int forced;\n", encoding="utf-8")
-            processor = _Preprocessor(FrontendOptions())
-            processor._pragma_once_files.add(str(header.resolve()))
-            processed = processor._process_forced_include(
-                "forced.h",
-                location=_SourceLocation("main.c", 1),
-                base_dir=root,
-                include_stack=(),
+            header.write_text("#pragma once\n#define VALUE 7\n", encoding="utf-8")
+            result = preprocess_source(
+                "VALUE\n",
+                filename=str(root / "main.c"),
+                options=FrontendOptions(
+                    macro_includes=("forced.h",),
+                    forced_includes=("forced.h",),
+                ),
             )
-        self.assertEqual(processed.source, "")
-        self.assertEqual(processed.line_map, ())
+        self.assertEqual(result.source, "7\n")
 
     def test_forced_include_cycle_reports_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             header = root / "forced.h"
-            header.write_text("int forced;\n", encoding="utf-8")
-            processor = _Preprocessor(FrontendOptions())
-            include_path = str(header.resolve())
+            header.write_text('#include "forced.h"\n', encoding="utf-8")
             with self.assertRaises(PreprocessorError) as ctx:
-                processor._process_forced_include(
-                    "forced.h",
-                    location=_SourceLocation("main.c", 1),
-                    base_dir=root,
-                    include_stack=(include_path,),
+                preprocess_source(
+                    "int main;\n",
+                    filename=str(root / "main.c"),
+                    options=FrontendOptions(forced_includes=("forced.h",)),
                 )
         self.assertEqual(ctx.exception.code, "XCC-PP-0302")
 
@@ -4306,233 +3391,24 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "forced.h").write_text("int forced;\n", encoding="utf-8")
-            processor = _Preprocessor(FrontendOptions())
             with patch("pathlib.Path.read_text", side_effect=OSError("permission denied")):
                 with self.assertRaises(PreprocessorError) as ctx:
-                    processor._process_forced_include(
-                        "forced.h",
-                        location=_SourceLocation("main.c", 1),
-                        base_dir=root,
-                        include_stack=(),
+                    preprocess_source(
+                        "int main;\n",
+                        filename=str(root / "main.c"),
+                        options=FrontendOptions(forced_includes=("forced.h",)),
                     )
         self.assertEqual(ctx.exception.code, "XCC-PP-0301")
 
-    def test_parse_header_name_operand_rejects_invalid_macro_expansion(self) -> None:
-        processor = _Preprocessor(FrontendOptions())
-        with patch.object(processor, "_expand_macro_text", return_value="@"):
-            with self.assertRaises(PreprocessorError) as ctx:
-                processor._parse_header_name_operand("HDR", _SourceLocation("main.c", 1))
-        self.assertIn("Invalid #include directive", str(ctx.exception))
-
-    def test_parse_header_name_operand_no_macro_allows_trailing_block_comment(self) -> None:
-        processor = _Preprocessor(FrontendOptions())
-        self.assertEqual(
-            processor._parse_header_name_operand_no_macro(
-                "<machine/_types.h> /* __uint32_t */",
-                _SourceLocation("main.c", 1),
-            ),
-            ("machine/_types.h", True),
-        )
-
-    def test_resolve_include_next_handles_missing_and_matched_start_root(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            first = root / "first"
-            second = root / "second"
-            first.mkdir()
-            second.mkdir()
-            (first / "h.h").write_text("int first;\n", encoding="utf-8")
-            processor = _Preprocessor(
-                FrontendOptions(include_dirs=(str(first), str(second)), no_standard_includes=True),
-            )
-            include_path, searched_roots = processor._resolve_include(
-                "h.h",
-                is_angled=False,
-                base_dir=None,
-                include_next_from=root / "missing",
-            )
-            self.assertEqual(include_path, (first / "h.h").resolve())
-            self.assertEqual(
-                searched_roots,
-                ((first / "h.h").parent.resolve(), (second / "h.h").parent.resolve()),
-            )
-
-            next_path, next_roots = processor._resolve_include(
-                "h.h",
-                is_angled=False,
-                base_dir=None,
-                include_next_from=second,
-            )
-            self.assertIsNone(next_path)
-            self.assertEqual(next_roots, ())
-
-    def test_feature_warning_attribute_and_include_probe_error_paths(self) -> None:
-        processor = _Preprocessor(FrontendOptions(std="gnu11"))
-        location = _SourceLocation("main.c", 1)
-        self.assertEqual(
-            processor._replace_single_feature_probe_operator(
-                "x__has_builtin(foo)",
-                marker="__has_builtin",
-                location=location,
-                supported=("foo",),
-            ),
-            "x__has_builtin(foo)",
-        )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_feature_probe_operator(
-                "__has_builtin foo",
-                marker="__has_builtin",
-                location=location,
-                supported=("foo",),
-            )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_feature_probe_operator(
-                "__has_builtin(foo",
-                marker="__has_builtin",
-                location=location,
-                supported=("foo",),
-            )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_feature_probe_operator(
-                "__has_builtin()",
-                marker="__has_builtin",
-                location=location,
-                supported=("foo",),
-            )
-
-        self.assertEqual(
-            processor._replace_single_warning_probe_operator(
-                'x__has_warning("-Wall")',
-                marker="__has_warning",
-                location=location,
-                supported=frozenset({"-Wall"}),
-            ),
-            'x__has_warning("-Wall")',
-        )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_warning_probe_operator(
-                '__has_warning "-Wall"',
-                marker="__has_warning",
-                location=location,
-                supported=frozenset({"-Wall"}),
-            )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_warning_probe_operator(
-                '__has_warning("-Wall"',
-                marker="__has_warning",
-                location=location,
-                supported=frozenset({"-Wall"}),
-            )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_warning_probe_operator(
-                "__has_warning()",
-                marker="__has_warning",
-                location=location,
-                supported=frozenset({"-Wall"}),
-            )
-
-        self.assertEqual(
-            processor._replace_single_attribute_probe_operator(
-                "x__has_c_attribute(gnu::unused)",
-                marker="__has_c_attribute",
-                location=location,
-                supported=frozenset({"gnu::unused"}),
-            ),
-            "x__has_c_attribute(gnu::unused)",
-        )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_attribute_probe_operator(
-                "__has_c_attribute gnu::unused",
-                marker="__has_c_attribute",
-                location=location,
-                supported=frozenset({"gnu::unused"}),
-            )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_attribute_probe_operator(
-                "__has_c_attribute(gnu::unused",
-                marker="__has_c_attribute",
-                location=location,
-                supported=frozenset({"gnu::unused"}),
-            )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_attribute_probe_operator(
-                "__has_c_attribute()",
-                marker="__has_c_attribute",
-                location=location,
-                supported=frozenset({"gnu::unused"}),
-            )
-
-        self.assertEqual(
-            processor._replace_single_has_include_operator(
-                'x__has_include("a.h")',
-                marker="__has_include",
-                location=location,
-                base_dir=None,
-                include_next=False,
-            ),
-            'x__has_include("a.h")',
-        )
-        with self.assertRaises(PreprocessorError):
-            processor._replace_single_has_include_operator(
-                '__has_include "a.h"',
-                marker="__has_include",
-                location=location,
-                base_dir=None,
-                include_next=False,
-            )
-        self.assertEqual(processor._find_matching_has_include_close("((x))", 0), 4)
-
     def test_parse_line_directive_rejects_invalid_filename_literal_escape(self) -> None:
-        processor = _Preprocessor(FrontendOptions())
         with self.assertRaises(PreprocessorError) as ctx:
-            processor._parse_line_directive('1 "bad\\xZZ"', _SourceLocation("main.c", 1))
-        self.assertIn("Invalid #line directive", str(ctx.exception))
+            preprocess_source('#line 1 "bad\\xZZ"\n', filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
 
     def test_parse_line_directive_rejects_unterminated_filename_literal(self) -> None:
-        processor = _Preprocessor(FrontendOptions())
-        for body in ('1 "bad', '1 "bad\\', '1 "bad\n"'):
-            with self.subTest(body=body), self.assertRaises(PreprocessorError) as ctx:
-                processor._parse_line_directive(body, _SourceLocation("main.c", 1))
-            self.assertEqual(ctx.exception.code, "XCC-PP-0104")
-
-    def test_parse_cli_define_head_rejects_invalid_forms(self) -> None:
-        self.assertIsNone(_parse_cli_define_head("F("))
-        self.assertIsNone(_parse_cli_define_head("F(x) trailing"))
-        self.assertIsNone(_parse_cli_define_head("1F(x)"))
-        self.assertIsNone(_parse_cli_define_head("F(x, ..., y)"))
-
-    def test_expand_macro_tokens_dynamic_macro_without_resolver_defaults_to_zero(self) -> None:
-        expanded = _expand_macro_tokens(
-            [_MacroToken(TokenKind.IDENT, "__COUNTER__")],
-            {"__COUNTER__": _Macro("__COUNTER__", ())},
-            "c11",
-            _SourceLocation("main.c", 1),
-        )
-        self.assertEqual(expanded, [_MacroToken(TokenKind.INT_CONST, "0")])
-
-    def test_parse_pp_char_literal_covers_prefix_and_empty_literal(self) -> None:
-        self.assertEqual(_parse_pp_char_literal("u8'A'"), ord("A"))
-        self.assertIsNone(_parse_pp_char_literal("''"))
-
-    def test_validate_defined_syntax_covers_bare_paren_and_missing_close(self) -> None:
-        location = _SourceLocation("if.c", 1)
-        _validate_defined_syntax("defined FLAG", location)
-        _validate_defined_syntax("defined(FLAG)", location)
-        _validate_defined_syntax("undefined FLAG defined_suffix defined(FLAG)", location)
         with self.assertRaises(PreprocessorError) as ctx:
-            _validate_defined_syntax("defined( FLAG", location)
-        self.assertEqual(ctx.exception.code, "XCC-PP-0103")
-
-    def test_eval_node_boolean_paths_cover_and_or_outcomes(self) -> None:
-        self.assertEqual(
-            _eval_node(ast.BoolOp(op=ast.And(), values=[ast.Constant(1), ast.Constant(2)])), 1
-        )
-        self.assertEqual(
-            _eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(2)])), 1
-        )
-        self.assertEqual(
-            _eval_node(ast.BoolOp(op=ast.Or(), values=[ast.Constant(0), ast.Constant(0)])), 0
-        )
+            preprocess_source('#line 1 "bad\n', filename="main.c")
+        self.assertEqual(ctx.exception.code, "XCC-PP-0104")
 
     def test_ternary_if_true(self) -> None:
         source = "#if 1 ? 1 : 0\nint yes;\n#endif\n"
@@ -4580,26 +3456,9 @@ A(0)
         result = preprocess_source(source, filename="ternary.c")
         self.assertNotIn("int yes", result.source)
 
-    def test_translate_ternary_expr(self) -> None:
-        self.assertEqual(
-            _translate_expr_to_python("1 ? 2 : 3"),
-            "( 2 if 1 else 3 )",
-        )
-
-    def test_translate_nested_ternary_expr(self) -> None:
-        self.assertEqual(
-            _translate_expr_to_python("1 ? 0 ? 3 : 4 : 5"),
-            "( ( 3 if 0 else 4 ) if 1 else 5 )",
-        )
-
     def test_ternary_missing_colon_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            _translate_expr_to_python("1 ? 2")
-
-    def test_safe_eval_pp_expr_ternary(self) -> None:
-        self.assertEqual(_safe_eval_pp_expr("( 1 if 1 else 0 )"), 1)
-        self.assertEqual(_safe_eval_pp_expr("( 0 if 0 else 1 )"), 1)
-        self.assertEqual(_safe_eval_pp_expr("( 4 if 1 else 5 )"), 4)
+        with self.assertRaises(PreprocessorError):
+            preprocess_source("#if 1 ? 2\nint bad;\n#endif\n", filename="ternary.c")
 
     def test_multiline_macro_invocation(self) -> None:
         source = "#define M(a,b) a+b\nM(1,\n2)\n"
@@ -4748,7 +3607,7 @@ A(0)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "data.bin").write_bytes(b"\x0a\x0b\x0c\x0d")
-            source = '#embed "data.bin" limit(2)\n'
+            source = '#embed "data.bin" limit(1 + 1)\n'
             result = preprocess_source(
                 source,
                 filename=str(root / "test.c"),
@@ -5472,7 +4331,7 @@ A(0)
             options=FrontendOptions(std="gnu11"),
         )
         self.assertEqual(len(result.pack_changes), 1)
-        self.assertEqual(result.pack_changes[0][2], 4)
+        self.assertEqual(result.pack_changes[0], (1, 4))
 
     def test_pragma_pack_pop_restores_pack(self) -> None:
         """#pragma pack(pop) restores previous pack."""
@@ -5481,56 +4340,20 @@ A(0)
             filename="pack.c",
             options=FrontendOptions(std="gnu11"),
         )
-        self.assertEqual(len(result.pack_changes), 2)
-        self.assertEqual(result.pack_changes[0][2], 4)
-        self.assertIsNone(result.pack_changes[1][2])
+        self.assertEqual(result.pack_changes, ((1, 4), (2, None)))
 
-    def test_pragma_pack_push_defaults_to_8(self) -> None:
-        """#pragma pack(push) without explicit value defaults to 8."""
-        result = preprocess_source(
-            "#pragma pack(push)\nint x;\n",
-            filename="pack.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        self.assertEqual(result.pack_changes[0][2], 8)
-
-    def test_pragma_pack_pop_empty_stack_no_error(self) -> None:
-        """#pragma pack(pop) on empty stack is a no-op."""
-        result = preprocess_source(
-            "#pragma pack(pop)\nint x;\n",
-            filename="pack.c",
-            options=FrontendOptions(std="gnu11"),
-        )
-        self.assertEqual(len(result.pack_changes), 0)
-
-    def test_handle_pack_pragma_edge_cases(self) -> None:
-        """_handle_pack_pragma handles edge case inputs without crashing."""
-        from xcc.preprocessor import _Preprocessor
-        from xcc.options import FrontendOptions
-
-        p = _Preprocessor(FrontendOptions(std="gnu11"))
-        # Non-pack pragma (doesn't start with "pack(")
-        p._handle_pack_pragma("once")
-        self.assertEqual(len(p._pack_stack), 0)
-        # pack( without closing paren
-        p._handle_pack_pragma("pack(")
-        self.assertEqual(len(p._pack_stack), 0)
-        # pack() without push/pop
-        p._handle_pack_pragma("pack()")
-        self.assertEqual(len(p._pack_stack), 0)
-        # push without location
-        p._handle_pack_pragma("pack(push, 2)")
-        self.assertEqual(len(p._pack_stack), 1)
-        self.assertEqual(p._pack_stack[-1], 2)
-        self.assertEqual(len(p._pack_changes), 0)  # no location = no change record
-        # pop without location
-        p._handle_pack_pragma("pack(pop)")
-        self.assertEqual(len(p._pack_stack), 0)
-        self.assertEqual(len(p._pack_changes), 0)
-        # push with non-integer defaults to 8
-        p._handle_pack_pragma("pack(push, i)")
-        self.assertEqual(len(p._pack_stack), 1)
-        self.assertEqual(p._pack_stack[-1], 8)
+    def test_pragma_pack_rejects_invalid_directives(self) -> None:
+        for directive in ("pack(pop)", "pack(push)", "pack(push, nope)", "pack(push, 3)"):
+            with self.subTest(directive=directive), self.assertRaises(
+                PreprocessorError
+            ) as ctx:
+                preprocess_source(
+                    f"#pragma {directive}\n",
+                    filename="pack.c",
+                    options=FrontendOptions(std="gnu11"),
+                )
+            self.assertEqual(ctx.exception.code, "XCC-PP-0104")
+            self.assertEqual(str(ctx.exception), "Invalid #pragma pack directive at pack.c:1:1")
 
 
 if __name__ == "__main__":

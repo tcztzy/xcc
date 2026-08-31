@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 
-from xcc.aot import py_ast as ast
 from xcc.aot.diag import AotDiagnostic, AotError, node_location
 from xcc.aot.module import AotModule
+
+from . import py_ast as ast
 
 _DYNAMIC_CALLS = {
     "__import__",

@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -41,23 +42,12 @@ class DesignatorRange:
 Designator = tuple[str, "Expr | str | DesignatorRange"]
 
 
-def _ops_from_legacy(
-    pointer_depth: int,
-    array_lengths: tuple[int, ...],
-) -> tuple[DeclaratorOp, ...]:
-    ops: list[DeclaratorOp] = []
-    for length in array_lengths:
-        ops.append(("arr", length))
-    for _ in range(pointer_depth):
-        ops.append(("ptr", 0))
-    return tuple(ops)
-
-
 @dataclass(frozen=True)
 class TranslationUnit:
     functions: list["FunctionDef"]
     declarations: list["Stmt"] = field(default_factory=list)
     externals: list["FunctionDef | Stmt"] = field(default_factory=list)
+    source_map: dict[int, SourceLocation] = field(default_factory=dict, compare=False)
     source_locations: list[SourceLocation] = field(default_factory=list, compare=False)
 
 
@@ -72,8 +62,6 @@ class RecordMemberDecl:
 @dataclass(frozen=True)
 class TypeSpec:
     name: str
-    pointer_depth: int = 0
-    array_lengths: tuple[int, ...] = ()
     declarator_ops: tuple[DeclaratorOp, ...] = ()
     qualifiers: tuple[str, ...] = ()
     is_atomic: bool = False
@@ -86,52 +74,6 @@ class TypeSpec:
     source_line: int | None = field(default=None, compare=False)
     source_column: int | None = field(default=None, compare=False)
     typeof_expr: "Expr | None" = field(default=None, compare=False)
-
-    def __post_init__(self) -> None:
-        if self.declarator_ops:
-            pointer_depth = 0
-            array_values: list[int] = []
-            for kind, length in self.declarator_ops:
-                if kind == "ptr":
-                    pointer_depth += 1
-                elif kind == "arr" and isinstance(length, int):
-                    array_values.append(int(length))
-            array_lengths = tuple(array_values)
-            object.__setattr__(self, "pointer_depth", pointer_depth)
-            object.__setattr__(self, "array_lengths", array_lengths)
-        else:
-            object.__setattr__(
-                self,
-                "declarator_ops",
-                _ops_from_legacy(self.pointer_depth, self.array_lengths),
-            )
-        if self.record_members:
-            normalized_members: list[RecordMemberDecl] = []
-            for member in self.record_members:
-                if isinstance(member, RecordMemberDecl):
-                    normalized_members.append(member)
-                    continue
-                if isinstance(member, tuple) and len(member) == 2:
-                    normalized_members.append(RecordMemberDecl(member[0], member[1]))
-                    continue
-                if isinstance(member, tuple) and len(member) == 3:
-                    normalized_members.append(RecordMemberDecl(member[0], member[1], member[2]))
-                    continue
-                if isinstance(member, tuple) and len(member) == 4:
-                    normalized_members.append(
-                        RecordMemberDecl(member[0], member[1], member[2], member[3])
-                    )
-                    continue
-                raise TypeError("Invalid record member declaration")
-            object.__setattr__(self, "record_members", tuple(normalized_members))
-        if self.record_members and not self.has_record_body:
-            object.__setattr__(self, "has_record_body", True)
-
-
-def type_spec_declarator_ops(type_spec: TypeSpec) -> tuple[DeclaratorOp, ...]:
-    if type_spec.declarator_ops:
-        return type_spec.declarator_ops
-    return _ops_from_legacy(type_spec.pointer_depth, type_spec.array_lengths)
 
 
 @dataclass(frozen=True)
@@ -315,7 +257,6 @@ class SizeofExpr(Expr):
 class AlignofExpr(Expr):
     expr: Expr | None
     type_spec: TypeSpec | None
-    is_gnu: bool = False
 
 
 @dataclass(frozen=True)
@@ -429,3 +370,135 @@ class InitItem:
 @dataclass(frozen=True)
 class InitList:
     items: tuple[InitItem, ...]
+
+
+def walk_ast_children(node: object, walk: Callable[[object], None]) -> None:
+    if isinstance(node, (list, tuple)):
+        for item in node:
+            walk(item)
+    elif isinstance(node, ArrayDecl):
+        walk(node.length)
+    elif isinstance(node, DesignatorRange):
+        walk(node.low)
+        walk(node.high)
+    elif isinstance(node, RecordMemberDecl):
+        walk(node.type_spec)
+        if node.bit_width_expr is not None:
+            walk(node.bit_width_expr)
+    elif isinstance(node, TypeSpec):
+        for member in node.record_members:
+            walk(member)
+        for _kind, declarator_value in node.declarator_ops:
+            walk(declarator_value)
+        for _name, enum_value in node.enum_members:
+            if enum_value is not None:
+                walk(enum_value)
+        if node.atomic_target is not None:
+            walk(node.atomic_target)
+        if node.typeof_expr is not None:
+            walk(node.typeof_expr)
+    elif isinstance(node, InitItem):
+        for _kind, designator_value in node.designators:
+            walk(designator_value)
+        walk(node.initializer)
+    elif isinstance(node, InitList):
+        for item in node.items:
+            walk(item)
+    elif isinstance(node, FunctionDef):
+        walk(node.return_type)
+        for param in node.params:
+            walk(param.type_spec)
+        if node.body is not None:
+            walk(node.body)
+    elif isinstance(node, CompoundStmt):
+        for statement in node.statements:
+            walk(statement)
+    elif isinstance(node, IfStmt):
+        walk(node.condition)
+        walk(node.then_body)
+        if node.else_body is not None:
+            walk(node.else_body)
+    elif isinstance(node, WhileStmt):
+        walk(node.condition)
+        walk(node.body)
+    elif isinstance(node, DoWhileStmt):
+        walk(node.body)
+        walk(node.condition)
+    elif isinstance(node, ForStmt):
+        walk(node.init)
+        walk(node.condition)
+        walk(node.post)
+        walk(node.body)
+    elif isinstance(node, SwitchStmt):
+        walk(node.condition)
+        walk(node.body)
+    elif isinstance(node, CaseStmt):
+        walk(node.value)
+        walk(node.body)
+    elif isinstance(node, (DefaultStmt, LabelStmt)):
+        walk(node.body)
+    elif isinstance(node, IndirectGotoStmt):
+        walk(node.target)
+    elif isinstance(node, ReturnStmt):
+        walk(node.value)
+    elif isinstance(node, StaticAssertDecl):
+        walk(node.condition)
+        walk(node.message)
+    elif isinstance(node, ExprStmt):
+        walk(node.expr)
+    elif isinstance(node, DeclGroupStmt):
+        for declaration in node.declarations:
+            walk(declaration)
+    elif isinstance(node, DeclStmt):
+        walk(node.type_spec)
+        walk(node.init)
+    elif isinstance(node, TypedefDecl):
+        walk(node.type_spec)
+    elif isinstance(node, BinaryExpr):
+        walk(node.left)
+        walk(node.right)
+    elif isinstance(node, ConditionalExpr):
+        walk(node.condition)
+        walk(node.then_expr)
+        walk(node.else_expr)
+    elif isinstance(node, CommaExpr):
+        walk(node.left)
+        walk(node.right)
+    elif isinstance(node, AssignExpr):
+        walk(node.target)
+        walk(node.value)
+    elif isinstance(node, (UnaryExpr, UpdateExpr)):
+        walk(node.operand)
+    elif isinstance(node, CallExpr):
+        walk(node.callee)
+        for arg in node.args:
+            walk(arg)
+    elif isinstance(node, SubscriptExpr):
+        walk(node.base)
+        walk(node.index)
+    elif isinstance(node, MemberExpr):
+        walk(node.base)
+    elif isinstance(node, (SizeofExpr, AlignofExpr)):
+        walk(node.expr)
+        walk(node.type_spec)
+    elif isinstance(node, CastExpr):
+        walk(node.type_spec)
+        walk(node.expr)
+    elif isinstance(node, CompoundLiteralExpr):
+        walk(node.type_spec)
+        walk(node.initializer)
+    elif isinstance(node, StatementExpr):
+        walk(node.body)
+    elif isinstance(node, GenericExpr):
+        walk(node.control)
+        for assoc_type, assoc_expr in node.associations:
+            walk(assoc_type)
+            walk(assoc_expr)
+    elif isinstance(node, BuiltinOffsetofExpr):
+        walk(node.type_spec)
+    elif isinstance(node, BuiltinTypesCompatExpr):
+        walk(node.type1)
+        walk(node.type2)
+    elif isinstance(node, BuiltinVaArgExpr):
+        walk(node.ap)
+        walk(node.type_spec)

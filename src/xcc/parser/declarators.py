@@ -1,6 +1,6 @@
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
-from xcc.ast import ArrayDecl, Expr, IntLiteral, TypeSpec, type_spec_declarator_ops
+from xcc.ast import ArrayDecl, Expr, IntLiteral, TypeSpec
 from xcc.lexer import Token, TokenKind
 from xcc.parser.array_sizes import (
     array_size_literal_error,
@@ -18,8 +18,8 @@ DeclaratorOp = tuple[str, int | ArrayDecl | FunctionDeclarator]
 POINTER_OP: DeclaratorOp = ("ptr", 0)
 
 
-def _check_star(parser: Any) -> bool:
-    token = parser._current()
+def _check_star(p: "Parser") -> bool:
+    token = p._current()
     return token.kind == TokenKind.PUNCTUATOR and token.lexeme == "*"
 
 
@@ -39,8 +39,7 @@ def _normalize_type_qualifier(lexeme: str) -> str:
     return lexeme
 
 
-def parse_pointer_depth(parser: "Parser") -> int:
-    p = cast(Any, parser)
+def parse_pointer_depth(p: "Parser") -> int:
     p._skip_type_qualifiers()
     pointer_depth = 0
     while _check_star(p):
@@ -50,8 +49,7 @@ def parse_pointer_depth(parser: "Parser") -> int:
     return pointer_depth
 
 
-def parse_parenthesized_atomic_type_name(parser: "Parser") -> tuple[TypeSpec, bool]:
-    p = cast(Any, parser)
+def parse_parenthesized_atomic_type_name(p: "Parser") -> tuple[TypeSpec, bool]:
     p._expect_punct("(")
     base_is_qualified_typedef = False
     current = p._current()
@@ -82,12 +80,11 @@ def parse_parenthesized_atomic_type_name(parser: "Parser") -> tuple[TypeSpec, bo
 
 
 def parse_atomic_type_name_declarator(
-    parser: "Parser",
+    p: "Parser",
     *,
     allow_abstract: bool = True,
     allow_gnu_attributes: bool = False,
 ) -> tuple[str | None, tuple[DeclaratorOp, ...], bool, bool]:
-    p = cast(Any, parser)
     declarator_has_prefix_qualifier = p._skip_type_qualifiers(allow_atomic=True)
     p._skip_type_name_attributes(allow_gnu_attributes=allow_gnu_attributes)
     p._skip_calling_convention_identifiers_before_pointer()
@@ -114,12 +111,11 @@ def parse_atomic_type_name_declarator(
 
 
 def parse_atomic_type_name_direct_declarator(
-    parser: "Parser",
+    p: "Parser",
     *,
     allow_abstract: bool = True,
     allow_gnu_attributes: bool = False,
 ) -> tuple[str | None, tuple[DeclaratorOp, ...], bool]:
-    p = cast(Any, parser)
     name: str | None
     declarator_ops: tuple[DeclaratorOp, ...]
     top_pointer_is_qualified = False
@@ -188,7 +184,7 @@ def build_declarator_type(
     base_type: TypeSpec,
     declarator_ops: tuple[DeclaratorOp, ...],
 ) -> TypeSpec:
-    combined_ops = declarator_ops + type_spec_declarator_ops(base_type)
+    combined_ops = declarator_ops + base_type.declarator_ops
     return TypeSpec(
         base_type.name,
         declarator_ops=combined_ops,
@@ -205,7 +201,7 @@ def build_declarator_type(
 
 
 def parse_declarator(
-    parser: "Parser",
+    p: "Parser",
     allow_abstract: bool,
     *,
     allow_vla: bool = False,
@@ -213,7 +209,7 @@ def parse_declarator(
     allow_flexible_array: bool = False,
 ) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
     name, ops, _has_overloadable = parse_declarator_details(
-        parser,
+        p,
         allow_abstract,
         allow_vla=allow_vla,
         allow_parameter_arrays=allow_parameter_arrays,
@@ -223,14 +219,13 @@ def parse_declarator(
 
 
 def parse_declarator_details(
-    parser: "Parser",
+    p: "Parser",
     allow_abstract: bool,
     *,
     allow_vla: bool = False,
     allow_parameter_arrays: bool = False,
     allow_flexible_array: bool = False,
 ) -> tuple[str | None, tuple[DeclaratorOp, ...], bool]:
-    p = cast(Any, parser)
     p._skip_type_qualifiers()
     p._skip_calling_convention_identifiers_before_pointer()
     has_overloadable = p._consume_overloadable_decl_attributes()
@@ -243,7 +238,7 @@ def parse_declarator_details(
             has_overloadable = True
         pointer_count += 1
     name, ops, direct_has_overloadable = parse_direct_declarator_details(
-        parser,
+        p,
         allow_abstract,
         allow_vla=allow_vla,
         allow_parameter_arrays=allow_parameter_arrays,
@@ -254,33 +249,14 @@ def parse_declarator_details(
     return name, ops, has_overloadable or direct_has_overloadable
 
 
-def parse_direct_declarator(
-    parser: "Parser",
-    allow_abstract: bool,
-    *,
-    allow_vla: bool = False,
-    allow_parameter_arrays: bool = False,
-    allow_flexible_array: bool = False,
-) -> tuple[str | None, tuple[DeclaratorOp, ...]]:
-    name, ops, _has_overloadable = parse_direct_declarator_details(
-        parser,
-        allow_abstract,
-        allow_vla=allow_vla,
-        allow_parameter_arrays=allow_parameter_arrays,
-        allow_flexible_array=allow_flexible_array,
-    )
-    return name, ops
-
-
 def parse_direct_declarator_details(
-    parser: "Parser",
+    p: "Parser",
     allow_abstract: bool,
     *,
     allow_vla: bool = False,
     allow_parameter_arrays: bool = False,
     allow_flexible_array: bool = False,
 ) -> tuple[str | None, tuple[DeclaratorOp, ...], bool]:
-    p = cast(Any, parser)
     name: str | None
     ops: tuple[DeclaratorOp, ...]
     has_overloadable = False
@@ -293,7 +269,7 @@ def parse_direct_declarator_details(
     elif p._check_punct("("):
         p._advance()
         name, ops, has_overloadable = parse_declarator_details(
-            parser,
+            p,
             allow_abstract=True,
             allow_vla=allow_vla,
             allow_parameter_arrays=allow_parameter_arrays,
@@ -342,13 +318,12 @@ def parse_direct_declarator_details(
 
 
 def parse_array_declarator(
-    parser: "Parser",
+    p: "Parser",
     *,
     allow_vla: bool,
     allow_parameter_arrays: bool,
     allow_flexible_array: bool = False,
 ) -> int | ArrayDecl:
-    p = cast(Any, parser)
     qualifiers: list[str] = []
     seen_qualifiers: set[str] = set()
     has_static_bound = False
@@ -400,13 +375,12 @@ def parse_array_declarator(
     if allow_vla:
         return ArrayDecl(size_expr, tuple(qualifiers), has_static_bound)
     raise ParserError(
-        array_size_non_ice_error_for_parser(parser, size_expr),
+        array_size_non_ice_error_for_parser(p, size_expr),
         size_token,
     )
 
 
-def parse_function_suffix_params(parser: "Parser") -> FunctionDeclarator:
-    p = cast(Any, parser)
+def parse_function_suffix_params(p: "Parser") -> FunctionDeclarator:
     if p._check_punct(")"):
         return None, False
     if p._check_keyword("void") and p._peek_punct(")"):
@@ -435,8 +409,7 @@ def parse_function_suffix_params(parser: "Parser") -> FunctionDeclarator:
     return tuple(params), is_variadic
 
 
-def parse_type_name(parser: "Parser") -> TypeSpec:
-    p = cast(Any, parser)
+def parse_type_name(p: "Parser") -> TypeSpec:
     base_type = p._parse_type_spec(context="type-name")
     name, declarator_ops = p._parse_declarator(allow_abstract=True, allow_vla=True)
     if name is not None:
@@ -447,8 +420,7 @@ def parse_type_name(parser: "Parser") -> TypeSpec:
     return p._build_declarator_type(base_type, declarator_ops)
 
 
-def try_parse_type_name(parser: "Parser") -> bool:
-    p = cast(Any, parser)
+def try_parse_type_name(p: "Parser") -> bool:
     saved_index = p._index
     try:
         base_type = p._parse_type_spec()

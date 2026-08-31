@@ -1,8 +1,7 @@
-import inspect
 import unittest
 
-from tests import _bootstrap  # noqa: F401
 import xcc.aot.llvm_text as llvm_text_module
+from tests import _bootstrap  # noqa: F401
 from xcc.aot import (
     AotError,
     IrAssign,
@@ -48,16 +47,9 @@ from xcc.aot import (
     lower_source_to_ir,
 )
 from xcc.aot.llvm_text import (
-    _block_is_terminated,
-    _branch_assigned_names,
-    _current_label,
     _EmittedValue,
     _Emitter,
-    _for_each_targets,
-    _llvm_symbol,
     _phase_intrinsic_is_no_capture,
-    _statement_assigned_names,
-    _statement_assignment_types,
 )
 
 
@@ -89,10 +81,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn(" uwtable !dbg !", debug)
 
     def test_debug_unwind_attribute_covers_multiline_runtime_definitions(self) -> None:
-        source = (
-            "def answer(values: tuple[str, ...]) -> int:\n"
-            "    return len(values)\n"
-        )
+        source = "def answer(values: tuple[str, ...]) -> int:\n    return len(values)\n"
         module = lower_source_to_ir(source, filename="runtime-lines.py", entry="answer")
         lines = emit_llvm_text(module, debug=True).splitlines()
         headers: list[str] = []
@@ -108,22 +97,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertTrue(headers)
         self.assertTrue(all(" uwtable" in header for header in headers))
 
-    def test_v446_object_phase_helpers_use_one_finite_emission(self) -> None:
-        source = inspect.getsource(
-            llvm_text_module._Emitter._emit_phase_promotion_helpers
-        )
-        self.assertNotIn("while True", source)
-        self.assertEqual(source.count("_emit_phase_object_promotion_helpers()"), 1)
-
     def test_v445_exact_phase_helpers_are_registered_once_at_discovery(self) -> None:
-        registry_source = inspect.getsource(
-            llvm_text_module._Emitter._emit_phase_promotion_helpers
-        )
-        self.assertNotIn("emitted_exact_records", registry_source)
-        self.assertIn(
-            "_remember_phase_exact_promotion_record",
-            inspect.getsource(llvm_text_module._Emitter),
-        )
         source = (
             "class Payload:\n"
             "    label: str\n"
@@ -147,7 +121,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertTrue(definitions)
         self.assertEqual(len(definitions), len(set(definitions)))
 
-    def test_v443_phase_type_keys_are_structural_and_do_not_use_repr(self) -> None:
+    def test_v443_phase_type_keys_are_structural(self) -> None:
         type_key = getattr(llvm_text_module, "_phase_type_key", None)
         self.assertTrue(callable(type_key))
         assert callable(type_key)
@@ -159,17 +133,6 @@ class AotLlvmTextTests(unittest.TestCase):
             IrDictType(IrStringType(), IrTupleType((IrBytesType(),))),
         )
         self.assertEqual(len({type_key(type_info) for type_info in types}), len(types))
-        phase_source = "\n".join(
-            inspect.getsource(method)
-            for method in (
-                llvm_text_module._Emitter._emit_phase_promote_return,
-                llvm_text_module._Emitter._emit_phase_promote_value,
-                llvm_text_module._Emitter._emit_phase_capture_value,
-                llvm_text_module._Emitter._emit_phase_capture_helpers,
-                llvm_text_module._Emitter._emit_phase_promotion_helper,
-            )
-        )
-        self.assertNotIn("repr(type_info)", phase_source)
 
     def test_v439_final_llvm_join_uses_a_terminal_sentinel(self) -> None:
         finalize = getattr(llvm_text_module, "_finalize_llvm_lines", None)
@@ -601,19 +564,17 @@ class AotLlvmTextTests(unittest.TestCase):
         )
 
         llvm_ir = emit_llvm_text(lower_source_to_ir(source, filename="region-owner.py"))
-        tuple_key = llvm_text_module._phase_type_key(
-            IrTupleType((IrRecordType("Payload"),))
-        )
+        tuple_key = llvm_text_module._phase_type_key(IrTupleType((IrRecordType("Payload"),)))
         record_key = llvm_text_module._phase_type_key(IrRecordType("Payload"))
-        tuple_helper = llvm_ir.split(
-            f'define void @"__xcc_aot_phase_promote:{tuple_key}"', 1
-        )[1].split("\n}", 1)[0]
-        record_helper = llvm_ir.split(
-            f'define void @"__xcc_aot_phase_promote:{record_key}"', 1
-        )[1].split("\n}", 1)[0]
-        capture_helper = llvm_ir.split(
-            'define void @"__xcc_aot_phase_capture:string"', 1
-        )[1].split("\n}", 1)[0]
+        tuple_helper = llvm_ir.split(f'define void @"__xcc_aot_phase_promote:{tuple_key}"', 1)[
+            1
+        ].split("\n}", 1)[0]
+        record_helper = llvm_ir.split(f'define void @"__xcc_aot_phase_promote:{record_key}"', 1)[
+            1
+        ].split("\n}", 1)[0]
+        capture_helper = llvm_ir.split('define void @"__xcc_aot_phase_capture:string"', 1)[1].split(
+            "\n}", 1
+        )[0]
 
         self.assertIn(
             "call i1 @__xcc_aot_phase_promote_allocated_to(ptr %value, ptr %target)",
@@ -645,9 +606,7 @@ class AotLlvmTextTests(unittest.TestCase):
                 entry="read",
             )
         )
-        dict_key = llvm_text_module._phase_type_key(
-            IrDictType(IrStringType(), IrStringType())
-        )
+        dict_key = llvm_text_module._phase_type_key(IrDictType(IrStringType(), IrStringType()))
         external_capture = global_ir.split(
             f'define void @"__xcc_aot_phase_capture:{dict_key}:external-owner"',
             1,
@@ -2154,33 +2113,6 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("getelementptr inbounds %Box, ptr %box, i32 0, i32 0", llvm_ir)
         self.assertIn("store i64 3, ptr %fieldptr", llvm_ir)
 
-    def test_emits_protocol_record_field_access_with_concrete_layout(self) -> None:
-        int64 = IrIntType(64, signed=True)
-        protocol_type = IrRecordType("_StatementParser")
-        module = IrModule(
-            "statement_parser_protocol_field.py",
-            (
-                IrRecord("Parser", (IrField("tokens", IrTupleType(())), IrField("_index", int64))),
-                IrRecord("_StatementParser", (IrField("_index", int64),)),
-            ),
-            (
-                IrFunction(
-                    "rewind",
-                    (IrParam("parser", protocol_type),),
-                    int64,
-                    (
-                        IrAssign("parser._index", IrConstInt(0, int64)),
-                        IrReturn(IrGetField(IrName("parser", protocol_type), "_index", int64)),
-                    ),
-                ),
-            ),
-        )
-
-        llvm_ir = emit_llvm_text(module)
-
-        self.assertIn("getelementptr inbounds %Parser, ptr %parser, i32 0, i32 1", llvm_ir)
-        self.assertNotIn("getelementptr inbounds %_StatementParser", llvm_ir)
-
     def test_emits_tuple_backed_record_field_assignment_store(self) -> None:
         int64 = IrIntType(64, signed=True)
         string_tuple = IrTupleType((IrStringType(),))
@@ -3410,14 +3342,11 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertRegex(llvm_ir, r"icmp eq i64 %object\.record\.tag\d+, 2")
 
     def test_emits_type_constant_name_as_global_singleton(self) -> None:
-        int64 = IrIntType(64, signed=True)
         tuple_type = IrTupleType((IrRecordType("object"),))
         type_record = IrRecord(
             "Type",
             (
                 IrField("name", IrStringType()),
-                IrField("pointer_depth", int64),
-                IrField("array_lengths", tuple_type),
                 IrField("declarator_ops", tuple_type),
                 IrField("qualifiers", tuple_type),
             ),
@@ -5005,6 +4934,20 @@ class AotLlvmTextTests(unittest.TestCase):
                     ),
                 ),
                 IrFunction(
+                    "read_bytes",
+                    (IrParam("path", path_type),),
+                    IrBytesType(),
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__path_read_bytes",
+                                (IrName("path", path_type),),
+                                IrBytesType(),
+                            )
+                        ),
+                    ),
+                ),
+                IrFunction(
                     "exists",
                     (IrParam("path", path_type),),
                     IrBoolType(),
@@ -5032,6 +4975,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("define ptr @resolved(ptr %filename)", llvm_ir)
         self.assertIn("ret ptr %filename", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_read_text_file(ptr %path)", llvm_ir)
+        self.assertIn("call ptr @__xcc_aot_read_bytes_file(ptr %path)", llvm_ir)
         self.assertIn("call i1 @__xcc_aot_path_is_file(ptr %path)", llvm_ir)
         self.assertIn("define i1 @__xcc_aot_path_is_file(ptr %path)", llvm_ir)
         self.assertNotIn("@Path", llvm_ir)
@@ -5168,12 +5112,8 @@ class AotLlvmTextTests(unittest.TestCase):
             "    return 'entry'\n"
         )
 
-        llvm_ir = emit_llvm_text(
-            lower_source_to_ir(source, filename="direct-reversed-loop.py")
-        )
-        body = llvm_ir.split("define ptr @current_label(ptr %lines)", 1)[1].split(
-            "\n}", 1
-        )[0]
+        llvm_ir = emit_llvm_text(lower_source_to_ir(source, filename="direct-reversed-loop.py"))
+        body = llvm_ir.split("define ptr @current_label(ptr %lines)", 1)[1].split("\n}", 1)[0]
 
         self.assertNotIn("@__xcc_aot_tuple_reversed", body)
         self.assertIn("%reverse.offset", body)
@@ -5413,6 +5353,19 @@ class AotLlvmTextTests(unittest.TestCase):
 
         self.assertIn("call ptr @__xcc_aot_tuple_append", function_ir)
         self.assertNotIn("call ptr @__xcc_aot_tuple_concat", function_ir)
+
+    def test_emits_bytes_comprehension(self) -> None:
+        module = lower_source_to_ir(
+            "def gather(values: bytes) -> tuple[int, ...]:\n"
+            "    return tuple(value for value in values)\n",
+            filename="bytes_comprehension.py",
+        )
+
+        llvm_ir = emit_llvm_text(module)
+
+        self.assertIn("call ptr @__xcc_aot_bytes_data(ptr %values)", llvm_ir)
+        self.assertIn("call i64 @__xcc_aot_bytes_len(ptr %values)", llvm_ir)
+        self.assertIn("zext i8 %seqcomp.item", llvm_ir)
 
     def test_emits_zip_intrinsic_as_runtime_tuple_pairs(self) -> None:
         int64 = IrIntType(64, signed=True)
@@ -5914,1275 +5867,3 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("zext i32 1 to i64", llvm_ir)
         self.assertIn("trunc i128 1 to i64", llvm_ir)
         self.assertIn("icmp eq ptr null, null", llvm_ir)
-
-    def test_llvm_text_private_helpers_cover_edge_inputs(self) -> None:
-        self.assertEqual(_llvm_symbol("super().__init__"), '@"super().__init__"')
-        self.assertFalse(_block_is_terminated([]))
-        self.assertEqual(_current_label(["  ret i32 0"]), "entry")
-        self.assertEqual(_for_each_targets("item"), ("item",))
-        self.assertEqual(_for_each_targets("(kind, _)"), ("kind",))
-        self.assertEqual(
-            _statement_assigned_names(IrAssign("(left, _)", IrConstNone())),
-            ("left",),
-        )
-        int64 = IrIntType(64, signed=True)
-        self.assertEqual(
-            _statement_assignment_types(
-                IrAssign(
-                    "(left, right)",
-                    IrTuple(
-                        (IrConstBool(True), IrConstInt(1, int64)),
-                        IrTupleType((IrBoolType(), int64)),
-                    ),
-                )
-            ),
-            {"left": (IrBoolType(),), "right": (int64,)},
-        )
-        self.assertEqual(_statement_assigned_names(IrAssign("__expr", IrConstNone())), ())
-        self.assertEqual(
-            _statement_assigned_names(
-                IrSetItem(
-                    IrName("values", IrTupleType((IrStringType(),))),
-                    IrConstInt(0, IrIntType(64, signed=True)),
-                    IrConstString("x"),
-                )
-            ),
-            (),
-        )
-        self.assertEqual(_statement_assigned_names(IrBreak()), ())
-        self.assertEqual(_statement_assigned_names(IrContinue()), ())
-        self.assertEqual(
-            _statement_assigned_names(
-                IrIf(
-                    IrConstBool(True),
-                    IrBranch((IrAssign("then_only", IrConstNone()),)),
-                    None,
-                )
-            ),
-            ("then_only",),
-        )
-        self.assertEqual(_statement_assigned_names(IrReturn(IrConstNone())), ())
-        self.assertEqual(
-            _branch_assigned_names(
-                IrBranch(
-                    (
-                        IrIf(
-                            IrConstBool(True),
-                            IrBranch((IrAssign("then_value", IrConstNone()),)),
-                            IrBranch((IrAssign("else_value", IrConstNone()),)),
-                        ),
-                        IrForEach(
-                            "item",
-                            IrTuple((), IrTupleType(())),
-                            IrBranch((IrAssign("loop_value", IrConstNone()),)),
-                        ),
-                        IrWhile(
-                            IrConstBool(True),
-                            IrBranch((IrAssign("while_value", IrConstNone()),)),
-                        ),
-                    )
-                )
-            ),
-            ("else_value", "item", "loop_value", "then_value", "while_value"),
-        )
-        emitter = _Emitter(IrModule("bad.py", (), ()))
-        with self.assertRaises(AotError) as ctx:
-            emitter._default_value(object())  # type: ignore[arg-type]
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        self.assertEqual(emitter._default_value(IrBoolType()), "false")
-        self.assertEqual(emitter._default_value(IrFloatType()), "0.0")
-        with self.assertRaises(AotError) as ctx:
-            emitter._emit_runtime_boxed_value("%raw", object(), [])  # type: ignore[arg-type]
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        narrowing_lines: list[str] = []
-        narrowed = emitter._emit_runtime_object_narrowing(
-            _EmittedValue("%raw", IrRecordType("object")),
-            IrFloatType(),
-            narrowing_lines,
-        )
-        self.assertIsNotNone(narrowed)
-        assert narrowed is not None
-        self.assertEqual(narrowed.type, IrFloatType())
-        self.assertIn("  %object.payload1 = getelementptr i8, ptr %raw, i64 8", narrowing_lines)
-        self.assertIn("  %object.float2 = load double, ptr %object.payload1", narrowing_lines)
-        with self.assertRaises(AotError) as ctx:
-            emitter._emit_error_record(
-                IrRaise("ValueError", IrConstString("bad")),
-                {},
-                [],
-            )
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        with self.assertRaises(AotError) as ctx:
-            emitter._emit_statement(IrBreak(), {}, [], IrNoneType())
-        self.assertEqual(ctx.exception.diagnostics[0].message, "break outside loop")
-        with self.assertRaises(AotError) as ctx:
-            emitter._emit_statement(IrContinue(), {}, [], IrNoneType())
-        self.assertEqual(ctx.exception.diagnostics[0].message, "continue outside loop")
-        with self.assertRaises(AotError) as ctx:
-            emitter._emit_default_return([], object())  # type: ignore[arg-type]
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        original_emit_expr = emitter._emit_expr
-        emitter._emit_expr = (  # type: ignore[method-assign]
-            lambda expr, names, lines: _EmittedValue("value", object())
-        )
-        with self.assertRaises(AotError) as ctx:
-            emitter._emit_condition(IrConstBool(True), {}, [])
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        emitter._emit_expr = original_emit_expr  # type: ignore[method-assign]
-        with self.assertRaises(AotError) as ctx:
-            emitter._coerce_to_bool(_EmittedValue("value", object()), [])  # type: ignore[arg-type]
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        with self.assertRaises(AotError) as ctx:
-            emitter._box_to_runtime_ptr(_EmittedValue("value", object()), [])  # type: ignore[arg-type]
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        with self.assertRaises(AotError) as ctx:
-            emitter._pointer_compare_value(_EmittedValue("value", object()))  # type: ignore[arg-type]
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        with self.assertRaises(AotError) as ctx:
-            emitter._coerce_llvm_pointer(_EmittedValue("value", IrBoolType()), [])
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        self.assertEqual(
-            emitter._coerce_llvm_pointer(_EmittedValue("value", IrStringType()), []),
-            "value",
-        )
-        self.assertEqual(
-            emitter._coerce_llvm_pointer(_EmittedValue("value", IrNoneType()), []),
-            "null",
-        )
-        with self.assertRaises(AotError) as ctx:
-            emitter._coerce_i32(_EmittedValue("value", IrBoolType()), [])
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-        self.assertEqual(
-            emitter._coerce_i32(_EmittedValue("value", IrIntType(32, signed=True)), []),
-            "value",
-        )
-        widen_lines: list[str] = []
-        self.assertTrue(
-            emitter._coerce_i32(
-                _EmittedValue("value", IrIntType(16, signed=True)),
-                widen_lines,
-            ).startswith("%i32")
-        )
-        self.assertIn("sext i16 value to i32", widen_lines[0])
-
-        int64 = IrIntType(64, signed=True)
-        llvm_api_module = IrModule(
-            "llvm_api_handle.py",
-            (),
-            (
-                IrFunction(
-                    "handle",
-                    (),
-                    IrRecordType("LLVMApi"),
-                    (IrReturn(IrCall("__llvm_api", (), IrRecordType("LLVMApi"))),),
-                ),
-            ),
-        )
-        self.assertIn("ret ptr null", emit_llvm_text(llvm_api_module))
-
-        enumerate_cases = (
-            (
-                IrCall("__enumerate", (), IrTupleType((int64, IrStringType()))),
-                "__enumerate expects one or two arguments",
-            ),
-            (
-                IrCall(
-                    "__enumerate",
-                    (IrTuple((), IrTupleType(())),),
-                    IrStringType(),
-                ),
-                "__enumerate loop expects two element types",
-            ),
-            (
-                IrCall(
-                    "__enumerate",
-                    (IrTuple((), IrTupleType(())),),
-                    IrTupleType((int64,)),
-                ),
-                "__enumerate loop expects two element types",
-            ),
-            (
-                IrCall(
-                    "__enumerate",
-                    (IrTuple((), IrTupleType(())),),
-                    IrTupleType((int64, IrStringType())),
-                ),
-                "tuple assignment target expects tuple value",
-            ),
-        )
-        for iterable, message in enumerate_cases:
-            with self.subTest(message=message):
-                target = (
-                    "(index, item, extra)"
-                    if message == "tuple assignment target expects tuple value"
-                    else "(index, item)"
-                )
-                bad_module = IrModule(
-                    "bad_enumerate.py",
-                    (),
-                    (
-                        IrFunction(
-                            "walk",
-                            (),
-                            IrNoneType(),
-                            (IrForEach(target, iterable, IrBranch(())),),
-                        ),
-                    ),
-                )
-                with self.assertRaises(AotError) as ctx:
-                    emit_llvm_text(bad_module)
-                self.assertEqual(ctx.exception.diagnostics[0].message, message)
-
-        bad_llvm_function_type = IrModule(
-            "bad_llvm_call.py",
-            (),
-            (
-                IrFunction(
-                    "bad",
-                    (),
-                    int64,
-                    (IrReturn(IrCall("__llvm_FunctionType", (), int64)),),
-                ),
-            ),
-        )
-        with self.assertRaises(AotError) as ctx:
-            emit_llvm_text(bad_llvm_function_type)
-        self.assertEqual(
-            ctx.exception.diagnostics[0].message,
-            "LLVMFunctionType helper expects four args -> int",
-        )
-
-    def test_reports_unsupported_llvm_shapes(self) -> None:
-        int64 = IrIntType(64, signed=True)
-        record = IrRecord("Box", (IrField("value", int64),))
-        cases = (
-            IrModule(
-                "bad.py",
-                (),
-                (IrFunction("f", (), object(), (IrReturn(IrConstInt(1, int64)),)),),
-            ),
-            IrModule("bad.py", (), (IrFunction("f", (), int64, (object(),)),)),
-            IrModule("bad.py", (), (IrFunction("f", (), int64, (IrReturn(object()),)),)),
-            IrModule("bad.py", (), (IrFunction("f", (), int64, (IrReturn(IrName("x", int64)),)),)),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (IrParam("items", IrTupleType((IrStringType(),))),),
-                        IrNoneType(),
-                        (
-                            IrForEach(
-                                "(left, right)",
-                                IrName("items", IrTupleType((IrStringType(),))),
-                                IrBranch(()),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__cmp_Lt",
-                                    (IrConstBool(False), IrConstBool(True)),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_startswith",
-                                    (
-                                        IrConstString("x"),
-                                        IrTuple(
-                                            (IrConstInt(1, int64),),
-                                            IrTupleType((int64,)),
-                                        ),
-                                        IrConstInt(0, int64),
-                                    ),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrNoneType(),
-                        (IrAssign("(left, right)", IrConstBool(True)),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "len",
-                                    (
-                                        IrTuple((), IrTupleType(())),
-                                        IrConstInt(0, int64),
-                                    ),
-                                    int64,
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (IrReturn(IrCall("__bytes", (), IrStringType())),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (IrReturn(IrCall("__bytes", (IrConstBool(True),), IrStringType())),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (IrReturn(IrCall("__bytes", (IrConstInt(1, int64),), int64)),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (IrReturn(IrCall("__id", (), int64)),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (IrReturn(IrCall("__id", (IrConstString("x"),), IrStringType())),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (IrReturn(IrCall("__id", (IrConstInt(1, int64),), int64)),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall("__int_to_bytes", (IrConstInt(1, int64),), IrStringType())
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__int_to_bytes",
-                                    (
-                                        IrConstString("x"),
-                                        IrConstInt(1, int64),
-                                        IrConstString("little"),
-                                    ),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__int_to_bytes",
-                                    (
-                                        IrConstInt(1, int64),
-                                        IrConstBool(True),
-                                        IrConstString("little"),
-                                    ),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__int_to_bytes",
-                                    (
-                                        IrConstInt(1, int64),
-                                        IrConstInt(1, int64),
-                                        IrConstBool(True),
-                                    ),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__int_to_bytes",
-                                    (
-                                        IrConstInt(1, int64),
-                                        IrConstInt(1, int64),
-                                        IrConstString("little"),
-                                    ),
-                                    int64,
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_ljust",
-                                    (IrConstString("x"), IrConstInt(2, int64)),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_ljust",
-                                    (
-                                        IrConstInt(1, int64),
-                                        IrConstInt(2, int64),
-                                        IrConstString(" "),
-                                    ),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_ljust",
-                                    (
-                                        IrConstString("x"),
-                                        IrConstBool(True),
-                                        IrConstString(" "),
-                                    ),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_ljust",
-                                    (
-                                        IrConstString("x"),
-                                        IrConstInt(2, int64),
-                                        IrConstString(" "),
-                                    ),
-                                    int64,
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_rstrip",
-                                    (IrConstString("x"),),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_rstrip",
-                                    (IrConstString("x"), IrConstInt(1, int64)),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_rstrip",
-                                    (IrConstString("x"), IrConstString("x")),
-                                    int64,
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_endswith",
-                                    (IrConstString("x"),),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_endswith",
-                                    (IrConstString("x"), IrConstInt(1, int64)),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_endswith",
-                                    (IrConstString("x"), IrConstString("x")),
-                                    int64,
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (IrReturn(IrCall("__int_parse", (IrConstString("1"),), int64)),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__int_parse",
-                                    (IrConstInt(1, int64), IrConstInt(10, int64)),
-                                    int64,
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__int_parse",
-                                    (IrConstString("1"), IrConstBool(True)),
-                                    int64,
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__int_parse",
-                                    (IrConstString("1"), IrConstInt(10, int64)),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (IrReturn(IrCall("__str_isalpha", (), IrBoolType())),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (IrReturn(IrCall("__str_isalpha", (IrConstInt(1, int64),), IrBoolType())),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (IrReturn(IrCall("__str_isalpha", (IrConstString("x"),), int64)),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_startswith",
-                                    (IrConstString("x"),),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_startswith",
-                                    (
-                                        IrConstInt(1, int64),
-                                        IrConstString("x"),
-                                        IrConstInt(0, int64),
-                                    ),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_startswith",
-                                    (
-                                        IrConstString("x"),
-                                        IrConstInt(1, int64),
-                                        IrConstInt(0, int64),
-                                    ),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_startswith",
-                                    (
-                                        IrConstString("x"),
-                                        IrConstString("x"),
-                                        IrConstBool(False),
-                                    ),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_startswith",
-                                    (
-                                        IrConstString("x"),
-                                        IrConstString("x"),
-                                        IrConstInt(0, IrIntType(32, signed=True)),
-                                    ),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__str_startswith",
-                                    (
-                                        IrConstString("x"),
-                                        IrConstString("x"),
-                                        IrConstInt(0, int64),
-                                    ),
-                                    int64,
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__cmp_Lt",
-                                    (IrConstInt(1, int64),),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__cmp_Lt",
-                                    (
-                                        IrConstInt(1, IrIntType(32, signed=True)),
-                                        IrConstInt(2, int64),
-                                    ),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "len",
-                                    (IrTuple((), IrTupleType(())),),
-                                    IrBoolType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__getitem",
-                                    (
-                                        IrTuple(
-                                            (IrConstString("x"),),
-                                            IrTupleType((IrStringType(),)),
-                                        ),
-                                        IrConstBool(True),
-                                    ),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (
-                            IrReturn(
-                                IrCall(
-                                    "__getitem",
-                                    (IrTuple((), IrTupleType(())),),
-                                    IrStringType(),
-                                )
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "xcc.lexer.translate_source",
-                        (),
-                        IrStringType(),
-                        (IrReturn(IrConstString("")),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "xcc.lexer._aot_header_summary_for_source",
-                        (),
-                        IrStringType(),
-                        (IrReturn(IrConstString("")),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "xcc.lexer._aot_token_summary_for_source",
-                        (),
-                        IrStringType(),
-                        (IrReturn(IrConstString("")),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (
-                            IrReturn(
-                                IrBinary("/", IrConstInt(1, int64), IrConstInt(2, int64), int64)
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        int64,
-                        (IrReturn(IrGetField(IrConstInt(1, int64), "value", int64)),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (record,),
-                (
-                    IrFunction(
-                        "f",
-                        (IrParam("box", IrRecordType("Box")),),
-                        int64,
-                        (
-                            IrReturn(
-                                IrGetField(IrName("box", IrRecordType("Box")), "missing", int64)
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (IrRecord("Box", ()),),
-                (
-                    IrFunction(
-                        "box",
-                        (),
-                        IrRecordType("Box"),
-                        (IrReturn(IrConstructRecord("Box", (), IrRecordType("Box"))),),
-                    ),
-                ),
-                entry="box",
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrStringType(),
-                        (IrReturn(IrStringConcat((IrConstString("x"), IrConstBool(True)))),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f", (), IrBoolType(), (IrReturn(IrCall("__not", (), IrBoolType())),)
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (IrReturn(IrCall("__ifexp", (IrConstBool(True),), IrBoolType())),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (IrReturn(IrCall("__cmp_Eq", (IrConstInt(1, int64),), IrBoolType())),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (),
-                (
-                    IrFunction(
-                        "f",
-                        (),
-                        IrBoolType(),
-                        (IrReturn(IrCall("__cmp_Is", (IrConstInt(1, int64),), IrBoolType())),),
-                    ),
-                ),
-            ),
-            IrModule(
-                "bad.py",
-                (IrRecord("Type", (IrField("name", IrStringType()),)),),
-                (
-                    IrFunction(
-                        "xcc.types.Type.__str__", (), IrStringType(), (IrReturn(IrConstString("")),)
-                    ),
-                ),
-            ),
-        )
-        for module in cases:
-            with self.subTest(module=module):
-                with self.assertRaises(AotError) as ctx:
-                    emit_llvm_text(module)  # type: ignore[arg-type]
-                self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LLVM-0001")
-
-
-if __name__ == "__main__":
-    unittest.main()

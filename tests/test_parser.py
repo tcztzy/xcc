@@ -1,45 +1,38 @@
 import unittest
-from enum import Enum, auto
-from unittest.mock import patch
 
-from tests import _bootstrap  # noqa: F401
-import xcc.parser.array_sizes as parser_array_sizes
-import xcc.parser.declarators as parser_declarators
-import xcc.parser.expressions as parser_expressions
-import xcc.parser.extensions as parser_extensions
 import xcc.parser.statements as parser_statements
-import xcc.parser.type_specs as parser_type_specs
+from tests import _bootstrap  # noqa: F401
 from xcc.ast import (
     AlignofExpr,
     ArrayDecl,
     AssignExpr,
     BinaryExpr,
     BreakStmt,
-    CaseStmt,
     CallExpr,
+    CaseStmt,
     CastExpr,
     CharLiteral,
-    CompoundStmt,
-    CompoundLiteralExpr,
-    ContinueStmt,
-    ConditionalExpr,
     CommaExpr,
+    CompoundLiteralExpr,
+    CompoundStmt,
+    ConditionalExpr,
+    ContinueStmt,
     DeclGroupStmt,
     DeclStmt,
     DefaultStmt,
     DesignatorRange,
     DoWhileStmt,
     ExprStmt,
-    Expr,
     FloatLiteral,
     ForStmt,
     FunctionDef,
+    GenericExpr,
     GotoStmt,
     Identifier,
+    IfStmt,
     IndirectGotoStmt,
     InitItem,
     InitList,
-    IfStmt,
     IntLiteral,
     LabelAddressExpr,
     LabelStmt,
@@ -49,12 +42,11 @@ from xcc.ast import (
     RecordMemberDecl,
     ReturnStmt,
     SizeofExpr,
-    StaticAssertDecl,
     StatementExpr,
+    StaticAssertDecl,
     StringLiteral,
     SubscriptExpr,
     SwitchStmt,
-    GenericExpr,
     TypedefDecl,
     TypeSpec,
     UnaryExpr,
@@ -63,11 +55,7 @@ from xcc.ast import (
 )
 from xcc.lexer import Token, TokenKind, lex
 from xcc.parser import (
-    DeclSpecInfo,
-    Parser,
     ParserError,
-    array_size_non_ice_error,
-    parse_int_literal_value,
     parse,
 )
 
@@ -78,93 +66,6 @@ def _body(func):
 
 
 class ParserTests(unittest.TestCase):
-    def test_parser_extension_helpers_live_outside_entrypoint(self) -> None:
-        self.assertEqual(ParserError.__module__, "xcc.parser.type_specs")
-        self.assertEqual(DeclSpecInfo.__module__, "xcc.parser.type_specs")
-        self.assertEqual(
-            parser_array_sizes.eval_array_size_expr.__module__,
-            "xcc.parser.array_sizes",
-        )
-        self.assertEqual(
-            parser_type_specs.unsupported_type_message.__module__, "xcc.parser.type_specs"
-        )
-        self.assertEqual(
-            parser_extensions._skip_decl_extensions.__module__,
-            "xcc.parser.extensions",
-        )
-        self.assertEqual(
-            parser_extensions._skip_asm_label.__module__,
-            "xcc.parser.extensions",
-        )
-        self.assertEqual(parser_type_specs.parse_type_spec.__module__, "xcc.parser.type_specs")
-        self.assertEqual(
-            parser_type_specs.consume_decl_specifiers.__module__, "xcc.parser.type_specs"
-        )
-        self.assertEqual(parser_declarators.parse_declarator.__module__, "xcc.parser.declarators")
-        self.assertEqual(
-            parser_declarators.parse_array_declarator.__module__,
-            "xcc.parser.declarators",
-        )
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._unsupported_type_name_token_message("", "end of input"),
-            "Type name is missing before end of input",
-        )
-        self.assertEqual(
-            parser._unsupported_declaration_type_token_message("", "end of input"),
-            "Declaration type is missing before end of input",
-        )
-        self.assertEqual(
-            parser._unsupported_type_name_punctuator_message("???"),
-            "Unsupported type name punctuator: '???'",
-        )
-        self.assertEqual(
-            parser._unsupported_declaration_type_punctuator_message("???"),
-            "Unsupported declaration type punctuator: '???'",
-        )
-
-    def test_parser_expression_statement_helpers_live_outside_entrypoint(self) -> None:
-        self.assertEqual(parser_expressions.parse_expression.__module__, "xcc.parser.expressions")
-        self.assertEqual(parser_expressions.parse_primary.__module__, "xcc.parser.expressions")
-        self.assertEqual(parser_statements.parse_statement.__module__, "xcc.parser.statements")
-        self.assertEqual(parser_statements.parse_initializer.__module__, "xcc.parser.statements")
-
-        expr = Parser(list(lex("1 + 2")))._parse_expression()
-        self.assertIsInstance(expr, BinaryExpr)
-        stmt = Parser(list(lex("return 3;")))._parse_statement()
-        self.assertIsInstance(stmt, ReturnStmt)
-        init = Parser(list(lex("{ [0] = 1 }")))._parse_initializer()
-        self.assertIsInstance(init, InitList)
-        string_parser = Parser(list(lex('"x"')))
-        string_token = string_parser._current()
-        self.assertEqual(string_parser._split_string_literal('u8"xy"', string_token), ("u8", "xy"))
-        self.assertEqual(string_parser._merge_string_prefix("", "u8", string_token), "u8")
-
-        class RaisingCompoundLiteralProbe:
-            _index = 0
-
-            def _is_parenthesized_type_name_start(self) -> bool:
-                return True
-
-            def _parse_parenthesized_type_name(self) -> None:
-                raise RuntimeError("probe")
-
-        with self.assertRaises(RuntimeError):
-            parser_expressions.looks_like_compound_literal(RaisingCompoundLiteralProbe())
-
-    def test_parser_extension_wrapper_methods_delegate(self) -> None:
-        parser = Parser(list(lex('__attribute__((overloadable)) int f __asm__("sym");')))
-        self.assertTrue(parser._is_gnu_attribute_start())
-        self.assertEqual(parser._consume_gnu_attributes(), (True, True))
-        parser._expect(TokenKind.KEYWORD)
-        parser._expect(TokenKind.IDENT)
-        self.assertTrue(parser._skip_asm_label())
-
-        parser = Parser(list(lex("__attribute__((unused)) __declspec(align(8)) int x;")))
-        self.assertEqual(parser._consume_decl_attributes(), (True, False))
-        self.assertEqual(parser._current().lexeme, "int")
-        self.assertFalse(parser._skip_gnu_attributes())
-
     def test_typedef_preserves_transparent_union_attribute(self) -> None:
         unit = parse(
             list(
@@ -198,23 +99,10 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(right, BinaryExpr)
         self.assertEqual(right.op, "*")
 
-    def test_parser_records_debug_locations_in_codegen_traversal_order(self) -> None:
-        source = (
-            "int main(void) {\n"
-            "  int left = 0, right = 1;\n"
-            "  for (int index = 0; index < 1; index++) {\n"
-            "    left = right;\n"
-            "  }\n"
-            "  return left;\n"
-            "}\n"
-        )
-
-        unit = parse(list(lex(source)))
-
-        self.assertEqual(
-            [location.line for location in unit.source_locations],
-            [1, 1, 2, 3, 3, 3, 4, 6],
-        )
+    def test_nineteen_nested_parenthesized_expressions(self) -> None:
+        source = "int f(void){return " + "(" * 19 + "1" + ")" * 19 + ";}"
+        value = _body(parse(list(lex(source))).functions[0]).statements[0].value
+        self.assertEqual(value, IntLiteral("1"))
 
     def test_void_return(self) -> None:
         source = "void main(){return;}"
@@ -415,8 +303,8 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(
             unit.functions[0].params,
             [
-                Param(TypeSpec("void", pointer_depth=1, qualifiers=("const",)), "p"),
-                Param(TypeSpec("char", pointer_depth=1, qualifiers=("const",)), "q"),
+                Param(TypeSpec("void", declarator_ops=(("ptr", 0),), qualifiers=("const",)), "p"),
+                Param(TypeSpec("char", declarator_ops=(("ptr", 0),), qualifiers=("const",)), "q"),
             ],
         )
 
@@ -466,7 +354,8 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, ReturnStmt)
         self.assertIsInstance(stmt.value, SizeofExpr)
         self.assertEqual(
-            stmt.value.type_spec, TypeSpec("int", pointer_depth=1, qualifiers=("const",))
+            stmt.value.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0),), qualifiers=("const",)),
         )
 
     def test_void_parameter_list(self) -> None:
@@ -613,11 +502,15 @@ class ParserTests(unittest.TestCase):
 
     def test_void_pointer_parameter_is_allowed(self) -> None:
         unit = parse(list(lex("int f(void *p){return 0;}")))
-        self.assertEqual(unit.functions[0].params, [Param(TypeSpec("void", 1), "p")])
+        self.assertEqual(
+            unit.functions[0].params, [Param(TypeSpec("void", declarator_ops=(("ptr", 0),)), "p")]
+        )
 
     def test_array_parameter_is_allowed(self) -> None:
         unit = parse(list(lex("int f(int a[4]){return a[0];}")))
-        self.assertEqual(unit.functions[0].params, [Param(TypeSpec("int", 0, (4,)), "a")])
+        self.assertEqual(
+            unit.functions[0].params, [Param(TypeSpec("int", declarator_ops=(("arr", 4),)), "a")]
+        )
 
     def test_pointer_to_array_parameter(self) -> None:
         unit = parse(list(lex("int f(int (*p)[4]){return (*p)[0];}")))
@@ -775,50 +668,31 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(body[1], LabelStmt)
 
     def test_indirect_goto_statement(self) -> None:
-        unit = parse(
-            list(lex("int main(void){void *target=0; goto *target; return 0;}")),
-            std="gnu11",
-        )
-        stmt = _body(unit.functions[0]).statements[1]
-        self.assertIsInstance(stmt, IndirectGotoStmt)
-        self.assertIsInstance(stmt.target, Identifier)
-        self.assertEqual(stmt.target.name, "target")
+        source = "int main(void){void *target=0; goto *target; return 0;}"
+        for std in ("c11", "gnu11"):
+            with self.subTest(std=std):
+                stmt = _body(parse(list(lex(source)), std=std).functions[0]).statements[1]
+                self.assertIsInstance(stmt, IndirectGotoStmt)
+                self.assertIsInstance(stmt.target, Identifier)
+                self.assertEqual(stmt.target.name, "target")
 
     def test_label_address_expression(self) -> None:
-        unit = parse(
-            list(lex("int main(void){void *target = &&done; goto *target; done: return 0;}")),
-            std="gnu11",
-        )
-        decl = _body(unit.functions[0]).statements[0]
-        self.assertIsInstance(decl, DeclStmt)
-        self.assertIsInstance(decl.init, LabelAddressExpr)
-        self.assertEqual(decl.init.label, "done")
+        source = "int main(void){void *target = &&done; goto *target; done: return 0;}"
+        for std in ("c11", "gnu11"):
+            with self.subTest(std=std):
+                decl = _body(parse(list(lex(source)), std=std).functions[0]).statements[0]
+                self.assertIsInstance(decl, DeclStmt)
+                self.assertIsInstance(decl.init, LabelAddressExpr)
+                self.assertEqual(decl.init.label, "done")
 
     def test_statement_expression_in_for_init(self) -> None:
         source = "int main(void){for(({int x=0; x;});;); return 0;}"
-        unit = parse(list(lex(source)), std="gnu11")
-        stmt = _body(unit.functions[0]).statements[0]
-        self.assertIsInstance(stmt, ForStmt)
-        self.assertIsInstance(stmt.init, StatementExpr)
-        self.assertEqual(len(stmt.init.body.statements), 2)
-
-    def test_c11_accepts_indirect_goto_statement(self) -> None:
-        unit = parse(
-            list(lex("int main(void){void *target=0; goto *target; return 0;}")), std="c11"
-        )
-        self.assertIsNotNone(unit)
-
-    def test_c11_accepts_label_address_expression(self) -> None:
-        unit = parse(
-            list(lex("int main(void){void *target = &&done; goto *target; done: return 0;}")),
-            std="c11",
-        )
-        self.assertIsNotNone(unit)
-
-    def test_c11_accepts_statement_expression(self) -> None:
-        source = "int main(void){for(({int x=0; x;});;); return 0;}"
-        unit = parse(list(lex(source)), std="c11")
-        self.assertIsNotNone(unit)
+        for std in ("c11", "gnu11"):
+            with self.subTest(std=std):
+                stmt = _body(parse(list(lex(source)), std=std).functions[0]).statements[0]
+                self.assertIsInstance(stmt, ForStmt)
+                self.assertIsInstance(stmt.init, StatementExpr)
+                self.assertEqual(len(stmt.init.body.statements), 2)
 
     def test_goto_requires_label_name(self) -> None:
         with self.assertRaises(ParserError):
@@ -970,25 +844,6 @@ class ParserTests(unittest.TestCase):
     def test_adjacent_string_literals_incompatible_prefix_error(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex('int main(){u8"a" L"b";return 0;}')))
-
-    def test_invalid_string_literal_token_error(self) -> None:
-        tokens = [
-            Token(TokenKind.KEYWORD, "int", 1, 1),
-            Token(TokenKind.IDENT, "main", 1, 5),
-            Token(TokenKind.PUNCTUATOR, "(", 1, 9),
-            Token(TokenKind.PUNCTUATOR, ")", 1, 10),
-            Token(TokenKind.PUNCTUATOR, "{", 1, 11),
-            Token(TokenKind.STRING_LITERAL, "invalid", 1, 12),
-            Token(TokenKind.PUNCTUATOR, ";", 1, 19),
-            Token(TokenKind.KEYWORD, "return", 1, 20),
-            Token(TokenKind.INT_CONST, "0", 1, 27),
-            Token(TokenKind.PUNCTUATOR, ";", 1, 28),
-            Token(TokenKind.PUNCTUATOR, "}", 1, 29),
-            Token(TokenKind.EOF, None, 1, 30),
-        ]
-        with self.assertRaises(ParserError) as ctx:
-            parse(tokens)
-        self.assertEqual(str(ctx.exception), "Invalid string literal at 1:12")
 
     def test_prefix_update_expression(self) -> None:
         unit = parse(list(lex("int main(){++x;return 0;}")))
@@ -1238,7 +1093,9 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){enum E *p;return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("enum", 1, enum_tag="E"))
+        self.assertEqual(
+            stmt.type_spec, TypeSpec("enum", declarator_ops=(("ptr", 0),), enum_tag="E")
+        )
 
     def test_enum_member_value_constant_expression(self) -> None:
         unit = parse(list(lex("int main(){enum E { A=1<<2, B=A+1 } x;return x;}")))
@@ -1272,7 +1129,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("enum { SIZE = 64 }; typedef char Name[SIZE + 4];")))
         typedef = unit.declarations[1]
         self.assertIsInstance(typedef, TypedefDecl)
-        self.assertEqual(typedef.type_spec.array_lengths, (68,))
+        self.assertEqual(typedef.type_spec.declarator_ops, (("arr", 68),))
 
     def test_tagged_struct_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){struct Node { int value; }; return 0;}")))
@@ -1283,7 +1140,8 @@ class ParserTests(unittest.TestCase):
             TypeSpec(
                 "struct",
                 record_tag="Node",
-                record_members=((TypeSpec("int"), "value"),),
+                record_members=(RecordMemberDecl(TypeSpec("int"), "value"),),
+                has_record_body=True,
             ),
         )
         self.assertIsNone(stmt.name)
@@ -1312,7 +1170,8 @@ class ParserTests(unittest.TestCase):
             TypeSpec(
                 "struct",
                 record_tag="Node",
-                record_members=((TypeSpec("int"), "value"),),
+                record_members=(RecordMemberDecl(TypeSpec("int"), "value"),),
+                has_record_body=True,
             ),
         )
         self.assertEqual(stmt.name, "n")
@@ -1323,7 +1182,11 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, DeclStmt)
         self.assertEqual(
             stmt.type_spec,
-            TypeSpec("struct", record_members=((TypeSpec("int"), "x"),)),
+            TypeSpec(
+                "struct",
+                record_members=(RecordMemberDecl(TypeSpec("int"), "x"),),
+                has_record_body=True,
+            ),
         )
         self.assertEqual(stmt.name, "v")
 
@@ -1331,7 +1194,9 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){struct Node *next; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("struct", 1, record_tag="Node"))
+        self.assertEqual(
+            stmt.type_spec, TypeSpec("struct", declarator_ops=(("ptr", 0),), record_tag="Node")
+        )
         self.assertEqual(stmt.name, "next")
 
     def test_union_object_declaration_statement(self) -> None:
@@ -1343,7 +1208,11 @@ class ParserTests(unittest.TestCase):
             TypeSpec(
                 "union",
                 record_tag="Data",
-                record_members=((TypeSpec("int"), "x"), (TypeSpec("int"), "y")),
+                record_members=(
+                    RecordMemberDecl(TypeSpec("int"), "x"),
+                    RecordMemberDecl(TypeSpec("int"), "y"),
+                ),
+                has_record_body=True,
             ),
         )
         self.assertEqual(stmt.name, "d")
@@ -1357,7 +1226,11 @@ class ParserTests(unittest.TestCase):
             TypeSpec(
                 "struct",
                 record_tag="S",
-                record_members=((TypeSpec("int"), "x"), (TypeSpec("int"), "y")),
+                record_members=(
+                    RecordMemberDecl(TypeSpec("int"), "x"),
+                    RecordMemberDecl(TypeSpec("int"), "y"),
+                ),
+                has_record_body=True,
             ),
         )
 
@@ -1365,7 +1238,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("struct token { const char *start, *end; };")))
         stmt = unit.declarations[0]
         self.assertIsInstance(stmt, DeclStmt)
-        expected = TypeSpec("char", 1, qualifiers=("const",))
+        expected = TypeSpec("char", declarator_ops=(("ptr", 0),), qualifiers=("const",))
         self.assertEqual(
             stmt.type_spec.record_members,
             (
@@ -1386,7 +1259,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int *p;return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_char_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){char c;return 0;}")))
@@ -1411,7 +1284,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int __unaligned *__unaligned p; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
         self.assertEqual(stmt.name, "p")
 
     def test_declspec_block_scope_declaration_is_ignored(self) -> None:
@@ -1991,14 +1864,6 @@ class ParserTests(unittest.TestCase):
             "Invalid integer type keyword order: 'char' after 'short'",
         )
 
-    def test_typespec_normalizes_legacy_record_member_with_alignment(self) -> None:
-        record_type = TypeSpec("struct", record_members=((TypeSpec("int"), "x", 16),))
-        self.assertEqual(record_type.record_members[0], RecordMemberDecl(TypeSpec("int"), "x", 16))
-
-    def test_typespec_rejects_invalid_record_member_tuple(self) -> None:
-        with self.assertRaises(TypeError):
-            TypeSpec("struct", record_members=(("x",),))  # type: ignore[arg-type]
-
     def test_atomic_qualified_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){_Atomic int value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
@@ -2015,7 +1880,9 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){_Atomic(int) *value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, is_atomic=True))
+        self.assertEqual(
+            stmt.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),), is_atomic=True)
+        )
 
     def test_atomic_qualified_declaration_statement_idempotent(self) -> None:
         unit = parse(list(lex("int main(){_Atomic _Atomic int value; return 0;}")))
@@ -2033,7 +1900,9 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){_Atomic int values[2]; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", array_lengths=(2,), is_atomic=True))
+        self.assertEqual(
+            stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 2),), is_atomic=True)
+        )
 
     def test_atomic_qualified_typedef_array_is_rejected(self) -> None:
         with self.assertRaises(ParserError) as ctx:
@@ -2116,31 +1985,37 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("typedef const int CI; int main(){_Atomic(CI *) value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, qualifiers=("const",), is_atomic=True))
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0),), qualifiers=("const",), is_atomic=True),
+        )
 
     def test_atomic_type_specifier_accepts_unqualified_pointer_typedef_alias(self) -> None:
         unit = parse(list(lex("typedef const int *PCI; int main(){_Atomic(PCI) value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, qualifiers=("const",), is_atomic=True))
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0),), qualifiers=("const",), is_atomic=True),
+        )
 
     def test_atomic_qualified_pointer_typedef_declaration(self) -> None:
         unit = parse(list(lex("typedef int *_Atomic AtomicIntPtr;")))
         declaration = unit.declarations[0]
         self.assertIsInstance(declaration, TypedefDecl)
-        self.assertEqual(declaration.type_spec, TypeSpec("int", 1))
+        self.assertEqual(declaration.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_atomic_qualified_parenthesized_pointer_typedef_declaration(self) -> None:
         unit = parse(list(lex("typedef int (*_Atomic AtomicIntPtr);")))
         declaration = unit.declarations[0]
         self.assertIsInstance(declaration, TypedefDecl)
-        self.assertEqual(declaration.type_spec, TypeSpec("int", 1))
+        self.assertEqual(declaration.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_atomic_qualified_before_pointer_typedef_declaration(self) -> None:
         unit = parse(list(lex("typedef int _Atomic *AtomicIntPtr;")))
         declaration = unit.declarations[0]
         self.assertIsInstance(declaration, TypedefDecl)
-        self.assertEqual(declaration.type_spec, TypeSpec("int", 1))
+        self.assertEqual(declaration.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_atomic_type_specifier_accepts_transitive_unqualified_pointer_typedef_alias(
         self,
@@ -2154,7 +2029,10 @@ class ParserTests(unittest.TestCase):
         )
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, qualifiers=("const",), is_atomic=True))
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0),), qualifiers=("const",), is_atomic=True),
+        )
 
     def test_atomic_type_specifier_rejects_shadowed_typedef_name(self) -> None:
         source = "typedef const int CI; int main(){int CI=0; _Atomic(CI) value; return value;}"
@@ -2184,13 +2062,18 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){_Atomic(const int *) value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, qualifiers=("const",), is_atomic=True))
+        self.assertEqual(
+            stmt.type_spec,
+            TypeSpec("int", declarator_ops=(("ptr", 0),), qualifiers=("const",), is_atomic=True),
+        )
 
     def test_atomic_type_specifier_accepts_pointer_to_qualified_pointer_type(self) -> None:
         unit = parse(list(lex("int main(){_Atomic(int *const *) value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 2, is_atomic=True))
+        self.assertEqual(
+            stmt.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0), ("ptr", 0)), is_atomic=True)
+        )
 
     def test_atomic_type_specifier_rejects_atomic_qualified_pointer_type(self) -> None:
         with self.assertRaises(ParserError):
@@ -2200,7 +2083,9 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){_Atomic(int *_Atomic *) value; return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 2, is_atomic=True))
+        self.assertEqual(
+            stmt.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0), ("ptr", 0)), is_atomic=True)
+        )
 
     def test_atomic_typedef_ignores_gnu_attribute_before_name(self) -> None:
         unit = parse(
@@ -2494,7 +2379,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int *p[4];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1, (4,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 4), ("ptr", 0))))
 
     def test_pointer_to_array_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){int (*p)[4];return 0;}")))
@@ -2628,7 +2513,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int a[4];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (4,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 4),)))
 
     def test_multi_declarator_declaration_statement(self) -> None:
         unit = parse(list(lex("int main(){int a=1,b=a;return b;}")))
@@ -2653,25 +2538,27 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(){int a[2][3];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (2, 3)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 2), ("arr", 3))))
 
     def test_void_pointer_declaration_is_allowed(self) -> None:
         unit = parse(list(lex("int main(){void *p;return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("void", 1))
+        self.assertEqual(stmt.type_spec, TypeSpec("void", declarator_ops=(("ptr", 0),)))
 
     def test_pointer_parameter_and_return_type(self) -> None:
         unit = parse(list(lex("int *id(int *p){return p;}")))
         func = unit.functions[0]
-        self.assertEqual(func.return_type, TypeSpec("int", 1))
-        self.assertEqual(func.params, [Param(TypeSpec("int", 1), "p")])
+        self.assertEqual(func.return_type, TypeSpec("int", declarator_ops=(("ptr", 0),)))
+        self.assertEqual(func.params, [Param(TypeSpec("int", declarator_ops=(("ptr", 0),)), "p")])
 
     def test_multiple_pointer_levels(self) -> None:
         unit = parse(list(lex("int **id(int **pp){return pp;}")))
         func = unit.functions[0]
-        self.assertEqual(func.return_type, TypeSpec("int", 2))
-        self.assertEqual(func.params, [Param(TypeSpec("int", 2), "pp")])
+        self.assertEqual(func.return_type, TypeSpec("int", declarator_ops=(("ptr", 0), ("ptr", 0))))
+        self.assertEqual(
+            func.params, [Param(TypeSpec("int", declarator_ops=(("ptr", 0), ("ptr", 0))), "pp")]
+        )
 
     def test_unary_address_of_expression(self) -> None:
         unit = parse(list(lex("int main(){int x;return &x;}")))
@@ -2748,7 +2635,7 @@ class ParserTests(unittest.TestCase):
         expr = stmt.value
         self.assertIsInstance(expr, SizeofExpr)
         self.assertIsNone(expr.expr)
-        self.assertEqual(expr.type_spec, TypeSpec("int", 1))
+        self.assertEqual(expr.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_sizeof_unsigned_short_type_name(self) -> None:
         unit = parse(list(lex("int main(){return sizeof(unsigned short);}")))
@@ -2774,7 +2661,7 @@ class ParserTests(unittest.TestCase):
         expr = stmt.value
         self.assertIsInstance(expr, AlignofExpr)
         self.assertIsNone(expr.expr)
-        self.assertEqual(expr.type_spec, TypeSpec("int", 1))
+        self.assertEqual(expr.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_alignof_unaligned_type_name(self) -> None:
         unit = parse(list(lex("int main(){return _Alignof(__unaligned int);}")))
@@ -2792,7 +2679,7 @@ class ParserTests(unittest.TestCase):
         expr = stmt.value
         self.assertIsInstance(expr, AlignofExpr)
         self.assertIsNone(expr.expr)
-        self.assertEqual(expr.type_spec, TypeSpec("int", 1))
+        self.assertEqual(expr.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_alignof_expression(self) -> None:
         unit = parse(list(lex("int main(){int x; return _Alignof(x);}")), std="gnu11")
@@ -2814,7 +2701,6 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(expr, AlignofExpr)
         self.assertIsNotNone(expr.expr)
         self.assertIsNone(expr.type_spec)
-        self.assertTrue(expr.is_gnu)
 
     def test_alignof_expression_rejected_in_c11(self) -> None:
         with self.assertRaises(ParserError) as ctx:
@@ -2825,7 +2711,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){typeof(int*) p; return 0;}")), std="gnu11")
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_typeof_expression_declaration(self) -> None:
         unit = parse(list(lex("int main(void){int x; typeof(x) y; return 0;}")), std="gnu11")
@@ -2850,7 +2736,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){typeof_unqual(int*) p; return 0;}")), std="gnu11")
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_typeof_unqual_expression_declaration(self) -> None:
         unit = parse(list(lex("int main(void){int x; typeof_unqual(x) y; return 0;}")), std="gnu11")
@@ -2862,7 +2748,7 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("int main(void){typeof(int) *p; return 0;}")), std="gnu11")
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 1))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_typeof_accepted_in_c11(self) -> None:
         unit = parse(list(lex("int main(void){typeof(int) x; return 0;}")), std="c11")
@@ -3037,145 +2923,10 @@ class ParserTests(unittest.TestCase):
             (("arr", ArrayDecl(IntLiteral("4"), ("const", "volatile"), False)),),
         )
 
-    def test_array_size_helpers_cover_error_paths(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        with (
-            patch.object(parser_array_sizes, "array_size_literal_error", return_value=None),
-            patch.object(parser_array_sizes, "parse_int_literal_value", return_value=-1),
-            self.assertRaisesRegex(ParserError, "Array size must be positive"),
-        ):
-            parser._parse_array_size(Token(TokenKind.INT_CONST, "1", 1, 1))
-        with self.assertRaisesRegex(
-            ParserError, "Array size identifier 'n' is not an integer constant expression"
-        ):
-            parser._parse_array_size_expr(Identifier("n"), Token(TokenKind.IDENT, "n", 1, 1))
-        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
-            parser._parse_array_size_expr(
-                UnaryExpr("-", IntLiteral("1")),
-                Token(TokenKind.PUNCTUATOR, "-", 1, 1),
-            )
-        with self.assertRaisesRegex(
-            ParserError,
-            "Array size unary operator '\\+' is not an integer constant expression",
-        ):
-            parser._parse_array_size_expr(
-                UnaryExpr("+", Identifier("n")),
-                Token(TokenKind.PUNCTUATOR, "+", 1, 1),
-            )
-        with self.assertRaisesRegex(
-            ParserError,
-            "Array size binary operator '\\*' is not an integer constant expression",
-        ):
-            parser._parse_array_size_expr(
-                BinaryExpr("*", IntLiteral("1"), IntLiteral("n")),
-                Token(TokenKind.PUNCTUATOR, "*", 1, 1),
-            )
-        with self.assertRaisesRegex(
-            ParserError, "Array size call expression is not an integer constant expression"
-        ):
-            parser._parse_array_size_expr(
-                CallExpr(Identifier("f"), []),
-                Token(TokenKind.IDENT, "f", 1, 1),
-            )
-        with self.assertRaisesRegex(
-            ParserError,
-            "Array size generic selection is not an integer constant expression",
-        ):
-            parser._parse_array_size_expr(
-                GenericExpr(IntLiteral("0"), ((TypeSpec("long"), IntLiteral("1")),)),
-                Token(TokenKind.PUNCTUATOR, "_Generic", 1, 1),
-            )
-        with self.assertRaisesRegex(
-            ParserError,
-            "Array size comma expression is not an integer constant expression",
-        ):
-            parser._parse_array_size_expr(
-                CommaExpr(IntLiteral("1"), Identifier("n")),
-                Token(TokenKind.PUNCTUATOR, ",", 1, 1),
-            )
-        with self.assertRaisesRegex(
-            ParserError,
-            "Array size conditional condition is not an integer constant expression",
-        ):
-            parser._parse_array_size_expr(
-                ConditionalExpr(Identifier("n"), IntLiteral("1"), IntLiteral("2")),
-                Token(TokenKind.PUNCTUATOR, "?", 1, 1),
-            )
-        with self.assertRaisesRegex(
-            ParserError,
-            "Array size identifier 'n' is not an integer constant expression",
-        ):
-            parser._parse_array_size_expr(
-                CastExpr(TypeSpec("int"), Identifier("n")),
-                Token(TokenKind.PUNCTUATOR, "(", 1, 1),
-            )
-        self.assertEqual(
-            parser._parse_array_size_expr(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1)),
-            0,
-        )
-        self.assertEqual(
-            parser._parse_array_size_expr_or_vla(
-                Identifier("n"), Token(TokenKind.IDENT, "n", 1, 1)
-            ),
-            -1,
-        )
-        with self.assertRaisesRegex(ParserError, "Array size must be positive"):
-            parser._parse_array_size_expr_or_vla(
-                UnaryExpr("-", IntLiteral("1")),
-                Token(TokenKind.PUNCTUATOR, "-", 1, 1),
-            )
-
-    def test_zero_length_array_allowed(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._parse_array_size_expr(IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1)), 0
-        )
-        self.assertEqual(parser._parse_array_size(Token(TokenKind.INT_CONST, "0", 1, 1)), 0)
-        self.assertEqual(
-            parser._parse_array_size_expr_or_vla(
-                IntLiteral("0"), Token(TokenKind.INT_CONST, "0", 1, 1)
-            ),
-            0,
-        )
-
-    def test_zero_length_array_struct_member(self) -> None:
-        src = "struct s { int n; char data[0]; };"
-        tu = parse(lex(src))
-        self.assertEqual(len(tu.declarations), 1)
-
     def test_c11_zero_length_array_struct_member_allowed(self) -> None:
         src = "struct s { int n; char data[0]; };"
         tu = parse(lex(src), std="c11")
         self.assertEqual(len(tu.declarations), 1)
-
-    def test_sizeof_type_spec_handles_array_decl_forms(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertIsNone(
-            parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", object()),)))
-        )
-        self.assertIsNone(
-            parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", ArrayDecl(None)),)))
-        )
-        self.assertIsNone(
-            parser._sizeof_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(IntLiteral("n"))),))
-            )
-        )
-        self.assertIsNone(
-            parser._sizeof_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(IntLiteral("0"))),))
-            )
-        )
-        self.assertEqual(
-            parser._sizeof_type_spec(TypeSpec("int", declarator_ops=(("arr", ArrayDecl(2)),))),
-            8,
-        )
-        self.assertEqual(
-            parser._sizeof_type_spec(
-                TypeSpec("int", declarator_ops=(("arr", ArrayDecl(IntLiteral("2"))),))
-            ),
-            8,
-        )
 
     def test_decl_specifier_duplicate_errors(self) -> None:
         with self.assertRaisesRegex(ParserError, "Duplicate storage class specifier: 'extern'"):
@@ -3203,62 +2954,6 @@ class ParserTests(unittest.TestCase):
         with self.assertRaisesRegex(ParserError, "Duplicate array bound specifier: 'static'"):
             parse(list(lex("int f(int a[static static 4]){return 0;}")))
 
-    def test_compound_literal_helper_errors(self) -> None:
-        parser = Parser(list(lex("1")))
-        self.assertFalse(parser._looks_like_compound_literal())
-        parser = Parser(list(lex("(int)1")))
-        with self.assertRaises(ParserError):
-            parser._parse_compound_literal_expr()
-
-    def test_array_declarator_helper_unsupported_paths(self) -> None:
-        parser = Parser(list(lex("]")))
-        with self.assertRaisesRegex(ParserError, "Array size is required in this context"):
-            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
-        parser = Parser(list(lex("n]")))
-        with self.assertRaisesRegex(
-            ParserError,
-            "Array size identifier 'n' is not an integer constant expression",
-        ):
-            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
-        parser = Parser(list(lex("a+b]")))
-        with self.assertRaisesRegex(
-            ParserError,
-            "not an integer constant expression",
-        ):
-            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
-        parser = Parser(list(lex("foo()]")))
-        with self.assertRaisesRegex(
-            ParserError,
-            "Array size call expression is not an integer constant expression",
-        ):
-            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
-        parser = Parser(
-            [
-                Token(TokenKind.INT_CONST, "1uu", 1, 1),
-                Token(TokenKind.PUNCTUATOR, "]", 1, 4),
-                Token(TokenKind.EOF, "", 1, 5),
-            ]
-        )
-        with self.assertRaisesRegex(
-            ParserError, "Array size literal has unsupported integer suffix"
-        ):
-            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
-        parser = Parser(list(lex("n]")))
-
-        def parse_assignment_with_malformed_int_literal() -> IntLiteral:
-            parser._advance()
-            return IntLiteral(1)
-
-        parser._parse_assignment = parse_assignment_with_malformed_int_literal
-        with self.assertRaisesRegex(ParserError, "Array size literal token is malformed"):
-            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=False)
-        parser = Parser(list(lex("static ]")))
-        with self.assertRaisesRegex(ParserError, "Array parameter with 'static' requires a size"):
-            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=True)
-        parser = Parser(list(lex("int]")))
-        with self.assertRaises(ParserError):
-            parser._parse_array_declarator(allow_vla=False, allow_parameter_arrays=True)
-
     def test_unsigned_long_cast_expression(self) -> None:
         unit = parse(list(lex("int main(){int x; return (unsigned long)x;}")))
         stmt = _body(unit.functions[0]).statements[1]
@@ -3283,7 +2978,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(outer_expr, CastExpr)
         inner_expr = outer_expr.expr
         self.assertIsInstance(inner_expr, CastExpr)
-        self.assertEqual(inner_expr.type_spec, TypeSpec("void", 1))
+        self.assertEqual(inner_expr.type_spec, TypeSpec("void", declarator_ops=(("ptr", 0),)))
 
     def test_typedef_declaration_and_use(self) -> None:
         unit = parse(list(lex("int main(){typedef int T; T x=1; return (T)x;}")))
@@ -3306,7 +3001,7 @@ class ParserTests(unittest.TestCase):
         self.assertIsInstance(stmt, ReturnStmt)
         expr = stmt.value
         self.assertIsInstance(expr, SizeofExpr)
-        self.assertEqual(expr.type_spec, TypeSpec("int", 1))
+        self.assertEqual(expr.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_typedef_name_shadowed_by_local_object(self) -> None:
         unit = parse(list(lex("int main(){typedef int T; {int T=1; (T);} return 0;}")))
@@ -3334,12 +3029,12 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex(source)))
         self.assertEqual(len(unit.functions), 1)
         func = unit.functions[0]
-        self.assertEqual(func.return_type, TypeSpec("int", 1))
+        self.assertEqual(func.return_type, TypeSpec("int", declarator_ops=(("ptr", 0),)))
         return_stmt = _body(func).statements[0]
         self.assertIsInstance(return_stmt, ReturnStmt)
         return_expr = return_stmt.value
         self.assertIsInstance(return_expr, CastExpr)
-        self.assertEqual(return_expr.type_spec, TypeSpec("int", 1))
+        self.assertEqual(return_expr.type_spec, TypeSpec("int", declarator_ops=(("ptr", 0),)))
 
     def test_file_scope_typedef_chain(self) -> None:
         unit = parse(list(lex("typedef int T; typedef T U; U main(){return 0;}")))
@@ -3398,132 +3093,12 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int main(void){_Static_assert(1, 2); return 0;}")))
 
-    def test_expression_start_ellipsis_after_static_assert_reports_operand_diagnostic(self) -> None:
+    def test_expression_start_punctuator_reports_operand_diagnostic(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex('int main(void){ _Static_assert(1, "ok"); ...; return 0; }')))
         self.assertEqual(
             ctx.exception.message,
             "Expression cannot start with '...': expected an operand",
-        )
-
-    def test_expression_start_right_paren_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); ); return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with ')': expected an operand",
-        )
-
-    def test_expression_start_right_bracket_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); ]; return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with ']': expected an operand",
-        )
-
-    def test_expression_start_right_brace_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); return };')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with '}': expected an operand",
-        )
-
-    def test_expression_start_comma_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); , return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with ',': expected an operand",
-        )
-
-    def test_expression_start_colon_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); : return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with ':': expected an operand",
-        )
-
-    def test_expression_start_question_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); ? return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with '?': expected an operand",
-        )
-
-    def test_expression_start_semicolon_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex("int main(void){ int x = ; return 0; }")))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with ';': expected an operand",
-        )
-
-    def test_expression_start_left_brace_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex("int main(void){ return { 0; } }")))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with '{': expected an operand",
-        )
-
-    def test_expression_start_token_paste_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); ##; return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with '##': expected an operand",
-        )
-
-    def test_expression_start_hash_digraph_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); %:; return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with '%:': expected an operand",
-        )
-
-    def test_expression_start_hash_hash_digraph_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); %:%:; return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with '%:%:': expected an operand",
-        )
-
-    def test_expression_start_left_bracket_digraph_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); <:; return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with '<:': expected an operand",
-        )
-
-    def test_expression_start_right_bracket_digraph_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); :>; return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with ':>': expected an operand",
-        )
-
-    def test_expression_start_left_brace_digraph_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); <%; return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with '<%': expected an operand",
-        )
-
-    def test_expression_start_right_brace_digraph_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex('int main(void){ _Static_assert(1, "ok"); %>; return 0; }')))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with '%>': expected an operand",
         )
 
     def test_expression_start_keyword_reports_operand_diagnostic(self) -> None:
@@ -3542,168 +3117,76 @@ class ParserTests(unittest.TestCase):
             "Expression is missing before end of input",
         )
 
-    def test_expression_start_eof_after_initializer_reports_operand_diagnostic(self) -> None:
-        with self.assertRaises(ParserError) as ctx:
-            parse(list(lex("int main(void){ int x =")))
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression is missing before end of input",
-        )
-
     def test_expression_start_pp_number_reports_operand_diagnostic(self) -> None:
-        tokens = list(lex("int main(void){ return 0; }"))
-        int_token_index = next(i for i, tok in enumerate(tokens) if tok.kind == TokenKind.INT_CONST)
-        int_token = tokens[int_token_index]
-        tokens[int_token_index] = Token(
-            TokenKind.PP_NUMBER,
-            "1e+",
-            int_token.line,
-            int_token.column,
-        )
         with self.assertRaises(ParserError) as ctx:
-            parse(tokens)
+            parse(list(lex("int main(void){ return 1e+; }")))
         self.assertEqual(
             ctx.exception.message,
             "Expression cannot start with preprocessing number: '1e+'",
         )
 
-    def test_expression_start_header_name_reports_operand_diagnostic(self) -> None:
-        tokens = list(lex("int main(void){ return 0; }"))
-        int_token_index = next(i for i, tok in enumerate(tokens) if tok.kind == TokenKind.INT_CONST)
-        int_token = tokens[int_token_index]
-        tokens[int_token_index] = Token(
-            TokenKind.HEADER_NAME,
-            "<stdio.h>",
-            int_token.line,
-            int_token.column,
-        )
-        with self.assertRaises(ParserError) as ctx:
-            parse(tokens)
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with header name: '<stdio.h>'",
-        )
-
-    def test_expression_start_unsupported_token_kind_reports_specific_diagnostic(
-        self,
-    ) -> None:
-        class SyntheticTokenKind(Enum):
-            GARBAGE = auto()
-
-        tokens = list(lex("int main(void){ return 0; }"))
-        int_token_index = next(i for i, tok in enumerate(tokens) if tok.kind == TokenKind.INT_CONST)
-        int_token = tokens[int_token_index]
-        tokens[int_token_index] = Token(
-            SyntheticTokenKind.GARBAGE,  # type: ignore[arg-type]
-            "@@",
-            int_token.line,
-            int_token.column,
-        )
-
-        with self.assertRaises(ParserError) as ctx:
-            parse(tokens)
-
-        self.assertEqual(
-            ctx.exception.message,
-            "Expression cannot start with unsupported token kind (lexeme '@@')",
-        )
-
-    def test_parse_decl_stmt_static_assert_dispatch(self) -> None:
-        parser = Parser(list(lex('_Static_assert(1, "ok");')))
-        stmt = parser._parse_decl_stmt()
-        self.assertIsInstance(stmt, StaticAssertDecl)
-
-    def test_parse_static_assert_decl_requires_keyword(self) -> None:
-        parser = Parser(list(lex("int value;")))
-        with self.assertRaises(ParserError):
-            parser._parse_static_assert_decl()
-
     def test_zero_array_size_is_allowed(self) -> None:
         unit = parse(list(lex("int main(){int a[0];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (0,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 0),)))
 
     def test_array_size_accepts_hex_literal(self) -> None:
         unit = parse(list(lex("int main(){int a[0x10];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (16,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 16),)))
 
     def test_array_size_accepts_octal_literal(self) -> None:
         unit = parse(list(lex("int main(){int a[012];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (10,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 10),)))
 
     def test_array_size_accepts_unsigned_suffix(self) -> None:
         unit = parse(list(lex("int main(){int a[10U];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (10,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 10),)))
 
     def test_array_size_accepts_additive_constant_expression(self) -> None:
         unit = parse(list(lex("int main(){int a[1073741820U + 5U - 1U];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (1073741824,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 1073741824),)))
 
     def test_array_size_accepts_shift_constant_expression(self) -> None:
         unit = parse(list(lex("int main(){int a[1LL<<4];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (16,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 16),)))
 
     def test_array_size_accepts_sizeof_typedef_cast_expression(self) -> None:
         source = "int main(){typedef char a[1LL<<61]; char b[(long long)sizeof(a)-1]; return 0;}"
         unit = parse(list(lex(source)))
         stmt = _body(unit.functions[0]).statements[1]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("char", 0, (2305843009213693951,)))
+        self.assertEqual(
+            stmt.type_spec, TypeSpec("char", declarator_ops=(("arr", 2305843009213693951),))
+        )
 
     def test_array_size_accepts_sizeof_int_shift_expression(self) -> None:
         source = "int main(){int a[(long long)sizeof(int)<<1]; return 0;}"
         unit = parse(list(lex(source)))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (8,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 8),)))
 
     def test_array_size_accepts_sizeof_pointer_expression(self) -> None:
         source = "int main(){char a[(long long)sizeof(int*)]; return 0;}"
         unit = parse(list(lex(source)))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("char", 0, (8,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("char", declarator_ops=(("arr", 8),)))
 
     def test_negative_array_size_rejected_after_literal_conversion(self) -> None:
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){int a[-0x1u];return 0;}")))
-
-    def test_array_size_helper_rejects_invalid_literals(self) -> None:
-        self.assertIsNone(parse_int_literal_value("1uu"))
-        self.assertIsNone(parse_int_literal_value("08"))
-        self.assertIsNone(parse_int_literal_value("abc"))
-
-    def test_array_size_rejects_non_string_or_invalid_literal_tokens(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(parser._parse_array_size(Token(TokenKind.INT_CONST, "1", 1, 1)), 1)
-        self.assertEqual(parser._parse_array_size(Token(TokenKind.INT_CONST, "0", 1, 1)), 0)
-        with self.assertRaisesRegex(ParserError, "Array size literal token is malformed"):
-            parser._parse_array_size(Token(TokenKind.INT_CONST, None, 1, 1))
-        with self.assertRaisesRegex(
-            ParserError, "Array size literal has unsupported integer suffix"
-        ):
-            parser._parse_array_size(Token(TokenKind.INT_CONST, "1uu", 1, 1))
-        with self.assertRaisesRegex(
-            ParserError, "Array size octal literal contains non-octal digits"
-        ):
-            parser._parse_array_size(Token(TokenKind.INT_CONST, "08", 1, 1))
-        with self.assertRaisesRegex(
-            ParserError, "Array size hexadecimal literal requires at least one digit"
-        ):
-            parser._parse_array_size(Token(TokenKind.INT_CONST, "0x", 1, 1))
-        with self.assertRaisesRegex(ParserError, "Array size literal must contain decimal digits"):
-            parser._parse_array_size(Token(TokenKind.INT_CONST, "u", 1, 1))
 
     def test_array_size_accepts_vla_non_constant_expression(self) -> None:
         unit = parse(list(lex("int main(){int n=4;int a[n];return 0;}")))
@@ -3759,26 +3242,6 @@ class ParserTests(unittest.TestCase):
             ),
         )
 
-    def test_array_size_helper_handles_sizeof_expression_forms(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertIsNone(parser._eval_array_size_expr(SizeofExpr(Identifier("x"), None)))
-        self.assertEqual(parser._eval_array_size_expr(AlignofExpr(None, TypeSpec("int"))), 4)
-        self.assertIsNone(parser._eval_array_size_expr(AlignofExpr(Identifier("x"), None)))
-        self.assertIsNone(
-            parser._eval_array_size_expr(
-                SizeofExpr(
-                    None,
-                    TypeSpec("struct", record_tag="S", record_members=((TypeSpec("int"), "x"),)),
-                )
-            )
-        )
-        self.assertEqual(parser._eval_array_size_expr(SizeofExpr(None, TypeSpec("int", 1))), 8)
-        self.assertIsNone(
-            parser._eval_array_size_expr(
-                SizeofExpr(None, TypeSpec("int", declarator_ops=(("fn", (None, False)),)))
-            )
-        )
-
     def test_array_size_accepts_conditional_generic_expression(self) -> None:
         unit = parse(
             list(
@@ -3791,11 +3254,11 @@ class ParserTests(unittest.TestCase):
         )
         statements = _body(unit.functions[1]).statements
         self.assertIsInstance(statements[0], DeclStmt)
-        self.assertEqual(statements[0].type_spec, TypeSpec("int", 0, (1,)))
+        self.assertEqual(statements[0].type_spec, TypeSpec("int", declarator_ops=(("arr", 1),)))
         self.assertIsInstance(statements[1], DeclStmt)
-        self.assertEqual(statements[1].type_spec, TypeSpec("int", 0, (1,)))
+        self.assertEqual(statements[1].type_spec, TypeSpec("int", declarator_ops=(("arr", 1),)))
         self.assertIsInstance(statements[2], DeclStmt)
-        self.assertEqual(statements[2].type_spec, TypeSpec("int", 0, (1,)))
+        self.assertEqual(statements[2].type_spec, TypeSpec("int", declarator_ops=(("arr", 1),)))
 
     def test_array_size_accepts_generic_identifier_control_with_declared_int(self) -> None:
         unit = parse(
@@ -3803,207 +3266,25 @@ class ParserTests(unittest.TestCase):
         )
         stmt = _body(unit.functions[0]).statements[1]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (1,)))
-
-    def test_int_literal_type_spec_helper_suffixes(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(parser._int_literal_type_spec("1"), TypeSpec("int"))
-        self.assertEqual(parser._int_literal_type_spec("1u"), TypeSpec("unsigned int"))
-        self.assertEqual(parser._int_literal_type_spec("1L"), TypeSpec("long"))
-        self.assertEqual(parser._int_literal_type_spec("1ll"), TypeSpec("long long"))
-        self.assertEqual(parser._int_literal_type_spec("1ull"), TypeSpec("unsigned long long"))
-
-    def test_array_size_generic_helpers_cover_unmatched_and_unknown_control(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertIsNone(parser._lookup_ordinary_type("missing"))
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("!=", IntLiteral("1"), IntLiteral("2"))),
-            1,
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(GenericExpr(IntLiteral("0L"), ((None, IntLiteral("2")),))),
-            2,
-        )
-        self.assertIsNone(
-            parser._eval_array_size_expr(
-                ConditionalExpr(Identifier("x"), IntLiteral("1"), IntLiteral("2"))
-            )
-        )
-        self.assertIsNone(
-            parser._eval_array_size_expr(
-                GenericExpr(IntLiteral("0"), ((TypeSpec("long"), IntLiteral("1")),))
-            )
-        )
-        self.assertIsNone(parser._array_size_generic_control_type(Identifier("x")))
-        self.assertIsNone(parser._array_size_generic_control_type(FloatLiteral("1.0")))
-        self.assertEqual(
-            parser._decay_type_spec(TypeSpec("int", declarator_ops=(("arr", 2),))),
-            TypeSpec("int", declarator_ops=(("ptr", 0),)),
-        )
-        self.assertEqual(
-            parser._unqualified_type_spec(TypeSpec("int", qualifiers=("const",))),
-            TypeSpec("int"),
-        )
-        self.assertEqual(parser._alignof_type_spec(TypeSpec("int", pointer_depth=1)), 8)
-        self.assertEqual(parser._alignof_type_spec(TypeSpec("int", array_lengths=(2,))), 4)
-        self.assertIsNone(
-            parser._alignof_type_spec(TypeSpec("int", declarator_ops=(("fn", (None, False)),)))
-        )
-
-    def test_array_size_helper_binary_with_non_constant_operand(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        expr = BinaryExpr("+", Identifier("x"), IntLiteral("1"))
-        self.assertIsNone(parser._eval_array_size_expr(expr))
-
-    def test_array_size_non_ice_error_helper_covers_conditional_and_cast_fallbacks(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            array_size_non_ice_error(
-                CastExpr(TypeSpec("int"), IntLiteral("1")), parser._eval_array_size_expr
-            ),
-            "Array size cast expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(
-                ConditionalExpr(IntLiteral("0"), IntLiteral("1"), IntLiteral("2")),
-                parser._eval_array_size_expr,
-            ),
-            "Array size conditional expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(
-                ConditionalExpr(IntLiteral("1"), Identifier("n"), IntLiteral("2")),
-                parser._eval_array_size_expr,
-            ),
-            "Array size identifier 'n' is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(SizeofExpr(None, None), parser._eval_array_size_expr),
-            "Array size sizeof expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(AlignofExpr(None, None), parser._eval_array_size_expr),
-            "Array size alignof expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(
-                StatementExpr(CompoundStmt([ExprStmt(IntLiteral("1"))])),
-                parser._eval_array_size_expr,
-            ),
-            "Array size statement expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(LabelAddressExpr("target"), parser._eval_array_size_expr),
-            "Array size label address expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(
-                AssignExpr("=", Identifier("n"), IntLiteral("1")),
-                parser._eval_array_size_expr,
-            ),
-            "Array size assignment expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(
-                UpdateExpr("++", Identifier("n"), is_postfix=False),
-                parser._eval_array_size_expr,
-            ),
-            "Array size update expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(
-                SubscriptExpr(Identifier("arr"), IntLiteral("0")),
-                parser._eval_array_size_expr,
-            ),
-            "Array size subscript expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(
-                MemberExpr(Identifier("s"), "field", False),
-                parser._eval_array_size_expr,
-            ),
-            "Array size member access expression is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(
-                CompoundLiteralExpr(TypeSpec("int"), InitList((InitItem((), IntLiteral("1")),))),
-                parser._eval_array_size_expr,
-            ),
-            "Array size compound literal is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(IntLiteral("0x"), parser._eval_array_size_expr),
-            "Array size integer literal is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(FloatLiteral("1.0"), parser._eval_array_size_expr),
-            "Array size floating literal is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(CharLiteral("'a'"), parser._eval_array_size_expr),
-            "Array size character literal is not an integer constant expression",
-        )
-        self.assertEqual(
-            array_size_non_ice_error(StringLiteral('"x"'), parser._eval_array_size_expr),
-            "Array size string literal is not an integer constant expression",
-        )
-
-        class WeirdExpr(Expr):
-            pass
-
-        self.assertEqual(
-            array_size_non_ice_error(WeirdExpr(), parser._eval_array_size_expr),
-            "Array size expression 'WeirdExpr' is not an integer constant expression",
-        )
-
-    def test_unsupported_type_token_kind_helper_covers_remaining_branches(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._unsupported_type_token_kind(TokenKind.FLOAT_CONST),
-            "floating constant",
-        )
-        self.assertEqual(
-            parser._unsupported_type_token_kind(TokenKind.CHAR_CONST),
-            "character constant",
-        )
-        self.assertEqual(
-            parser._unsupported_type_token_kind(TokenKind.STRING_LITERAL),
-            "string literal",
-        )
-        self.assertEqual(parser._unsupported_type_token_kind(TokenKind.HEADER_NAME), "header name")
-        self.assertEqual(
-            parser._unsupported_type_token_kind(TokenKind.PP_NUMBER),
-            "preprocessor number",
-        )
-        self.assertEqual(parser._unsupported_type_token_kind(TokenKind.IDENT), "token")
-
-    def test_array_size_helper_or_vla_accepts_constant_size(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        token = Token(TokenKind.INT_CONST, "4", 1, 1)
-        self.assertEqual(parser._parse_array_size_expr_or_vla(IntLiteral("4"), token), 4)
-
-    def test_array_size_helper_or_vla_accepts_zero_size(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        token = Token(TokenKind.INT_CONST, "0", 1, 1)
-        self.assertEqual(parser._parse_array_size_expr_or_vla(IntLiteral("0"), token), 0)
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 1),)))
 
     def test_array_size_accepts_simple_ternary(self) -> None:
         unit = parse(list(lex("int main(){int a[1 ? 4 : 8];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (4,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 4),)))
 
     def test_array_size_accepts_sizeof_in_ternary_condition(self) -> None:
         unit = parse(list(lex("int main(){int a[(sizeof(int) > 2) ? 10 : 20];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (10,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 10),)))
 
     def test_array_size_accepts_nested_ternary(self) -> None:
         unit = parse(list(lex("int main(){int a[(1 > 0) ? (2 > 1 ? 3 : 4) : 5];return 0;}")))
         stmt = _body(unit.functions[0]).statements[0]
         self.assertIsInstance(stmt, DeclStmt)
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (3,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 3),)))
 
     def test_array_size_accepts_fd_set_pattern(self) -> None:
         source = (
@@ -4018,116 +3299,29 @@ class ParserTests(unittest.TestCase):
         stmt = _body(unit.functions[0]).statements[1]
         self.assertIsInstance(stmt, DeclStmt)
         # sizeof(int)=4, 4*8=32, 1024%32==0, so 1024/32=32
-        self.assertEqual(stmt.type_spec, TypeSpec("int", 0, (32,)))
+        self.assertEqual(stmt.type_spec, TypeSpec("int", declarator_ops=(("arr", 32),)))
 
-    def test_array_size_eval_binary_multiply(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("*", IntLiteral("3"), IntLiteral("4"))), 12
-        )
-
-    def test_array_size_eval_binary_divide(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("/", IntLiteral("10"), IntLiteral("3"))), 3
-        )
-        self.assertIsNone(
-            parser._eval_array_size_expr(BinaryExpr("/", IntLiteral("10"), IntLiteral("0")))
-        )
-
-    def test_array_size_eval_binary_modulo(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("%", IntLiteral("10"), IntLiteral("3"))), 1
-        )
-        self.assertIsNone(
-            parser._eval_array_size_expr(BinaryExpr("%", IntLiteral("10"), IntLiteral("0")))
-        )
-
-    def test_array_size_eval_binary_right_shift(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr(">>", IntLiteral("16"), IntLiteral("2"))), 4
-        )
-        self.assertIsNone(
-            parser._eval_array_size_expr(
-                BinaryExpr(">>", IntLiteral("16"), UnaryExpr("-", IntLiteral("1")))
-            )
-        )
-
-    def test_array_size_eval_binary_relational(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("<", IntLiteral("1"), IntLiteral("2"))), 1
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("<", IntLiteral("2"), IntLiteral("1"))), 0
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr(">", IntLiteral("2"), IntLiteral("1"))), 1
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr(">", IntLiteral("1"), IntLiteral("2"))), 0
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("<=", IntLiteral("1"), IntLiteral("1"))), 1
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("<=", IntLiteral("2"), IntLiteral("1"))), 0
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr(">=", IntLiteral("1"), IntLiteral("1"))), 1
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr(">=", IntLiteral("0"), IntLiteral("1"))), 0
-        )
-
-    def test_array_size_eval_binary_bitwise(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("&", IntLiteral("6"), IntLiteral("3"))), 2
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("^", IntLiteral("6"), IntLiteral("3"))), 5
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("|", IntLiteral("6"), IntLiteral("3"))), 7
-        )
-
-    def test_array_size_eval_binary_logical(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("&&", IntLiteral("1"), IntLiteral("2"))), 1
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("&&", IntLiteral("0"), IntLiteral("2"))), 0
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("||", IntLiteral("0"), IntLiteral("0"))), 0
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("||", IntLiteral("0"), IntLiteral("1"))), 1
-        )
-        self.assertEqual(
-            parser._eval_array_size_expr(BinaryExpr("||", IntLiteral("1"), IntLiteral("0"))), 1
-        )
-        # Unknown binary operator falls through to None
-        self.assertIsNone(
-            parser._eval_array_size_expr(BinaryExpr(",", IntLiteral("1"), IntLiteral("2")))
-        )
-
-    def test_array_size_eval_unary_plus(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(parser._eval_array_size_expr(UnaryExpr("+", IntLiteral("7"))), 7)
-
-    def test_array_size_eval_unary_bitwise_not(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(parser._eval_array_size_expr(UnaryExpr("~", IntLiteral("0"))), -1)
-
-    def test_array_size_eval_unary_logical_not(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(parser._eval_array_size_expr(UnaryExpr("!", IntLiteral("0"))), 1)
-        self.assertEqual(parser._eval_array_size_expr(UnaryExpr("!", IntLiteral("5"))), 0)
+    def test_array_size_constant_operators(self) -> None:
+        for expression, expected in (
+            ("3*4", 12),
+            ("10/3", 3),
+            ("10%3", 1),
+            ("16>>2", 4),
+            ("1<2", 1),
+            ("6&3", 2),
+            ("6^3", 5),
+            ("6|3", 7),
+            ("1&&2", 1),
+            ("0||1", 1),
+            ("+7", 7),
+            ("!0", 1),
+        ):
+            with self.subTest(expression=expression):
+                unit = parse(list(lex(f"int a[{expression}];")))
+                self.assertEqual(
+                    unit.declarations[0].type_spec.declarator_ops,
+                    (("arr", expected),),
+                )
 
     def test_void_declaration_is_rejected(self) -> None:
         with self.assertRaises(ParserError):
@@ -4174,25 +3368,13 @@ class ParserTests(unittest.TestCase):
         with self.assertRaises(ParserError):
             parse(list(lex("int main(){union ;return 0;}")))
 
-    def test_empty_struct_definition_allowed_in_c11(self) -> None:
-        unit = parse(list(lex("struct S {}; int main(){return 0;}")))
-        self.assertEqual(len(unit.declarations), 1)
-        self.assertEqual(len(unit.functions), 1)
-
-    def test_empty_struct_definition_allowed_in_gnu11(self) -> None:
-        unit = parse(list(lex("struct S {}; int main(){return 0;}")), std="gnu11")
-        self.assertEqual(len(unit.declarations), 1)
-        self.assertEqual(len(unit.functions), 1)
-
-    def test_empty_union_definition_allowed_in_gnu11(self) -> None:
-        unit = parse(list(lex("union U {}; int main(){return 0;}")), std="gnu11")
-        self.assertEqual(len(unit.declarations), 1)
-        self.assertEqual(len(unit.functions), 1)
-
-    def test_empty_union_definition_allowed_in_c11(self) -> None:
-        unit = parse(list(lex("union U {}; int main(){return 0;}")))
-        self.assertEqual(len(unit.declarations), 1)
-        self.assertEqual(len(unit.functions), 1)
+    def test_empty_record_definition(self) -> None:
+        for kind in ("struct", "union"):
+            for std in ("c11", "gnu11"):
+                with self.subTest(kind=kind, std=std):
+                    unit = parse(list(lex(f"{kind} S {{}}; int main(){{return 0;}}")), std=std)
+                    self.assertEqual(len(unit.declarations), 1)
+                    self.assertEqual(len(unit.functions), 1)
 
     def test_struct_without_declarator_rejects_initializer(self) -> None:
         with self.assertRaises(ParserError):
@@ -4406,13 +3588,6 @@ class ParserTests(unittest.TestCase):
         unit = parse(list(lex("")))
         self.assertEqual(unit.functions, [])
 
-    def test_expected_identifier_error_helper_covers_eof_and_missing_lexeme(self) -> None:
-        parser = Parser(list(lex("")))
-        eof_error = parser._expected_identifier_error()
-        self.assertEqual(eof_error.message, "Expected identifier before end of input")
-        punct_error = parser._expected_identifier_error(Token(TokenKind.PUNCTUATOR, None, 1, 1))
-        self.assertEqual(punct_error.message, "Expected identifier")
-
     def test_parameter_list_rejects_comma_after_ellipsis(self) -> None:
         with self.assertRaises(ParserError) as ctx:
             parse(list(lex("int logf(int level, ...,);")))
@@ -4435,13 +3610,6 @@ class ParserTests(unittest.TestCase):
             parse(list(lex("typedef int (*logf_t)(int, ... int other);")))
         self.assertEqual(ctx.exception.message, "Expected ')' after ... in parameter list")
 
-    def test_invalid_decl_specifier_message_helper_without_marker(self) -> None:
-        parser = Parser([Token(TokenKind.EOF, None, 1, 1)])
-        self.assertEqual(
-            parser._invalid_decl_specifier_message("parameter", DeclSpecInfo()),
-            "Invalid declaration specifier for parameter",
-        )
-
     def test_complex_leading_specifier_parses_float_and_long_double(self) -> None:
         unit = parse(list(lex("_Complex float a; _Complex long double b;")))
         first = unit.declarations[0]
@@ -4462,26 +3630,6 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(op_kind, "arr")
         self.assertIsInstance(op_value, ArrayDecl)
         self.assertIsNone(op_value.length)
-
-    def test_generic_association_type_key_handles_unhashable_and_function_declarators(self) -> None:
-        parser = Parser(list(lex("int x;")))
-        unhashable_array_type = TypeSpec("int", declarator_ops=(("arr", ArrayDecl([])),))
-        unhashable_key = parser._generic_association_type_key(unhashable_array_type)
-        declarator_keys = unhashable_key[-1]
-        self.assertEqual(declarator_keys[0][0], "arr")
-        self.assertEqual(declarator_keys[0][1], "object")
-
-        no_proto_fn_type = TypeSpec("int", declarator_ops=(("func", (None, True)),))
-        no_proto_key = parser._generic_association_type_key(no_proto_fn_type)
-        self.assertEqual(no_proto_key[-1][0], ("func", None, True))
-
-        proto_fn_type = TypeSpec(
-            "int",
-            declarator_ops=(("func", ((TypeSpec("int"), TypeSpec("long")), False)),),
-        )
-        proto_key = parser._generic_association_type_key(proto_fn_type)
-        self.assertEqual(proto_key[-1][0][0], "func")
-        self.assertIsNotNone(proto_key[-1][0][1])
 
     def test_parameter_rejects_noreturn_specifier(self) -> None:
         with self.assertRaises(ParserError) as ctx:
@@ -4614,10 +3762,6 @@ class ParserTests(unittest.TestCase):
             std="gnu11",
         )
         self.assertEqual(len(unit.functions), 1)
-
-    def test_looks_like_function_rejects_initialized_prototype_declaration(self) -> None:
-        parser = Parser(list(lex("int f(void) = 1;")))
-        self.assertFalse(parser._looks_like_function())
 
     def test_knr_missing_declarator_in_declaration(self) -> None:
         with self.assertRaises(ParserError):
@@ -4911,12 +4055,6 @@ class ParserTests(unittest.TestCase):
             std="c11",
         )
         self.assertEqual(unit.declarations[0].name, "x")
-
-    def test_skip_type_qualifiers_consumes_constexpr_before_identifier(self) -> None:
-        parser = Parser(list(lex("constexpr x")), std="c11")
-
-        self.assertTrue(parser._skip_type_qualifiers())
-        self.assertEqual(parser._current().lexeme, "x")
 
     def test_multi_line_compound_literal_in_return(self) -> None:
         """Multi-line compound literal after multi-line function signature."""

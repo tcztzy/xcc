@@ -1,6 +1,5 @@
 from collections.abc import Sequence
 
-from xcc.aot import py_ast as ast
 from xcc.aot.diag import AotDiagnostic, AotError, node_location
 from xcc.aot.module import AotModule
 from xcc.aot.subset import AotModuleSummary
@@ -13,6 +12,8 @@ from xcc.aot.types import (
     is_builtin_type_name,
     width_alias_type,
 )
+
+from . import py_ast as ast
 
 _OWNED_AST_TYPE_NAMES = {
     "alias",

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from xcc.ast import ArrayDecl, Expr, RecordMemberDecl, StorageClass, TypeSpec
 from xcc.lexer import Token, TokenKind
@@ -92,18 +92,16 @@ def _normalize_type_qualifier(lexeme: str) -> str:
 
 
 def _consume_trailing_type_qualifiers(
-    parser: "Parser",
+    p: "Parser",
     qualifiers: tuple[str, ...],
 ) -> tuple[str, ...]:
-    p = cast(Any, parser)
     trailing = p._consume_type_qualifiers()
     return _merge_unique_qualifiers(qualifiers, trailing)
 
 
-def _apply_pointer_depth(parser: "Parser", type_spec: TypeSpec, pointer_depth: int) -> TypeSpec:
+def _apply_pointer_depth(p: "Parser", type_spec: TypeSpec, pointer_depth: int) -> TypeSpec:
     if pointer_depth == 0:
         return type_spec
-    p = cast(Any, parser)
     return p._build_declarator_type(type_spec, _pointer_ops(pointer_depth))
 
 
@@ -114,10 +112,9 @@ def _pointer_ops(pointer_depth: int) -> tuple[DeclaratorOp, ...]:
     return ops
 
 
-def _parse_optional_pointer_depth(parser: "Parser", parse_pointer_depth: bool) -> int:
+def _parse_optional_pointer_depth(p: "Parser", parse_pointer_depth: bool) -> int:
     if not parse_pointer_depth:
         return 0
-    p = cast(Any, parser)
     return p._parse_pointer_depth()
 
 
@@ -152,6 +149,7 @@ class DeclSpecInfo:
 
 def unsupported_type_message(context: str, token: Token) -> str:
     token_text = str(token.lexeme)
+    token_kind = unsupported_type_token_kind(token.kind)
     if token.kind == TokenKind.IDENT:
         if context == "type-name":
             return f"Unknown type name: '{token_text}'"
@@ -160,11 +158,6 @@ def unsupported_type_message(context: str, token: Token) -> str:
         if context == "type-name":
             return f"Unsupported type name: '{token_text}'"
         return f"Unsupported declaration type: '{token_text}'"
-    token_kind = (
-        unsupported_type_token_kind(token.kind)
-        if isinstance(token.kind, TokenKind)
-        else "unsupported token kind"
-    )
     if context == "type-name":
         if token.kind == TokenKind.PUNCTUATOR:
             return unsupported_type_name_punctuator_message(token_text)
@@ -323,7 +316,7 @@ def unsupported_declaration_type_punctuator_message(punctuator: str) -> str:
     return f"Unsupported declaration type punctuator: '{punctuator}'"
 
 
-def unsupported_type_token_kind(kind: TokenKind) -> str:
+def unsupported_type_token_kind(kind: object) -> str:
     if kind == TokenKind.INT_CONST:
         return "integer constant"
     if kind == TokenKind.FLOAT_CONST:
@@ -344,12 +337,11 @@ def unsupported_type_token_kind(kind: TokenKind) -> str:
 
 
 def parse_type_spec(
-    parser: "Parser",
+    p: "Parser",
     *,
     parse_pointer_depth: bool = True,
     context: str = "declaration",
 ) -> TypeSpec:
-    p = cast(Any, parser)
     qualifiers = p._consume_type_qualifiers()
     if p._check_keyword("_Atomic"):
         atomic_token = p._advance()
@@ -404,29 +396,29 @@ def parse_type_spec(
         assert isinstance(token.lexeme, str)
         if token.lexeme in _GNU_EXTENSION_TYPES:
             p._advance()
-            type_spec = TypeSpec(token.lexeme)
+            extension_type = TypeSpec(token.lexeme)
             qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
             pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
             if pointer_depth:
-                type_spec = p._build_declarator_type(
-                    type_spec,
+                extension_type = p._build_declarator_type(
+                    extension_type,
                     _pointer_ops(pointer_depth),
                 )
-            return p._apply_type_qualifiers(type_spec, qualifiers)
-        type_spec = p._lookup_typedef(token.lexeme)
-        if type_spec is None:
+            return p._apply_type_qualifiers(extension_type, qualifiers)
+        typedef_type = p._lookup_typedef(token.lexeme)
+        if typedef_type is None:
             raise ParserError(p._unsupported_type_message(context, token), token)
-        typedef_has_declarator_ops = bool(type_spec.declarator_ops)
+        typedef_has_declarator_ops = bool(typedef_type.declarator_ops)
         p._advance()
         qualifiers = _consume_trailing_type_qualifiers(p, qualifiers)
         pointer_depth = _parse_optional_pointer_depth(p, parse_pointer_depth)
         if pointer_depth:
-            type_spec = p._build_declarator_type(
-                type_spec,
+            typedef_type = p._build_declarator_type(
+                typedef_type,
                 _pointer_ops(pointer_depth),
             )
         return apply_typedef_type_qualifiers(
-            type_spec,
+            typedef_type,
             qualifiers,
             typedef_has_declarator_ops=typedef_has_declarator_ops,
         )
@@ -522,8 +514,7 @@ def parse_type_spec(
     raise ParserError(p._unsupported_type_message(context, token), token)
 
 
-def consume_type_qualifiers(parser: "Parser", *, allow_atomic: bool = False) -> tuple[str, ...]:
-    p = cast(Any, parser)
+def consume_type_qualifiers(p: "Parser", *, allow_atomic: bool = False) -> tuple[str, ...]:
     seen: list[str] = []
     while True:
         token = p._current()
@@ -600,12 +591,11 @@ def apply_typedef_type_qualifiers(
 
 
 def reject_optional_complex_specifier(
-    parser: "Parser",
+    p: "Parser",
     context: str,
     *,
     allow: bool = False,
 ) -> None:
-    p = cast(Any, parser)
     if p._check_keyword("_Complex"):
         token = p._advance()
         if allow:
@@ -663,13 +653,12 @@ def _consume_gnu_int_type(token: Token) -> str | None:
 
 
 def parse_integer_type_spec(
-    parser: "Parser",
+    p: "Parser",
     first_keyword: str,
     first_token: Token,
     *,
     context: str = "declaration",
 ) -> str:
-    p = cast(Any, parser)
     signedness: str | None = None
     base: str | None = None
 
@@ -704,10 +693,9 @@ def parse_integer_type_spec(
 
 
 def parse_enum_spec(
-    parser: "Parser",
+    p: "Parser",
     token: Token,
 ) -> tuple[str | None, tuple[tuple[str, Expr | None], ...]]:
-    p = cast(Any, parser)
     enum_tag: str | None = None
     if p._current().kind == TokenKind.IDENT:
         ident = p._advance()
@@ -725,8 +713,7 @@ def parse_enum_spec(
     return enum_tag, enum_members
 
 
-def parse_enum_members(parser: "Parser") -> tuple[tuple[str, Expr | None], ...]:
-    p = cast(Any, parser)
+def parse_enum_members(p: "Parser") -> tuple[tuple[str, Expr | None], ...]:
     p._expect_punct("{")
     if p._check_punct("}"):
         raise ParserError("Expected enumerator", p._current())
@@ -742,8 +729,7 @@ def parse_enum_members(parser: "Parser") -> tuple[tuple[str, Expr | None], ...]:
     return tuple(members)
 
 
-def parse_enum_member(parser: "Parser") -> tuple[str, Expr | None]:
-    p = cast(Any, parser)
+def parse_enum_member(p: "Parser") -> tuple[str, Expr | None]:
     token = p._expect(TokenKind.IDENT)
     assert isinstance(token.lexeme, str)
     p._skip_decl_attributes()
@@ -754,11 +740,10 @@ def parse_enum_member(parser: "Parser") -> tuple[str, Expr | None]:
 
 
 def parse_record_spec(
-    parser: "Parser",
+    p: "Parser",
     token: Token,
     kind: str,
 ) -> tuple[str | None, tuple[RecordMemberDecl, ...], bool]:
-    p = cast(Any, parser)
     p._skip_decl_attributes()
     record_tag: str | None = None
     if p._current().kind == TokenKind.IDENT:
@@ -775,8 +760,7 @@ def parse_record_spec(
     return record_tag, record_members, has_record_body
 
 
-def parse_record_members(parser: "Parser") -> tuple[RecordMemberDecl, ...]:
-    p = cast(Any, parser)
+def parse_record_members(p: "Parser") -> tuple[RecordMemberDecl, ...]:
     p._expect_punct("{")
     members: list[RecordMemberDecl] = []
     while not p._check_punct("}"):
@@ -788,8 +772,7 @@ def parse_record_members(parser: "Parser") -> tuple[RecordMemberDecl, ...]:
     return tuple(members)
 
 
-def parse_record_member_declaration(parser: "Parser") -> list[RecordMemberDecl]:
-    p = cast(Any, parser)
+def parse_record_member_declaration(p: "Parser") -> list[RecordMemberDecl]:
     p._skip_extension_markers()
     decl_specs = p._consume_decl_specifiers()
     if decl_specs.is_typedef or decl_specs.storage_class not in {None, "typedef"}:
@@ -855,8 +838,7 @@ def parse_record_member_declaration(parser: "Parser") -> list[RecordMemberDecl]:
     return members
 
 
-def consume_decl_specifiers(parser: "Parser") -> DeclSpecInfo:
-    p = cast(Any, parser)
+def consume_decl_specifiers(p: "Parser") -> DeclSpecInfo:
     storage_class: StorageClass | None = None
     storage_class_token: Token | None = None
     alignment: int | None = None
@@ -866,14 +848,14 @@ def consume_decl_specifiers(parser: "Parser") -> DeclSpecInfo:
     is_noreturn = False
     while True:
         attr_found, attr_alignment, attr_alignment_token = p._consume_decl_attribute_alignment()
+        if (
+            attr_found
+            and attr_alignment is not None
+            and (alignment is None or attr_alignment > alignment)
+        ):
+            alignment = attr_alignment
+            alignment_token = attr_alignment_token
         if attr_found:
-            if attr_alignment is not None:
-                current_alignment: int = 0
-                if alignment is not None:
-                    current_alignment = cast(int, alignment)
-                if alignment is None or attr_alignment > current_alignment:
-                    alignment = attr_alignment
-                    alignment_token = attr_alignment_token
             continue
         current = p._current()
         if current.kind == TokenKind.KEYWORD:
@@ -915,10 +897,7 @@ def consume_decl_specifiers(parser: "Parser") -> DeclSpecInfo:
             if alignment_token is None:
                 alignment_token = current
             current_alignment = p._consume_alignas_specifier()
-            previous_alignment: int = 0
-            if alignment is not None:
-                previous_alignment = cast(int, alignment)
-            if alignment is None or current_alignment > previous_alignment:
+            if alignment is None or current_alignment > alignment:
                 alignment = current_alignment
             continue
         # _Alignas can appear after type qualifiers
@@ -945,14 +924,13 @@ def consume_decl_specifiers(parser: "Parser") -> DeclSpecInfo:
 
 
 def reject_invalid_alignment_context(
-    parser: "Parser",
+    p: "Parser",
     alignment: int | None,
     alignment_token: Token | None,
     *,
     context: str,
     allow: bool,
 ) -> None:
-    p = cast(Any, parser)
     if alignment is None or allow:
         return
     raise ParserError(
@@ -961,8 +939,7 @@ def reject_invalid_alignment_context(
     )
 
 
-def consume_alignas_specifier(parser: "Parser") -> int:
-    p = cast(Any, parser)
+def consume_alignas_specifier(p: "Parser") -> int:
     token = p._current()
     p._advance()
     p._expect_punct("(")
@@ -1002,8 +979,7 @@ def consume_alignas_specifier(parser: "Parser") -> int:
     return alignment
 
 
-def skip_type_qualifiers(parser: "Parser", *, allow_atomic: bool = False) -> bool:
-    p = cast(Any, parser)
+def skip_type_qualifiers(p: "Parser", *, allow_atomic: bool = False) -> bool:
     found = False
     while True:
         token = p._current()
@@ -1048,8 +1024,7 @@ def is_function_object_type(type_spec: TypeSpec) -> bool:
     return bool(type_spec.declarator_ops) and type_spec.declarator_ops[0][0] == "fn"
 
 
-def define_enum_member_names(parser: "Parser", type_spec: TypeSpec) -> None:
-    p = cast(Any, parser)
+def define_enum_member_names(p: "Parser", type_spec: TypeSpec) -> None:
     value = -1
     for member_name, value_expr in type_spec.enum_members:
         if value_expr is None:

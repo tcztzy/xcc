@@ -86,8 +86,6 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "@dataclass(frozen=True)\n"
             "class Type:\n"
             "    name: str\n"
-            "    pointer_depth: int = 0\n"
-            "    array_lengths: tuple[int, ...] = ()\n"
             "    declarator_ops: tuple[tuple[str, int], ...] = ()\n"
             "    qualifiers: tuple[str, ...] = ()\n"
             "INT: Type = Type('int')\n"
@@ -2804,6 +2802,21 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "        return 9\n",
             expected=9,
             filename="try-factory-exception.py",
+        )
+
+    def test_caught_value_error_string_uses_raised_message(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Problem(ValueError):\n"
+            "    pass\n"
+            "def fail() -> int:\n"
+            "    raise Problem('problem')\n"
+            "def entry() -> int:\n"
+            "    try:\n"
+            "        return fail()\n"
+            "    except Problem as error:\n"
+            "        return len(str(error))\n",
+            expected=7,
+            filename="caught-error-string.py",
         )
 
     def test_constructor_and_string_bytes_semantics(self) -> None:

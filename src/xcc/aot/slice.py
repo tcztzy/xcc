@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
-from xcc.aot import py_ast as ast
 from xcc.aot.analysis import AotAnalysis, analyze_module, analyze_source
 from xcc.aot.binder import bind_class_types, bind_function_signatures, bind_types
 from xcc.aot.diag import AotDiagnostic, AotError
@@ -63,6 +62,8 @@ from xcc.aot.module import AotModule, parse_source
 from xcc.aot.subset import AotModuleSummary, check_subset
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
 
+from . import py_ast as ast
+
 _NATIVE_EMITTED_LEAF_FUNCTIONS = {
     "xcc.cc_driver._aot_exec_argv",
     "xcc.frontend._aot_monotonic_ns",
@@ -92,221 +93,24 @@ _NATIVE_EMITTED_LEAF_FUNCTIONS = {
 _NATIVE_EMITTED_LEAF_DEPENDENCIES: dict[str, tuple[str, ...]] = {}
 _NORETURN_CALL_PREFIX = "__noreturn__:"
 _RECORD_INIT_PREFIX = "__record_init__:"
-_PROTOCOL_METHOD_TARGETS = {
+_CALL_TARGET_OVERRIDES = {
     "xcc.preprocessor.__init__.preprocess_source": (
         "xcc.preprocessor.__init__.preprocess_source_no_callback"
     ),
-    "xcc.parser.statements._StatementParser._advance": "xcc.parser.__init__.Parser._advance",
-    "xcc.parser.statements._StatementParser._check_keyword": (
-        "xcc.parser.__init__.Parser._check_keyword"
-    ),
-    "xcc.parser.statements._StatementParser._check_punct": (
-        "xcc.parser.__init__.Parser._check_punct"
-    ),
-    "xcc.parser.statements._StatementParser._current": "xcc.parser.__init__.Parser._current",
-    "xcc.parser.statements._StatementParser._expect": "xcc.parser.__init__.Parser._expect",
-    "xcc.parser.statements._StatementParser._expect_punct": (
-        "xcc.parser.__init__.Parser._expect_punct"
-    ),
-    "xcc.parser.statements._StatementParser._is_declaration_start": (
-        "xcc.parser.__init__.Parser._is_declaration_start"
-    ),
-    "xcc.parser.statements._StatementParser._is_label_start": (
-        "xcc.parser.__init__.Parser._is_label_start"
-    ),
-    "xcc.parser.statements._StatementParser._is_typedef_name": (
-        "xcc.parser.__init__.Parser._is_typedef_name"
-    ),
-    "xcc.parser.statements._StatementParser._make_error": (
-        "xcc.parser.__init__.Parser._make_error"
-    ),
-    "xcc.parser.statements._StatementParser._parse_assignment": (
-        "xcc.parser.__init__.Parser._parse_assignment"
-    ),
-    "xcc.parser.statements._StatementParser._parse_case_stmt": (
-        "xcc.parser.__init__.Parser._parse_case_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_compound_stmt": (
-        "xcc.parser.__init__.Parser._parse_compound_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_conditional": (
-        "xcc.parser.__init__.Parser._parse_conditional"
-    ),
-    "xcc.parser.statements._StatementParser._parse_decl_stmt": (
-        "xcc.parser.__init__.Parser._parse_decl_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_default_stmt": (
-        "xcc.parser.__init__.Parser._parse_default_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_designator_list": (
-        "xcc.parser.__init__.Parser._parse_designator_list"
-    ),
-    "xcc.parser.statements._StatementParser._parse_do_while_stmt": (
-        "xcc.parser.__init__.Parser._parse_do_while_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_expression": (
-        "xcc.parser.__init__.Parser._parse_expression"
-    ),
-    "xcc.parser.statements._StatementParser._parse_for_stmt": (
-        "xcc.parser.__init__.Parser._parse_for_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_goto_stmt": (
-        "xcc.parser.__init__.Parser._parse_goto_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_if_stmt": (
-        "xcc.parser.__init__.Parser._parse_if_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_initializer": (
-        "xcc.parser.__init__.Parser._parse_initializer"
-    ),
-    "xcc.parser.statements._StatementParser._parse_initializer_list": (
-        "xcc.parser.__init__.Parser._parse_initializer_list"
-    ),
-    "xcc.parser.statements._StatementParser._parse_label_stmt": (
-        "xcc.parser.__init__.Parser._parse_label_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_return_stmt": (
-        "xcc.parser.__init__.Parser._parse_return_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_static_assert_decl": (
-        "xcc.parser.__init__.Parser._parse_static_assert_decl"
-    ),
-    "xcc.parser.statements._StatementParser._parse_statement": (
-        "xcc.parser.__init__.Parser._parse_statement"
-    ),
-    "xcc.parser.statements._StatementParser._parse_string_literal": (
-        "xcc.parser.__init__.Parser._parse_string_literal"
-    ),
-    "xcc.parser.statements._StatementParser._parse_switch_stmt": (
-        "xcc.parser.__init__.Parser._parse_switch_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._parse_while_stmt": (
-        "xcc.parser.__init__.Parser._parse_while_stmt"
-    ),
-    "xcc.parser.statements._StatementParser._peek_punct": (
-        "xcc.parser.__init__.Parser._peek_punct"
-    ),
-    "xcc.parser.statements._StatementParser._pop_scope": ("xcc.parser.__init__.Parser._pop_scope"),
-    "xcc.parser.statements._StatementParser._push_scope": (
-        "xcc.parser.__init__.Parser._push_scope"
-    ),
-    "xcc.parser.statements._StatementParser._skip_decl_attributes": (
-        "xcc.parser.__init__.Parser._skip_decl_attributes"
-    ),
-    "xcc.parser.statements._StatementParser._skip_extension_markers": (
-        "xcc.parser.__init__.Parser._skip_extension_markers"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._alignof_type": (
-        "xcc.sema.__init__.Analyzer._alignof_type"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._analyze_file_scope_decl": (
-        "xcc.sema.__init__.Analyzer._analyze_file_scope_decl"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._analyze_initializer": (
-        "xcc.sema.__init__.Analyzer._analyze_initializer"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._check_static_assert": (
-        "xcc.sema.__init__.Analyzer._check_static_assert"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._define_enum_members": (
-        "xcc.sema.__init__.Analyzer._define_enum_members"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._ensure_array_size_limit": (
-        "xcc.sema.__init__.Analyzer._ensure_array_size_limit"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._extern_initializer_message": (
-        "xcc.sema.__init__.Analyzer._extern_initializer_message"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._infer_array_size_from_init": (
-        "xcc.sema.__init__.Analyzer._infer_array_size_from_init"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._invalid_alignment_message": (
-        "xcc.sema.__init__.Analyzer._invalid_alignment_message"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._invalid_object_type_message": (
-        "xcc.sema.__init__.Analyzer._invalid_object_type_message"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._invalid_typedef_type_message": (
-        "xcc.sema.__init__.Analyzer._invalid_typedef_type_message"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._is_const_qualified": (
-        "xcc.sema.__init__.Analyzer._is_const_qualified"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._is_file_scope_vla_type_spec": (
-        "xcc.sema.__init__.Analyzer._is_file_scope_vla_type_spec"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._is_function_object_type": (
-        "xcc.sema.__init__.Analyzer._is_function_object_type"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._is_invalid_atomic_type_spec": (
-        "xcc.sema.__init__.Analyzer._is_invalid_atomic_type_spec"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._is_invalid_incomplete_record_object_type": (
-        "xcc.sema.__init__.Analyzer._is_invalid_incomplete_record_object_type"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._is_invalid_void_object_type": (
-        "xcc.sema.__init__.Analyzer._is_invalid_void_object_type"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._is_valid_explicit_alignment": (
-        "xcc.sema.__init__.Analyzer._is_valid_explicit_alignment"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._missing_identifier_for_alignment_message": (
-        "xcc.sema.__init__.Analyzer._missing_identifier_for_alignment_message"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._missing_object_identifier_message": (
-        "xcc.sema.__init__.Analyzer._missing_object_identifier_message"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._register_function_typed_file_scope_decl": (
-        "xcc.sema.__init__.Analyzer._register_function_typed_file_scope_decl"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._register_transparent_union_typedef": (
-        "xcc.sema.__init__.Analyzer._register_transparent_union_typedef"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._register_type_spec": (
-        "xcc.sema.__init__.Analyzer._register_type_spec"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._resolve_type": (
-        "xcc.sema.__init__.Analyzer._resolve_type"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._thread_local_storage_class_message": (
-        "xcc.sema.__init__.Analyzer._thread_local_storage_class_message"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._try_eval_scalar_initializer": (
-        "xcc.sema.__init__.Analyzer._try_eval_scalar_initializer"
-    ),
-    "xcc.sema.declarations._FileScopeAnalyzer._typedef_storage_class_object_message": (
-        "xcc.sema.__init__.Analyzer._typedef_storage_class_object_message"
-    ),
-    (
-        "xcc.preprocessor.process._ProcessTextPreprocessor."
-        "_should_collect_function_macro_continuation"
-    ): "xcc.preprocessor.__init__._Preprocessor._should_collect_function_macro_continuation",
-    "xcc.preprocessor.process._ProcessTextPreprocessor._expand_line": (
+    "xcc.preprocessor.__init__._Preprocessor._expand_line": (
         "xcc.preprocessor.__init__._Preprocessor._expand_line_no_callback"
     ),
-    "xcc.preprocessor.process._ProcessTextPreprocessor._handle_conditional": (
+    "xcc.preprocessor.__init__._Preprocessor._handle_conditional": (
         "xcc.preprocessor.__init__._Preprocessor._handle_conditional_no_callback"
     ),
-    "xcc.preprocessor.process._ProcessTextPreprocessor._handle_conditional_for_process": (
+    "xcc.preprocessor.__init__._Preprocessor._handle_conditional_for_process": (
         "xcc.preprocessor.__init__._Preprocessor._handle_conditional_for_process_no_callback"
     ),
-    "xcc.preprocessor.process._ProcessTextPreprocessor._handle_define": (
+    "xcc.preprocessor.__init__._Preprocessor._handle_define": (
         "xcc.preprocessor.__init__._Preprocessor._handle_define_no_callback"
     ),
-    "xcc.preprocessor.process._ProcessTextPreprocessor._handle_undef": (
+    "xcc.preprocessor.__init__._Preprocessor._handle_undef": (
         "xcc.preprocessor.__init__._Preprocessor._handle_undef_no_callback"
-    ),
-    "xcc.preprocessor.process._ProcessTextPreprocessor._handle_include": (
-        "xcc.preprocessor.__init__._Preprocessor._handle_include"
-    ),
-    "xcc.preprocessor.process._ProcessTextPreprocessor._parse_line_directive": (
-        "xcc.preprocessor.__init__._Preprocessor._parse_line_directive"
-    ),
-    "xcc.preprocessor.process._ProcessTextPreprocessor._record_pragma_once": (
-        "xcc.preprocessor.__init__._Preprocessor._record_pragma_once"
-    ),
-    "xcc.preprocessor.process._ProcessTextPreprocessor._handle_pack_pragma": (
-        "xcc.preprocessor.__init__._Preprocessor._handle_pack_pragma"
     ),
     "xcc.preprocessor.__init__._Preprocessor._parse_include_target": (
         "xcc.preprocessor.__init__._Preprocessor._parse_include_target_no_macro"
@@ -951,7 +755,7 @@ def _slice_method_signature_table(
         ).items():
             function_types.setdefault(function_name, function_info)
             function_types.setdefault(f"{module_input.name}.{function_name}", function_info)
-    for protocol_target, concrete_target in _PROTOCOL_METHOD_TARGETS.items():
+    for protocol_target, concrete_target in _CALL_TARGET_OVERRIDES.items():
         concrete_info = function_types.get(concrete_target)
         if concrete_info is not None:
             function_types[protocol_target] = concrete_info
@@ -1499,6 +1303,7 @@ def _rename_statement_call(statement: IrStmt, rename_map: dict[str, str]) -> IrS
             statement.target,
             _rename_expr_call(statement.value, rename_map),
             statement.span,
+            statement.chain,
         )
     if isinstance(statement, IrSetItem):
         return IrSetItem(
@@ -1634,17 +1439,17 @@ def _rename_call_target(target: str, rename_map: dict[str, str]) -> str:
     if target.startswith(_RECORD_INIT_PREFIX):
         init_target = target.removeprefix(_RECORD_INIT_PREFIX)
         return _RECORD_INIT_PREFIX + _rename_call_target(init_target, rename_map)
-    protocol_target = _PROTOCOL_METHOD_TARGETS.get(target)
+    protocol_target = _CALL_TARGET_OVERRIDES.get(target)
     if protocol_target is not None:
         return protocol_target
     renamed = rename_map.get(target)
     if renamed is not None:
-        return _PROTOCOL_METHOD_TARGETS.get(renamed, renamed)
+        return _CALL_TARGET_OVERRIDES.get(renamed, renamed)
     for local_name, target_name in rename_map.items():
         prefix = f"{local_name}."
         if target.startswith(prefix):
             renamed_target = f"{target_name}.{target[len(prefix) :]}"
-            return _PROTOCOL_METHOD_TARGETS.get(renamed_target, renamed_target)
+            return _CALL_TARGET_OVERRIDES.get(renamed_target, renamed_target)
     return target
 
 
@@ -2053,10 +1858,8 @@ def _type_pointer_array_str_wrapper() -> IrFunction:
         "Type",
         (
             IrConstString("int"),
-            IrConstInt(0, int64),
-            IrConstNone(),
             declarator_ops,
-            IrConstNone(),
+            IrTuple((), IrTupleType((IrStringType(),))),
         ),
         type_type,
     )

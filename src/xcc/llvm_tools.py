@@ -65,8 +65,27 @@ def is_llvm_llc(path: str) -> bool:
 def find_llc(explicit: str | None = None) -> str:
     configured = explicit or os.environ.get("XCC_LLC")
     if configured:
-        return configured
+        if is_llvm_llc(configured):
+            return configured
+        raise ValueError(f"{configured} is not LLVM llc")
     for candidate in llc_candidates():
         if is_llvm_llc(candidate):
             return candidate
     raise ValueError("unable to find LLVM llc; set XCC_LLC or put LLVM llc on PATH")
+
+
+def find_libllvm() -> str:
+    configured = os.environ.get("XCC_LIBLLVM")
+    if configured:
+        return configured
+    llc = Path(find_llc())
+    llvm_config = os.environ.get("LLVM_CONFIG") or str(llc.with_name("llvm-config"))
+    completed = subprocess.run(
+        (llvm_config, "--libdir", "--link-shared", "--libnames"),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    libdir, library = completed.stdout.split()[:2]
+    return str(Path(libdir) / library)

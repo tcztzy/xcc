@@ -1,7 +1,6 @@
 from collections.abc import Sequence
 from typing import Literal, NoReturn
 
-from xcc.aot import py_ast as ast
 from xcc.aot.analysis import AotAnalysis, analyze_source
 from xcc.aot.diag import AotDiagnostic, AotError, node_location
 from xcc.aot.ir import (
@@ -55,6 +54,8 @@ from xcc.aot.ir import (
     IrWhile,
 )
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType, annotation_name
+
+from . import py_ast as ast
 
 _ALLOWED_BUILTIN_CALLS = {
     "all",
@@ -115,6 +116,8 @@ _LLVM_API_RECORD = "LLVMApi"
 _LLVM_API_VOID_METHODS = frozenset(
     {
         "AddCase",
+        "AddAttributeAtIndex",
+        "AddCallSiteAttribute",
         "AddIncoming",
         "AddModuleFlag",
         "DIBuilderFinalize",
@@ -128,6 +131,7 @@ _LLVM_API_VOID_METHODS = frozenset(
         "SetOrdering",
         "SetSubprogram",
         "SetTarget",
+        "SetThreadLocal",
         "SetValueName2",
     }
 )
@@ -137,6 +141,7 @@ _LLVM_API_INTEGER_METHODS = frozenset(
         "ConstIntGetSExtValue",
         "ConstIntGetZExtValue",
         "GetArrayLength",
+        "GetEnumAttributeKindForName",
         "GetIntTypeWidth",
         "GetNumOperands",
         "GetTypeKind",
@@ -222,6 +227,7 @@ _LLVM_API_HANDLE_METHODS = frozenset(
         "ConstTruncOrBitCast",
         "ContextCreate",
         "CreateBuilder",
+        "CreateTypeAttribute",
         "DoubleType",
         "FloatType",
         "FunctionType",
@@ -236,6 +242,7 @@ _LLVM_API_HANDLE_METHODS = frozenset(
         "GetUndef",
         "ValueAsMetadata",
         "Int16Type",
+        "IntType",
         "Int1Type",
         "Int32Type",
         "Int64Type",
@@ -531,15 +538,6 @@ class _Lowerer:
         if isinstance(argument.type, IrIntType):
             return IrStringConcat((argument,))
         return IrConstString(exception)
-
-    def _global_annotation_types(self, annotations: dict[str, str]) -> dict[str, IrType]:
-        global_types: dict[str, IrType] = {}
-        for name, annotation in annotations.items():
-            try:
-                global_types[name] = self._type_name_to_ir_type(annotation, ast.Pass())
-            except AotError:
-                continue
-        return global_types
 
     def lower_function(
         self,
@@ -1013,10 +1011,11 @@ class _Lowerer:
                 names,
                 return_type,
             )
-        if (
-            isinstance(statement, ast.Assign)
-            and len(statement.targets) == 1
+        if isinstance(statement, ast.Assign) and (
+            len(statement.targets) == 1
             and isinstance(statement.targets[0], (ast.Name, ast.Attribute, ast.Tuple))
+            or len(statement.targets) > 1
+            and all(isinstance(target, ast.Name) for target in statement.targets)
         ):
             target = statement.targets[0]
             expected_type = self._assignment_value_type(
@@ -1036,8 +1035,13 @@ class _Lowerer:
                 else uncoerced_value.type
             )
             value = self._coerce_optional_assignment(uncoerced_value, expected_type)
-            self._bind_assignment_target(target, flow_type, names)
-            return IrAssign(ast.unparse(target), value)
+            for target in statement.targets:
+                self._bind_assignment_target(target, flow_type, names)
+            return IrAssign(
+                ", ".join(ast.unparse(target) for target in statement.targets),
+                value,
+                chain=len(statement.targets) > 1,
+            )
         if (
             isinstance(statement, ast.AugAssign)
             and isinstance(statement.target, (ast.Name, ast.Attribute))
@@ -1932,11 +1936,12 @@ class _Lowerer:
         }:
             return self._lower_container_constructor(expr, names, expected)
         if isinstance(expr.func, ast.Name) and expr.func.id == "len" and len(expr.args) == 1:
-            return IrCall(
-                "len",
-                (self._lower_expr(expr.args[0], names, IrTupleType(())),),
-                IrIntType(64, signed=True),
-            )
+            value = self._lower_expr(expr.args[0], names, IrTupleType(()))
+            if isinstance(value.type, IrRecordType):
+                target = self._record_method_target(value.type, "__len__")
+                if self._function_info(target) is not None:
+                    return IrCall(target, (value,), IrIntType(64, signed=True))
+            return IrCall("len", (value,), IrIntType(64, signed=True))
         if isinstance(expr.func, ast.Name) and expr.func.id == "abs":
             if expr.keywords or len(expr.args) != 1:
                 self._error(
@@ -2140,6 +2145,14 @@ class _Lowerer:
                 "Path | None",
             }:
                 return self._lower_path_read_text_call(expr, receiver)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == "read_bytes":
+            receiver = self._lower_expr(expr.func.value, names, IrRecordType("Path"))
+            if isinstance(receiver.type, IrRecordType) and receiver.type.name in {
+                "object",
+                "Path",
+                "Path | None",
+            }:
+                return self._lower_path_read_bytes_call(expr, receiver)
         if isinstance(expr.func, ast.Attribute) and expr.func.attr == "write_text":
             receiver = self._lower_expr(expr.func.value, names, IrRecordType("Path"))
             if isinstance(receiver.type, IrRecordType) and receiver.type.name in {
@@ -2156,6 +2169,14 @@ class _Lowerer:
                 "Path | None",
             }:
                 return self._lower_path_is_file_call(expr, receiver)
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr == "is_absolute":
+            receiver = self._lower_expr(expr.func.value, names, IrRecordType("Path"))
+            if isinstance(receiver.type, IrRecordType) and receiver.type.name in {
+                "object",
+                "Path",
+                "Path | None",
+            }:
+                return self._lower_path_is_absolute_call(expr, receiver)
         if isinstance(expr.func, ast.Attribute) and expr.func.attr == "find":
             receiver = self._lower_string_receiver(expr.func.value, names)
             if isinstance(receiver.type, IrStringType):
@@ -2329,6 +2350,11 @@ class _Lowerer:
                 arg_expected = expected
                 if expr.func.attr == "append":
                     arg_expected = _literal_element_expected_type(receiver_type)
+                    if not receiver_type.elements:
+                        arg_expected = self._infer_assignment_expr_type(
+                            expr.args[0], names, expected
+                        )
+                        expected = IrTupleType((arg_expected,))
                 elif expr.func.attr == "extend":
                     arg_expected = receiver_type
                 return IrCall(
@@ -2675,6 +2701,13 @@ class _Lowerer:
                 return_type = self._function_return_type(str_target, IrRecordType("object"))
                 if isinstance(return_type, IrStringType):
                     return IrCall(str_target, (value,), return_type)
+            if _record_extends(
+                value.type.name,
+                "Exception",
+                self.class_types,
+                self.fallback_class_types,
+            ):
+                return IrCall("__caught_error_str", (value,), IrStringType())
         if isinstance(value.type, IrRecordType) and value.type.name in {
             "object",
             "Path",
@@ -2705,6 +2738,15 @@ class _Lowerer:
                     expr,
                 )
         return IrCall("__path_read_text", (receiver,), IrStringType())
+
+    def _lower_path_read_bytes_call(self, expr: ast.Call, receiver: IrExpr) -> IrExpr:
+        if expr.args or expr.keywords:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        return IrCall("__path_read_bytes", (receiver,), IrBytesType())
 
     def _lower_path_write_text_call(
         self,
@@ -2753,6 +2795,15 @@ class _Lowerer:
                 expr,
             )
         return IrCall("__path_is_file", (receiver,), IrBoolType())
+
+    def _lower_path_is_absolute_call(self, expr: ast.Call, receiver: IrExpr) -> IrExpr:
+        if expr.args or expr.keywords:
+            self._error(
+                "XCC-AOT-LOWER-0003",
+                f"Unsupported call target: {ast.unparse(expr.func)}",
+                expr,
+            )
+        return IrCall("__path_is_absolute", (receiver,), IrBoolType())
 
     def _lower_range_call(self, expr: ast.Call, names: dict[str, IrType]) -> IrExpr:
         if expr.keywords or len(expr.args) not in {1, 2, 3}:
@@ -4397,12 +4448,6 @@ class _Lowerer:
                 return IrTuple((IrTuple((), element_type),), type_info)
         return self._default_expr(type_info)
 
-    def _record_field_types(self, record_name: str) -> tuple[IrType, ...]:
-        return tuple(
-            self._aot_type_to_ir_type(field_type)
-            for _field_name, field_type, _kw_only in self._record_layout_field_items(record_name)
-        )
-
     def _record_layout_field_items(
         self,
         record_name: str,
@@ -5444,16 +5489,6 @@ class _Lowerer:
         )
         return IrCall("__dict_remove", (receiver, key), receiver.type)
 
-    def _none_guard_narrowing(
-        self,
-        test: ast.expr,
-        body: Sequence[ast.stmt],
-        orelse: Sequence[ast.stmt],
-        names: dict[str, IrType],
-    ) -> tuple[str, IrType] | None:
-        narrowings = self._none_guard_narrowings(test, body, orelse, names)
-        return narrowings[0] if narrowings else None
-
     def _none_guard_narrowings(
         self,
         test: ast.expr,
@@ -5474,16 +5509,6 @@ class _Lowerer:
             if narrowed is not None:
                 narrowings.append(narrowed)
         return tuple(narrowings)
-
-    def _negative_isinstance_guard_narrowing(
-        self,
-        test: ast.expr,
-        body: Sequence[ast.stmt],
-        orelse: Sequence[ast.stmt],
-        names: dict[str, IrType],
-    ) -> tuple[str, IrType] | None:
-        narrowings = self._negative_isinstance_guard_narrowings(test, body, orelse, names)
-        return narrowings[0] if narrowings else None
 
     def _negative_isinstance_guard_narrowings(
         self,
@@ -6640,6 +6665,8 @@ def _lowered_statement_assignment_types(statement: IrStmt) -> dict[str, tuple[Ir
     if isinstance(statement, IrAssign):
         if statement.target == "__expr":
             return {}
+        if statement.chain:
+            return {name.strip(): (statement.value.type,) for name in statement.target.split(",")}
         return {statement.target: (statement.value.type,)}
     if isinstance(statement, IrIf):
         assignments = _lowered_branch_assignment_types(statement.then_branch)
@@ -6925,6 +6952,12 @@ def _record_extends(
     record_name = record_name.rsplit(".", 1)[-1]
     base_name = base_name.rsplit(".", 1)[-1]
     if record_name == base_name:
+        return True
+    if (record_name, base_name) in {
+        ("Exception", "BaseException"),
+        ("ValueError", "Exception"),
+        ("ValueError", "BaseException"),
+    }:
         return True
     class_info = class_types.get(record_name)
     if class_info is None and fallback_class_types is not None:
@@ -7554,7 +7587,7 @@ def _except_handler_names(handler: ast.ExceptHandler) -> tuple[str, ...]:
 
 def _with_statement_span(statement: IrStmt, span: IrSourceSpan) -> IrStmt:
     if isinstance(statement, IrAssign):
-        return IrAssign(statement.target, statement.value, span)
+        return IrAssign(statement.target, statement.value, span, statement.chain)
     if isinstance(statement, IrSetItem):
         return IrSetItem(statement.target, statement.index, statement.value, span)
     if isinstance(statement, IrReturn):

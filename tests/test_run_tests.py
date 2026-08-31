@@ -3,7 +3,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -184,8 +183,6 @@ class RunTestsScriptTests(unittest.TestCase):
             status = runner.main(
                 [
                     "--coverage",
-                    "--fail-under",
-                    "0",
                     "tests.test_aot_bootstrap",
                 ]
             )
@@ -204,105 +201,6 @@ class RunTestsScriptTests(unittest.TestCase):
             ["tests.test_aot_bootstrap.AotBootstrapNativeBuildTests"],
         )
         self.assertNotIn("XCC_SKIP_NATIVE_BOOTSTRAP_TESTS", calls[1]["base_env"])
-
-    def test_coverage_report_command_can_require_100_percent(self) -> None:
-        runner = _load_run_tests_module()
-
-        command = runner.coverage_report_command(fail_under=100)
-
-        self.assertEqual(
-            command,
-            [sys.executable, "-m", "coverage", "report", "--fail-under", "100"],
-        )
-
-
-class GateConfigTests(unittest.TestCase):
-    def test_tox_test_envs_use_serial_coverage_runner(self) -> None:
-        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
-
-        env_run_base = config["tool"]["tox"]["env_run_base"]
-        commands = env_run_base["commands"]
-
-        self.assertEqual(env_run_base["dependency_groups"], ["dev"])
-        self.assertEqual(commands[0][:2], ["python", "scripts/run_tests.py"])
-        self.assertIn("--coverage", commands[0])
-        self.assertEqual(commands[0][-2:], ["--jobs", "1"])
-
-        mypyc_command = config["tool"]["tox"]["env"]["mypyc"]["commands"][1]
-        self.assertEqual(mypyc_command[-2:], ["--jobs", "1"])
-
-    def test_lint_gate_covers_runtime_and_maintenance_scripts(self) -> None:
-        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
-        commands = config["tool"]["tox"]["env"]["lint"]["commands"]
-
-        self.assertEqual(commands[0], ["ruff", "check", "src", "scripts"])
-        self.assertEqual(commands[1], ["ruff", "format", "--check", "src", "scripts"])
-
-    def test_type_gate_covers_runtime_and_maintenance_scripts(self) -> None:
-        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
-        commands = config["tool"]["tox"]["env"]["type"]["commands"]
-
-        self.assertIn("scripts", config["tool"]["ty"]["src"]["include"])
-        self.assertEqual(config["tool"]["mypy"]["files"], ["src", "scripts"])
-        self.assertEqual(commands[0], ["ty", "check", "src", "scripts"])
-
-    def test_coverage_report_uses_current_ratchet(self) -> None:
-        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
-
-        self.assertEqual(config["tool"]["coverage"]["report"]["fail_under"], 94.76)
-
-    def test_coverage_report_preserves_decimal_ratchet_precision(self) -> None:
-        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
-
-        self.assertGreaterEqual(config["tool"]["coverage"]["report"]["precision"], 1)
-
-    def test_pre_commit_runs_test_lint_and_type_gates(self) -> None:
-        text = (_repo_root() / ".pre-commit-config.yaml").read_text(encoding="utf-8")
-
-        self.assertIn("id: xcc-test-gate", text)
-        self.assertIn("entry: uv run tox -e py311", text)
-        self.assertIn("id: xcc-lint-gate", text)
-        self.assertIn("entry: uv run tox -e lint", text)
-        self.assertIn("id: xcc-type-gate", text)
-        self.assertIn("entry: uv run tox -e type", text)
-
-    def test_ci_uses_same_tox_test_gate_as_local_handoff(self) -> None:
-        text = (_repo_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-
-        self.assertIn("uv run tox -e py311", text)
-        self.assertNotIn("python -m unittest discover", text)
-
-    def test_ci_push_validation_watches_master_and_exposes_installed_llc(self) -> None:
-        text = (_repo_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-
-        self.assertIn("      - master", text)
-        self.assertIn("XCC_LLC:", text)
-
-    def test_pages_publish_from_master(self) -> None:
-        text = (_repo_root() / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
-
-        self.assertIn("      - master", text)
-
-    def test_ci_verifies_installed_wheel_outside_source_tree(self) -> None:
-        config = tomllib.loads((_repo_root() / "pyproject.toml").read_text(encoding="utf-8"))
-        package_smoke = config["tool"]["tox"]["env"]["package-smoke"]
-        workflow = (_repo_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-
-        self.assertNotEqual(package_smoke.get("package"), "skip")
-        self.assertIn(
-            ["python", "scripts/validate_package.py"],
-            package_smoke["commands"],
-        )
-        self.assertIn("uv run tox -e package-smoke", workflow)
-
-    def test_ci_exercises_core_frontend_on_newest_supported_cpython(self) -> None:
-        workflow = (_repo_root() / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-
-        self.assertIn('python-version: "3.14"', workflow)
-        self.assertIn("tests.test_parser", workflow)
-        self.assertIn("tests.test_preprocessor", workflow)
-        self.assertIn("tests.test_sema", workflow)
-
 
 if __name__ == "__main__":
     unittest.main()

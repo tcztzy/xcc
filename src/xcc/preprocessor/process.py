@@ -1,10 +1,9 @@
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING
 
-from xcc.options import FrontendOptions
-
-from . import (
+from .conditionals import _ConditionalFrame, _is_active
+from .model import (
     PreprocessorError,
     _DirectiveCursor,
     _LogicalCursor,
@@ -12,7 +11,6 @@ from . import (
     _ProcessedText,
     _SourceLocation,
 )
-from .conditionals import _ConditionalFrame, _is_active
 from .pragmas import _validate_pragma
 from .text import _blank_line, _parse_directive, _scan_block_comment_state
 
@@ -20,74 +18,8 @@ _PP_UNKNOWN_DIRECTIVE = "XCC-PP-0101"
 _PP_INVALID_DIRECTIVE = "XCC-PP-0104"
 _PP_UNTERMINATED_MACRO = "XCC-PP-0202"
 
-
-class _ProcessTextPreprocessor(Protocol):
-    _options: FrontendOptions
-
-    def _record_pragma_once(self, source_id: str) -> None: ...
-
-    def _expand_line(self, line: str, location: _SourceLocation) -> str: ...
-
-    def _should_collect_function_macro_continuation(
-        self,
-        text: str,
-        next_line: str,
-    ) -> bool: ...
-
-    def _handle_conditional(
-        self,
-        name: str,
-        body: str,
-        location: _SourceLocation,
-        stack: list[_ConditionalFrame],
-        *,
-        base_dir: Path | None,
-    ) -> str | None: ...
-
-    def _handle_conditional_for_process(
-        self,
-        name: str,
-        body: str,
-        location: _SourceLocation,
-        stack: list[_ConditionalFrame],
-        *,
-        base_dir: Path | None,
-    ) -> tuple[str | None, list[_ConditionalFrame]]: ...
-
-    def _handle_define(self, body: str) -> None: ...
-
-    def _handle_undef(self, body: str, location: _SourceLocation) -> None: ...
-
-    def _handle_include(
-        self,
-        body: str,
-        location: _SourceLocation,
-        *,
-        base_dir: Path | None,
-        include_stack: tuple[str, ...],
-        include_next: bool = False,
-        is_import: bool = False,
-    ) -> _ProcessedText: ...
-
-    def _parse_line_directive(
-        self,
-        body: str,
-        location: _SourceLocation,
-    ) -> tuple[int, str | None]: ...
-
-    def _handle_embed(
-        self,
-        body: str,
-        location: _SourceLocation,
-        *,
-        base_dir: Path | None,
-    ) -> _ProcessedText: ...
-
-    def _handle_pack_pragma(
-        self,
-        body: str,
-        location: _SourceLocation | None = None,
-    ) -> None: ...
+if TYPE_CHECKING:
+    from . import _Preprocessor
 
 
 def _strip_block_comments(text: str) -> str:
@@ -163,7 +95,7 @@ def _has_unclosed_block_comment(text: str) -> bool:
 
 
 def process_text(
-    preprocessor: _ProcessTextPreprocessor,
+    self: "_Preprocessor",
     source: str,
     *,
     filename: str,
@@ -172,7 +104,6 @@ def process_text(
     include_stack: tuple[str, ...],
     parse_directive: Callable[[str], tuple[str, str] | None] = _parse_directive,
 ) -> _ProcessedText:
-    self = preprocessor
     lines = source.splitlines(keepends=True)
     if not lines:
         return _ProcessedText(source, ())
@@ -430,9 +361,11 @@ def process_text(
             if stripped_body == "once":
                 self._record_pragma_once(source_id)
             elif stripped_body.startswith("pack("):
-                self._handle_pack_pragma(
-                    stripped_body,
-                    directive_cursor.first_location(),
+                out.record_pack(
+                    self._handle_pack_pragma(
+                        stripped_body,
+                        directive_cursor.first_location(),
+                    )
                 )
             else:
                 _validate_pragma(stripped_body, directive_cursor.first_location())

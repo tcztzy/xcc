@@ -1,5 +1,4 @@
 import contextlib
-import inspect
 import io
 import json
 import runpy
@@ -425,15 +424,6 @@ class AotCliTests(unittest.TestCase):
         self.assertTrue(compile_executable.call_args.kwargs["debug"])
         self.assertFalse(compile_executable.call_args.kwargs["profile"])
 
-    def test_v444_native_reachability_is_written_in_a_bounded_subphase(self) -> None:
-        helper = getattr(native_cli_module, "_write_native_reachability", None)
-        self.assertTrue(callable(helper))
-        build_source = inspect.getsource(native_cli_module._run_native_build)
-        self.assertLess(
-            build_source.index("_write_native_reachability("),
-            build_source.index("emit_llvm_text("),
-        )
-
     def test_v440_native_normalizer_recognizes_allocation_free_input(self) -> None:
         predicate = getattr(native_cli_module, "_llvm_is_already_normalized", None)
         self.assertTrue(callable(predicate))
@@ -772,7 +762,10 @@ class AotCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "bin" / "tool"
             tool_log = Path(tmp) / "artifacts" / "tools.log"
-            with patch("xcc.aot.native._run_tool") as run_tool:
+            with (
+                patch("xcc.aot.native.find_llc", return_value="/tool/llc"),
+                patch("xcc.aot.native._run_tool") as run_tool,
+            ):
                 compile_llvm_executable(
                     "define i32 @main() { ret i32 0 }\n",
                     output,

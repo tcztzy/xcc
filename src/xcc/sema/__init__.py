@@ -5,12 +5,14 @@ from xcc.ast import (
     CompoundLiteralExpr,
     CompoundStmt,
     DeclStmt,
+    Designator,
     Expr,
     FunctionDef,
     Identifier,
     InitList,
     MemberExpr,
     Param,
+    SourceLocation,
     StaticAssertDecl,
     Stmt,
     StringLiteral,
@@ -72,16 +74,17 @@ from .initializers import (
     lookup_initializer_member,
 )
 from .layout import (
+    RecordLayout,
     alignof_object_base_type,
     alignof_type,
+    offsetof_type,
+    record_layout,
     sizeof_object_base_type,
     sizeof_type,
 )
 from .records import (
     anonymous_record_key,
-    flatten_hoisted_record_members,
     is_anonymous_record_member,
-    normalize_record_members,
     record_key,
     record_member_lookup,
     record_members,
@@ -102,27 +105,19 @@ from .symbols import (
 from .type_helpers import (
     has_nested_pointer_qualifier_mismatch,
     integer_promotion,
-    integer_rank,
     is_arithmetic_type,
     is_assignment_compatible,
     is_compatible_pointee_type,
     is_const_qualified,
-    is_floating_type,
     is_integer_type,
     is_object_pointer_type,
-    is_pointer_conversion_compatible,
-    is_signed_integer_type,
     is_void_pointer_type,
     merged_qualifiers,
-    qualifiers_contain,
-    signed_can_represent_unsigned,
-    signed_range,
     unqualified_type,
-    unsigned_max,
     usual_arithmetic_conversion,
 )
 
-VOID_PTR = Type("void", pointer_depth=1)
+VOID_PTR = Type("void", declarator_ops=(("ptr", 0),))
 _MAX_ARRAY_OBJECT_BYTES = (1 << 31) - 1
 StdMode = Literal["c11", "gnu11"]
 _FLOAT_COMPARE_BUILTINS = (
@@ -135,13 +130,154 @@ _FLOAT_COMPARE_BUILTINS = (
 )
 
 
+def _builtin_arg_limits(name: str) -> tuple[int, int | None] | None:
+    if name in (
+        "__builtin_flt_rounds",
+        "__builtin_inf",
+        "__builtin_inff",
+        "__builtin_infl",
+        "__builtin_huge_val",
+        "__builtin_huge_valf",
+        "__builtin_huge_vall",
+        "__sync_synchronize",
+    ):
+        return 0, 0
+    if name in (
+        "__builtin_constant_p",
+        "__builtin_fabs",
+        "__builtin_fabsf",
+        "__builtin_fabsl",
+        "__builtin_nan",
+        "__builtin_nanf",
+        "__builtin_nanl",
+        "__builtin_alloca",
+        "__builtin_malloc",
+        "__builtin_frame_address",
+        "__builtin_return_address",
+        "__builtin_clz",
+        "__builtin_clzl",
+        "__builtin_clzll",
+        "__builtin_ctz",
+        "__builtin_ctzl",
+        "__builtin_ctzll",
+        "__builtin_ffs",
+        "__builtin_ffsl",
+        "__builtin_ffsll",
+        "__builtin_popcount",
+        "__builtin_popcountl",
+        "__builtin_popcountll",
+        "__builtin_bswap16",
+        "__builtin_bswap32",
+        "__builtin_bswap64",
+        "__builtin_isinf",
+        "__builtin_isinf_sign",
+        "__builtin_isnan",
+        "__builtin_isfinite",
+        "__builtin_isnormal",
+        "__builtin_signbit",
+        "__builtin_va_end",
+        "__atomic_thread_fence",
+        "__atomic_signal_fence",
+        "__c11_atomic_thread_fence",
+        "__c11_atomic_signal_fence",
+        "__c11_atomic_is_lock_free",
+    ):
+        return 1, 1
+    if name in (
+        "__builtin_copysign",
+        "__builtin_copysignf",
+        "__builtin_copysignl",
+        "__builtin_bzero",
+        "__builtin___bzero",
+        "__builtin_alloca_with_align",
+        "__builtin_calloc",
+        "__builtin_va_start",
+        "__builtin_va_copy",
+        "__atomic_load_n",
+        "__atomic_is_lock_free",
+        "__atomic_always_lock_free",
+        "__c11_atomic_init",
+        "__c11_atomic_load",
+        "__scoped_atomic_thread_fence",
+    ):
+        return 2, 2
+    if name in (
+        "__builtin_memcpy",
+        "__builtin_memmove",
+        "__builtin_memset",
+        "__builtin_umul_overflow",
+        "__builtin_umull_overflow",
+        "__builtin_umulll_overflow",
+        "__atomic_load",
+        "__atomic_store",
+        "__atomic_store_n",
+        "__atomic_exchange_n",
+        "__atomic_fetch_add",
+        "__atomic_fetch_sub",
+        "__atomic_fetch_and",
+        "__atomic_fetch_or",
+        "__atomic_fetch_xor",
+        "__atomic_fetch_nand",
+        "__atomic_add_fetch",
+        "__atomic_sub_fetch",
+        "__atomic_and_fetch",
+        "__atomic_or_fetch",
+        "__atomic_xor_fetch",
+        "__atomic_nand_fetch",
+        "__c11_atomic_store",
+        "__c11_atomic_exchange",
+        "__c11_atomic_fetch_add",
+        "__c11_atomic_fetch_sub",
+        "__c11_atomic_fetch_and",
+        "__c11_atomic_fetch_or",
+        "__c11_atomic_fetch_xor",
+        "__scoped_atomic_load",
+    ):
+        return 3, 3
+    if name in (
+        "__builtin___memcpy_chk",
+        "__atomic_exchange",
+        "__scoped_atomic_store",
+        "__scoped_atomic_fetch_add",
+    ):
+        return 4, 4
+    if name in (
+        "__c11_atomic_compare_exchange_strong",
+        "__c11_atomic_compare_exchange_weak",
+    ):
+        return 5, 5
+    if name in ("__atomic_compare_exchange", "__atomic_compare_exchange_n"):
+        return 6, 6
+    if name == "__builtin_assume_aligned":
+        return 2, 3
+    if name in (
+        "__sync_fetch_and_add",
+        "__sync_fetch_and_sub",
+        "__sync_fetch_and_or",
+        "__sync_fetch_and_and",
+        "__sync_fetch_and_xor",
+        "__sync_add_and_fetch",
+        "__sync_sub_and_fetch",
+        "__sync_or_and_fetch",
+        "__sync_and_and_fetch",
+        "__sync_xor_and_fetch",
+        "__sync_lock_test_and_set",
+    ):
+        return 2, None
+    if name in ("__sync_val_compare_and_swap", "__sync_bool_compare_and_swap"):
+        return 3, None
+    if name == "__sync_lock_release":
+        return 1, None
+    return None
+
+
 class Analyzer:
     def __init__(
         self,
         *,
         std: StdMode = "c11",
         excess_init_ok: bool = False,
-        pack_changes: tuple[tuple[str, int, int | None], ...] = (),
+        pack_changes: tuple[tuple[int, int | None], ...] = (),
         data_layout: TargetDataLayout = GENERIC_LP64_DATA_LAYOUT,
     ) -> None:
         self._std = std
@@ -149,12 +285,8 @@ class Analyzer:
         self._excess_init_ok = excess_init_ok
         self._pack_changes = pack_changes
         self._allow_const_var_folding = False
-        # Derive effective global pack from pack changes (for Mach headers).
-        _pack = None
-        for _fn, _ln, _p in pack_changes:
-            if _p is not None:
-                _pack = _p
-        self._effective_global_pack: int | None = _pack
+        self._source_map: dict[int, SourceLocation] = {}
+        self._current_source_location: SourceLocation | None = None
         self._functions: dict[str, FunctionSymbol] = {}
         self._type_map: TypeMap = TypeMap()
         self._function_signatures: dict[str, FunctionSignature] = {}
@@ -166,6 +298,7 @@ class Analyzer:
         self._record_definitions: dict[str, tuple[RecordMemberInfo, ...]] = {}
         self._transparent_union_types: set[str] = set()
         self._record_pack: dict[str, int | None] = {}
+        self._record_layout_cache: dict[str, RecordLayout] = {}
         self._record_member_lookup_cache: dict[
             str,
             tuple[tuple[RecordMemberInfo, ...], dict[str, tuple[Type, int]]],
@@ -639,8 +772,8 @@ class Analyzer:
             )
         self._function_signatures["__builtin_evm_return_array"] = FunctionSignature(
             return_type=VOID,
-            params=None,
-            is_variadic=True,
+            params=(EVM_UINT256.pointer_to(), EVM_UINT256),
+            is_variadic=False,
         )
         self._function_signatures["__builtin_bswap16"] = FunctionSignature(
             return_type=USHORT, params=None, is_variadic=True
@@ -655,31 +788,42 @@ class Analyzer:
             self._function_signatures[name] = FunctionSignature(
                 return_type=VOID, params=None, is_variadic=True
             )
-        # assert() fallback: when the macro from <assert.h> is not expanded
-        # (e.g. inside macro bodies or due to __has_attribute not being
-        # supported in some #if paths), treat assert as a variadic void fn.
-        self._function_signatures["assert"] = FunctionSignature(
-            return_type=VOID, params=None, is_variadic=True
-        )
 
     def analyze(self, unit: TranslationUnit) -> SemaUnit:
+        self._source_map = unit.source_map
         externals = unit.externals or [*unit.declarations, *unit.functions]
-        for external in externals:
-            if isinstance(external, FunctionDef):
-                self._register_function_external(external)
-                continue
-            self._analyze_file_scope_decl(external)
-        for external in externals:
-            if isinstance(external, FunctionDef) and external.body is not None:
-                self._analyze_function(external)
+        try:
+            for external in externals:
+                self._current_source_location = self._source_map.get(id(external))
+                if isinstance(external, FunctionDef):
+                    self._register_function_external(external)
+                    continue
+                self._analyze_file_scope_decl(external)
+            for external in externals:
+                if isinstance(external, FunctionDef) and external.body is not None:
+                    self._current_source_location = self._source_map.get(id(external))
+                    self._analyze_function(external)
+        except SemaError as error:
+            if self._current_source_location is not None:
+                error.line = self._current_source_location.line
+                error.column = self._current_source_location.column
+            raise
+        layouts: dict[str, RecordLayout] = {}
+        for name in self._record_definitions:
+            layout = record_layout(self, name)
+            assert layout is not None
+            layouts[name] = layout
         return SemaUnit(
-            self._functions,
-            self._type_map,
-            self._record_definitions,
-            self._file_scope,
-            dict(self._function_signatures),
-            set(self._transparent_union_types),
-            self._data_layout,
+            functions=self._functions,
+            type_map=self._type_map,
+            record_definitions=self._record_definitions,
+            file_scope=self._file_scope,
+            function_signatures=dict(self._function_signatures),
+            transparent_union_types=set(self._transparent_union_types),
+            data_layout=self._data_layout,
+            record_type_names=dict(self._record_type_names_by_spec_id),
+            record_packs=dict(self._record_pack),
+            record_layouts=layouts,
         )
 
     def _register_function_external(self, func: FunctionDef) -> None:
@@ -1023,12 +1167,12 @@ class Analyzer:
         return record_key(kind, tag)
 
     def _record_type_name(self, type_spec: TypeSpec) -> str:
+        cached = self._record_type_names_by_spec_id.get(id(type_spec))
+        if cached is not None:
+            return cached
         if type_spec.record_tag is not None:
-            cached = self._record_type_names_by_spec_id.get(id(type_spec))
-            if cached is not None:
-                return cached
             scope = self._current_scope if self._current_scope is not None else self._file_scope
-            if type_spec.has_record_body or type_spec.record_members:
+            if type_spec.has_record_body:
                 name = scope.lookup_record_tag_current(type_spec.name, type_spec.record_tag)
                 if name is None:
                     name = self._new_record_type_name(type_spec.name, type_spec.record_tag, scope)
@@ -1038,16 +1182,14 @@ class Analyzer:
                 if name is None:
                     name = self._new_record_type_name(type_spec.name, type_spec.record_tag, scope)
                     scope.define_record_tag(type_spec.name, type_spec.record_tag, name)
-            self._record_type_names_by_spec_id[id(type_spec)] = name
-            return name
-        result = record_type_name(
-            type_spec,
-            self._anon_record_names,
-            self._anon_record_counter,
-        )
-        name = result[0]
-        self._anon_record_counter = result[1]
-        self._anon_record_names[anonymous_record_key(type_spec)] = name
+        else:
+            name, self._anon_record_counter = record_type_name(
+                type_spec,
+                self._anon_record_names,
+                self._anon_record_counter,
+            )
+            self._anon_record_names[anonymous_record_key(type_spec)] = name
+        self._record_type_names_by_spec_id[id(type_spec)] = name
         return name
 
     def _new_record_type_name(self, kind: str, tag: str, scope: Scope) -> str:
@@ -1056,12 +1198,6 @@ class Analyzer:
             return base_name
         self._scoped_record_counter += 1
         return f"{base_name} <scope:{self._scoped_record_counter}>"
-
-    def _normalize_record_members(
-        self,
-        members: tuple[RecordMemberInfo, ...] | tuple[tuple[str | None, Type], ...],
-    ) -> tuple[RecordMemberInfo, ...]:
-        return normalize_record_members(members)
 
     def _record_members(self, record_name: str) -> tuple[RecordMemberInfo, ...] | None:
         return record_members(self._record_definitions, record_name)
@@ -1074,17 +1210,6 @@ class Analyzer:
 
     def _is_anonymous_record_member(self, member: RecordMemberInfo) -> bool:
         return is_anonymous_record_member(member)
-
-    def _flatten_hoisted_record_members(
-        self,
-        record_type: Type,
-        owner_index: int,
-    ) -> list[tuple[str, tuple[Type, int]]]:
-        return flatten_hoisted_record_members(
-            self._record_definitions,
-            record_type,
-            owner_index,
-        )
 
     def _record_member_lookup(
         self,
@@ -1163,20 +1288,11 @@ class Analyzer:
     def _is_invalid_sizeof_type_spec(self, type_spec: TypeSpec) -> bool:
         return self._invalid_sizeof_operand_reason_for_type_spec(type_spec) is not None
 
-    def _is_invalid_sizeof_type(self, type_: Type) -> bool:
-        return self._invalid_sizeof_operand_reason_for_type(type_) is not None
-
     def _is_invalid_alignof_type_spec(self, type_spec: TypeSpec) -> bool:
         return self._invalid_alignof_operand_reason_for_type_spec(type_spec) is not None
 
-    def _is_invalid_alignof_type(self, type_: Type) -> bool:
-        return self._invalid_alignof_operand_reason_for_type(type_) is not None
-
     def _invalid_generic_association_type_reason(self, type_spec: TypeSpec) -> str | None:
         return _type_resolution.invalid_generic_association_type_reason(self, type_spec)
-
-    def _is_invalid_generic_association_type_spec(self, type_spec: TypeSpec) -> bool:
-        return self._invalid_generic_association_type_reason(type_spec) is not None
 
     def _describe_generic_association_type(self, type_spec: TypeSpec, resolved_type: Type) -> str:
         return _type_resolution.describe_generic_association_type(type_spec, resolved_type)
@@ -1209,32 +1325,14 @@ class Analyzer:
     def _is_integer_type(self, type_: Type) -> bool:
         return is_integer_type(type_)
 
-    def _is_floating_type(self, type_: Type) -> bool:
-        return is_floating_type(type_)
-
     def _is_arithmetic_type(self, type_: Type) -> bool:
         return is_arithmetic_type(type_)
 
     def _unqualified_type(self, type_: Type) -> Type:
         return unqualified_type(type_)
 
-    def _integer_rank(self, type_: Type) -> int:
-        return integer_rank(type_)
-
-    def _is_signed_integer_type(self, type_: Type) -> bool:
-        return is_signed_integer_type(type_)
-
     def _integer_promotion(self, type_: Type) -> Type:
         return integer_promotion(type_)
-
-    def _signed_range(self, type_: Type) -> tuple[int, int] | None:
-        return signed_range(type_)
-
-    def _unsigned_max(self, type_: Type) -> int | None:
-        return unsigned_max(type_)
-
-    def _signed_can_represent_unsigned(self, signed: Type, unsigned: Type) -> bool:
-        return signed_can_represent_unsigned(signed, unsigned)
 
     def _usual_arithmetic_conversion(self, left_type: Type, right_type: Type) -> Type | None:
         return usual_arithmetic_conversion(left_type, right_type)
@@ -1248,9 +1346,6 @@ class Analyzer:
     def _merged_qualifiers(self, left_type: Type, right_type: Type) -> tuple[str, ...]:
         return merged_qualifiers(left_type, right_type)
 
-    def _qualifiers_contain(self, target_type: Type, value_type: Type) -> bool:
-        return qualifiers_contain(target_type, value_type)
-
     def _is_object_pointer_type(self, type_: Type) -> bool:
         return is_object_pointer_type(type_)
 
@@ -1262,14 +1357,10 @@ class Analyzer:
             return True
         if self._std != "gnu11":
             return False
-        # In GNU mode, allow cross-pointer assignment (e.g. char* to wchar_t*),
-        # matching GCC -fpermissive behavior used by CPython.
+        # GNU C diagnoses incompatible object pointers without rejecting them.
         t_ptr = target_type.declarator_ops and target_type.declarator_ops[0][0] == "ptr"
         v_ptr = value_type.declarator_ops and value_type.declarator_ops[0][0] == "ptr"
         return bool(t_ptr and v_ptr)
-
-    def _is_pointer_conversion_compatible(self, target_type: Type, value_type: Type) -> bool:
-        return is_pointer_conversion_compatible(target_type, value_type)
 
     def _has_nested_pointer_qualifier_mismatch(self, left_type: Type, right_type: Type) -> bool:
         return has_nested_pointer_qualifier_mismatch(left_type, right_type)
@@ -1325,7 +1416,7 @@ class Analyzer:
     def _analyze_designated_initializer(
         self,
         target_type: Type,
-        designators: tuple[tuple[str, Expr | str], ...],
+        designators: tuple[Designator, ...],
         initializer: Expr | InitList,
         scope: Scope,
     ) -> None:
@@ -1367,10 +1458,13 @@ class Analyzer:
     def _alignof_type(self, type_: Type) -> int | None:
         return alignof_type(self, type_)
 
+    def _offsetof_type(self, type_: Type, member_path: str) -> int | None:
+        return offsetof_type(self, type_, member_path)
+
     def _pack_alignment_for(self, source_line: int) -> int | None:
         """Return the #pragma pack alignment active at *source_line*."""
         pack = None
-        for _filename, line, alignment in self._pack_changes:
+        for line, alignment in self._pack_changes:
             if line <= source_line:
                 pack = alignment
             else:
@@ -1473,6 +1567,9 @@ class Analyzer:
             self._analyze_stmt(item, scope, return_type)
 
     def _analyze_stmt(self, stmt: Stmt, scope: Scope, return_type: Type) -> None:
+        location = self._source_map.get(id(stmt))
+        if location is not None:
+            self._current_source_location = location
         analyze_stmt(self, stmt, scope, return_type)
 
     def _analyze_expr(self, expr: Expr, scope: Scope) -> Type:
@@ -1486,6 +1583,21 @@ class Analyzer:
         *,
         default: FunctionSignature,
     ) -> FunctionSignature:
+        if default.params is None:
+            limits = _builtin_arg_limits(name)
+            if limits is not None:
+                minimum, maximum = limits
+                count = len(args)
+                if count < minimum or maximum is not None and count > maximum:
+                    if maximum is None:
+                        expected = f"at least {minimum}"
+                    elif minimum == maximum:
+                        expected = str(minimum)
+                    else:
+                        expected = f"{minimum} or {maximum}"
+                    raise SemaError(
+                        f"Argument count mismatch (expected {expected}, got {count}): {name}"
+                    )
         overloads = self._function_overloads.get(name)
         if not overloads:
             for arg in args:
@@ -1685,7 +1797,7 @@ def analyze(
     *,
     std: StdMode = "c11",
     excess_init_ok: bool = False,
-    pack_changes: tuple[tuple[str, int, int | None], ...] = (),
+    pack_changes: tuple[tuple[int, int | None], ...] = (),
     data_layout: TargetDataLayout = GENERIC_LP64_DATA_LAYOUT,
 ) -> SemaUnit:
     return Analyzer(

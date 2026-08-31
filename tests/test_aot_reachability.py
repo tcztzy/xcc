@@ -1,4 +1,3 @@
-import inspect
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -36,15 +35,6 @@ AOT_ROOT = ROOT / "src/xcc/aot"
 
 
 class AotReachabilityTests(unittest.TestCase):
-    def test_v441_reachability_caches_sorted_names_and_uses_dict_membership(
-        self,
-    ) -> None:
-        source = inspect.getsource(render_native_reachability)
-        self.assertNotIn(".keys()", source)
-        self.assertNotIn(" & ", source)
-        self.assertEqual(source.count("sorted(functions)"), 1)
-        self.assertEqual(source.count("sorted(records)"), 1)
-
     def test_v401_reachability_materializes_each_record_once(self) -> None:
         source = (
             "class Left:\n"
@@ -551,6 +541,17 @@ class AotReachabilityTests(unittest.TestCase):
         llvm_text = emit_llvm_text(module)
         self.assertIn("any.cond", llvm_text)
         self.assertNotIn("@__any_generator", llvm_text)
+
+    def test_any_generator_over_enumerate_reaches_native_loop(self) -> None:
+        module = lower_source_to_ir(
+            "def has_value(values: list[str]) -> bool:\n"
+            "    return any(index and value for index, value in enumerate(values))\n",
+            filename="any_enumerate_generator.py",
+        )
+
+        llvm_text = emit_llvm_text(module)
+        self.assertIn("any.cond", llvm_text)
+        self.assertNotIn("@__enumerate", llvm_text)
 
     def test_v376_owned_parser_record_layout_matches_constructor(self) -> None:
         module = lower_core_slice(

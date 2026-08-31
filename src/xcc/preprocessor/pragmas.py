@@ -1,7 +1,7 @@
 from typing import NoReturn
 
-from . import PreprocessorError, _SourceLocation
 from .expressions import _strip_condition_comments
+from .model import PreprocessorError, _SourceLocation
 
 _STDC_PRAGMA_TOGGLE_VALUES = ("ON", "OFF", "DEFAULT")
 _STDC_VALIDATED_PRAGMAS = ("FENV_ACCESS", "CX_LIMITED_RANGE", "FP_CONTRACT")

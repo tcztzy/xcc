@@ -244,6 +244,7 @@ class IrAssign:
     target: str
     value: IrExpr
     span: IrSourceSpan = field(default=IrSourceSpan(), compare=False)
+    chain: bool = field(default=False, repr=False)
 
 
 @dataclass(frozen=True)

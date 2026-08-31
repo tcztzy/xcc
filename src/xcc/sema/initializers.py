@@ -1,27 +1,33 @@
-from xcc.ast import DesignatorRange, Expr, InitItem, InitList, StringLiteral
+from typing import TYPE_CHECKING
+
+from xcc.ast import Designator, DesignatorRange, Expr, InitItem, InitList, StringLiteral
 from xcc.types import Type
 
+from .constants import narrow_string_bytes
 from .symbols import RecordMemberInfo, Scope, SemaError
 
+if TYPE_CHECKING:
+    from . import Analyzer
 
-def _is_gnu_mode(analyzer: object) -> bool:
-    return analyzer._std == "gnu11"  # type: ignore
+
+def _is_gnu_mode(a: "Analyzer") -> bool:
+    return a._std == "gnu11"
 
 
 def is_initializer_compatible(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
     init_expr: Expr,
     init_type: Type,
     scope: Scope,
 ) -> bool:
-    if analyzer._is_char_array_string_initializer(target_type, init_expr):  # type: ignore
+    if a._is_char_array_string_initializer(target_type, init_expr):
         return True
-    if analyzer._is_void_pointer_type(target_type) and init_type.callable_signature() is not None:  # type: ignore
+    if a._is_void_pointer_type(target_type) and init_type.callable_signature() is not None:
         return True
-    if target_type.callable_signature() is not None and analyzer._is_void_pointer_type(init_type):  # type: ignore
+    if target_type.callable_signature() is not None and a._is_void_pointer_type(init_type):
         return True
-    return analyzer._is_assignment_expr_compatible(  # type: ignore
+    return a._is_assignment_expr_compatible(
         target_type,
         init_expr,
         init_type,
@@ -30,33 +36,33 @@ def is_initializer_compatible(
 
 
 def analyze_initializer(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
     initializer: Expr | InitList,
     scope: Scope,
 ) -> None:
     if isinstance(initializer, InitList):
-        analyzer._analyze_initializer_list(target_type, initializer, scope)  # type: ignore
+        a._analyze_initializer_list(target_type, initializer, scope)
         return
-    init_type = analyzer._decay_array_value(analyzer._analyze_expr(initializer, scope))  # type: ignore
-    if analyzer._is_initializer_compatible(target_type, initializer, init_type, scope):  # type: ignore
+    init_type = a._decay_array_value(a._analyze_expr(initializer, scope))
+    if a._is_initializer_compatible(target_type, initializer, init_type, scope):
         return
     # Scalar-to-aggregate: a scalar can initialize a struct/union/array
     # by initializing its first element / member (C11 6.7.9p13, 6.7.9p17).
     # Only try this when the direct compatibility check fails.
-    if analyzer._is_record_name(target_type.name) and not target_type.declarator_ops:  # type: ignore
-        members = analyzer._record_members(target_type.name)  # type: ignore
+    if a._is_record_name(target_type.name) and not target_type.declarator_ops:
+        members = a._record_members(target_type.name)
         if members:
-            analyzer._analyze_initializer(members[0].type_, initializer, scope)  # type: ignore
+            a._analyze_initializer(members[0].type_, initializer, scope)
             return
     if target_type.is_array():
         element_type = target_type.element_type()
         if element_type is not None:
-            analyzer._analyze_initializer(element_type, initializer, scope)  # type: ignore
+            a._analyze_initializer(element_type, initializer, scope)
             return
     # In GNU mode, allow pointer↔integer and cross-pointer initializer
     # conversions (GCC -fpermissive).  At least one side must be a pointer.
-    if _is_gnu_mode(analyzer) and _either_is_pointer(target_type, init_type):
+    if _is_gnu_mode(a) and _either_is_pointer(target_type, init_type):
         return
     raise SemaError("Initializer type mismatch")
 
@@ -70,27 +76,27 @@ def _either_is_pointer(t: Type, i: Type) -> bool:
 
 
 def analyze_initializer_list(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
     init: InitList,
     scope: Scope,
 ) -> None:
     if target_type.is_array():
-        analyzer._analyze_array_initializer_list(target_type, init, scope)  # type: ignore
+        a._analyze_array_initializer_list(target_type, init, scope)
         return
-    if analyzer._is_record_name(target_type.name) and not target_type.declarator_ops:  # type: ignore
-        analyzer._analyze_record_initializer_list(target_type, init, scope)  # type: ignore
+    if a._is_record_name(target_type.name) and not target_type.declarator_ops:
+        a._analyze_record_initializer_list(target_type, init, scope)
         return
     if len(init.items) != 1:
         raise SemaError("Scalar initializer list must contain exactly one item")
     item = init.items[0]
     if item.designators:
         raise SemaError("Scalar initializer list item cannot be designated")
-    analyzer._analyze_initializer(target_type, item.initializer, scope)  # type: ignore
+    a._analyze_initializer(target_type, item.initializer, scope)
 
 
 def analyze_array_initializer_list(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
     init: InitList,
     scope: Scope,
@@ -100,7 +106,7 @@ def analyze_array_initializer_list(
     assert isinstance(length_value, int)
     length = length_value
     if length < 0:
-        length = infer_incomplete_array_length(analyzer, init, scope, target_type)
+        length = infer_incomplete_array_length(a, init, scope, target_type)
     element_type = target_type.element_type()
     assert element_type is not None
     next_index = 0
@@ -111,12 +117,12 @@ def analyze_array_initializer_list(
             kind, value = item.designators[0]
             if kind == "range":
                 assert isinstance(value, DesignatorRange)
-                low = analyzer._eval_initializer_index(value.low, scope)  # type: ignore
-                high = analyzer._eval_initializer_index(value.high, scope)  # type: ignore
+                low = a._eval_initializer_index(value.low, scope)
+                high = a._eval_initializer_index(value.high, scope)
                 if low < 0 or high >= length or low > high:
                     raise SemaError("Initializer range out of bounds")
                 for _i in range(low, high + 1):
-                    analyzer._analyze_designated_initializer(  # type: ignore
+                    a._analyze_designated_initializer(
                         element_type,
                         item.designators[1:],
                         item.initializer,
@@ -128,10 +134,10 @@ def analyze_array_initializer_list(
             if kind != "index":
                 raise SemaError("Array initializer designator must use index")
             assert isinstance(value, Expr)
-            index = analyzer._eval_initializer_index(value, scope)  # type: ignore
+            index = a._eval_initializer_index(value, scope)
             if index < 0 or index >= length:
                 raise SemaError("Initializer index out of range")
-            analyzer._analyze_designated_initializer(  # type: ignore
+            a._analyze_designated_initializer(
                 element_type,
                 item.designators[1:],
                 item.initializer,
@@ -141,36 +147,36 @@ def analyze_array_initializer_list(
             item_index += 1
             continue
         if next_index >= length:
-            if analyzer._excess_init_ok:  # type: ignore
+            if a._excess_init_ok:
                 item_index += 1
                 continue
             raise SemaError("Initializer index out of range")
         if _is_single_aggregate_initializer(
-            analyzer,
+            a,
             element_type,
             item.initializer,
             scope,
         ):
-            analyzer._analyze_initializer(element_type, item.initializer, scope)  # type: ignore
+            a._analyze_initializer(element_type, item.initializer, scope)
             item_index += 1
             next_index += 1
             continue
         consumed = _analyze_unbraced_aggregate_initializer_items(
-            analyzer,
+            a,
             element_type,
             init.items,
             item_index,
             scope,
         )
         if consumed == 0:
-            analyzer._analyze_initializer(element_type, item.initializer, scope)  # type: ignore
+            a._analyze_initializer(element_type, item.initializer, scope)
             consumed = 1
         item_index += consumed
         next_index += 1
 
 
 def infer_incomplete_array_length(
-    analyzer: object,
+    a: "Analyzer",
     init: InitList,
     scope: Scope,
     target_type: Type | None = None,
@@ -185,11 +191,11 @@ def infer_incomplete_array_length(
             kind, value = item.designators[0]
             if kind == "index":
                 assert isinstance(value, Expr)
-                idx = analyzer._eval_initializer_index(value, scope)  # type: ignore
+                idx = a._eval_initializer_index(value, scope)
                 next_idx = idx + 1
             elif kind == "range":
                 assert isinstance(value, DesignatorRange)
-                high = analyzer._eval_initializer_index(value.high, scope)  # type: ignore
+                high = a._eval_initializer_index(value.high, scope)
                 next_idx = high + 1
             else:
                 next_idx += 1
@@ -197,13 +203,13 @@ def infer_incomplete_array_length(
         else:
             consumed = 1
             if element_type is not None and not _is_single_aggregate_initializer(
-                analyzer,
+                a,
                 element_type,
                 item.initializer,
                 scope,
             ):
                 consumed = _analyze_unbraced_aggregate_initializer_items(
-                    analyzer,
+                    a,
                     element_type,
                     init.items,
                     item_index,
@@ -218,22 +224,22 @@ def infer_incomplete_array_length(
 
 
 def analyze_record_initializer_list(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
     init: InitList,
     scope: Scope,
 ) -> None:
-    all_members = analyzer._record_members(target_type.name)  # type: ignore
+    all_members = a._record_members(target_type.name)
     if all_members is None:
         raise SemaError("Initializer type mismatch")
     has_initializable_member = False
     for member in all_members:
-        if _record_member_takes_initializer(analyzer, member):
+        if _record_member_takes_initializer(a, member):
             has_initializable_member = True
             break
     if not has_initializable_member:
         # In GNU mode, empty/anonymous struct init is silently accepted.
-        if _is_gnu_mode(analyzer):
+        if _is_gnu_mode(a):
             return
         raise SemaError("Initializer type mismatch")
     is_union = target_type.name.startswith("union ")
@@ -249,8 +255,8 @@ def analyze_record_initializer_list(
                 raise SemaError("Record initializer designator must use member")
             if is_union and initialized_union and initialized_union_member != value:
                 raise SemaError("Initializer type mismatch")
-            member_type, member_index = analyzer._lookup_initializer_member(target_type, value)  # type: ignore
-            analyzer._analyze_designated_initializer(  # type: ignore
+            member_type, member_index = a._lookup_initializer_member(target_type, value)
+            a._analyze_designated_initializer(
                 member_type,
                 item.designators[1:],
                 item.initializer,
@@ -266,80 +272,80 @@ def analyze_record_initializer_list(
         if is_union:
             if initialized_union:
                 raise SemaError("Initializer type mismatch")
-            member_index = _next_initializable_record_member_index(
-                analyzer,
+            first_member = _next_initializable_record_member_index(
+                a,
                 all_members,
                 0,
             )
-            if member_index is None:
+            if first_member is None:
                 raise SemaError("Initializer type mismatch")
-            analyzer._analyze_initializer(  # type: ignore
-                all_members[member_index].type_,
+            a._analyze_initializer(
+                all_members[first_member].type_,
                 item.initializer,
                 scope,
             )
             initialized_union = True
             item_index += 1
             continue
-        member_index = _next_initializable_record_member_index(
-            analyzer,
+        next_index = _next_initializable_record_member_index(
+            a,
             all_members,
             next_member,
         )
-        if member_index is None:
-            if analyzer._excess_init_ok:  # type: ignore
+        if next_index is None:
+            if a._excess_init_ok:
                 item_index += 1
                 continue
             # In GNU mode, excess initializer elements are silently ignored.
-            if _is_gnu_mode(analyzer):
+            if _is_gnu_mode(a):
                 item_index += 1
                 continue
             raise SemaError("Initializer type mismatch")
-        member_type = all_members[member_index].type_
+        member_type = all_members[next_index].type_
         if _is_single_aggregate_initializer(
-            analyzer,
+            a,
             member_type,
             item.initializer,
             scope,
         ):
-            analyzer._analyze_initializer(member_type, item.initializer, scope)  # type: ignore
+            a._analyze_initializer(member_type, item.initializer, scope)
             item_index += 1
-            next_member = member_index + 1
+            next_member = next_index + 1
             continue
         consumed = _analyze_unbraced_aggregate_initializer_items(
-            analyzer,
+            a,
             member_type,
             init.items,
             item_index,
             scope,
         )
         if consumed == 0:
-            analyzer._analyze_initializer(member_type, item.initializer, scope)  # type: ignore
+            a._analyze_initializer(member_type, item.initializer, scope)
             consumed = 1
         item_index += consumed
-        next_member = member_index + 1
+        next_member = next_index + 1
 
 
-def _is_aggregate_initializer_target(analyzer: object, target_type: Type) -> bool:
+def _is_aggregate_initializer_target(a: "Analyzer", target_type: Type) -> bool:
     return target_type.is_array() or (
-        not target_type.declarator_ops and analyzer._is_record_name(target_type.name)  # type: ignore
+        not target_type.declarator_ops and a._is_record_name(target_type.name)
     )
 
 
 def _is_single_aggregate_initializer(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
     initializer: Expr | InitList,
     scope: Scope,
 ) -> bool:
     if isinstance(initializer, InitList):
         return True
-    if not _is_aggregate_initializer_target(analyzer, target_type):
+    if not _is_aggregate_initializer_target(a, target_type):
         return True
-    if analyzer._is_char_array_string_initializer(target_type, initializer):  # type: ignore
+    if a._is_char_array_string_initializer(target_type, initializer):
         return True
-    init_type = analyzer._decay_array_value(analyzer._analyze_expr(initializer, scope))  # type: ignore
-    return analyzer._is_initializer_compatible(  # type: ignore
+    init_type = a._decay_array_value(a._analyze_expr(initializer, scope))
+    return a._is_initializer_compatible(
         target_type,
         initializer,
         init_type,
@@ -348,7 +354,7 @@ def _is_single_aggregate_initializer(
 
 
 def _analyze_unbraced_aggregate_initializer_items(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
     items: tuple[InitItem, ...],
     start: int,
@@ -370,7 +376,7 @@ def _analyze_unbraced_aggregate_initializer_items(
             if items[index].designators:
                 break
             consumed = _analyze_unbraced_initializer_item(
-                analyzer,
+                a,
                 element_type,
                 items,
                 index,
@@ -380,8 +386,8 @@ def _analyze_unbraced_aggregate_initializer_items(
                 break
             index += consumed
         return index - start
-    if not target_type.declarator_ops and analyzer._is_record_name(target_type.name):  # type: ignore
-        all_members = analyzer._record_members(target_type.name)  # type: ignore
+    if not target_type.declarator_ops and a._is_record_name(target_type.name):
+        all_members = a._record_members(target_type.name)
         if all_members is None:
             return 0
         is_union = target_type.name.startswith("union ")
@@ -393,14 +399,14 @@ def _analyze_unbraced_aggregate_initializer_items(
             if items[index].designators:
                 break
             member_index = _next_initializable_record_member_index(
-                analyzer,
+                a,
                 all_members,
                 member_start,
             )
             if member_index is None:
                 break
             consumed = _analyze_unbraced_initializer_item(
-                analyzer,
+                a,
                 all_members[member_index].type_,
                 items,
                 index,
@@ -417,7 +423,7 @@ def _analyze_unbraced_aggregate_initializer_items(
 
 
 def _analyze_unbraced_initializer_item(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
     items: tuple[InitItem, ...],
     index: int,
@@ -427,15 +433,15 @@ def _analyze_unbraced_initializer_item(
     if item.designators:
         return 0
     if _is_single_aggregate_initializer(
-        analyzer,
+        a,
         target_type,
         item.initializer,
         scope,
     ):
-        analyzer._analyze_initializer(target_type, item.initializer, scope)  # type: ignore
+        a._analyze_initializer(target_type, item.initializer, scope)
         return 1
     return _analyze_unbraced_aggregate_initializer_items(
-        analyzer,
+        a,
         target_type,
         items,
         index,
@@ -444,41 +450,39 @@ def _analyze_unbraced_initializer_item(
 
 
 def _record_member_takes_initializer(
-    analyzer: object,
+    a: "Analyzer",
     member: RecordMemberInfo,
 ) -> bool:
-    return bool(
-        member.name is not None or analyzer._is_anonymous_record_member(member)  # type: ignore
-    )
+    return bool(member.name is not None or a._is_anonymous_record_member(member))
 
 
 def _next_initializable_record_member_index(
-    analyzer: object,
+    a: "Analyzer",
     members: tuple[RecordMemberInfo, ...],
     start: int,
 ) -> int | None:
     for index in range(start, len(members)):
-        if _record_member_takes_initializer(analyzer, members[index]):
+        if _record_member_takes_initializer(a, members[index]):
             return index
     return None
 
 
 def analyze_designated_initializer(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
-    designators: tuple[tuple[str, Expr | str], ...],
+    designators: tuple[Designator, ...],
     initializer: Expr | InitList,
     scope: Scope,
 ) -> None:
     if not designators:
-        analyzer._analyze_initializer(target_type, initializer, scope)  # type: ignore
+        a._analyze_initializer(target_type, initializer, scope)
         return
     kind, value = designators[0]
     if kind == "index":
         if not target_type.is_array():
             raise SemaError("Initializer type mismatch")
         assert isinstance(value, Expr)
-        index = analyzer._eval_initializer_index(value, scope)  # type: ignore
+        index = a._eval_initializer_index(value, scope)
         assert target_type.declarator_ops
         _, length_value = target_type.declarator_ops[0]
         assert isinstance(length_value, int)
@@ -486,7 +490,7 @@ def analyze_designated_initializer(
             raise SemaError("Initializer index out of range")
         element_type = target_type.element_type()
         assert element_type is not None
-        analyzer._analyze_designated_initializer(  # type: ignore
+        a._analyze_designated_initializer(
             element_type,
             designators[1:],
             initializer,
@@ -495,8 +499,8 @@ def analyze_designated_initializer(
         return
     if kind != "member" or not isinstance(value, str):
         raise SemaError("Initializer type mismatch")
-    member_type, _ = analyzer._lookup_initializer_member(target_type, value)  # type: ignore
-    analyzer._analyze_designated_initializer(  # type: ignore
+    member_type, _ = a._lookup_initializer_member(target_type, value)
+    a._analyze_designated_initializer(
         member_type,
         designators[1:],
         initializer,
@@ -505,13 +509,13 @@ def analyze_designated_initializer(
 
 
 def lookup_initializer_member(
-    analyzer: object,
+    a: "Analyzer",
     record_type: Type,
     member_name: str,
 ) -> tuple[Type, int]:
-    if record_type.declarator_ops or not analyzer._is_record_name(record_type.name):  # type: ignore
+    if record_type.declarator_ops or not a._is_record_name(record_type.name):
         raise SemaError("Initializer type mismatch")
-    lookup = analyzer._record_member_lookup(record_type.name)  # type: ignore
+    lookup = a._record_member_lookup(record_type.name)
     if lookup is None:
         raise SemaError("Initializer type mismatch")
     member = lookup.get(member_name)
@@ -520,15 +524,15 @@ def lookup_initializer_member(
     raise SemaError(f"No such member: {member_name}")
 
 
-def eval_initializer_index(analyzer: object, expr: Expr, scope: Scope) -> int:
-    value = analyzer._eval_int_constant_expr(expr, scope)  # type: ignore
+def eval_initializer_index(a: "Analyzer", expr: Expr, scope: Scope) -> int:
+    value = a._eval_int_constant_expr(expr, scope)
     if value is None:
         raise SemaError("Initializer index is not integer constant")
     return value
 
 
 def is_char_array_string_initializer(
-    analyzer: object,
+    a: "Analyzer",
     target_type: Type,
     init_expr: Expr,
 ) -> bool:
@@ -539,10 +543,10 @@ def is_char_array_string_initializer(
     elem = target_type.element_type()
     if elem is None or elem.name not in {"char", "unsigned char"} or elem.declarator_ops:
         return False
-    body = analyzer._string_literal_body(init_expr.value)  # type: ignore
+    body = a._string_literal_body(init_expr.value)
     if body is None:
         return False
-    data_length = len(analyzer._decode_escaped_units(body))  # type: ignore
+    data_length = len(narrow_string_bytes(body))
     assert target_type.declarator_ops
     _, value = target_type.declarator_ops[0]
     assert isinstance(value, int)

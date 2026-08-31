@@ -59,7 +59,7 @@ from xcc.ast import (
 )
 from xcc.diag import CodegenError, Diagnostic
 from xcc.frontend import FrontendResult
-from xcc.sema.constants import char_literal_body, decode_escaped_units, string_literal_body
+from xcc.sema.constants import char_literal_value, narrow_string_bytes, string_literal_body
 from xcc.sema.symbols import EnumConstSymbol, FunctionSymbol, RecordMemberInfo, VarSymbol
 from xcc.sema.type_helpers import (
     integer_promotion,
@@ -1153,11 +1153,6 @@ class _EvmGen:
     def _is_word_value_type(self, type_: Type) -> bool:
         return type_.pointee() is not None or (not type_.declarator_ops and is_integer_type(type_))
 
-    @staticmethod
-    def _is_function_pointer_type(type_: Type) -> bool:
-        pointee = type_.pointee()
-        return pointee is not None and pointee.callable_signature() is not None
-
     def _is_record_type(self, type_: Type) -> bool:
         return not type_.declarator_ops and type_.name in self._sema.record_definitions
 
@@ -2182,7 +2177,7 @@ class _EvmGen:
             self._asm.push(self._parse_int(expr.value))
             return
         if isinstance(expr, CharLiteral):
-            self._asm.push(self._char_value(expr.value))
+            self._asm.push(char_literal_value(expr.value))
             return
         if isinstance(expr, LabelAddressExpr):
             self._asm.push_label(self._user_label(expr.label))
@@ -2702,235 +2697,110 @@ class _EvmGen:
         name = expr.callee.name
         modular_opcode = self._evm_modular_arithmetic_opcode(name)
         if modular_opcode is not None:
-            if len(expr.args) != 3:
-                raise evm_backend_error(
-                    self._result.filename,
-                    f"{name} expects three arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op(modular_opcode)
             return
         if name == "__builtin_evm_exp":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_exp expects two arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("EXP")
             return
         if name == "__builtin_evm_byte":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_byte expects two arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("BYTE")
             return
         if name == "__builtin_evm_signextend":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_signextend expects two arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("SIGNEXTEND")
             return
         if name == "__builtin_evm_sload":
-            if len(expr.args) != 1:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_sload expects one argument",
-                )
             self._emit_expr(expr.args[0])
             self._asm.op("SLOAD")
             return
         if name == "__builtin_evm_sstore":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_sstore expects two arguments",
-                )
             self._emit_expr(expr.args[1])
             self._emit_expr(expr.args[0])
             self._asm.op("SSTORE")
             return
         if name == "__builtin_evm_tload":
-            if len(expr.args) != 1:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_tload expects one argument",
-                )
             self._emit_expr(expr.args[0])
             self._asm.op("TLOAD")
             return
         if name == "__builtin_evm_tstore":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_tstore expects two arguments",
-                )
             self._emit_expr(expr.args[1])
             self._emit_expr(expr.args[0])
             self._asm.op("TSTORE")
             return
         if name == "__builtin_evm_caller":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_caller expects no arguments",
-                )
             self._asm.op("CALLER")
             return
         if name == "__builtin_evm_callvalue":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_callvalue expects no arguments",
-                )
             self._asm.op("CALLVALUE")
             return
         environment_opcode = self._evm_environment_opcode(name)
         if environment_opcode is not None:
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    f"{name} expects no arguments",
-                )
             self._asm.op(environment_opcode)
             return
         query_opcode = self._evm_unary_query_opcode(name)
         if query_opcode is not None:
-            if len(expr.args) != 1:
-                raise evm_backend_error(
-                    self._result.filename,
-                    f"{name} expects one argument",
-                )
             self._emit_expr(expr.args[0])
             self._asm.op(query_opcode)
             return
         if name == "__builtin_evm_blobhash":
-            if len(expr.args) != 1:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_blobhash expects one argument",
-                )
             self._emit_expr(expr.args[0])
             self._asm.op("BLOBHASH")
             return
         if name == "__builtin_evm_calldatasize":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_calldatasize expects no arguments",
-                )
             self._asm.op("CALLDATASIZE")
             return
         if name == "__builtin_evm_calldataload":
-            if len(expr.args) != 1:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_calldataload expects one argument",
-                )
             self._emit_expr(expr.args[0])
             self._asm.op("CALLDATALOAD")
             return
         if name == "__builtin_evm_calldatacopy":
-            if len(expr.args) != 3:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_calldatacopy expects three arguments",
-                )
             self._emit_expr(expr.args[2])
             self._emit_expr(expr.args[1])
             self._emit_expr(expr.args[0])
             self._asm.op("CALLDATACOPY")
             return
         if name == "__builtin_evm_codesize":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_codesize expects no arguments",
-                )
             self._asm.op("CODESIZE")
             return
         if name == "__builtin_evm_codecopy":
-            if len(expr.args) != 3:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_codecopy expects three arguments",
-                )
             self._emit_expr(expr.args[2])
             self._emit_expr(expr.args[1])
             self._emit_expr(expr.args[0])
             self._asm.op("CODECOPY")
             return
         if name == "__builtin_evm_mload":
-            if len(expr.args) != 1:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_mload expects one argument",
-                )
             self._emit_expr(expr.args[0])
             self._asm.op("MLOAD")
             return
         if name == "__builtin_evm_mstore":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_mstore expects two arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("MSTORE")
             return
         if name == "__builtin_evm_mcopy":
-            if len(expr.args) != 3:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_mcopy expects three arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("MCOPY")
             return
         if name == "__builtin_evm_mstore8":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_mstore8 expects two arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("MSTORE8")
             return
         if name == "__builtin_evm_msize":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_msize expects no arguments",
-                )
             self._asm.op("MSIZE")
             return
         if name == "__builtin_evm_pc":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_pc expects no arguments",
-                )
             self._asm.op("PC")
             return
         if name == "__builtin_evm_extcodecopy":
-            if len(expr.args) != 4:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_extcodecopy expects four arguments",
-                )
             self._emit_expr(expr.args[3])
             self._emit_expr(expr.args[2])
             self._emit_expr(expr.args[1])
@@ -2938,157 +2808,76 @@ class _EvmGen:
             self._asm.op("EXTCODECOPY")
             return
         if name == "__builtin_evm_returndatasize":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_returndatasize expects no arguments",
-                )
             self._asm.op("RETURNDATASIZE")
             return
         if name == "__builtin_evm_returndatacopy":
-            if len(expr.args) != 3:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_returndatacopy expects three arguments",
-                )
             self._emit_expr(expr.args[2])
             self._emit_expr(expr.args[1])
             self._emit_expr(expr.args[0])
             self._asm.op("RETURNDATACOPY")
             return
         if name == "__builtin_evm_create":
-            if len(expr.args) != 3:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_create expects three arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("CREATE")
             return
         if name == "__builtin_evm_create2":
-            if len(expr.args) != 4:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_create2 expects four arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("CREATE2")
             return
         if name == "__builtin_evm_call":
-            if len(expr.args) != 7:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_call expects seven arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("CALL")
             return
         if name == "__builtin_evm_callcode":
-            if len(expr.args) != 7:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_callcode expects seven arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("CALLCODE")
             return
         if name == "__builtin_evm_staticcall":
-            if len(expr.args) != 6:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_staticcall expects six arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("STATICCALL")
             return
         if name == "__builtin_evm_delegatecall":
-            if len(expr.args) != 6:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_delegatecall expects six arguments",
-                )
             for arg in reversed(expr.args):
                 self._emit_expr(arg)
             self._asm.op("DELEGATECALL")
             return
         if name == "__builtin_evm_revert":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_revert expects no arguments",
-                )
             self._asm.push(0)
             self._asm.push(0)
             self._asm.op("REVERT")
             return
         if name == "__builtin_evm_revert_data":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_revert_data expects two arguments",
-                )
             self._emit_expr(expr.args[1])
             self._emit_expr(expr.args[0])
             self._asm.op("REVERT")
             return
         if name == "__builtin_evm_return":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_return expects two arguments",
-                )
             self._emit_expr(expr.args[1])
             self._emit_expr(expr.args[0])
             self._asm.op("RETURN")
             return
         if name == "__builtin_evm_stop":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_stop expects no arguments",
-                )
             self._asm.op("STOP")
             return
         if name == "__builtin_evm_invalid":
-            if expr.args:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_invalid expects no arguments",
-                )
             self._asm.op("INVALID")
             return
         if name == "__builtin_evm_selfdestruct":
-            if len(expr.args) != 1:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_selfdestruct expects one argument",
-                )
             self._emit_expr(expr.args[0])
             self._asm.op("SELFDESTRUCT")
             return
         if name == "__builtin_evm_keccak256":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_keccak256 expects two arguments",
-                )
             self._emit_expr(expr.args[1])
             self._emit_expr(expr.args[0])
             self._asm.op("SHA3")
             return
         log_topic_count = self._evm_log_topic_count(name)
         if log_topic_count is not None:
-            expected_arg_count = log_topic_count + 1
-            if len(expr.args) != expected_arg_count:
-                raise evm_backend_error(
-                    self._result.filename,
-                    f"{name} expects {expected_arg_count} arguments",
-                )
             self._emit_expr(expr.args[-1])
             self._asm.push(0)
             self._asm.op("MSTORE")
@@ -3100,12 +2889,6 @@ class _EvmGen:
             return
         log_data_topic_count = self._evm_log_data_topic_count(name)
         if log_data_topic_count is not None:
-            expected_arg_count = log_data_topic_count + 2
-            if len(expr.args) != expected_arg_count:
-                raise evm_backend_error(
-                    self._result.filename,
-                    f"{name} expects {expected_arg_count} arguments",
-                )
             for topic in reversed(expr.args[:log_data_topic_count]):
                 self._emit_expr(topic)
             self._emit_expr(expr.args[-1])
@@ -3113,11 +2896,6 @@ class _EvmGen:
             self._asm.op(f"LOG{log_data_topic_count}")
             return
         if name == "__builtin_evm_return_array":
-            if len(expr.args) != 2:
-                raise evm_backend_error(
-                    self._result.filename,
-                    "__builtin_evm_return_array expects two arguments",
-                )
             self._emit_return_array(expr.args[0], expr.args[1])
             return
         function = self._functions_by_name.get(name)
@@ -3147,11 +2925,6 @@ class _EvmGen:
             raise evm_backend_error(
                 self._result.filename,
                 "EVM function pointer calls need a fixed prototype",
-            )
-        if len(expr.args) != len(params) or len(call_layout.arg_offsets) != len(params):
-            raise evm_backend_error(
-                self._result.filename,
-                "EVM function pointer argument count mismatch",
             )
         targets = self._function_pointer_targets(signature)
         if not targets:
@@ -3312,11 +3085,6 @@ class _EvmGen:
                 self._result.filename,
                 f"missing EVM function layout: {function.name}",
             )
-        if len(expr.args) != len(function.params):
-            raise evm_backend_error(
-                self._result.filename,
-                f"EVM call argument count mismatch for {function.name}",
-            )
         for arg, param in zip(expr.args, function.params, strict=True):
             assert param.name is not None
             local = layout.locals[param.name]
@@ -3421,10 +3189,6 @@ class _EvmGen:
     def _load_mem_word(self, offset: int) -> None:
         self._asm.push(offset)
         self._asm.op("MLOAD")
-
-    def _store_storage_global(self, storage: _StorageGlobal) -> None:
-        self._asm.push(storage.slot)
-        self._asm.op("SSTORE")
 
     def _load_storage_global(self, storage: _StorageGlobal) -> None:
         self._asm.push(storage.slot)
@@ -3712,7 +3476,9 @@ class _EvmGen:
                     f"EVM target cannot align array type: {type_}",
                 )
             return self._alignof_type(element_type)
-        if is_integer_type(type_) or self._is_record_type(type_):
+        if self._is_record_type(type_):
+            return self._sema.record_packs.get(type_.name) or _WORD_BYTES
+        if is_integer_type(type_):
             return _WORD_BYTES
         raise evm_backend_error(self._result.filename, f"EVM target cannot align type: {type_}")
 
@@ -3775,36 +3541,7 @@ class _EvmGen:
         return Type(base.name, declarator_ops=tuple(ops), qualifiers=base.qualifiers)
 
     def _record_name_for_type_spec(self, type_spec: TypeSpec) -> str:
-        if type_spec.record_tag is not None:
-            candidate = f"{type_spec.name} {type_spec.record_tag}"
-            if candidate in self._sema.record_definitions or not type_spec.has_record_body:
-                return candidate
-            scoped_prefix = f"{candidate} <scope:"
-            for record_name in self._sema.record_definitions:
-                if record_name.startswith(scoped_prefix) and self._record_members_match_type_spec(
-                    record_name,
-                    type_spec,
-                ):
-                    return record_name
-            return candidate
-        if type_spec.has_record_body:
-            for record_name in self._sema.record_definitions:
-                if not record_name.startswith(type_spec.name):
-                    continue
-                if self._record_members_match_type_spec(record_name, type_spec):
-                    return record_name
-        return type_spec.name
-
-    def _record_members_match_type_spec(self, record_name: str, type_spec: TypeSpec) -> bool:
-        members = self._sema.record_definitions.get(record_name)
-        if members is None or len(members) != len(type_spec.record_members):
-            return False
-        for resolved, declared in zip(members, type_spec.record_members, strict=True):
-            if resolved.name != declared.name:
-                return False
-            if resolved.type_ != self._resolve_type_spec(declared.type_spec):
-                return False
-        return True
+        return self._sema.record_type_names[id(type_spec)]
 
     def _expr_is_void(self, expr: Expr) -> bool:
         type_ = self._type_map.get(expr)
@@ -4099,7 +3836,7 @@ class _EvmGen:
         if isinstance(expr, IntLiteral):
             return self._parse_int(expr.value)
         if isinstance(expr, CharLiteral):
-            return self._char_value(expr.value)
+            return char_literal_value(expr.value)
         if isinstance(expr, Identifier):
             return self._lookup_enum_constant(expr.name)
         if isinstance(expr, UnaryExpr):
@@ -4265,17 +4002,6 @@ class _EvmGen:
             return sign * int(body or "0", 8)
         return int(text or "0", 10)
 
-    @staticmethod
-    def _char_value(lexeme: str) -> int:
-        body = char_literal_body(lexeme)
-        units = decode_escaped_units(body) if body is not None else [ord(ch) for ch in lexeme]
-        if len(units) == 1:
-            return units[0]
-        value = 0
-        for unit in units:
-            value = (value << 8) | (unit & 0xFF)
-        return value
-
     def _string_literal_units(self, expr: StringLiteral) -> list[int]:
         body = string_literal_body(expr.value)
         if body is None:
@@ -4283,9 +4009,7 @@ class _EvmGen:
                 self._result.filename,
                 "EVM target cannot decode string literal",
             )
-        units = decode_escaped_units(body)
-        units.append(0)
-        return units
+        return [*narrow_string_bytes(body), 0]
 
 
 def generate_evm_asm(result: FrontendResult) -> str:

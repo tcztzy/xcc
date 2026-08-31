@@ -111,18 +111,12 @@ class AotPythonParserTests(unittest.TestCase):
         self.assertEqual(subset_spans, hosted_spans)
 
     def test_all_active_sources_match_cpython_owned_ast(self) -> None:
-        failures: list[str] = []
         for path in sorted((ROOT / "src/xcc").rglob("*.py")):
-            source = path.read_text(encoding="utf-8")
-            try:
+            with self.subTest(path=path.relative_to(ROOT)):
+                source = path.read_text(encoding="utf-8")
                 subset = parse_subset_source(source, filename=str(path)).tree
                 hosted = parse_cpython_source(source, filename=str(path))
-            except Exception as error:
-                failures.append(f"{path.relative_to(ROOT)}: {error}")
-                continue
-            if subset != hosted:
-                failures.append(f"{path.relative_to(ROOT)}: owned AST differs")
-        self.assertEqual(failures, [])
+                self.assertEqual(subset, hosted)
 
     def test_all_active_source_spans_and_child_edges_match_cpython(self) -> None:
         failures: list[str] = []
@@ -137,7 +131,7 @@ class AotPythonParserTests(unittest.TestCase):
             if subset_kinds != hosted_kinds:
                 failures.append(f"{path.relative_to(ROOT)}: child edge order differs")
                 continue
-            for index, (left, right) in enumerate(zip(subset_nodes, hosted_nodes)):
+            for index, (left, right) in enumerate(zip(subset_nodes, hosted_nodes, strict=True)):
                 if left.span != right.span:
                     failures.append(
                         f"{path.relative_to(ROOT)} node {index} {type(left).__name__}: "

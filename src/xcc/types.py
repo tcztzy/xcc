@@ -5,24 +5,6 @@ TypeOp = tuple[str, int | FunctionParams]
 POINTER_OP: TypeOp = ("ptr", 0)
 
 
-def _ops_from_legacy(
-    pointer_depth: int,
-    array_lengths: tuple[int, ...],
-) -> tuple[TypeOp, ...]:
-    ops: list[TypeOp] = []
-    for length in array_lengths:
-        ops.append(("arr", length))
-    for _ in range(pointer_depth):
-        ops.append(POINTER_OP)
-    return tuple(ops)
-
-
-def type_declarator_ops(type_: "Type") -> tuple[TypeOp, ...]:
-    if type_.declarator_ops:
-        return type_.declarator_ops
-    return _ops_from_legacy(type_.pointer_depth, type_.array_lengths)
-
-
 def _format_function_params(params: FunctionParams) -> str:
     parameter_types, is_variadic = params
     if parameter_types is None:
@@ -38,34 +20,13 @@ def _format_function_params(params: FunctionParams) -> str:
 @dataclass(frozen=True)
 class Type:
     name: str
-    pointer_depth: int = 0
-    array_lengths: tuple[int, ...] = ()
     declarator_ops: tuple[TypeOp, ...] = ()
     qualifiers: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.declarator_ops:
-            pointer_depth = 0
-            array_values: list[int] = []
-            for kind, value in self.declarator_ops:
-                if kind == "ptr":
-                    pointer_depth += 1
-                elif kind == "arr" and isinstance(value, int):
-                    array_values.append(value)
-            array_lengths = tuple(array_values)
-            object.__setattr__(self, "pointer_depth", pointer_depth)
-            object.__setattr__(self, "array_lengths", array_lengths)
-            return
-        object.__setattr__(
-            self,
-            "declarator_ops",
-            _ops_from_legacy(self.pointer_depth, self.array_lengths),
-        )
 
     def __str__(self) -> str:
         prefix = "" if not self.qualifiers else f"{' '.join(self.qualifiers)} "
         suffix: list[str] = []
-        for kind, value in reversed(type_declarator_ops(self)):
+        for kind, value in reversed(self.declarator_ops):
             if kind == "ptr":
                 suffix.append("*")
             elif kind == "arr":
@@ -79,12 +40,12 @@ class Type:
     def pointer_to(self) -> "Type":
         return Type(
             self.name,
-            declarator_ops=(POINTER_OP,) + type_declarator_ops(self),
+            declarator_ops=(POINTER_OP,) + self.declarator_ops,
             qualifiers=self.qualifiers,
         )
 
     def pointee(self) -> "Type | None":
-        ops = type_declarator_ops(self)
+        ops = self.declarator_ops
         if not ops or ops[0][0] != "ptr":
             return None
         return Type(self.name, declarator_ops=ops[1:], qualifiers=self.qualifiers)
@@ -92,12 +53,12 @@ class Type:
     def array_of(self, length: int) -> "Type":
         return Type(
             self.name,
-            declarator_ops=(("arr", length),) + type_declarator_ops(self),
+            declarator_ops=(("arr", length),) + self.declarator_ops,
             qualifiers=self.qualifiers,
         )
 
     def element_type(self) -> "Type | None":
-        ops = type_declarator_ops(self)
+        ops = self.declarator_ops
         if not ops or ops[0][0] != "arr":
             return None
         return Type(self.name, declarator_ops=ops[1:], qualifiers=self.qualifiers)
@@ -110,12 +71,12 @@ class Type:
     ) -> "Type":
         return Type(
             self.name,
-            declarator_ops=(("fn", (params, is_variadic)),) + type_declarator_ops(self),
+            declarator_ops=(("fn", (params, is_variadic)),) + self.declarator_ops,
             qualifiers=self.qualifiers,
         )
 
     def callable_signature(self) -> "tuple[Type, FunctionParams] | None":
-        ops = type_declarator_ops(self)
+        ops = self.declarator_ops
         if ops and ops[0][0] == "ptr":
             ops = ops[1:]
         if not ops or ops[0][0] != "fn":
@@ -125,7 +86,7 @@ class Type:
         return Type(self.name, declarator_ops=ops[1:], qualifiers=self.qualifiers), params
 
     def decay_parameter_type(self) -> "Type":
-        ops = type_declarator_ops(self)
+        ops = self.declarator_ops
         if not ops:
             return self
         if ops[0][0] == "arr":
@@ -143,7 +104,7 @@ class Type:
         return self
 
     def is_array(self) -> bool:
-        ops = type_declarator_ops(self)
+        ops = self.declarator_ops
         return bool(ops) and ops[0][0] == "arr"
 
 

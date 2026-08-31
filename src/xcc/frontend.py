@@ -218,8 +218,20 @@ def compile_source(
             data_layout=data_layout,
         )
     except SemaError as error:
+        mapped_filename, mapped_line, mapped_column = _map_diagnostic_location(
+            pp_result.line_map,
+            error.line,
+            error.column,
+        )
         raise FrontendError(
-            Diagnostic("sema", filename, str(error), code=_SEMA_ERROR_CODE)
+            Diagnostic(
+                "sema",
+                filename if mapped_filename is None else mapped_filename,
+                str(error),
+                mapped_line,
+                mapped_column,
+                code=_SEMA_ERROR_CODE,
+            )
         ) from error
     return FrontendResult(
         filename,

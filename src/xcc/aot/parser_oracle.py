@@ -2,7 +2,6 @@ import json
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-from xcc.aot import py_ast as ast
 from xcc.aot.cpython_ast_adapter import parse_cpython_source
 from xcc.aot.module import AotModule
 from xcc.aot.py_parser import parse_subset_source
@@ -13,6 +12,9 @@ from xcc.aot.source_contract import (
     resolve_source_set,
     source_module_name,
 )
+
+from . import py_ast as ast
+from .diag import AotError
 
 
 @dataclass(frozen=True)
@@ -85,7 +87,7 @@ def run_parser_oracle(source_root: Path, entry_module: str) -> ParserOracleRepor
                 if subset_module is not None
                 else parse_subset_source(source, filename=str(path)).tree
             )
-        except Exception as error:
+        except (AotError, SyntaxError) as error:
             failures.append(f"{relative}: {type(error).__name__}: {error}")
             continue
         if normalize_owned_ast(subset) != normalize_owned_ast(hosted):

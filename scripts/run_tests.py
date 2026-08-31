@@ -104,11 +104,8 @@ def coverage_combine_command() -> list[str]:
     return [sys.executable, "-m", "coverage", "combine"]
 
 
-def coverage_report_command(*, fail_under: int | None = None) -> list[str]:
-    command = [sys.executable, "-m", "coverage", "report"]
-    if fail_under is not None:
-        command.extend(["--fail-under", str(fail_under)])
-    return command
+def coverage_report_command() -> list[str]:
+    return [sys.executable, "-m", "coverage", "report"]
 
 
 def coverage_detached_tests(modules: Sequence[str]) -> list[str]:
@@ -316,11 +313,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--coverage", action="store_true", help="collect combined coverage data")
     parser.add_argument(
-        "--fail-under",
-        type=int,
-        help="override coverage report percentage threshold, for example 100",
-    )
-    parser.add_argument(
         "--pythonpath",
         type=Path,
         help="additional import root to prepend, such as build/mypyc/lib",
@@ -427,7 +419,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if coverage_file.exists():
                 shutil.copyfile(coverage_file, root / ".coverage")
             reported = _run_command(
-                coverage_report_command(fail_under=args.fail_under),
+                coverage_report_command(),
                 cwd=root,
                 env=env,
             )

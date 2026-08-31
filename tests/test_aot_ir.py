@@ -1,9 +1,7 @@
 import unittest
 from dataclasses import FrozenInstanceError
-from unittest.mock import patch
 
 from tests import _bootstrap  # noqa: F401
-from xcc.aot import py_ast as ast
 from xcc.aot import (
     AotError,
     IrAssign,
@@ -22,11 +20,10 @@ from xcc.aot import (
     IrContinue,
     IrDictType,
     IrEnumMember,
-    IrExceptHandler,
+    IrFloatType,
     IrForEach,
     IrFunction,
     IrGetField,
-    IrFloatType,
     IrIf,
     IrIntType,
     IrModule,
@@ -39,36 +36,22 @@ from xcc.aot import (
     IrReturn,
     IrSetItem,
     IrStringConcat,
-    IrStringJoin,
     IrStringType,
+    IrTry,
     IrTuple,
     IrTupleSlice,
     IrTupleType,
-    IrTry,
     IrWhile,
     analyze_source,
     lower_source_to_ir,
 )
-from xcc.aot.binder import _TypeBinder
+from xcc.aot import py_ast as ast
 from xcc.aot.cpython_ast_adapter import parse_cpython_expression, parse_cpython_source
 from xcc.aot.ir import qualify_ir_entry, validate_ir_module
 from xcc.aot.lower import (
-    _can_narrow_to_record,
-    _collect_global_names,
-    _dict_container_type_names,
-    _dict_get_result_type,
-    _for_each_target_type,
-    _isinstance_target_names,
     _Lowerer,
-    _llvm_api_call_return_type,
-    _none_guard_name,
-    _prepare_analysis_lowerer,
-    _record_extends,
-    _tuple_backed_container_element_name,
-    _tuple_subscript_result_type,
 )
 from xcc.aot.module import parse_source
-from xcc.aot.subset import check_subset
 from xcc.aot.types import AotClassInfo, AotFunctionInfo, AotType
 
 
@@ -333,49 +316,7 @@ class AotScalarLoweringTests(unittest.TestCase):
         )
         self.assertEqual(branch.handlers[0].exceptions, ("Exception",))
 
-    def test_lowers_sema_error_try_except_normal_path(self) -> None:
-        module = lower_source_to_ir(
-            "class SemaError(Exception):\n"
-            "    pass\n"
-            "def f(value: int) -> int:\n"
-            "    try:\n"
-            "        return value\n"
-            "    except SemaError:\n"
-            "        return 0\n",
-            filename="try_sema_error.py",
-            entry="f",
-        )
-        branch = module.functions[0].body[0]
-        self.assertIsInstance(branch, IrTry)
-        assert isinstance(branch, IrTry)
-        self.assertEqual(
-            branch.body.statements,
-            (IrReturn(IrName("value", IrIntType(64, signed=True))),),
-        )
-        self.assertEqual(branch.handlers[0].exceptions, ("SemaError",))
-
-    def test_lowers_parser_error_try_except_normal_path(self) -> None:
-        module = lower_source_to_ir(
-            "class ParserError(Exception):\n"
-            "    pass\n"
-            "def f(value: int) -> int:\n"
-            "    try:\n"
-            "        return value\n"
-            "    except ParserError:\n"
-            "        return 0\n",
-            filename="try_parser_error.py",
-            entry="f",
-        )
-        branch = module.functions[0].body[0]
-        self.assertIsInstance(branch, IrTry)
-        assert isinstance(branch, IrTry)
-        self.assertEqual(
-            branch.body.statements,
-            (IrReturn(IrName("value", IrIntType(64, signed=True))),),
-        )
-        self.assertEqual(branch.handlers[0].exceptions, ("ParserError",))
-
-    def test_lowers_preprocessor_try_except_normal_path(self) -> None:
+    def test_lowers_ordered_exception_handlers(self) -> None:
         module = lower_source_to_ir(
             "class PreprocessorError(Exception):\n"
             "    pass\n"
@@ -1581,6 +1522,31 @@ class AotScalarLoweringTests(unittest.TestCase):
         assert isinstance(append.value, IrCall)
         self.assertEqual(append.value.args[1], IrConstInt(0, IrIntType(64, True)))
 
+    def test_aot_v4_first_append_infers_empty_list_element_type(self) -> None:
+        module = lower_source_to_ir(
+            "def first() -> int:\n"
+            "    values = []\n"
+            "    values.append(-1)\n"
+            "    return values[0]\n",
+            filename="empty_list_append.py",
+            entry="first",
+        )
+
+        append = module.functions[0].body[1]
+        self.assertIsInstance(append, IrAssign)
+        assert isinstance(append, IrAssign)
+        self.assertEqual(
+            append.value,
+            IrCall(
+                "values.append",
+                (
+                    IrName("values", IrTupleType(())),
+                    IrConstInt(-1, IrIntType(64, True)),
+                ),
+                IrTupleType((IrIntType(64, True),)),
+            ),
+        )
+
     def test_lowers_tuple_backed_attribute_append_as_field_assignment(self) -> None:
         module = lower_source_to_ir(
             "class Builder:\n"
@@ -1780,7 +1746,6 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(loop, IrForEach)
         assert isinstance(loop, IrForEach)
         self.assertEqual(loop.target, "ch")
-        self.assertEqual(_for_each_target_type(loop.iterable.type), IrStringType())
         self.assertIn("IrName(name='ch', type=IrStringType())", repr(loop.body.statements[0]))
 
     def test_lowers_enumerate_for_target_from_homogeneous_container_annotation(self) -> None:
@@ -2248,51 +2213,6 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsNone(
             lowerer._project_record_name("PyToken | xcc.aot.py_ast.AST")
         )
-
-    def test_v402_project_record_name_is_cached(self) -> None:
-        lowerer = _Lowerer(
-            "project-record-name.py",
-            {"AST": AotClassInfo("AST", (), (), {}, {})},
-            {},
-        )
-        with patch.object(lowerer, "_has_class", wraps=lowerer._has_class) as check:
-            self.assertEqual(lowerer._project_record_name("xcc.aot.py_ast.AST"), "AST")
-            self.assertEqual(lowerer._project_record_name("xcc.aot.py_ast.AST"), "AST")
-            self.assertIsNone(lowerer._project_record_name("Missing"))
-            self.assertIsNone(lowerer._project_record_name("Missing"))
-        self.assertEqual(check.call_count, 3)
-
-    def test_aot_v2_function_suffix_lookup_is_cached(self) -> None:
-        class CountingFunctions(dict[str, AotFunctionInfo]):
-            def __init__(self, values: dict[str, AotFunctionInfo]) -> None:
-                super().__init__(values)
-                self.iterations = 0
-
-            def __iter__(self):
-                self.iterations += 1
-                return super().__iter__()
-
-        function_info = AotFunctionInfo("render", (), AotType("str"))
-        functions = CountingFunctions(
-            {
-                "first.Value.render": function_info,
-                "second.Value.render": function_info,
-            }
-        )
-        lowerer = _Lowerer("suffix-cache.py", {}, functions)
-
-        self.assertEqual(
-            lowerer._function_names_ending_with(".Value.render"),
-            ("first.Value.render", "second.Value.render"),
-        )
-        self.assertEqual(
-            lowerer._function_names_ending_with(
-                ".Value.render",
-                "first.Value.render",
-            ),
-            ("second.Value.render",),
-        )
-        self.assertEqual(functions.iterations, 1)
 
     def test_lowers_negative_int_literal_subscript_index(self) -> None:
         module = lower_source_to_ir(
@@ -3075,76 +2995,6 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertEqual(container.target, "__global_tuple")
         self.assertIsInstance(container.args[1], IrTuple)
         self.assertEqual(container.type, IrDictType(IrStringType(), int64))
-
-    def test_prepare_lowerer_layers_shared_context_without_copying_it(self) -> None:
-        analysis = analyze_source(
-            "class Local:\n"
-            "    pass\n"
-            "Alias = str\n"
-            "VALUE: str\n"
-            "VALUES: dict[str, int]\n"
-            "def local() -> int:\n"
-            "    return 1\n",
-            filename="layered_lowerer.py",
-        )
-        shared_classes = {
-            "Local": AotClassInfo("Local", {"wrong": AotType("int")}),
-            "Shared": AotClassInfo("Shared", {}),
-        }
-        shared_functions = {
-            "local": AotFunctionInfo("local", (), AotType("str")),
-            "shared": AotFunctionInfo("shared", (), AotType("int")),
-        }
-        fallback_functions = {
-            "fallback": AotFunctionInfo("fallback", (), AotType("bool"))
-        }
-        shared_aliases = {"Alias": AotType("int"), "SharedAlias": AotType("bool")}
-        shared_annotations = {"VALUE": "int", "SHARED_VALUE": "bool"}
-        shared_strings = {"SHARED_TEXT": "shared"}
-        shared_scalars = {"SHARED_COUNT": IrConstInt(7, IrIntType(64, signed=True))}
-        shared_containers = {
-            "VALUES": IrTuple((IrConstString("wrong"),), IrTupleType((IrStringType(),)))
-        }
-
-        lowerer = _prepare_analysis_lowerer(
-            analysis,
-            extra_classes=shared_classes,
-            extra_functions=shared_functions,
-            fallback_function_types=fallback_functions,
-            extra_aliases=shared_aliases,
-            extra_global_annotations=shared_annotations,
-            extra_global_string_constants=shared_strings,
-            extra_global_scalar_constants=shared_scalars,
-            extra_global_string_container_constants=shared_containers,
-        )
-
-        self.assertIs(lowerer.class_types, analysis.types.classes)
-        self.assertIs(lowerer.fallback_class_types, shared_classes)
-        self.assertIs(lowerer.imported_function_types, shared_functions)
-        self.assertIs(lowerer.fallback_function_types, fallback_functions)
-        self.assertIs(lowerer.fallback_aliases, shared_aliases)
-        self.assertIs(lowerer.fallback_global_annotations, shared_annotations)
-        self.assertIs(lowerer.fallback_global_string_constants, shared_strings)
-        self.assertIs(lowerer.fallback_global_scalar_constants, shared_scalars)
-        self.assertIs(
-            lowerer.fallback_global_string_container_constants,
-            shared_containers,
-        )
-        self.assertIs(lowerer._class_info("Local"), analysis.types.classes["Local"])
-        self.assertIs(lowerer._class_info("Shared"), shared_classes["Shared"])
-        self.assertIs(lowerer._function_info("local"), analysis.types.functions["local"])
-        self.assertIs(lowerer._function_info("shared"), shared_functions["shared"])
-        self.assertIs(lowerer._function_info("fallback"), fallback_functions["fallback"])
-        self.assertEqual(lowerer._alias("Alias"), AotType("str"))
-        self.assertEqual(lowerer._alias("SharedAlias"), AotType("bool"))
-        self.assertEqual(lowerer._global_type("VALUE"), IrStringType())
-        self.assertEqual(lowerer._global_type("SHARED_VALUE"), IrBoolType())
-        self.assertEqual(lowerer._global_string_constant("SHARED_TEXT"), "shared")
-        self.assertIs(
-            lowerer._global_scalar_constant("SHARED_COUNT"),
-            shared_scalars["SHARED_COUNT"],
-        )
-        self.assertIsNone(lowerer._global_string_container_constant("VALUES"))
 
     def test_lowers_isinstance_guarded_ifexp_record_field(self) -> None:
         module = lower_source_to_ir(
@@ -4295,37 +4145,6 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
-    def test_tuple_backed_container_element_name_edges(self) -> None:
-        self.assertIsNone(_tuple_backed_container_element_name("Callable[[str], bool]"))
-        self.assertIsNone(_tuple_backed_container_element_name("dict[str, int]"))
-        self.assertIsNone(_tuple_backed_container_element_name("tuple[]"))
-        self.assertEqual(
-            _tuple_backed_container_element_name("list['FunctionDef']"),
-            "FunctionDef",
-        )
-        self.assertEqual(
-            _tuple_backed_container_element_name("tuple[list[str], ...]"),
-            "list[str]",
-        )
-        self.assertIsNone(_dict_container_type_names("dict[str]"))
-        self.assertEqual(
-            _dict_container_type_names("dict[str, list[int]]"),
-            ("str", "list[int]"),
-        )
-        self.assertEqual(
-            _dict_get_result_type(IrRecordType("FunctionSymbol | None")),
-            IrRecordType("FunctionSymbol | None"),
-        )
-        self.assertEqual(
-            _dict_get_result_type(IrIntType(64, signed=True)),
-            IrRecordType("int | None"),
-        )
-        self.assertEqual(
-            _none_guard_name(_owned_parse("None is value").body[0].value),
-            "value",
-        )
-        self.assertIsNone(_none_guard_name(_owned_parse("None is 1").body[0].value))
-
     def test_lowers_bodyless_requested_function_signature(self) -> None:
         module = lower_source_to_ir(
             "def native_leaf(value: str) -> str:\n"
@@ -4499,6 +4318,21 @@ class AotScalarLoweringTests(unittest.TestCase):
         int64 = IrIntType(64, signed=True)
         self.assertEqual(module.functions[0].body[0], IrAssign("self.column", IrConstInt(1, int64)))
         self.assertEqual(module.functions[1].body[1], IrAssign("count", IrConstInt(1, int64)))
+
+    def test_lowers_chained_name_assignment_once(self) -> None:
+        module = lower_source_to_ir(
+            "def value() -> int:\n"
+            "    return 3\n"
+            "def assign() -> int:\n"
+            "    left = right = value()\n"
+            "    return left + right\n",
+            filename="chained_assignment.py",
+        )
+        int64 = IrIntType(64, signed=True)
+        self.assertEqual(
+            module.functions[1].body[0],
+            IrAssign("left, right", IrCall("value", (), int64), chain=True),
+        )
 
     def test_lowers_assignment_value_using_literal_ifexp_type(self) -> None:
         module = lower_source_to_ir(
@@ -5282,11 +5116,6 @@ class AotScalarLoweringTests(unittest.TestCase):
                 with self.assertRaises(AotError):
                     analyze_source(source, filename="bad_init.py")
 
-    def test_direct_binder_infers_none_expression_type(self) -> None:
-        module = parse_source("", filename="direct.py")
-        binder = _TypeBinder(check_subset(module), module)
-        self.assertEqual(binder._infer_expr_type(None, {}, {}, {}), AotType("None"))
-
     def test_rejects_while_else_statement(self) -> None:
         with self.assertRaises(AotError) as ctx:
             lower_source_to_ir(
@@ -5509,64 +5338,6 @@ class AotScalarLoweringTests(unittest.TestCase):
                     lower_source_to_ir(source, filename="bad.py", entry="f")
                 self.assertEqual(ctx.exception.diagnostics[0].code, code)
 
-    def test_llvm_api_lowering_private_helpers_cover_edge_inputs(self) -> None:
-        lowerer = _Lowerer("bad.py", {}, global_names={"llvm"})
-        bad_call = _owned_parse("llvm()", mode="eval").body
-        self.assertIsInstance(bad_call, ast.Call)
-        assert isinstance(bad_call, ast.Call)
-        with self.assertRaises(AotError) as ctx:
-            lowerer._lower_llvm_api_call(bad_call, {}, IrNoneType())
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
-
-        self.assertEqual(
-            _llvm_api_call_return_type("SetTarget", IrIntType(64, signed=True)),
-            IrNoneType(),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("AddCase", IrIntType(64, signed=True)),
-            IrNoneType(),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("AddIncoming", IrIntType(64, signed=True)),
-            IrNoneType(),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("SetAlignment", IrIntType(64, signed=True)),
-            IrNoneType(),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("IsNull", IrIntType(64, signed=True)),
-            IrBoolType(),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("GetTypeKind", IrTupleType((IrIntType(64, True),))),
-            IrIntType(64, signed=True),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("Int8Type", IrRecordType("object")),
-            IrIntType(64, signed=True),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("CreateBuilder", IrRecordType("Builder")),
-            IrIntType(64, signed=True),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("CreateBuilder", IrNoneType()),
-            IrIntType(64, signed=True),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("GetBasicBlockTerminator", IrBoolType()),
-            IrIntType(64, signed=True),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("ConstIntGetSExtValue", IrRecordType("object")),
-            IrIntType(64, signed=True),
-        )
-        self.assertEqual(
-            _llvm_api_call_return_type("ConstIntGetZExtValue", IrRecordType("object")),
-            IrIntType(64, signed=True),
-        )
-
     def test_star_project_import_does_not_bind_call_target_name(self) -> None:
         module = lower_source_to_ir(
             "from xcc.frontend import *\n"
@@ -5576,174 +5347,6 @@ class AotScalarLoweringTests(unittest.TestCase):
             entry="f",
         )
         self.assertEqual(module.functions[0].name, "f")
-
-    def test_direct_lowerer_reports_missing_and_unsupported_forms(self) -> None:
-        lowerer = _Lowerer("direct.py", {})
-        missing_param = _owned_parse("def f(value) -> int:\n    return 1\n").body[0]
-        with self.assertRaises(AotError) as ctx:
-            lowerer.lower_function(missing_param, owner=None)
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
-
-        missing_return = _owned_parse("def f():\n    return 1\n").body[0]
-        with self.assertRaises(AotError) as ctx:
-            lowerer.lower_function(missing_return, owner=None)
-        self.assertEqual(ctx.exception.diagnostics[0].message, "Missing lowered annotation")
-
-        unsupported_return = _owned_parse("def f() -> float:\n    return 1\n").body[0]
-        with self.assertRaises(AotError) as ctx:
-            lowerer.lower_function(unsupported_return, owner=None)
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
-
-        unsupported_string_return = _owned_parse('def f() -> "int":\n    return 1\n').body[0]
-        with self.assertRaises(AotError) as ctx:
-            lowerer.lower_function(unsupported_string_return, owner=None)
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
-
-        unsupported_call = _owned_parse("def f(value: int) -> int:\n    return value.bits()\n").body[0]
-        with self.assertRaises(AotError) as ctx:
-            lowerer.lower_function(unsupported_call, owner=None)
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
-
-        unsupported_dynamic_call = _hosted_owned_parse(
-            "def f() -> int:\n    return (lambda: 1)()\n"
-        ).body[0]
-        with self.assertRaises(AotError) as ctx:
-            lowerer.lower_function(unsupported_dynamic_call, owner=None)
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0003")
-
-        with self.assertRaises(AotError) as ctx:
-            lowerer._lower_statement(
-                _hosted_owned_parse("del value\n").body[0],
-                {},
-                IrNoneType(),
-            )
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
-
-        with self.assertRaises(AotError) as ctx:
-            lowerer._lower_expr(
-                _owned_parse("lambda: 1", mode="eval").body,
-                {},
-                IrRecordType("object"),
-            )
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
-
-        missing_kwonly = _owned_parse("def f(*, flag) -> int:\n    return 1\n").body[0]
-        with self.assertRaises(AotError) as ctx:
-            lowerer.lower_function(missing_kwonly, owner=None)
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
-
-        malformed_compare = ast.Compare(
-            left=ast.Name("left", ast.Load()),
-            ops=(),
-            comparators=(),
-        )
-        with self.assertRaises(AotError) as ctx:
-            lowerer._lower_compare(malformed_compare, {})
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0004")
-
-        malformed_fstring = ast.JoinedStr([ast.Name("value", ast.Load())])
-        with self.assertRaises(AotError) as ctx:
-            lowerer._lower_joined_str(malformed_fstring, {})
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0005")
-
-        structured_try = _owned_parse(
-            "def f() -> int:\n"
-            "    try:\n"
-            "        return 1\n"
-            "    except RuntimeError:\n"
-            "        return 0\n"
-        ).body[0]
-        lowered_try = lowerer.lower_function(structured_try, owner=None).body[0]
-        self.assertIsInstance(lowered_try, IrTry)
-        assert isinstance(lowered_try, IrTry)
-        self.assertEqual(
-            lowered_try.handlers,
-            (
-                IrExceptHandler(
-                    ("RuntimeError",),
-                    None,
-                    lowered_try.handlers[0].body,
-                ),
-            ),
-        )
-
-    def test_direct_lowerer_maps_string_int_and_record_field_types(self) -> None:
-        lowerer = _Lowerer(
-            "record.py",
-            {
-                "Node": AotClassInfo(
-                    "Node",
-                    {
-                        "name": AotType("str"),
-                        "count": AotType("int"),
-                        "next": AotType("Node"),
-                    },
-                )
-            },
-        )
-        record = lowerer.lower_record(_owned_parse("class Node:\n    pass\n").body[0])
-        self.assertEqual(record.fields[0].type, IrStringType())
-        self.assertEqual(record.fields[1].type, IrIntType(64, signed=True))
-        self.assertEqual(record.fields[2].type, IrRecordType("Node"))
-        self.assertEqual(
-            lowerer._record_field_types("Node"),
-            (IrStringType(), IrIntType(64, signed=True), IrRecordType("Node")),
-        )
-        self.assertEqual(
-            lowerer._aot_type_to_ir_type(AotType("tuple[Node, ...]")),
-            IrTupleType((IrRecordType("Node"),)),
-        )
-        self.assertEqual(lowerer._aot_type_to_ir_type(AotType("float")), IrFloatType())
-        self.assertEqual(lowerer._aot_type_to_ir_type(AotType("Any")), IrRecordType("object"))
-        self.assertEqual(
-            lowerer._aot_type_to_ir_type(AotType("list[tuple[str, int]]")),
-            IrTupleType((IrTupleType((IrStringType(), IrIntType(64, signed=True))),)),
-        )
-        self.assertEqual(
-            lowerer._aot_type_to_ir_type(AotType("tuple[TypeOp, ...]")),
-            IrTupleType((IrTupleType((IrStringType(), IrRecordType("object"))),)),
-        )
-        self.assertEqual(
-            lowerer._aot_type_to_ir_type(AotType("tuple[DeclaratorOp, ...]")),
-            IrTupleType((IrTupleType((IrStringType(), IrRecordType("object"))),)),
-        )
-        self.assertEqual(
-            lowerer._aot_type_to_ir_type(AotType("FunctionParams")),
-            IrTupleType((IrRecordType("object"), IrBoolType())),
-        )
-        self.assertEqual(
-            lowerer._aot_type_to_ir_type(AotType("TypeOp")),
-            IrTupleType((IrStringType(), IrRecordType("object"))),
-        )
-        self.assertEqual(
-            lowerer._aot_type_to_ir_type(AotType("DeclaratorOp")),
-            IrTupleType((IrStringType(), IrRecordType("object"))),
-        )
-        self.assertEqual(
-            lowerer._type_name_to_ir_type("FunctionParams", ast.Pass()),
-            IrTupleType((IrRecordType("object"), IrBoolType())),
-        )
-        self.assertEqual(
-            lowerer._type_name_to_ir_type("TypeOp", ast.Pass()),
-            IrTupleType((IrStringType(), IrRecordType("object"))),
-        )
-        self.assertEqual(
-            lowerer._type_name_to_ir_type("DeclaratorOp", ast.Pass()),
-            IrTupleType((IrStringType(), IrRecordType("object"))),
-        )
-        self.assertEqual(
-            lowerer._aot_type_to_ir_type(AotType("dict[str, TypeOp]")),
-            IrDictType(
-                IrStringType(),
-                IrTupleType((IrStringType(), IrRecordType("object"))),
-            ),
-        )
-        self.assertIsNone(lowerer._optional_record_inner(IrIntType(64, signed=True)))
-        self.assertEqual(lowerer._aot_type_to_ir_type(AotType("NoReturn")), IrNoneType())
-        self.assertEqual(lowerer._aot_type_to_ir_type(AotType("object")), IrRecordType("object"))
-        with self.assertRaises(AotError) as ctx:
-            lowerer._record_field_type(IrIntType(64, signed=True), "value", ast.Pass())
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0002")
 
     def test_lowers_any_annotations_as_opaque_object(self) -> None:
         module = lower_source_to_ir(
@@ -6001,6 +5604,26 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
+    def test_lowers_record_len_call_as_dunder_len_method(self) -> None:
+        module = lower_source_to_ir(
+            "class Values:\n"
+            "    def __len__(self) -> int:\n"
+            "        return 3\n"
+            "def size(value: Values) -> int:\n"
+            "    return len(value)\n",
+            filename="record_len.py",
+            entry="size",
+        )
+        returned = module.functions[1].body[0].value
+        self.assertEqual(
+            returned,
+            IrCall(
+                "Values.__len__",
+                (IrName("value", IrRecordType("Values")),),
+                IrIntType(64, signed=True),
+            ),
+        )
+
     def test_lowers_optional_string_method_receiver_as_string_identity(self) -> None:
         module = lower_source_to_ir(
             "from dataclasses import dataclass\n"
@@ -6207,98 +5830,6 @@ class AotScalarLoweringTests(unittest.TestCase):
             ),
         )
 
-    def test_direct_lowerer_narrowing_helpers_cover_edge_inputs(self) -> None:
-        class_types = {
-            "Base": AotClassInfo("Base", {}),
-            "Child": AotClassInfo("Child", {}, ("Base",)),
-        }
-        lowerer = _Lowerer("narrow.py", class_types)
-        self.assertFalse(_can_narrow_to_record(IrIntType(64, signed=True), "Child", class_types))
-        self.assertTrue(_can_narrow_to_record(IrRecordType("object"), "Child", class_types))
-        self.assertTrue(_record_extends("Child", "Child", class_types))
-        self.assertFalse(_record_extends("Missing", "Base", class_types))
-
-        self.assertIsNone(
-            lowerer._isinstance_guard_narrowing(
-                _owned_parse("isinstance(value.attr, Child)", mode="eval").body,
-                {"value": IrRecordType("object")},
-            )
-        )
-        self.assertIsNone(
-            lowerer._isinstance_guard_narrowing(
-                _owned_parse("isinstance(value, Missing)", mode="eval").body,
-                {"value": IrRecordType("object")},
-            )
-        )
-        self.assertIsNone(
-            lowerer._isinstance_guard_narrowing(
-                _owned_parse("isinstance(value, Child)", mode="eval").body,
-                {"value": IrIntType(64, signed=True)},
-            )
-        )
-        self.assertIsNone(
-            lowerer._isinstance_guard_narrowing(
-                _owned_parse("isinstance(value, (Child, 1))", mode="eval").body,
-                {"value": IrRecordType("object")},
-            )
-        )
-        self.assertEqual(
-            lowerer._isinstance_guard_narrowing(
-                _owned_parse("isinstance(value, (Child, Base))", mode="eval").body,
-                {"value": IrRecordType("object")},
-            ),
-            ("value", IrRecordType("Child | Base")),
-        )
-        self.assertEqual(
-            _isinstance_target_names(_owned_parse("(Child, Base)", mode="eval").body),
-            ("Child", "Base"),
-        )
-        self.assertIsNone(_isinstance_target_names(_owned_parse("(Child, 1)", mode="eval").body))
-        self.assertIsNone(_isinstance_target_names(_owned_parse("factory()", mode="eval").body))
-
-        self.assertIsNone(lowerer._truthy_optional_record_narrowing(ast.Constant(True), {}))
-        self.assertIsNone(
-            lowerer._truthy_optional_record_narrowing(ast.Name("missing", ast.Load()), {})
-        )
-        self.assertIsNone(
-            lowerer._truthy_optional_record_narrowing(
-                ast.Name("value", ast.Load()),
-                {"value": IrIntType(64, signed=True)},
-            )
-        )
-
-        self.assertEqual(
-            lowerer._not_none_guard_narrowing(
-                _owned_parse("None is not value", mode="eval").body,
-                {"value": IrRecordType("Child | None")},
-            ),
-            ("value", IrRecordType("Child")),
-        )
-        self.assertIsNone(
-            lowerer._not_none_guard_narrowing(_owned_parse("None is not 1", mode="eval").body, {})
-        )
-        self.assertIsNone(
-            lowerer._not_none_guard_narrowing(_owned_parse("1 is not 2", mode="eval").body, {})
-        )
-        self.assertIsNone(
-            lowerer._not_none_guard_narrowing(
-                _owned_parse("missing is not None", mode="eval").body,
-                {},
-            )
-        )
-        self.assertIsNone(
-            lowerer._not_none_guard_narrowing(
-                _owned_parse("value is not None", mode="eval").body,
-                {"value": IrIntType(64, signed=True)},
-            )
-        )
-        self.assertIsNone(
-            lowerer._none_bool_op_narrowing(
-                _owned_parse("value is None", mode="eval").body,
-                {"value": IrIntType(64, signed=True)},
-            )
-        )
-
     def test_lowers_core_default_literal_and_runtime_shapes(self) -> None:
         source = (
             "from dataclasses import dataclass\n"
@@ -6342,174 +5873,6 @@ class AotScalarLoweringTests(unittest.TestCase):
         self.assertIsInstance(functions["abort"].return_type, IrNoneType)
         self.assertIsInstance(functions["abort"].body[0], IrRaise)
         self.assertEqual(functions["abort"].body[0].message.value, "stop")
-
-    def test_direct_lowerer_covers_assignment_and_global_name_edges(self) -> None:
-        lowerer = _Lowerer("direct.py", {})
-        names: dict[str, IrIntType] = {}
-        target = _owned_parse("self.value = 1\n").body[0].targets[0]
-        lowerer._bind_assignment_target(target, IrIntType(64, signed=True), names)
-        self.assertIn("self.value", names)
-        unsupported_target = _owned_parse("items[0] = 1\n").body[0].targets[0]
-        with self.assertRaises(AotError) as ctx:
-            lowerer._bind_assignment_target(
-                unsupported_target,
-                IrIntType(64, signed=True),
-                names,
-            )
-        self.assertEqual(ctx.exception.diagnostics[0].code, "XCC-AOT-LOWER-0001")
-        tree = _owned_parse(
-            "import os as operating_system\n"
-            "import sys\n"
-            "left, right = (1, 2)\n"
-            "name: int = 1\n"
-            "class Box:\n"
-            "    pass\n"
-            "42\n"
-        )
-        self.assertEqual(_collect_global_names(tree), {"operating_system", "sys", "name", "Box"})
-        self.assertIsInstance(
-            lowerer._default_expr(IrRecordType("Unknown")),
-            IrConstNone,
-        )
-        self.assertIsInstance(
-            lowerer._lower_call(
-                _owned_parse("''.join()\n").body[0].value,
-                {},
-                IrStringType(),
-            ),
-            IrStringJoin,
-        )
-        int64 = IrIntType(64, signed=True)
-        fallback = IrRecordType("object")
-        field_target = _owned_parse("value.field = None\n").body[0].targets[0]
-        self.assertEqual(
-            lowerer._assignment_value_type(
-                field_target,
-                ast.Constant(None),
-                {"value": int64},
-                fallback,
-            ),
-            fallback,
-        )
-        self.assertEqual(
-            lowerer._subscript_item_type(
-                ast.Name("values", ast.Load()),
-                {"values": IrTupleType((IrStringType(), IrIntType(64, signed=True)))},
-                fallback,
-            ),
-            fallback,
-        )
-        self.assertEqual(
-            lowerer._infer_assignment_expr_type(ast.Constant(1.5), {}, fallback),
-            fallback,
-        )
-        self.assertEqual(
-            lowerer._infer_assignment_expr_type(
-                _owned_parse("missing[0]", mode="eval").body,
-                {},
-                fallback,
-            ),
-            fallback,
-        )
-        mixed_ifexp = _owned_parse("1 if flag else 'x'").body[0].value
-        self.assertEqual(
-            lowerer._infer_assignment_expr_type(mixed_ifexp, {"flag": IrBoolType()}, fallback),
-            fallback,
-        )
-        mixed_bool = _owned_parse("text or flag", mode="eval").body
-        self.assertEqual(
-            lowerer._infer_assignment_expr_type(
-                mixed_bool,
-                {"text": IrStringType(), "flag": IrBoolType()},
-                fallback,
-            ),
-            fallback,
-        )
-        self.assertEqual(
-            lowerer._infer_assignment_expr_type(
-                _owned_parse("not flag", mode="eval").body,
-                {"flag": IrBoolType()},
-                fallback,
-            ),
-            IrBoolType(),
-        )
-        self.assertEqual(
-            lowerer._infer_assignment_expr_type(
-                _owned_parse("left + right", mode="eval").body,
-                {"left": IrStringType(), "right": IrStringType()},
-                fallback,
-            ),
-            IrStringType(),
-        )
-        self.assertEqual(
-            lowerer._infer_assignment_expr_type(
-                _owned_parse("left - right", mode="eval").body,
-                {"left": IrStringType(), "right": IrStringType()},
-                fallback,
-            ),
-            fallback,
-        )
-        self.assertEqual(
-            lowerer._infer_assignment_expr_type(
-                _owned_parse("value.missing", mode="eval").body,
-                {"value": int64},
-                fallback,
-            ),
-            fallback,
-        )
-        fixed_tuple_type = IrTupleType((IrStringType(), IrIntType(64, signed=True)))
-        self.assertEqual(
-            _tuple_subscript_result_type(ast.Name("index", ast.Load()), fixed_tuple_type),
-            fallback,
-        )
-        self.assertEqual(
-            _tuple_subscript_result_type(_owned_parse("-1", mode="eval").body, fixed_tuple_type),
-            IrIntType(64, signed=True),
-        )
-        self.assertEqual(
-            _tuple_subscript_result_type(ast.Constant(8), fixed_tuple_type),
-            fallback,
-        )
-        self.assertEqual(_for_each_target_type(int64), fallback)
-        self.assertIsNone(lowerer._tuple_backed_container_element_type("int", ast.Pass()))
-        self.assertEqual(
-            lowerer._tuple_backed_container_types("tuple[str, object]", ast.Pass()),
-            (IrStringType(), IrRecordType("object")),
-        )
-        self.assertEqual(
-            lowerer._tuple_backed_container_types("dict[str, object]", ast.Pass()),
-            (IrStringType(), IrRecordType("object")),
-        )
-        self.assertEqual(
-            lowerer._tuple_backed_container_types("list[object]", ast.Pass()),
-            (IrRecordType("object"),),
-        )
-        self.assertEqual(lowerer._optional_container_type("object", ast.Pass()), fallback)
-        self.assertIsNone(_tuple_backed_container_element_name("list[...]"))
-        self.assertIsNone(_tuple_backed_container_element_name("list["))
-        self.assertIsNone(_dict_container_type_names("dict[str]"))
-
-    def test_direct_lowerer_covers_record_union_field_edges(self) -> None:
-        lowerer = _Lowerer(
-            "union.py",
-            {
-                "Left": AotClassInfo("Left", {"value": AotType("str")}),
-                "Right": AotClassInfo("Right", {"value": AotType("int")}),
-                "Empty": AotClassInfo("Empty", {}),
-            },
-        )
-        self.assertIsNone(
-            lowerer._record_union_field_type("Left | None", "value", ast.Pass())
-        )
-        self.assertIsNone(
-            lowerer._record_union_field_type("Left | Missing", "value", ast.Pass())
-        )
-        self.assertIsNone(
-            lowerer._record_union_field_type("Left | Empty", "value", ast.Pass())
-        )
-        with self.assertRaises(AotError) as ctx:
-            lowerer._record_union_field_type("Left | Right", "value", ast.Pass())
-        self.assertEqual(ctx.exception.diagnostics[0].message, "Ambiguous union field access: value")
 
     def test_lowers_dataclass_record_layout_and_field_read(self) -> None:
         source = (

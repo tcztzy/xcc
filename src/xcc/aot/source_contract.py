@@ -3,11 +3,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, NoReturn
 
-from xcc.aot import py_ast as ast
 from xcc.aot.diag import AotDiagnostic, AotError
 from xcc.aot.module import AotModule
 from xcc.aot.py_parser import parse_subset_source
 from xcc.aot.sha256 import sha256_hex
+
+from . import py_ast as ast
 
 ParserKind = Literal["cpython", "subset"]
 ModuleParser = Callable[[str, str], AotModule]

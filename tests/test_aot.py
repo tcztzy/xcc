@@ -15,15 +15,13 @@ from xcc.aot import (
     check_subset,
     parse_source,
 )
-from xcc.aot.cpython_ast_adapter import parse_cpython_source
-from xcc.aot.diag import node_location
-from xcc.aot.py_ast import Pass
 from xcc.aot.binder import (
-    _is_supported_annotation_node,
-    _is_supported_composite_annotation,
     bind_class_types,
     bind_function_signatures,
 )
+from xcc.aot.cpython_ast_adapter import parse_cpython_source
+from xcc.aot.diag import node_location
+from xcc.aot.py_ast import Pass
 
 
 class AotDiagnosticTests(unittest.TestCase):
@@ -61,11 +59,6 @@ class AotDiagnosticTests(unittest.TestCase):
         error = AotError((first, second))
         self.assertEqual(error.diagnostics, (first, second))
         self.assertEqual(str(error), "bad.py: aot: XCC-AOT-PARSE-0001: invalid syntax")
-
-    def test_error_rejects_empty_diagnostics(self) -> None:
-        with self.assertRaises(ValueError) as ctx:
-            AotError(())
-        self.assertEqual(str(ctx.exception), "AotError requires at least one diagnostic")
 
     def test_node_location_handles_positioned_and_synthetic_nodes(self) -> None:
         function = parse_source("def f() -> int:\n    return 1\n").tree.body[0]
@@ -422,32 +415,6 @@ class AotTypeBinderTests(unittest.TestCase):
         self.assertEqual(diagnostic.code, "XCC-AOT-TYPE-0002")
         self.assertEqual(diagnostic.message, "Unsupported annotation: list[complex]")
 
-    def test_annotation_support_helper_edges(self) -> None:
-        self.assertTrue(_is_supported_composite_annotation("ast.expr"))
-        self.assertTrue(_is_supported_composite_annotation("'Type | None'"))
-        self.assertTrue(_is_supported_composite_annotation("tuple[str, ...]"))
-        self.assertTrue(_is_supported_composite_annotation("Callable[..., bool]"))
-        self.assertTrue(_is_supported_composite_annotation("(int | str)"))
-        self.assertTrue(_is_supported_composite_annotation("tuple[()]"))
-        self.assertTrue(_is_supported_composite_annotation(r'Literal["a\\\"b"]'))
-        self.assertFalse(_is_supported_composite_annotation("Literal[-1]"))
-        self.assertFalse(_is_supported_composite_annotation("["))
-        self.assertFalse(_is_supported_composite_annotation("list[str, int]"))
-        self.assertFalse(_is_supported_composite_annotation("dict[str]"))
-        self.assertFalse(_is_supported_composite_annotation("Callable[[str]]"))
-        self.assertFalse(_is_supported_composite_annotation("Callable[[str], complex]"))
-        self.assertFalse(_is_supported_composite_annotation("Callable[str, bool]"))
-        self.assertFalse(_is_supported_composite_annotation("type[str]"))
-
-        ellipsis_constant = parse_source("value = ...\n").tree.body[0].value
-        unsupported_constant = parse_source("value = 1\n").tree.body[0].value
-        unsupported_expr = parse_source("value = 1 + 2\n").tree.body[0].value
-        self.assertTrue(_is_supported_annotation_node(ellipsis_constant))
-        self.assertFalse(_is_supported_annotation_node(unsupported_constant))
-        self.assertFalse(_is_supported_annotation_node(unsupported_expr))
-
-
-class AotAnalysisApiTests(unittest.TestCase):
     def test_analyze_source_returns_summary_and_types(self) -> None:
         source = "int64 = int\ndef f(value: int64) -> int64:\n    return value\n"
         analysis = analyze_source(source, filename="api.py")

@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import TYPE_CHECKING
 
 from xcc.ast import (
     BreakStmt,
@@ -31,21 +31,23 @@ from xcc.types import VOID, Type
 
 from .symbols import Scope, SemaError, SwitchContext, VarSymbol
 
+if TYPE_CHECKING:
+    from . import Analyzer
 
-def _is_gnu_mode(analyzer: object) -> bool:
-    return analyzer._std == "gnu11"  # type: ignore
+
+def _is_gnu_mode(a: "Analyzer") -> bool:
+    return a._std == "gnu11"
 
 
-def _is_call_to_generic_builtin(analyzer: object, expr: Expr) -> bool:
+def _is_call_to_generic_builtin(a: "Analyzer", expr: Expr) -> bool:
     """Check if expr is a call to a builtin with params=None (generic return)."""
     if not isinstance(expr, CallExpr) or not isinstance(expr.callee, Identifier):
         return False
-    sig = analyzer._function_signatures.get(expr.callee.name)  # type: ignore
+    sig = a._function_signatures.get(expr.callee.name)
     return sig is not None and sig.params is None
 
 
-def analyze_stmt(analyzer: object, stmt: Stmt, scope: Scope, return_type: Type) -> None:
-    a = cast(Any, analyzer)
+def analyze_stmt(a: "Analyzer", stmt: Stmt, scope: Scope, return_type: Type) -> None:
     a._current_scope = scope
     if isinstance(stmt, DeclGroupStmt):
         for grouped_decl in stmt.declarations:

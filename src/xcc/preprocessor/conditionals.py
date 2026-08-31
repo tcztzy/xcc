@@ -2,9 +2,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import PreprocessorError, _SourceLocation
 from .expressions import _strip_condition_comments
 from .macros import _Macro
+from .model import PreprocessorError, _SourceLocation
 
 
 @dataclass

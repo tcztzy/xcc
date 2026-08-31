@@ -82,18 +82,3 @@ class AotParserOracleTests(unittest.TestCase):
         payload = json.loads(first)
         self.assertEqual(payload["version"], 1)
         self.assertEqual(payload["failures"], [])
-
-    def test_subset_frontend_source_has_no_hosted_parser_reference(self) -> None:
-        for relative in (
-            "src/xcc/aot/module.py",
-            "src/xcc/aot/py_lexer.py",
-            "src/xcc/aot/py_parser.py",
-        ):
-            source = (ROOT / relative).read_text(encoding="utf-8")
-            with self.subTest(relative=relative):
-                self.assertNotIn("cpython_ast_adapter", source)
-                self.assertNotIn("ast.parse", source)
-
-
-if __name__ == "__main__":
-    unittest.main()

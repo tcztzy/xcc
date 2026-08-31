@@ -38,42 +38,11 @@ def record_type_name(
     return name, anon_record_counter
 
 
-def normalize_record_members(
-    members: tuple[RecordMemberInfo, ...] | tuple[tuple[str | None, Type], ...],
-) -> tuple[RecordMemberInfo, ...]:
-    all_members_are_info = True
-    for member in members:
-        if not isinstance(member, RecordMemberInfo):
-            all_members_are_info = False
-            break
-    if all_members_are_info:
-        return members  # type: ignore
-    normalized: list[RecordMemberInfo] = []
-    for member in members:
-        if isinstance(member, RecordMemberInfo):
-            normalized.append(member)
-            continue
-        if isinstance(member, tuple) and len(member) == 2:
-            normalized.append(RecordMemberInfo(member[0], member[1]))
-            continue
-        if isinstance(member, tuple) and len(member) == 3:
-            normalized.append(RecordMemberInfo(member[0], member[1], member[2]))
-            continue
-        raise TypeError("Invalid record member")
-    return tuple(normalized)
-
-
 def record_members(
     definitions: RecordDefinitions,
     record_name: str,
 ) -> tuple[RecordMemberInfo, ...] | None:
-    members = definitions.get(record_name)
-    if members is None:
-        return None
-    normalized = normalize_record_members(members)
-    if normalized is not members:
-        definitions[record_name] = normalized
-    return normalized
+    return definitions.get(record_name)
 
 
 def is_anonymous_record_member(member: RecordMemberInfo) -> bool:

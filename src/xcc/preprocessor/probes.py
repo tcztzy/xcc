@@ -3,7 +3,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 
-from . import PreprocessorError, _SourceLocation
+from .model import PreprocessorError, _SourceLocation
 
 _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _SCOPED_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*")
