@@ -1,6 +1,6 @@
 """Build the native runtime as a symbol-resolved LLVM object model."""
 
-from xcc.aot.llvm_ir import LlvmModule, LlvmParameter, LlvmType
+from xcc.aot.llvm_ir import LlvmBlock, LlvmFunction, LlvmModule, LlvmParameter, LlvmType
 
 RUNTIME_ALLOC = "__xcc_aot_alloc"
 RUNTIME_CALLOC = "__xcc_aot_calloc"
@@ -168,16 +168,16 @@ def _declare_runtime(module: LlvmModule) -> None:
         "__xcc_aot_string_dict_cache_indices", "internal global [16384 x i64] zeroinitializer"
     )
     module.add_global(
-        "__xcc_aot_identity_dict_cache_dicts", "internal global [16384 x ptr] zeroinitializer"
+        "__xcc_aot_identity_dict_cache_dicts", "internal global [65536 x ptr] zeroinitializer"
     )
     module.add_global(
-        "__xcc_aot_identity_dict_cache_keys", "internal global [16384 x ptr] zeroinitializer"
+        "__xcc_aot_identity_dict_cache_keys", "internal global [65536 x ptr] zeroinitializer"
     )
     module.add_global(
-        "__xcc_aot_identity_dict_cache_states", "internal global [16384 x i64] zeroinitializer"
+        "__xcc_aot_identity_dict_cache_states", "internal global [65536 x i64] zeroinitializer"
     )
     module.add_global(
-        "__xcc_aot_identity_dict_cache_indices", "internal global [16384 x i64] zeroinitializer"
+        "__xcc_aot_identity_dict_cache_indices", "internal global [65536 x i64] zeroinitializer"
     )
     module.declare_function(
         "puts", LlvmType("i32"), (LlvmParameter(LlvmType("ptr"), None),), variadic=False
@@ -7022,6 +7022,48 @@ def _build___xcc_aot_string_dict_cache_store(module: LlvmModule) -> None:
     fail.emit(None, "unreachable")
 
 
+def _emit_string_search_prefix_filter(
+    function: LlvmFunction,
+    block: LlvmBlock,
+    *,
+    equal_label: str,
+    full_compare_label: str,
+    mismatch_label: str,
+) -> None:
+    block.emit("candidate_first", "load", " i8, ptr ", function.local("candidate"))
+    block.emit("key_first", "load", " i8, ptr ", function.local("key"))
+    block.emit(
+        "same_first",
+        "icmp",
+        " eq i8 ",
+        function.local("candidate_first"),
+        ", ",
+        function.local("key_first"),
+    )
+    block.emit(
+        None,
+        "br",
+        " i1 ",
+        function.local("same_first"),
+        ", label ",
+        function.local("compare_candidate_first_same"),
+        ", label ",
+        function.local(mismatch_label),
+    )
+    same = function.append_block("compare_candidate_first_same")
+    same.emit("first_zero", "icmp", " eq i8 ", function.local("candidate_first"), ", 0")
+    same.emit(
+        None,
+        "br",
+        " i1 ",
+        function.local("first_zero"),
+        ", label ",
+        function.local(equal_label),
+        ", label ",
+        function.local(full_compare_label),
+    )
+
+
 def _build___xcc_aot_string_dict_find_index(module: LlvmModule) -> None:
     function = module.function("__xcc_aot_string_dict_find_index")
     entry = function.append_block("entry")
@@ -7382,7 +7424,15 @@ def _build___xcc_aot_string_dict_find_index(module: LlvmModule) -> None:
         function.local("compare_candidate"),
     )
     compare_candidate = function.append_block("compare_candidate")
-    compare_candidate.emit(
+    _emit_string_search_prefix_filter(
+        function,
+        compare_candidate,
+        equal_label="found",
+        full_compare_label="compare_candidate_full",
+        mismatch_label="search_next",
+    )
+    compare_candidate_full = function.append_block("compare_candidate_full")
+    compare_candidate_full.emit(
         "candidate_cmp",
         "call",
         " i32 ",
@@ -7393,8 +7443,10 @@ def _build___xcc_aot_string_dict_find_index(module: LlvmModule) -> None:
         function.local("key"),
         ")",
     )
-    compare_candidate.emit("matches", "icmp", " eq i32 ", function.local("candidate_cmp"), ", 0")
-    compare_candidate.emit(
+    compare_candidate_full.emit(
+        "matches", "icmp", " eq i32 ", function.local("candidate_cmp"), ", 0"
+    )
+    compare_candidate_full.emit(
         None,
         "br",
         " i1 ",
@@ -7853,7 +7905,15 @@ def _build___xcc_aot_string_tuple_find_index(module: LlvmModule) -> None:
         function.local("compare_candidate"),
     )
     compare_candidate = function.append_block("compare_candidate")
-    compare_candidate.emit(
+    _emit_string_search_prefix_filter(
+        function,
+        compare_candidate,
+        equal_label="found",
+        full_compare_label="compare_candidate_full",
+        mismatch_label="search_next",
+    )
+    compare_candidate_full = function.append_block("compare_candidate_full")
+    compare_candidate_full.emit(
         "candidate_cmp",
         "call",
         " i32 ",
@@ -7864,8 +7924,10 @@ def _build___xcc_aot_string_tuple_find_index(module: LlvmModule) -> None:
         function.local("key"),
         ")",
     )
-    compare_candidate.emit("matches", "icmp", " eq i32 ", function.local("candidate_cmp"), ", 0")
-    compare_candidate.emit(
+    compare_candidate_full.emit(
+        "matches", "icmp", " eq i32 ", function.local("candidate_cmp"), ", 0"
+    )
+    compare_candidate_full.emit(
         None,
         "br",
         " i1 ",
@@ -7983,14 +8045,13 @@ def _build___xcc_aot_identity_dict_cache_bucket(module: LlvmModule) -> None:
     entry.emit("dict_bits", "ptrtoint", " ptr ", function.local("dict"), " to i64")
     entry.emit("key_bits", "ptrtoint", " ptr ", function.local("key"), " to i64")
     entry.emit("dict_aligned", "lshr", " i64 ", function.local("dict_bits"), ", 4")
-    entry.emit("key_aligned", "lshr", " i64 ", function.local("key_bits"), ", 4")
-    entry.emit("key_mixed", "mul", " i64 ", function.local("key_aligned"), ", -7046029254386353131")
+    entry.emit("key_mixed", "mul", " i64 ", function.local("key_bits"), ", -7046029254386353131")
     entry.emit(
         "mixed", "xor", " i64 ", function.local("dict_aligned"), ", ", function.local("key_mixed")
     )
     entry.emit("high", "lshr", " i64 ", function.local("mixed"), ", 32")
     entry.emit("folded", "xor", " i64 ", function.local("mixed"), ", ", function.local("high"))
-    entry.emit("bucket", "and", " i64 ", function.local("folded"), ", 16383")
+    entry.emit("bucket", "and", " i64 ", function.local("folded"), ", 65535")
     entry.emit(None, "ret", " i64 ", function.local("bucket"))
 
 
@@ -8011,7 +8072,7 @@ def _build___xcc_aot_identity_dict_cache_store(module: LlvmModule) -> None:
     entry.emit(
         "dict_slot",
         "getelementptr",
-        " [16384 x ptr], ptr ",
+        " [65536 x ptr], ptr ",
         module.symbol("__xcc_aot_identity_dict_cache_dicts"),
         ", i64 0, i64 ",
         function.local("bucket"),
@@ -8019,7 +8080,7 @@ def _build___xcc_aot_identity_dict_cache_store(module: LlvmModule) -> None:
     entry.emit(
         "key_slot",
         "getelementptr",
-        " [16384 x ptr], ptr ",
+        " [65536 x ptr], ptr ",
         module.symbol("__xcc_aot_identity_dict_cache_keys"),
         ", i64 0, i64 ",
         function.local("bucket"),
@@ -8027,7 +8088,7 @@ def _build___xcc_aot_identity_dict_cache_store(module: LlvmModule) -> None:
     entry.emit(
         "state_slot",
         "getelementptr",
-        " [16384 x i64], ptr ",
+        " [65536 x i64], ptr ",
         module.symbol("__xcc_aot_identity_dict_cache_states"),
         ", i64 0, i64 ",
         function.local("bucket"),
@@ -8035,7 +8096,7 @@ def _build___xcc_aot_identity_dict_cache_store(module: LlvmModule) -> None:
     entry.emit(
         "index_slot",
         "getelementptr",
-        " [16384 x i64], ptr ",
+        " [65536 x i64], ptr ",
         module.symbol("__xcc_aot_identity_dict_cache_indices"),
         ", i64 0, i64 ",
         function.local("bucket"),
@@ -8057,15 +8118,11 @@ def _build___xcc_aot_identity_dict_find_index(module: LlvmModule) -> None:
     function = module.function("__xcc_aot_identity_dict_find_index")
     entry = function.append_block("entry")
     entry.emit("dict_null", "icmp", " eq ptr ", function.local("dict"), ", null")
-    entry.emit("key_null", "icmp", " eq ptr ", function.local("key"), ", null")
-    entry.emit(
-        "invalid", "or", " i1 ", function.local("dict_null"), ", ", function.local("key_null")
-    )
     entry.emit(
         None,
         "br",
         " i1 ",
-        function.local("invalid"),
+        function.local("dict_null"),
         ", label ",
         function.local("uncached_missing"),
         ", label ",
@@ -8095,7 +8152,7 @@ def _build___xcc_aot_identity_dict_find_index(module: LlvmModule) -> None:
     prepare.emit(
         "dict_slot",
         "getelementptr",
-        " [16384 x ptr], ptr ",
+        " [65536 x ptr], ptr ",
         module.symbol("__xcc_aot_identity_dict_cache_dicts"),
         ", i64 0, i64 ",
         function.local("bucket"),
@@ -8103,7 +8160,7 @@ def _build___xcc_aot_identity_dict_find_index(module: LlvmModule) -> None:
     prepare.emit(
         "key_slot",
         "getelementptr",
-        " [16384 x ptr], ptr ",
+        " [65536 x ptr], ptr ",
         module.symbol("__xcc_aot_identity_dict_cache_keys"),
         ", i64 0, i64 ",
         function.local("bucket"),
@@ -8111,7 +8168,7 @@ def _build___xcc_aot_identity_dict_find_index(module: LlvmModule) -> None:
     prepare.emit(
         "state_slot",
         "getelementptr",
-        " [16384 x i64], ptr ",
+        " [65536 x i64], ptr ",
         module.symbol("__xcc_aot_identity_dict_cache_states"),
         ", i64 0, i64 ",
         function.local("bucket"),
@@ -8119,7 +8176,7 @@ def _build___xcc_aot_identity_dict_find_index(module: LlvmModule) -> None:
     prepare.emit(
         "index_slot",
         "getelementptr",
-        " [16384 x i64], ptr ",
+        " [65536 x i64], ptr ",
         module.symbol("__xcc_aot_identity_dict_cache_indices"),
         ", i64 0, i64 ",
         function.local("bucket"),
@@ -8378,15 +8435,11 @@ def _build___xcc_aot_identity_dict_note_index(module: LlvmModule) -> None:
     function = module.function("__xcc_aot_identity_dict_note_index")
     entry = function.append_block("entry")
     entry.emit("dict_null", "icmp", " eq ptr ", function.local("dict"), ", null")
-    entry.emit("key_null", "icmp", " eq ptr ", function.local("key"), ", null")
-    entry.emit(
-        "invalid", "or", " i1 ", function.local("dict_null"), ", ", function.local("key_null")
-    )
     entry.emit(
         None,
         "br",
         " i1 ",
-        function.local("invalid"),
+        function.local("dict_null"),
         ", label ",
         function.local("done"),
         ", label ",
@@ -17586,7 +17639,7 @@ def _build___xcc_aot_string_slice(module: LlvmModule) -> None:
         "start_from_end", "add", " i64 ", function.local("len"), ", ", function.local("start")
     )
     entry.emit(
-        "norm_start",
+        "raw_start",
         "select",
         " i1 ",
         function.local("start_neg"),
@@ -17595,10 +17648,37 @@ def _build___xcc_aot_string_slice(module: LlvmModule) -> None:
         ", i64 ",
         function.local("start"),
     )
+    entry.emit("start_below", "icmp", " slt i64 ", function.local("raw_start"), ", 0")
+    entry.emit(
+        "nonnegative_start",
+        "select",
+        " i1 ",
+        function.local("start_below"),
+        ", i64 0, i64 ",
+        function.local("raw_start"),
+    )
+    entry.emit(
+        "start_above",
+        "icmp",
+        " sgt i64 ",
+        function.local("nonnegative_start"),
+        ", ",
+        function.local("len"),
+    )
+    entry.emit(
+        "norm_start",
+        "select",
+        " i1 ",
+        function.local("start_above"),
+        ", i64 ",
+        function.local("len"),
+        ", i64 ",
+        function.local("nonnegative_start"),
+    )
     entry.emit("stop_neg", "icmp", " slt i64 ", function.local("stop"), ", 0")
     entry.emit("stop_from_end", "add", " i64 ", function.local("len"), ", ", function.local("stop"))
     entry.emit(
-        "norm_stop",
+        "raw_stop",
         "select",
         " i1 ",
         function.local("stop_neg"),
@@ -17606,6 +17686,33 @@ def _build___xcc_aot_string_slice(module: LlvmModule) -> None:
         function.local("stop_from_end"),
         ", i64 ",
         function.local("stop"),
+    )
+    entry.emit("stop_below", "icmp", " slt i64 ", function.local("raw_stop"), ", 0")
+    entry.emit(
+        "nonnegative_stop",
+        "select",
+        " i1 ",
+        function.local("stop_below"),
+        ", i64 0, i64 ",
+        function.local("raw_stop"),
+    )
+    entry.emit(
+        "stop_above",
+        "icmp",
+        " sgt i64 ",
+        function.local("nonnegative_stop"),
+        ", ",
+        function.local("len"),
+    )
+    entry.emit(
+        "norm_stop",
+        "select",
+        " i1 ",
+        function.local("stop_above"),
+        ", i64 ",
+        function.local("len"),
+        ", i64 ",
+        function.local("nonnegative_stop"),
     )
     entry.emit(
         "raw_count", "sub", " i64 ", function.local("norm_stop"), ", ", function.local("norm_start")

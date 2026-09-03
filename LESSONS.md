@@ -1,5 +1,66 @@
 # Lessons
 
+- Integer-to-pointer conversion must first extend or truncate the integer to
+  the target pointer width. Passing an `i32 -1` directly to `inttoptr` on a
+  64-bit target zero-extends the sentinel into `0x00000000ffffffff` instead of
+  preserving C's `(void *)-1` value; cover both constant and runtime casts.
+- LLVM ordered floating-point predicates do not implement C inequality or
+  scalar truth in the presence of NaN. C `x != y` and `if (x)` require an
+  unordered-or-not-equal predicate so NaN remains unequal to every value and
+  truthy when compared with zero.
+- Equality at a tagged-object boundary is a value operation, not a raw pointer
+  comparison. When one operand is opaque and the other is a concrete scalar,
+  box the scalar into the same tagged representation before dispatching the
+  comparison; otherwise optional and heterogeneous values disagree with
+  CPython while superficially type-correct LLVM still compiles.
+- LLVM shifts by a count greater than or equal to the operand width are poison,
+  while hardware may mask the count and Python constant evaluation is
+  unbounded. Guard dynamic full-width shifts explicitly and infer enough width
+  for constant expression trees before lowering them. Test this through a
+  compiler produced by the native compiler itself: the hosted path can preserve
+  a wide constant even when the self-hosted evaluator has already truncated it.
+- Optimize a self-hosted AOT compiler from a sampled native workload, then use
+  the smallest LLVM pipeline that survives the complete behavior contract.
+  `default<O2>` exposed latent runtime assumptions and changed compiler
+  behavior; after backpropping those failures, `default<O1>` passed the full
+  AOT suite, strong bootstrap, and clean CPython build while materially
+  outperforming targeted `always-inline` plus `mem2reg` alone.
+- `id(object)` must preserve the underlying object's identity across tagged
+  boxing. Using a temporary wrapper address silently breaks source maps and
+  other integer-keyed identity tables even though ordinary object operations
+  still appear correct.
+- Integer-key tuple dictionaries can reuse a pointer-identity cache by treating
+  the integer bits as the cache key, but zero must remain a valid key, all bits
+  must participate in hashing, and every mutating path must advance the same
+  generation used to validate negative and positive hits. Size a direct-mapped
+  cache from collision sampling rather than intuition: moving from 16,384 to
+  65,536 entries traded 1.5 MiB of BSS for enough eliminated fallback scans to
+  make the measured speedup robustly exceed its acceptance threshold.
+- A linear string-key fallback need not enter `strcmp` for every candidate.
+  Checking the first byte, including the terminating zero, cheaply rejects the
+  dominant mismatch case while preserving exact equality; measure longer
+  prefixes before adding them, because four-byte filtering did not improve this
+  workload over the single-byte check.
+- C variadic calls require default argument promotions after the declared
+  parameters on both direct and indirect call paths: narrow integers promote
+  with their source signedness and `float` promotes to `double`. Omitting this
+  can leave stale upper register bits that surface far from the call site, such
+  as impossible socket ports produced through `Py_BuildValue`.
+- A file-scope pointer initializer may be a relocatable address expression, not
+  only a bare symbol or null. Preserve array decay and lower constant
+  pointer-plus-integer expressions to a pointee-scaled constant GEP; silently
+  substituting null can remove whole method-table suffixes while the binary
+  still links and starts.
+- Callback-free preprocessing must resolve context-sensitive predefined macros
+  at the expansion site. A placeholder macro table entry for `__FILE__` or
+  `__LINE__` can make hosted preprocessing pass while the self-hosted compiler
+  silently emits zero; cover the native path with the predefined macro nested
+  inside a function-like macro argument.
+- Normalize and clamp both string-slice bounds before pointer arithmetic or
+  copying. Computing a nonnegative byte count is insufficient when an
+  out-of-range start still points beyond the allocation; use a native oracle
+  and a sanitizer when a seemingly deterministic compiler failure may be an
+  earlier memory read.
 - Bootstrap source admission, IR lowering, LLVM rendering, and native execution
   are separate gates. A module can parse while an unsupported method, missing
   flow type, or unmapped LLVM C call still breaks the complete compiler closure;

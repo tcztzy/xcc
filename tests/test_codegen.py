@@ -1263,6 +1263,27 @@ int main(void)
         self.assertIn("@q = internal global ptr getelementptr (i32, ptr @table", ir)
         self.assertProgramReturns(source, 0)
 
+    def test_global_pointer_initializer_accepts_array_pointer_arithmetic(self) -> None:
+        source = """
+struct Slot { int id; int *value; };
+static int values[] = {10, 20, 30, 40};
+static struct Slot slots[] = {{64, values + 2}, {0, 0}};
+
+int main(void)
+{
+  return slots[0].value == &values[2] && *slots[0].value == 30 ? 0 : 1;
+}
+"""
+
+        ir = self.assertLlcAccepts(source)
+
+        slots_line = "@slots = internal global" + ir.split(
+            "@slots = internal global", 1
+        )[1].splitlines()[0]
+        self.assertIn("getelementptr", slots_line)
+        self.assertNotIn("i32 64, ptr null", slots_line)
+        self.assertProgramReturns(source, 0)
+
     def test_gnu_atomic_builtins_lower_to_ir(self) -> None:
         source = """
 int main(void)
@@ -1901,6 +1922,22 @@ int main(void)
         self.assertIn("@one = internal global ptr inttoptr", ir)
         self.assertIn("@addr = internal global i64 ptrtoint", ir)
         self.assertProgramReturns(source, 0)
+
+    def test_negative_integer_function_pointer_cast_uses_pointer_width(self) -> None:
+        source = """
+typedef void (*destructor_type)(void *);
+extern int consume(destructor_type destructor);
+
+int pass_transient(void)
+{
+  return consume((destructor_type)-1);
+}
+"""
+
+        ir = self.assertLlcAccepts(source)
+
+        self.assertIn("ptr inttoptr (i64 -1 to ptr)", ir)
+        self.assertNotIn("ptr inttoptr (i32 -1 to ptr)", ir)
 
     def test_static_string_literal_sizeof_includes_null_terminator(self) -> None:
         source = """
@@ -2948,6 +2985,68 @@ int main(void)
 
         self.assertProgramReturns(source, 0)
 
+    def test_variadic_call_applies_default_argument_promotions(self) -> None:
+        source = """
+int promoted(int count, ...)
+{
+  __builtin_va_list ap;
+  int integer;
+  double real;
+  __builtin_va_start(ap, count);
+  integer = __builtin_va_arg(ap, int);
+  real = __builtin_va_arg(ap, double);
+  __builtin_va_end(ap);
+  return integer == 61896 && real == 1.25;
+}
+
+int main(void)
+{
+  unsigned short integer = 61896;
+  float real = 1.25f;
+  return promoted(2, integer, real) ? 0 : 1;
+}
+"""
+
+        ir = self.assertLlcAccepts(source)
+
+        self.assertIn("call i32 (i32, ...) @promoted(i32 2, i32", ir)
+        self.assertIn(", double ", ir)
+        self.assertProgramReturns(source, 0)
+
+    def test_indirect_variadic_call_applies_default_argument_promotions(self) -> None:
+        source = """
+typedef int (*promoted_fn)(int, ...);
+
+int promoted(int count, ...)
+{
+  __builtin_va_list ap;
+  int signed_integer;
+  int unsigned_integer;
+  double real;
+  __builtin_va_start(ap, count);
+  signed_integer = __builtin_va_arg(ap, int);
+  unsigned_integer = __builtin_va_arg(ap, int);
+  real = __builtin_va_arg(ap, double);
+  __builtin_va_end(ap);
+  return signed_integer == -123 && unsigned_integer == 61896 && real == 1.25;
+}
+
+int main(void)
+{
+  promoted_fn call = promoted;
+  short signed_integer = -123;
+  unsigned short unsigned_integer = 61896;
+  float real = 1.25f;
+  return call(3, signed_integer, unsigned_integer, real) ? 0 : 1;
+}
+"""
+
+        ir = self.assertLlcAccepts(source)
+
+        self.assertRegex(ir, r"call i32 \(i32, \.\.\.\) %[^ (]+\(i32 3, i32")
+        self.assertIn(", double ", ir)
+        self.assertProgramReturns(source, 0)
+
     def test_builtin_va_copy_reads_copied_variadic_cursor(self) -> None:
         source = """
 int pick_copy(int count, ...)
@@ -3067,6 +3166,23 @@ int f(double d)
 
         self.assertIn("fcmp oge double", ir)
         self.assertNotIn("fcmp oge double %d, float", ir)
+
+    def test_nan_is_unequal_and_truthy(self) -> None:
+        source = """
+int main(void)
+{
+  double nan = __builtin_nan("");
+  if (nan == nan) return 1;
+  if (!(nan != nan)) return 2;
+  if (!nan) return 3;
+  return 0;
+}
+"""
+
+        ir = self.assertLlcAccepts(source)
+
+        self.assertIn("fcmp une double", ir)
+        self.assertProgramReturns(source, 0)
 
     def test_anonymous_struct_return_prototype_declares_record_type(self) -> None:
         source = """

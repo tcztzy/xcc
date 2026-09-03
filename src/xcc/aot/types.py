@@ -46,6 +46,7 @@ class AotClassInfo:
     init_field_parameters: dict[str, str] = field(default_factory=dict)
     kw_only: bool = False
     field_defaults: dict[str, ast.expr] = field(default_factory=dict)
+    is_dataclass: bool = False
 
 
 @dataclass(frozen=True)

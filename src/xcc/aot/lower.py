@@ -3020,6 +3020,8 @@ class _Lowerer:
                     (IrTuple((), result_type), value),
                     result_type,
                 )
+            if expr.func.id == "list" and isinstance(value.type, IrTupleType):
+                return IrTupleSlice(value, None, None)
             return value
         if expr.args or expr.keywords:
             self._error(
@@ -4140,12 +4142,13 @@ class _Lowerer:
         record_type = IrRecordType(record_name)
         init_target = self._record_method_target(record_type, "__init__")
         if self._function_info(init_target) is None:
+            class_info = self._class_info(record_name)
             if _record_extends(
                 record_name,
                 "Exception",
                 self.class_types,
                 self.fallback_class_types,
-            ):
+            ) and (class_info is None or not class_info.is_dataclass):
                 return IrConstructRecord(
                     record_name,
                     tuple(
@@ -4156,9 +4159,24 @@ class _Lowerer:
                     ),
                     record_type,
                 )
-            return IrConstructRecord(
+            instance = IrConstructRecord(
                 record_name,
                 self._lower_constructor_args(record_name, expr, names),
+                record_type,
+            )
+            post_init_target = self._record_method_target(record_type, "__post_init__")
+            post_init = self._function_info(post_init_target)
+            if class_info is None or not class_info.is_dataclass or post_init is None:
+                return instance
+            if len(post_init.parameters) != 1:
+                self._error(
+                    "XCC-AOT-LOWER-0003",
+                    "Dataclass __post_init__ with InitVar parameters is unsupported",
+                    expr,
+                )
+            return IrCall(
+                _RECORD_INIT_PREFIX + post_init_target,
+                (instance,),
                 record_type,
             )
         instance = IrConstructRecord(
@@ -4778,6 +4796,9 @@ class _Lowerer:
         names: dict[str, IrType],
         fallback: IrType,
     ) -> IrType:
+        constant_integer_type = _constant_integer_expression_type(expr, {})
+        if constant_integer_type is not None:
+            return constant_integer_type
         if isinstance(expr, ast.Constant):
             if isinstance(expr.value, bool):
                 return IrBoolType()
@@ -6045,6 +6066,8 @@ class _Lowerer:
             right_type = self._infer_assignment_expr_type(right, names, IrRecordType("object"))
             if left_type == right_type and not _is_object_type(left_type):
                 return left_type
+            if isinstance(left_type, IrIntType) and isinstance(right_type, IrIntType):
+                return left_type if left_type.bits >= right_type.bits else right_type
             if isinstance(left_type, IrIntType):
                 return left_type
             if isinstance(right_type, IrIntType):
@@ -6589,6 +6612,20 @@ def _merge_fallthrough_branch_type(
 ) -> IrType | None:
     if then_type == else_type:
         return then_type
+    if (
+        isinstance(then_type, IrNoneType)
+        and isinstance(else_type, IrBoolType)
+        or isinstance(else_type, IrNoneType)
+        and isinstance(then_type, IrBoolType)
+    ):
+        return IrRecordType("bool | None")
+    if (
+        isinstance(then_type, IrNoneType)
+        and isinstance(else_type, IrIntType)
+        or isinstance(else_type, IrNoneType)
+        and isinstance(then_type, IrIntType)
+    ):
+        return IrRecordType("int | None")
     if _is_optional_bool_type(then_type) and isinstance(else_type, IrBoolType):
         return then_type
     if _is_optional_bool_type(else_type) and isinstance(then_type, IrBoolType):
@@ -6734,7 +6771,7 @@ def _merge_loop_fallthrough_type(
 
 def _record_union_contains_type(union_name: str, member_name: str) -> bool:
     parts = _top_level_union_parts(union_name)
-    return "None" in parts and member_name in parts
+    return "None" in parts and _record_type_contains_type(union_name, member_name)
 
 
 def _record_union_contains_ir_type(union_name: str, member_type: IrType) -> bool:
@@ -7079,11 +7116,75 @@ def _global_scalar_literal(
         if isinstance(value.value, bool):
             return IrConstBool(value.value)
         if type(value.value) is int:
-            return IrConstInt(value.value, IrIntType(64, signed=True))
+            return IrConstInt(value.value, _minimum_signed_integer_type(value.value))
         return None
     integer = _global_scalar_integer(value, constants)
     if integer is not None:
-        return IrConstInt(integer, IrIntType(64, signed=True))
+        return IrConstInt(integer, _minimum_signed_integer_type(integer))
+    return None
+
+
+def _minimum_signed_integer_type(value: int) -> IrIntType:
+    magnitude = value if value >= 0 else ~value
+    bits = 1
+    while magnitude:
+        magnitude >>= 1
+        bits += 1
+    return IrIntType(max(64, bits), signed=True)
+
+
+def _constant_integer_expression_type(
+    value: ast.expr,
+    constants: dict[str, IrExpr],
+) -> IrIntType | None:
+    bits = _constant_integer_expression_bits(value, constants)
+    return None if bits is None else IrIntType(max(64, bits), signed=True)
+
+
+def _constant_integer_expression_bits(
+    value: ast.expr,
+    constants: dict[str, IrExpr],
+) -> int | None:
+    if isinstance(value, ast.Constant) and type(value.value) is int:
+        integer_type = _minimum_signed_integer_type(value.value)
+        if integer_type.bits > 64:
+            return integer_type.bits
+        magnitude = value.value if value.value >= 0 else ~value.value
+        bits = 1
+        while magnitude:
+            magnitude >>= 1
+            bits += 1
+        return bits
+    if isinstance(value, ast.Name):
+        constant = constants.get(value.id)
+        if isinstance(constant, IrConstInt | IrBinary) and isinstance(constant.type, IrIntType):
+            return constant.type.bits
+        return None
+    if isinstance(value, ast.UnaryOp) and isinstance(value.op, (ast.Invert, ast.UAdd, ast.USub)):
+        operand_bits = _constant_integer_expression_bits(value.operand, constants)
+        if operand_bits is None:
+            return None
+        return operand_bits if isinstance(value.op, ast.UAdd) else operand_bits + 1
+    if not isinstance(value, ast.BinOp):
+        return None
+    left_bits = _constant_integer_expression_bits(value.left, constants)
+    right_bits = _constant_integer_expression_bits(value.right, constants)
+    if left_bits is None or right_bits is None:
+        return None
+    if isinstance(value.op, (ast.Add, ast.Sub)):
+        return max(left_bits, right_bits) + 1
+    if isinstance(value.op, ast.Mult):
+        return left_bits + right_bits
+    if isinstance(value.op, ast.LShift | ast.RShift):
+        shift = _global_scalar_integer(value.right, constants)
+        if shift is None or shift < 0:
+            return None
+        return left_bits + shift if isinstance(value.op, ast.LShift) else left_bits
+    if isinstance(
+        value.op,
+        (ast.FloorDiv, ast.Mod, ast.BitOr, ast.BitAnd, ast.BitXor),
+    ):
+        return max(left_bits, right_bits)
     return None
 
 

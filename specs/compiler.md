@@ -70,6 +70,21 @@ and link behavior belong to the selected target spec.
   Hexadecimal and octal escapes contribute their declared byte values without
   UTF-8 re-encoding; source characters and universal character names use UTF-8.
   Every backend consumes the same bytes.
+- V12: A constant integer converted to a pointer or function pointer is first
+  represented at the target pointer width with its C integer value preserved;
+  negative sentinels such as `(callback_type)-1` must not become a
+  zero-extended 32-bit address on a 64-bit target.
+- V13: Floating-point inequality and scalar-to-boolean conversion use unordered
+  comparison semantics, so NaN compares unequal to every value (including
+  itself) and converts to true as required by C.
+- V14: Every argument beyond a variadic function's declared parameters receives
+  C's default argument promotions on direct and indirect calls. Integer types
+  narrower than `int` promote with their source signedness, and `float`
+  promotes to `double`.
+- V15: Static pointer initializers preserve relocatable address arithmetic.
+  Array decay followed by an integer offset emits a constant address scaled by
+  the pointed-to element type; a valid address expression never falls back to
+  null merely because it is not a bare symbol.
 
 ## Regression Expectations
 

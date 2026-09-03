@@ -135,7 +135,10 @@ class AotMilestone4SliceTests(unittest.TestCase):
         )
         self.assertEqual(
             [function.name for function in module.functions],
-            ["xcc.options.normalize_options"],
+            [
+                "xcc.options.normalize_options",
+                "xcc.options.FrontendOptions.__post_init__",
+            ],
         )
         self.assertIn("FrontendOptions", {record.name for record in module.records})
 

@@ -3802,6 +3802,11 @@ class _Emitter:
                     continue
                 return None
             return optional_scalar
+        if any(isinstance(value.type, IrNoneType) for value in values):
+            if all(isinstance(value.type, IrBoolType | IrNoneType) for value in values):
+                return IrRecordType("bool | None")
+            if all(isinstance(value.type, IrIntType | IrNoneType) for value in values):
+                return IrRecordType("int | None")
         non_none_types = tuple(
             value.type for value in values if not isinstance(value.type, IrNoneType)
         )
@@ -4137,10 +4142,16 @@ class _Emitter:
         target = self._emit_expr(statement.target, names, lines)
         index = self._emit_expr(statement.index, names, lines)
         value = self._emit_expr(statement.value, names, lines)
-        stored = self._box_to_runtime_ptr(value, lines)
+        item_type = _homogeneous_tuple_element_type(target.type) or value.type
+        if _is_opaque_object_type(item_type):
+            stored = self._box_object_value(value, lines)
+        elif _is_optional_bool_type(item_type) or _is_optional_int_type(item_type):
+            stored = self._value_for_result_type(value, item_type, lines)
+        else:
+            stored = self._box_to_runtime_ptr(value, lines)
         index_value = self._coerce_index_i64(index, lines, "setitem")
         self.needs_runtime_prelude = True
-        self._emit_phase_capture_value(target.value, stored, value.type, True, lines)
+        self._emit_phase_capture_value(target.value, stored, item_type, True, lines)
         lines.append(
             f"  call void @__xcc_aot_tuple_set(ptr {target.value}, i64 {index_value}, ptr {stored})"
         )
@@ -4273,7 +4284,7 @@ class _Emitter:
                 if "," in slot:
                     self._bind_emitted_tuple_target(slot, item, names, lines)
                 else:
-                    names[slot] = item
+                    self._emit_assign_target(slot, item, names, lines)
 
     def _while_uses_iteration_phase(
         self,
@@ -4493,6 +4504,10 @@ class _Emitter:
             return self._emit_floor_div(expr.type, left, right, lines)
         if expr.op == "%":
             return self._emit_modulo(expr.type, left, right, lines)
+        if expr.op in {"<<", ">>"}:
+            if not isinstance(expr.type, IrIntType):
+                self._error("Shift operator requires integer operands")
+            return self._emit_shift(expr.op, expr.type, left, right, lines)
         if isinstance(expr.type, IrFloatType):
             float_opcode = {
                 "+": "fadd",
@@ -4504,13 +4519,10 @@ class _Emitter:
             result = self._tmp(float_opcode)
             lines.append(f"  {result} = {float_opcode} double {left.value}, {right.value}")
             return _EmittedValue(result, expr.type)
-        shift_opcode = "ashr" if isinstance(expr.type, IrIntType) and expr.type.signed else "lshr"
         opcode = {
             "+": "add",
             "-": "sub",
             "*": "mul",
-            "<<": "shl",
-            ">>": shift_opcode,
             "|": "or",
             "&": "and",
             "^": "xor",
@@ -4522,6 +4534,35 @@ class _Emitter:
             f"  {result} = {opcode} {self._llvm_type(expr.type)} {left.value}, {right.value}"
         )
         return _EmittedValue(result, expr.type)
+
+    def _emit_shift(
+        self,
+        op: str,
+        result_type: IrIntType,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        lines: list[str],
+    ) -> _EmittedValue:
+        llvm_type = self._llvm_type(result_type)
+        in_range = self._tmp("shift.in.range")
+        safe_count = self._tmp("shift.count")
+        shifted = self._tmp("shifted")
+        result = self._tmp("shift")
+        lines.append(f"  {in_range} = icmp ult {llvm_type} {right.value}, {result_type.bits}")
+        lines.append(
+            f"  {safe_count} = select i1 {in_range}, {llvm_type} {right.value}, {llvm_type} 0"
+        )
+        opcode = "shl" if op == "<<" else "ashr" if result_type.signed else "lshr"
+        lines.append(f"  {shifted} = {opcode} {llvm_type} {left.value}, {safe_count}")
+        if op == ">>" and result_type.signed:
+            saturated = self._tmp("shift.saturated")
+            lines.append(f"  {saturated} = ashr {llvm_type} {left.value}, {result_type.bits - 1}")
+            lines.append(
+                f"  {result} = select i1 {in_range}, {llvm_type} {shifted}, {llvm_type} {saturated}"
+            )
+        else:
+            lines.append(f"  {result} = select i1 {in_range}, {llvm_type} {shifted}, {llvm_type} 0")
+        return _EmittedValue(result, result_type)
 
     def _adapt_integer_width(
         self,
@@ -4901,6 +4942,7 @@ class _Emitter:
             f"ptr {value.value}, i64 {start}, i1 {has_start}, "
             f"i64 {stop}, i1 {has_stop})"
         )
+        self._register_tuple_object_layout(result, expr.type, lines)
         return _EmittedValue(result, expr.type)
 
     def _emit_construct_record(
@@ -6460,8 +6502,43 @@ class _Emitter:
             self._error("__id expects an int64 result")
         if not _is_pointer_type(value.type):
             self._error("__id expects a pointer-like value")
+        identity = value.value
+        if _is_opaque_object_type(value.type):
+            source_label = _current_label(lines)
+            inspect_label = self._label("id.inspect")
+            end_label = self._label("id.end")
+            nonnull = self._tmp("id.nonnull")
+            lines.append(f"  {nonnull} = icmp ne ptr {value.value}, null")
+            lines.append(f"  br i1 {nonnull}, label %{inspect_label}, label %{end_label}")
+            lines.append(f"{inspect_label}:")
+            tag = self._tmp("id.tag")
+            payload_pointer = self._tmp("id.payloadptr")
+            payload = self._tmp("id.payload")
+            pointer_tag_floor = self._tmp("id.pointer.floor")
+            pointer_tag_ceiling = self._tmp("id.pointer.ceiling")
+            pointer_tag_range = self._tmp("id.pointer.range")
+            not_ellipsis = self._tmp("id.pointer.notellipsis")
+            pointer_tag = self._tmp("id.pointer")
+            unboxed = self._tmp("id.unboxed")
+            lines.append(f"  {tag} = load i64, ptr {value.value}")
+            lines.append(f"  {payload_pointer} = getelementptr i8, ptr {value.value}, i64 8")
+            lines.append(f"  {payload} = load ptr, ptr {payload_pointer}")
+            lines.append(f"  {pointer_tag_floor} = icmp uge i64 {tag}, {_OBJECT_TAG_STRING}")
+            lines.append(f"  {pointer_tag_ceiling} = icmp ule i64 {tag}, {_OBJECT_TAG_DICT}")
+            lines.append(
+                f"  {pointer_tag_range} = and i1 {pointer_tag_floor}, {pointer_tag_ceiling}"
+            )
+            lines.append(f"  {not_ellipsis} = icmp ne i64 {tag}, {_OBJECT_TAG_ELLIPSIS}")
+            lines.append(f"  {pointer_tag} = and i1 {pointer_tag_range}, {not_ellipsis}")
+            lines.append(f"  {unboxed} = select i1 {pointer_tag}, ptr {payload}, ptr {value.value}")
+            lines.append(f"  br label %{end_label}")
+            lines.append(f"{end_label}:")
+            identity = self._tmp("id.identity")
+            lines.append(
+                f"  {identity} = phi ptr [ null, %{source_label} ], [ {unboxed}, %{inspect_label} ]"
+            )
         result = self._tmp("id")
-        lines.append(f"  {result} = ptrtoint ptr {value.value} to i64")
+        lines.append(f"  {result} = ptrtoint ptr {identity} to i64")
         return _EmittedValue(result, expr.type)
 
     def _emit_repr_call(
@@ -6676,6 +6753,34 @@ class _Emitter:
         lines.append(f"  {result} = call ptr @__xcc_aot_single_byte_string(i8 {byte})")
         return _EmittedValue(result, expr.type)
 
+    def _dict_cache_key(
+        self,
+        key_type: IrType,
+        key: _EmittedValue,
+        lines: list[str],
+    ) -> tuple[str, str, str] | None:
+        if isinstance(key_type, IrStringType) and isinstance(key.type, IrStringType):
+            return (
+                "__xcc_aot_string_dict_find_index",
+                "__xcc_aot_string_dict_note_index",
+                key.value,
+            )
+        if (
+            isinstance(key_type, IrIntType)
+            and key_type.bits <= 64
+            and isinstance(key.type, IrIntType)
+        ):
+            coerced = _EmittedValue(
+                self._value_for_result_type(key, key_type, lines),
+                key_type,
+            )
+            return (
+                "__xcc_aot_identity_dict_find_index",
+                "__xcc_aot_identity_dict_note_index",
+                self._box_to_runtime_ptr(coerced, lines),
+            )
+        return None
+
     def _emit_dict_get_call(
         self,
         expr: IrCall,
@@ -6690,7 +6795,9 @@ class _Emitter:
         key_type, value_type = dict_value.type.key, dict_value.type.value
         key = self._emit_expr(expr.args[1], names, lines)
         self.needs_runtime_prelude = True
-        if isinstance(key_type, IrStringType):
+        cache_key = self._dict_cache_key(key_type, key, lines)
+        if cache_key is not None:
+            find_index, _, key_pointer = cache_key
             result_type = self._llvm_type(expr.type)
             initial_value = self._default_value(expr.type)
             if len(expr.args) == 3:
@@ -6704,8 +6811,7 @@ class _Emitter:
             lines.append(f"  {result_ptr} = alloca {result_type}")
             lines.append(f"  store {result_type} {initial_value}, ptr {result_ptr}")
             lines.append(
-                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
-                f"ptr {dict_value.value}, ptr {key.value})"
+                f"  {index} = call i64 @{find_index}(ptr {dict_value.value}, ptr {key_pointer})"
             )
             lines.append(f"  {found} = icmp sge i64 {index}, 0")
             lines.append(f"  br i1 {found}, label %{found_label}, label %{end_label}")
@@ -6801,7 +6907,9 @@ class _Emitter:
         key = self._emit_expr(expr.args[1], names, lines)
         default = self._emit_expr(expr.args[2], names, lines)
         self.needs_runtime_prelude = True
-        if isinstance(key_type, IrStringType):
+        cache_key = self._dict_cache_key(key_type, key, lines)
+        if cache_key is not None:
+            find_index, note_index, key_pointer = cache_key
             result_ptr = self._tmp("dictdefault.resultptr")
             index = self._tmp("dictdefault.index")
             found = self._tmp("dictdefault.found")
@@ -6812,8 +6920,7 @@ class _Emitter:
             default_result = self._value_for_result_type(default, expr.type, lines)
             lines.append(f"  {result_ptr} = alloca {result_type}")
             lines.append(
-                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
-                f"ptr {dict_value.value}, ptr {key.value})"
+                f"  {index} = call i64 @{find_index}(ptr {dict_value.value}, ptr {key_pointer})"
             )
             lines.append(f"  {found} = icmp sge i64 {index}, 0")
             lines.append(f"  br i1 {found}, label %{found_label}, label %{insert_label}")
@@ -6860,8 +6967,8 @@ class _Emitter:
             )
             lines.append(f"  call void @__xcc_aot_dict_bump_state(ptr {dict_value.value})")
             lines.append(
-                f"  call void @__xcc_aot_string_dict_note_index("
-                f"ptr {dict_value.value}, ptr {key.value}, i64 {length})"
+                f"  call void @{note_index}("
+                f"ptr {dict_value.value}, ptr {key_pointer}, i64 {length})"
             )
             lines.append(f"  store {result_type} {default_result}, ptr {result_ptr}")
             lines.append(f"  br label %{end_label}")
@@ -6961,15 +7068,16 @@ class _Emitter:
         key = self._emit_expr(expr.args[1], names, lines)
         value = self._emit_expr(expr.args[2], names, lines)
         self.needs_runtime_prelude = True
-        if isinstance(key_type, IrStringType):
+        cache_key = self._dict_cache_key(key_type, key, lines)
+        if cache_key is not None:
+            find_index, note_index, key_pointer = cache_key
             index = self._tmp("dictset.index")
             found = self._tmp("dictset.found")
             found_label = self._label("dictset.found")
             append_label = self._label("dictset.append")
             end_label = self._label("dictset.end")
             lines.append(
-                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
-                f"ptr {dict_value.value}, ptr {key.value})"
+                f"  {index} = call i64 @{find_index}(ptr {dict_value.value}, ptr {key_pointer})"
             )
             lines.append(f"  {found} = icmp sge i64 {index}, 0")
             lines.append(f"  br i1 {found}, label %{found_label}, label %{append_label}")
@@ -7023,8 +7131,8 @@ class _Emitter:
             )
             lines.append(f"  call void @__xcc_aot_dict_bump_state(ptr {dict_value.value})")
             lines.append(
-                f"  call void @__xcc_aot_string_dict_note_index("
-                f"ptr {dict_value.value}, ptr {key.value}, i64 {length})"
+                f"  call void @{note_index}("
+                f"ptr {dict_value.value}, ptr {key_pointer}, i64 {length})"
             )
             lines.append(f"  br label %{end_label}")
             lines.append(f"{end_label}:")
@@ -7241,14 +7349,15 @@ class _Emitter:
         if not isinstance(target.type, IrDictType):
             self._error("__dict_remove expects a dictionary receiver")
         self.needs_runtime_prelude = True
-        if isinstance(target.type.key, IrStringType):
+        cache_key = self._dict_cache_key(target.type.key, key, lines)
+        if cache_key is not None:
+            find_index, _, key_pointer = cache_key
             index = self._tmp("dictremove.index")
             found = self._tmp("dictremove.found")
             found_label = self._label("dictremove.found")
             end_label = self._label("dictremove.end")
             lines.append(
-                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
-                f"ptr {target.value}, ptr {key.value})"
+                f"  {index} = call i64 @{find_index}(ptr {target.value}, ptr {key_pointer})"
             )
             lines.append(f"  {found} = icmp sge i64 {index}, 0")
             lines.append(f"  br i1 {found}, label %{found_label}, label %{end_label}")
@@ -9550,14 +9659,13 @@ class _Emitter:
         self.needs_runtime_prelude = True
         needle = self._emit_expr(needle_expr, names, lines)
         haystack = self._emit_expr(haystack_expr, names, lines)
-        if isinstance(haystack_expr.type.key, IrStringType) and isinstance(
-            needle.type, IrStringType
-        ):
+        cache_key = self._dict_cache_key(haystack_expr.type.key, needle, lines)
+        if cache_key is not None:
+            find_index, _, key_pointer = cache_key
             index = self._tmp("dictcontains.index")
             present = self._tmp("dictcontains")
             lines.append(
-                f"  {index} = call i64 @__xcc_aot_string_dict_find_index("
-                f"ptr {haystack.value}, ptr {needle.value})"
+                f"  {index} = call i64 @{find_index}(ptr {haystack.value}, ptr {key_pointer})"
             )
             lines.append(f"  {present} = icmp sge i64 {index}, 0")
             membership = _EmittedValue(present, IrBoolType())
@@ -10682,7 +10790,24 @@ class _Emitter:
                 negate=negate,
                 lines=lines,
             )
+        if _is_opaque_object_type(left.type) and _is_concrete_object_scalar_type(right.type):
+            boxed = _EmittedValue(self._box_object_value(right, lines), left.type)
+            return self._emit_tagged_object_equality_compare(
+                left,
+                boxed,
+                negate=negate,
+                lines=lines,
+            )
+        if _is_opaque_object_type(right.type) and _is_concrete_object_scalar_type(left.type):
+            boxed = _EmittedValue(self._box_object_value(left, lines), right.type)
+            return self._emit_tagged_object_equality_compare(
+                boxed,
+                right,
+                negate=negate,
+                lines=lines,
+            )
         if isinstance(left.type, IrIntType) and isinstance(right.type, IrIntType):
+            left, right = self._adapt_comparison_integers(left, right, lines)
             lines.append(
                 f"  {result} = icmp {predicate} {self._llvm_type(left.type)} "
                 f"{left.value}, {right.value}"
@@ -11407,8 +11532,8 @@ class _Emitter:
             return _EmittedValue(result, IrBoolType())
         if not isinstance(left.type, IrIntType) or not isinstance(right.type, IrIntType):
             self._error(f"{target} currently supports integer arguments")
-        if left.type.bits != right.type.bits:
-            self._error(f"{target} expects matching integer widths")
+        left, right = self._adapt_comparison_integers(left, right, lines)
+        assert isinstance(left.type, IrIntType)
         prefix = "s" if left.type.signed else "u"
         result = self._tmp("cmp")
         lines.append(
@@ -11416,6 +11541,25 @@ class _Emitter:
             f"{left.value}, {right.value}"
         )
         return _EmittedValue(result, IrBoolType())
+
+    def _adapt_comparison_integers(
+        self,
+        left: _EmittedValue,
+        right: _EmittedValue,
+        lines: list[str],
+    ) -> tuple[_EmittedValue, _EmittedValue]:
+        assert isinstance(left.type, IrIntType)
+        assert isinstance(right.type, IrIntType)
+        signed = left.type.signed or right.type.signed
+        bits = max(
+            left.type.bits + int(signed and not left.type.signed),
+            right.type.bits + int(signed and not right.type.signed),
+        )
+        common = IrIntType(bits, signed)
+        return (
+            self._adapt_integer_width(left, common, lines),
+            self._adapt_integer_width(right, common, lines),
+        )
 
     def _emit_tuple_order_compare(
         self,
@@ -12747,6 +12891,13 @@ def _is_opaque_object_type(type_info: IrType) -> bool:
     scalar_parts = {"bool", "bytes", "float", "int", "str"}
     has_scalar = any(part in scalar_parts for part in non_none_parts)
     return has_scalar and len(non_none_parts) > 1
+
+
+def _is_concrete_object_scalar_type(type_info: IrType) -> bool:
+    return isinstance(
+        type_info,
+        IrBoolType | IrBytesType | IrFloatType | IrIntType | IrNoneType | IrStringType,
+    )
 
 
 def _is_nullable_record_union(

@@ -2076,6 +2076,9 @@ class _Preprocessor:
             if macro is None:
                 result_parts.append(name)
                 continue
+            if name in _PREDEFINED_DYNAMIC_MACROS:
+                result_parts.append(self._resolve_dynamic_macro(name, location).text)
+                continue
             if name in blocked:
                 result_parts.append(_hide_macro_name_no_callback(name))
                 continue

@@ -152,6 +152,7 @@ def build_native_bootstrap(
         diagnostic_code="XCC-AOT-BOOTSTRAP-0003",
         debug=debug,
         profile=profile,
+        optimize=True,
     )
 
 

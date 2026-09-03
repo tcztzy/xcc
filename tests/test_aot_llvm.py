@@ -1037,8 +1037,8 @@ class AotLlvmTextTests(unittest.TestCase):
         int64 = IrIntType(64, signed=True)
         cases = (
             ("mod", "%", "srem i64 %left, %right"),
-            ("lshift", "<<", "shl i64 %left, %right"),
-            ("rshift", ">>", "ashr i64 %left, %right"),
+            ("lshift", "<<", "shl i64 %left, %shift.count"),
+            ("rshift", ">>", "ashr i64 %left, %shift.count"),
             ("or_", "|", "or i64 %left, %right"),
             ("and_", "&", "and i64 %left, %right"),
             ("xor_", "^", "xor i64 %left, %right"),
@@ -1072,6 +1072,8 @@ class AotLlvmTextTests(unittest.TestCase):
                 self.assertIn(expected, llvm_ir)
                 if op == "%":
                     self.assertIn("select i1", llvm_ir)
+                if op in {"<<", ">>"}:
+                    self.assertIn("icmp ult i64 %right, 64", llvm_ir)
 
     def test_emits_two_arg_integer_max_as_branch_phi(self) -> None:
         module = lower_source_to_ir(
@@ -4460,7 +4462,7 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("%payload_size = add i64 %count, 1", llvm_ir)
         self.assertIn("call ptr @memset(ptr %data, i32 0, i64 %payload_size)", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_bytes_new(i64 3)", llvm_ir)
-        self.assertIn("ptrtoint ptr %value to i64", llvm_ir)
+        self.assertIn("= ptrtoint ptr %id.identity", llvm_ir)
         self.assertIn("call ptr @__xcc_aot_int_to_bytes(i64 65, i64 1, ptr @.str0)", llvm_ir)
 
     def test_emits_string_predicate_intrinsic_calls(self) -> None:
@@ -4733,7 +4735,45 @@ class AotLlvmTextTests(unittest.TestCase):
         self.assertIn("call i64 @__xcc_aot_string_dict_find_index", function_ir)
         self.assertNotIn("dictget.cond", function_ir)
         self.assertIn("define i64 @__xcc_aot_string_dict_find_index", llvm_ir)
+        self.assertIn("%candidate_first = load i8, ptr %candidate", llvm_ir)
+        self.assertIn("%key_first = load i8, ptr %key", llvm_ir)
+        self.assertIn("br i1 %same_first", llvm_ir)
         self.assertNotIn("@__dict_get", llvm_ir)
+
+    def test_emits_integer_dict_get_through_sized_identity_cache(self) -> None:
+        int64 = IrIntType(64, signed=True)
+        dict_type = IrDictType(int64, int64)
+        module = IrModule(
+            "integer_dict_get.py",
+            (),
+            (
+                IrFunction(
+                    "lookup",
+                    (IrParam("values", dict_type), IrParam("key", int64)),
+                    int64,
+                    (
+                        IrReturn(
+                            IrCall(
+                                "__dict_get",
+                                (IrName("values", dict_type), IrName("key", int64)),
+                                int64,
+                            )
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        llvm_ir = emit_llvm_text(module)
+        function_ir = llvm_ir.split("define i64 @lookup", 1)[1].split("\n}", 1)[0]
+
+        self.assertIn("call i64 @__xcc_aot_identity_dict_find_index", function_ir)
+        self.assertIn(
+            "@__xcc_aot_identity_dict_cache_dicts = internal global "
+            "[65536 x ptr] zeroinitializer",
+            llvm_ir,
+        )
+        self.assertIn("%bucket = and i64 %folded, 65535", llvm_ir)
 
     def test_emits_dict_items_as_tuple_identity(self) -> None:
         int64 = IrIntType(64, signed=True)

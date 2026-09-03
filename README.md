@@ -148,7 +148,9 @@ behavior change is not progress here.
 
 ## Commands
 
-- Install: `uv sync --dev`
+- Install tox tooling: `uv sync --dev`
+- Optional dependency groups: `test`, `lint`, `type`, `mypyc`, `cython`,
+  `docs`, and `pre-commit`; tox selects only the groups required by each gate.
 - CPython build: `CC="xcc" ./configure && make`
 - CPython with explicit target:
   `CC="xcc --target=aarch64-apple-darwin" ./configure && make`
@@ -163,7 +165,7 @@ behavior change is not progress here.
 - Type check: `uv run tox -e type`
 - Test: `uv run tox -e py311`
 - Test with fixed worker count: `XCC_TEST_JOBS=1 uv run tox -e py311`
-- Coverage report: `uv run python scripts/run_tests.py --coverage`
+- Coverage report: `uv run --group test python scripts/run_tests.py --coverage`
 - mypyc import-tree test: `uv run tox -e mypyc`
 
 ## Performance Benchmark
@@ -189,7 +191,7 @@ The `bench-cython` and `bench-mypyc` environments run on CPython 3.11. Use
 directly:
 
 ```
-uv run python scripts/benchmark_xcc.py --variant all --cpython /path/to/cpython --runs 3 --warmups 1
+uv run --group cython --group mypyc python scripts/benchmark_xcc.py --variant all --cpython /path/to/cpython --runs 3 --warmups 1
 ```
 
 Use `--profile preprocessor` for the smaller mypyc subset, or the default

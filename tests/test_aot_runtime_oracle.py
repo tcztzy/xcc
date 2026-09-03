@@ -99,6 +99,88 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="record-global-field-default.py",
         )
 
+    def test_aot_v7_generated_dataclass_init_calls_post_init(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class Box:\n"
+            "    value: int\n"
+            "    initialized: int = 0\n"
+            "    def __post_init__(self) -> None:\n"
+            "        self.initialized = self.value + 2\n"
+            "def entry() -> int:\n"
+            "    return Box(5).initialized\n",
+            expected=7,
+            filename="aot-v7-dataclass-post-init.py",
+        )
+
+    def test_aot_v8_setitem_preserves_tagged_union_representation(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Symbol:\n"
+            "    name: str\n"
+            "Part = str | Symbol\n"
+            "def entry() -> int:\n"
+            "    old = Symbol('@malloc')\n"
+            "    new = Symbol('@alloc')\n"
+            "    values: list[Part] = ['call ', old, '()']\n"
+            "    values[1] = new\n"
+            "    parts = tuple(values)\n"
+            "    rendered: list[str] = []\n"
+            "    for part in parts:\n"
+            "        if isinstance(part, str):\n"
+            "            rendered.append(part)\n"
+            "        elif isinstance(part, Symbol):\n"
+            "            rendered.append(part.name)\n"
+            "        else:\n"
+            "            return 1\n"
+            "    return 7 if ''.join(rendered) == 'call @alloc()' else 2\n",
+            expected=7,
+            filename="aot-v8-tagged-union-setitem.py",
+        )
+
+    def test_aot_v9_list_constructor_copies_tuple_backed_input(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    original: tuple[str, ...] = ('head',)\n"
+            "    copied = list(original)\n"
+            "    copied.extend(('tail',))\n"
+            "    if original != ('head',):\n"
+            "        return 1\n"
+            "    if copied != ['head', 'tail']:\n"
+            "        return 2\n"
+            "    return 7\n",
+            expected=7,
+            filename="aot-v9-list-constructor-copy.py",
+        )
+
+    def test_aot_v10_value_or_removes_none_from_multi_record_union(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class Left:\n"
+            "    value: int\n"
+            "@dataclass\n"
+            "class Right:\n"
+            "    value: int\n"
+            "@dataclass\n"
+            "class Result:\n"
+            "    value: int\n"
+            "def select(optional: Left | Right | None, fallback: Left | Right, result: Result) -> None:\n"
+            "    selected = optional or fallback\n"
+            "    if isinstance(selected, Left):\n"
+            "        result.value = 7\n"
+            "    else:\n"
+            "        result.value = 2\n"
+            "def entry() -> int:\n"
+            "    result = Result(0)\n"
+            "    select(Left(7), Right(1), result)\n"
+            "    return result.value\n",
+            expected=7,
+            filename="aot-v10-multi-union-value-or.py",
+        )
+
     def test_break_preserves_assignments_from_current_iteration(self) -> None:
         self.assert_native_matches_cpython(
             "def entry() -> int:\n"
@@ -524,10 +606,33 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "    values.pop('missing', None)\n"
             "    if values.get('missing', 5) != 5 or 'missing' in values:\n"
             "        return 2\n"
+            "    if 1 in values:\n"
+            "        return 4\n"
             "    values['gamma'] = total\n"
             "    return 0 if values['gamma'] == 512 else 3\n",
             expected=0,
             filename="string-dict-cache-mutations.py",
+        )
+
+    def test_integer_dict_cache_tracks_zero_negative_and_inserted_keys(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    values: dict[int, int] = {0: 1, -7: 2}\n"
+            "    total = 0\n"
+            "    for _ in range(128):\n"
+            "        total += values.get(0, 0)\n"
+            "        total += values.get(-7, 0)\n"
+            "        total += values.get(5, 3)\n"
+            "    values[0] = 9\n"
+            "    values.setdefault(5, 11)\n"
+            "    if values.get(0, 0) != 9 or values.get(5, 0) != 11:\n"
+            "        return 1\n"
+            "    values.pop(0, None)\n"
+            "    if 0 in values or values.get(0, 4) != 4:\n"
+            "        return 2\n"
+            "    return 0 if total == 768 else 3\n",
+            expected=0,
+            filename="integer-dict-cache-mutations.py",
         )
 
     def test_constructor_maps_normalized_optional_field_by_parameter(self) -> None:
@@ -2075,6 +2180,40 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="optional-int-branch-local-none.py",
         )
 
+    def test_nested_branch_join_preserves_optional_integer_none(self) -> None:
+        self.assert_native_matches_cpython(
+            "def classify(text: str, fallback: int | None) -> int:\n"
+            "    if text == 'fallback':\n"
+            "        value = fallback\n"
+            "    elif text == 'number':\n"
+            "        value = 4\n"
+            "    elif not text:\n"
+            "        value = None\n"
+            "    else:\n"
+            "        value = 0\n"
+            "    return 0 if value is None else 1\n"
+            "def entry() -> int:\n"
+            "    return classify('', None)\n",
+            expected=0,
+            filename="optional-int-nested-branch.py",
+        )
+
+    def test_tuple_unpack_assignment_updates_record_attribute(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class Counter:\n"
+            "    value: int\n"
+            "def next_value() -> tuple[str, int]:\n"
+            "    return ('next', 7)\n"
+            "def entry() -> int:\n"
+            "    counter = Counter(0)\n"
+            "    name, counter.value = next_value()\n"
+            "    return counter.value if name == 'next' else 0\n",
+            expected=7,
+            filename="tuple-unpack-record-attribute.py",
+        )
+
     def test_assert_not_none_narrows_optional_integer_attribute(self) -> None:
         self.assert_native_matches_cpython(
             "class Box:\n"
@@ -2508,6 +2647,30 @@ class AotRuntimeOracleTests(unittest.TestCase):
             filename="tagged-integer-record-equality.py",
         )
 
+    def test_aot_v14_tuple_equality_compares_tagged_union_to_concrete_scalar(self) -> None:
+        self.assert_native_matches_cpython(
+            "class Marker:\n"
+            "    pass\n"
+            "TypeOp = tuple[str, int | Marker]\n"
+            "def make(value: int) -> TypeOp:\n"
+            "    return ('arr', value)\n"
+            "def entry() -> int:\n"
+            "    op = make(-1)\n"
+            "    return 7 if op == ('arr', -1) else 1\n",
+            expected=7,
+            filename="aot-v14-tagged-tuple-concrete-equality.py",
+        )
+
+    def test_aot_v15_full_width_shift_preserves_low_word_mask_semantics(self) -> None:
+        self.assert_native_matches_cpython(
+            "def entry() -> int:\n"
+            "    width = 64\n"
+            "    clear_mask = ((1 << width) - 1) ^ 1\n"
+            "    return 7 if clear_mask & 3 == 2 else 1\n",
+            expected=7,
+            filename="aot-v15-full-width-shift.py",
+        )
+
     def test_record_equality_compares_tagged_function_params_by_value(self) -> None:
         self.assert_native_matches_cpython(
             "from dataclasses import dataclass\n"
@@ -2582,6 +2745,24 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "    return 0\n",
             expected=0,
             filename="object-bool-identity.py",
+        )
+
+    def test_tagged_record_id_uses_record_identity(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Node:\n"
+            "    value: int\n"
+            "def locate(locations: dict[int, int], node: object) -> None:\n"
+            "    locations[id(node)] = 7\n"
+            "def entry() -> int:\n"
+            "    locations: dict[int, int] = {}\n"
+            "    node = Node(1)\n"
+            "    locate(locations, node)\n"
+            "    result = locations.get(id(node))\n"
+            "    return 0 if result is None else result\n",
+            expected=7,
+            filename="object-record-id.py",
         )
 
     def test_and_chain_none_narrowing_reaches_true_branch(self) -> None:
@@ -2817,6 +2998,25 @@ class AotRuntimeOracleTests(unittest.TestCase):
             "        return len(str(error))\n",
             expected=7,
             filename="caught-error-string.py",
+        )
+
+    def test_aot_v11_dataclass_exception_preserves_constructor_fields(self) -> None:
+        self.assert_native_matches_cpython(
+            "from dataclasses import dataclass\n"
+            "@dataclass\n"
+            "class Problem(ValueError):\n"
+            "    message: str\n"
+            "    def __str__(self) -> str:\n"
+            "        return self.message\n"
+            "def fail(detail: str) -> int:\n"
+            "    raise Problem('bad ' + detail)\n"
+            "def entry() -> int:\n"
+            "    try:\n"
+            "        return fail('input')\n"
+            "    except Problem as error:\n"
+            "        return len(error.message) + len(str(error))\n",
+            expected=18,
+            filename="dataclass-exception-fields.py",
         )
 
     def test_constructor_and_string_bytes_semantics(self) -> None:

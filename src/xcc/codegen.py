@@ -157,6 +157,7 @@ class _LLVMGen:
     _compound_literal_globals: dict[int, int]
     _func_types: dict[str, int]
     _func_param_types: dict[str, list[Type]]
+    _func_is_variadic: dict[str, bool]
     _struct_types: dict[str, int]
     _struct_layouts: dict[int, tuple[tuple[int, int | None], ...]]
     _struct_physical_layouts: dict[int, tuple[tuple[int, int, int, int | None], ...]]
@@ -205,6 +206,7 @@ class _LLVMGen:
         self._compound_literal_globals: dict[int, int] = {}
         self._func_types: dict[str, int] = {}  # func name → _LLVMTypeRef
         self._func_param_types: dict[str, list[Type]] = {}
+        self._func_is_variadic: dict[str, bool] = {}
 
         # Struct types: record_name → _LLVMTypeRef
         self._struct_types: dict[str, int] = {}
@@ -656,6 +658,18 @@ class _LLVMGen:
                 return c.BuildZExt(self._builder, value, target_type, name)
             return c.BuildSExt(self._builder, value, target_type, name)
         return value  # pragma: no cover - LLVM integer types are uniqued by width.
+
+    def _cast_integer_to_pointer(
+        self,
+        value: int,
+        pointer_type: int,
+        source_type: Type | None,
+        name: bytes,
+    ) -> int:
+        c = llvm()
+        integer_type = c.IntType(self._sema.data_layout.pointer_size * 8)
+        value = self._cast_integer_value(value, integer_type, source_type, name)
+        return c.BuildIntToPtr(self._builder, value, pointer_type, name)
 
     def _gep_index_value(
         self,
@@ -1168,6 +1182,7 @@ class _LLVMGen:
         fn_t = self._abi_function_type(return_type, c_param_types, is_variadic)
         self._func_types[func.name] = fn_t  # save for later calls
         self._func_param_types[func.name] = c_param_types
+        self._func_is_variadic[func.name] = is_variadic
         fn = c.GetNamedFunction(self._mod, func.name.encode())
         if not fn:
             fn = c.AddFunction(self._mod, func.name.encode(), fn_t)
@@ -1285,8 +1300,9 @@ class _LLVMGen:
     ) -> list[int]:
         """Coerce argument values to match function parameter types."""
         c_param_types = self._func_param_types.get(callee_name)
-        if not c_param_types:
+        if c_param_types is None:
             return vals
+        is_variadic = self._func_is_variadic.get(callee_name, False)
         c = llvm()
         result = []
         for i, v in enumerate(vals):
@@ -1313,11 +1329,25 @@ class _LLVMGen:
                 elif self._is_float_kind(pk) and self._is_float_kind(vk) and pt != vt:
                     v = c.BuildFPCast(self._builder, v, pt, b"arg.cast")
                 elif pk == LLVMTypeKind.POINTER and vk == LLVMTypeKind.INTEGER:
-                    v = c.BuildIntToPtr(self._builder, v, pt, b"arg.cast")
+                    source_type = None if arg_c_types is None else arg_c_types[i]
+                    v = self._cast_integer_to_pointer(v, pt, source_type, b"arg.cast")
                 elif pk == LLVMTypeKind.INTEGER and vk == LLVMTypeKind.POINTER:
                     v = c.BuildPtrToInt(self._builder, v, pt, b"arg.cast")
+            elif is_variadic:
+                source_type = None if arg_c_types is None else arg_c_types[i]
+                v = self._promote_variadic_argument(v, source_type)
             result.append(v)
         return result
+
+    def _promote_variadic_argument(self, value: int, source_type: Type | None) -> int:
+        c = llvm()
+        value_type = c.TypeOf(value)
+        kind = c.GetTypeKind(value_type)
+        if kind == LLVMTypeKind.INTEGER and c.GetIntTypeWidth(value_type) < 32:
+            return self._cast_integer_value(value, c.Int32Type(), source_type, b"arg.promote")
+        if kind == LLVMTypeKind.FLOAT:
+            return c.BuildFPCast(self._builder, value, c.DoubleType(), b"arg.promote")
+        return value
 
     # ── statement emission ───────────────────────────────────
 
@@ -2496,6 +2526,8 @@ class _LLVMGen:
             self._func_types[name] = fn_t
         if name not in self._func_param_types:
             self._func_param_types[name] = c_param_types
+        if name not in self._func_is_variadic:
+            self._func_is_variadic[name] = is_variadic
         if not fn:
             fn = c.AddFunction(self._mod, name.encode(), fn_t)
             c.SetLinkage(fn, LLVM_EXTERNAL_LINKAGE)
@@ -2920,7 +2952,7 @@ class _LLVMGen:
             if op == "==":
                 pred = 1
             elif op == "!=":
-                pred = 6
+                pred = 14
             elif op == "<":
                 pred = 4
             elif op == ">":
@@ -3780,6 +3812,7 @@ class _LLVMGen:
                     self._mark_sret_function(fn, return_type)
                 self._func_types[callee_name] = fn_t
                 self._func_param_types[callee_name] = c_param_types
+                self._func_is_variadic[callee_name] = is_variadic
             vals = self._coerce_call_args(vals, callee_name, arg_c_types)
             sret_result = 0
             if self._large_record_is_indirect(return_type):
@@ -3857,6 +3890,8 @@ class _LLVMGen:
                     )
                 elif self._is_float_kind(pk) and self._is_float_kind(vk) and param_lt != vt:
                     vals[i] = c.BuildFPCast(self._builder, v, param_lt, b"arg.cast")
+            elif is_var:
+                vals[i] = self._promote_variadic_argument(v, arg_c_types[i])
         sret_result = 0
         if self._large_record_is_indirect(return_type):
             sret_result = self._sret_result(return_type)
@@ -3932,7 +3967,8 @@ class _LLVMGen:
             return c.BuildPtrToInt(self._builder, op, lt, b"cast")
         # Integer → Pointer
         if from_kind != LLVMTypeKind.POINTER and to_kind == LLVMTypeKind.POINTER:
-            return c.BuildIntToPtr(self._builder, op, lt, b"cast")
+            operand_type = self._type_map.get(expr.expr)
+            return self._cast_integer_to_pointer(op, lt, operand_type, b"cast")
         # Float ↔ non-float: use bitcast
         from_is_float = self._is_float_kind(from_kind)
         to_is_float = self._is_float_kind(to_kind)
@@ -4282,7 +4318,7 @@ class _LLVMGen:
         if fk == LLVMTypeKind.POINTER and tk == LLVMTypeKind.INTEGER:
             return c.BuildPtrToInt(self._builder, val, to_type, b"cast")
         if fk == LLVMTypeKind.INTEGER and tk == LLVMTypeKind.POINTER:
-            return c.BuildIntToPtr(self._builder, val, to_type, b"cast")
+            return self._cast_integer_to_pointer(val, to_type, from_c_type, b"cast")
         if self._is_float_kind(fk) and not self._is_float_kind(tk):
             return c.BuildFPToSI(self._builder, val, to_type, b"cast")
         if not self._is_float_kind(fk) and self._is_float_kind(tk):
@@ -4428,7 +4464,7 @@ class _LLVMGen:
         if k == LLVMTypeKind.POINTER:
             return c.BuildICmp(self._builder, 33, val, c.ConstNull(t), name)
         if self._is_float_kind(k):
-            return c.BuildFCmp(self._builder, 6, val, c.ConstReal(t, 0.0), name)
+            return c.BuildFCmp(self._builder, 14, val, c.ConstReal(t, 0.0), name)
         return c.BuildICmp(self._builder, 33, val, c.ConstInt(t, 0, False), name)
 
     def _resolve_type(self, ts: TypeSpec) -> Type:
@@ -5481,10 +5517,15 @@ class _LLVMGen:
             if target_kind == LLVMTypeKind.POINTER:
                 if int_value == 0:
                     return c.ConstPointerNull(target_lt)
-                raw = c.ConstInt(c.Int64Type(), int_value, int_value < 0)
-                return c.ConstIntToPtr(raw, target_lt)
+                return self._const_int_to_pointer(int_value, target_lt)
             if target_kind is not None and self._is_float_kind(target_kind):
                 return c.ConstReal(target_lt, float(int_value))
+        if isinstance(expr, BinaryExpr) and expr.op in ("+", "-"):
+            value = self._eval_const_pointer_arithmetic(expr)
+            if value is not None:
+                if target_lt is not None:
+                    return self._const_cast(value, target_lt)
+                return value
         if target_kind == LLVMTypeKind.POINTER:
             value_type: Type | None = self._type_map.get(expr)
             if value_type is not None:  # noqa: SIM102  # pragma: no branch
@@ -5522,6 +5563,10 @@ class _LLVMGen:
                     return c.ConstInt(result_lt, cast_int, cast_int < 0)
                 if self._is_float_kind(result_kind):
                     return c.ConstReal(result_lt, float(cast_int))
+                if result_kind == LLVMTypeKind.POINTER:
+                    if cast_int == 0:
+                        return c.ConstPointerNull(result_lt)
+                    return self._const_int_to_pointer(cast_int, result_lt)
             value = self._eval_const_expr(expr.expr)
             if value is None:
                 return None
@@ -5539,6 +5584,37 @@ class _LLVMGen:
         if isinstance(expr, BuiltinOffsetofExpr):
             return self._offsetof_expr(expr)
         return None
+
+    def _eval_const_pointer_arithmetic(self, expr: BinaryExpr) -> int | None:
+        pointer_expr = expr.left
+        index_expr = expr.right
+        pointer_type = self._type_map.get(pointer_expr)
+        if expr.op == "+" and not self._is_pointer_arithmetic_type(pointer_type):
+            right_type = self._type_map.get(expr.right)
+            if self._is_pointer_arithmetic_type(right_type):
+                pointer_expr = expr.right
+                index_expr = expr.left
+                pointer_type = right_type
+        if not self._is_pointer_arithmetic_type(pointer_type):
+            return None
+        index = self._eval_int_constant_value(index_expr)
+        base = self._eval_const_expr(pointer_expr)
+        if index is None or base is None:
+            return None
+        if expr.op == "-":
+            index = -index
+        c = llvm()
+        llvm_index = c.ConstInt(c.Int64Type(), index, index < 0)
+        return c.ConstGEP2(
+            self._pointer_arith_element_llvm_type(pointer_type),
+            base,
+            ptr_array([llvm_index]),
+            1,
+        )
+
+    @staticmethod
+    def _is_pointer_arithmetic_type(type_: Type | None) -> bool:
+        return type_ is not None and (type_.is_array() or type_.pointee() is not None)
 
     def _eval_const_identifier(self, expr: Identifier) -> int | None:
         c = llvm()
@@ -5718,6 +5794,12 @@ class _LLVMGen:
                 return c.ConstInt(to_type, val, val < 0)
             return c.ConstTruncOrBitCast(value, to_type)
         return c.ConstBitCast(value, to_type)
+
+    def _const_int_to_pointer(self, value: int, pointer_type: int) -> int:
+        c = llvm()
+        integer_type = c.IntType(self._sema.data_layout.pointer_size * 8)
+        integer = c.ConstInt(integer_type, value, value < 0)
+        return c.ConstIntToPtr(integer, pointer_type)
 
     def _eval_int_constant_value(self, expr: Expr) -> int | None:
         if isinstance(expr, ConditionalExpr):

@@ -462,8 +462,14 @@ class AotBootstrapBuildTests(unittest.TestCase):
             if command[1:] == ("--help",):
                 return Result()
             output = Path(command[-1])
+            if command[0] == "/tool/opt":
+                llvm_ir = Path(command[-4]).read_text(encoding="utf-8")
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(llvm_ir, encoding="utf-8")
             if command[0] == "/tool/llc":
-                llvm_ir = Path(command[2]).read_text(encoding="utf-8")
+                llvm_ir = Path(command[command.index("-filetype=obj") + 1]).read_text(
+                    encoding="utf-8"
+                )
                 self.assertIn("@aot_bootstrap_smoke_main", llvm_ir)
                 self.assertIn("@xcc.options.FrontendOptions.__post_init__", llvm_ir)
                 output.parent.mkdir(parents=True, exist_ok=True)
@@ -491,7 +497,18 @@ class AotBootstrapBuildTests(unittest.TestCase):
             )
 
             self.assertEqual(output.name, "xcc")
-            self.assertTrue(any(command[0] == "/tool/llc" for command in commands))
+            opt_command = next(command for command in commands if command[0] == "/tool/opt")
+            self.assertIn("-passes=forceattrs,always-inline,default<O1>", opt_command)
+            self.assertIn(
+                "-force-attribute=__xcc_aot_identity_dict_find_index:alwaysinline",
+                opt_command,
+            )
+            llc_command = next(
+                command
+                for command in commands
+                if command[0] == "/tool/llc" and "-filetype=obj" in command
+            )
+            self.assertIn("-O3", llc_command)
             self.assertTrue(any(command[0] == "cc" for command in commands))
             self.assertTrue((output.parent / "xcc.ll").exists())
 
@@ -741,6 +758,38 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(obj.exists())
+
+    def test_aot_v13_real_native_bootstrap_expands_dynamic_macros(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            compiler = self._shared_native_bootstrap(llc)
+            source = root / "dynamic_macros.c"
+            executable = root / "dynamic_macros"
+            source.write_text(
+                "#define INVALID_DYNAMIC(file, line) ((file) == 0 || (line) == 0)\n"
+                "int main(void) {\n"
+                "    return INVALID_DYNAMIC(__FILE__, __LINE__);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            compile_result = subprocess.run(
+                (str(compiler), str(source), "-o", str(executable)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                compile_result.stdout + compile_result.stderr,
+            )
+            run_result = subprocess.run((str(executable),), check=False)
+            self.assertEqual(run_result.returncode, 0)
 
     def test_real_native_bootstrap_skips_object_macros_in_comments_and_literals(self) -> None:
         llc = Path("/opt/homebrew/opt/llvm/bin/llc")
@@ -1228,6 +1277,89 @@ class AotBootstrapNativeBuildTests(unittest.TestCase):
             source.write_text(
                 "static double values[] = {9.090423496703681e+223, 0.0};\n"
                 "int main(void) { return values[0] > 0.0 ? 0 : 1; }\n",
+                encoding="utf-8",
+            )
+
+            compile_result = subprocess.run(
+                (str(executable), str(source), "-o", str(program)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                compile_result.stdout + compile_result.stderr,
+            )
+            run_result = subprocess.run(
+                (str(program),),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(run_result.returncode, 0, run_result.stdout + run_result.stderr)
+
+    def test_aot_v14_real_native_bootstrap_infers_compound_literal_array(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executable = self._shared_native_bootstrap(llc)
+            source = root / "inferred_compound_literal_array.c"
+            obj = root / "inferred_compound_literal_array.o"
+            source.write_text(
+                "void *first;\n"
+                "void *second;\n"
+                "void **arguments(void) {\n"
+                "    return 1 + (void *[]) { 0, first, second };\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            compile_result = subprocess.run(
+                (str(executable), "-c", str(source), "-o", str(obj)),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(
+                compile_result.returncode,
+                0,
+                compile_result.stdout + compile_result.stderr,
+            )
+            llvm_ir = obj.with_suffix(".o.ll").read_text(encoding="utf-8")
+            self.assertIn("%compound.lit = alloca [3 x ptr]", llvm_ir)
+            self.assertIn("getelementptr [3 x ptr]", llvm_ir)
+
+    def test_aot_v15_real_native_bootstrap_updates_64_bit_bitfields(self) -> None:
+        llc = Path("/opt/homebrew/opt/llvm/bin/llc")
+        if not llc.exists():
+            self.skipTest("llc is not installed at the configured path")
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executable = self._shared_native_bootstrap(llc)
+            source = root / "bitfield64.c"
+            program = root / "bitfield64"
+            source.write_text(
+                "union Bits {\n"
+                "    struct { unsigned long a : 1; unsigned long b : 62; "
+                "unsigned long c : 1; } fields;\n"
+                "    unsigned long raw;\n"
+                "};\n"
+                "int main(void) {\n"
+                "    union Bits bits = {0};\n"
+                "    bits.fields.a = 1;\n"
+                "    bits.fields.b = ~0UL;\n"
+                "    bits.fields.b = 1;\n"
+                "    if (bits.raw != 3) return 1;\n"
+                "    bits.fields.c = 1;\n"
+                "    return bits.raw == ((1UL << 63) | 3) ? 0 : 2;\n"
+                "}\n",
                 encoding="utf-8",
             )
 

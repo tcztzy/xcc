@@ -215,6 +215,19 @@ class AotNativeRealSmokeTests(unittest.TestCase):
         self.assertEqual(result.native_returncode, 0)
 
     @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
+    def test_aot_v12_string_slice_clamps_out_of_range_bounds(self) -> None:
+        result = run_native_smoke(
+            "def message() -> str:\n"
+            "    text = 'abcdef'\n"
+            "    return text[-100:100]\n",
+            entry="message",
+            llc=_real_llc(),
+        )
+        self.assertEqual(result.python_result, "abcdef")
+        self.assertEqual(result.native_stdout, "abcdef\n")
+        self.assertEqual(result.native_returncode, 0)
+
+    @unittest.skipIf(_real_llc() is None, "LLVM llc is not available")
     def test_real_optional_string_equality_native_smoke_matches_cpython_stdout(self) -> None:
         result = run_native_smoke(
             "def message() -> str:\n"

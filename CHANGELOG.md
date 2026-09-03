@@ -2,6 +2,64 @@
 
 ## Current
 
+- Split development dependencies by purpose so tox test, lint, type-check,
+  mypyc, Cython, and benchmark environments install only the tools they use;
+  documentation and pre-commit tooling are now opt-in groups.
+
+- Profiled the native AOT compiler on CPython `Objects/listobject.c` and
+  optimized the remaining measured costs without broadening the runtime
+  contract. Integer-key tuple dictionaries now reuse the validated identity
+  cache with mutation generations and a zero-safe full-width key hash. The
+  direct-mapped identity cache grew from 16,384 to 65,536 entries after native
+  sampling showed collision fallback as the largest remaining local hotspot;
+  this adds 1.5 MiB of zero-filled BSS without increasing the executable file.
+  String-key fallback scans reject a mismatching first byte before calling
+  `strcmp`. Native bootstrap builds force-inline tuple access and identity
+  lookup, then run LLVM's `default<O1>` pipeline before `llc -O3`; the broader
+  `default<O2>` pipeline remains rejected by the behavior gate. In five
+  alternating warm runs, comparing optimized and unoptimized compilers built
+  from the same final source with identical production flags, median wall time
+  fell from 4.27s to 3.22s (1.3261x throughput) and native timing fell from
+  4.0992s to 3.0674s (1.3364x). The ten measured objects and two warm-up
+  objects were byte-identical with SHA-256
+  `c74d8b2850fbddd16291fc5616ded27126d287a70389ae4216ec721bc7c035c2`.
+  For scale rather than acceptance, Homebrew Clang 23.1.0 compiled the same
+  translation unit and flags in a 0.34s five-run median, so native XCC remains
+  9.47x slower on this workload.
+  The optimization and CPython build also exposed and backpropped ordinary AOT
+  semantic defects covering optional unions, destructuring assignment,
+  dataclass post-init and exception fields, tagged-container writes,
+  `list(iterable)` copying, object identity, bounded string slices, and dynamic
+  `__FILE__`/`__LINE__` expansion in callback-free preprocessing. Further
+  native-bootstrap and CPython gates fixed pointer-width sign extension for
+  negative pointer sentinels, unordered NaN inequality/truth, tagged-object
+  equality against concrete scalars, and poison-free full-width shifts with
+  structurally widened constant expressions. The clean CPython build further
+  backpropped C default argument promotions for variadic direct and indirect
+  calls, plus relocatable global address constants for array/pointer arithmetic.
+
+- A final Stage 0 → 1 → 2 → 3 replay from the corrected source passed
+  the strong-bootstrap behavior gate. All three native executables are
+  byte-identical (SHA-256
+  `6e442a3ca29f79adb78f84ee7f1b17aab03572f7b7d6e43e3ef7e8a11e0755a3`),
+  normalized LLVM is identical (SHA-256
+  `51dac65d1cb8639470145e485fa96c316410f653f789cc03d5c2e6121de79cd5`),
+  and Stage 2/3 source manifests and reachability reports match. The Stage 2
+  binary links only the platform C runtime, with no Python or `libpython`
+  dependency.
+
+- An isolated, unmodified CPython checkout at `0f1f7c788987` configured in
+  227.54s and completed serial `make -j1` in 1,181.35s with the optimized
+  native AOT compiler. CPython checked 116 modules: 37 built-in, 78 shared, one
+  host-dependency-missing `_gdbm`, and zero failed on import. A no-change make
+  completed in 1.16s. The resulting Python 3.16.0a0 interpreter reports `Clang
+  xcc 0.2`; socket address construction, `unicodedata.ucd_3_2_0`, `hashlib`,
+  `sqlite3`, `ssl`, `ctypes`, `pickle`, and `_testcapi` smoke checks pass. Eight
+  corresponding CPython test files pass 3,538 tests with 417 skips after
+  filtering one invalid-hostname assertion that the system Python reproduces
+  because the local DNS resolver maps it to `198.18.0.111`. The source checkout
+  remained clean.
+
 - Completed the minimalist architecture and behavior pass. Semantic analysis now
   owns one record layout consumed by every backend; duplicate backend layout,
   LLVM local pre-collection, and backend-specific narrow-string decoding are

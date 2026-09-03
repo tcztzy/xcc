@@ -107,6 +107,7 @@ def compile_llvm_executable(
     tool_log: Path | None = None,
     debug: bool = False,
     profile: bool = False,
+    optimize: bool = False,
 ) -> Path:
     output.parent.mkdir(parents=True, exist_ok=True)
     ll_path = output.parent / f"{output.name}.ll"
@@ -116,13 +117,35 @@ def compile_llvm_executable(
     llc_path = find_llc(llc)
     commands: list[tuple[str, ...]] = []
     command: tuple[str, ...]
+    llvm_input = ll_path
+    if optimize:
+        llvm_input = output.parent / f"{output.name}.opt.ll"
+        command = (
+            str(Path(llc_path).with_name("opt")),
+            "-passes=forceattrs,always-inline,default<O1>",
+            "-force-attribute=__xcc_aot_tuple_get:alwaysinline",
+            "-force-attribute=__xcc_aot_tuple_len:alwaysinline",
+            "-force-attribute=__xcc_aot_identity_dict_find_index:alwaysinline",
+            str(ll_path),
+            "-S",
+            "-o",
+            str(llvm_input),
+        )
+        commands.append(command)
+        _run_tool(
+            command,
+            filename,
+            diagnostic_code=diagnostic_code,
+        )
     llc_options = _native_llc_options(debug=debug, profile=profile)
+    if optimize:
+        llc_options = ("-O3", *llc_options)
     if assembler is None:
         command = (
             llc_path,
             *llc_options,
             "-filetype=obj",
-            str(ll_path),
+            str(llvm_input),
             "-o",
             str(obj_path),
         )
@@ -137,7 +160,7 @@ def compile_llvm_executable(
             llc_path,
             *llc_options,
             "-filetype=asm",
-            str(ll_path),
+            str(llvm_input),
             "-o",
             str(assembly_path),
         )

@@ -197,6 +197,7 @@ class _TypeBinder:
                 init_field_parameters,
                 kw_only=_class_is_kw_only_dataclass(statement),
                 field_defaults=field_defaults,
+                is_dataclass=_class_is_dataclass(statement),
             )
 
     def _collect_init_fields(
@@ -727,6 +728,19 @@ def _class_is_kw_only_dataclass(node: ast.ClassDef) -> bool:
                 and keyword.value.value is True
             ):
                 return True
+    return False
+
+
+def _class_is_dataclass(node: ast.ClassDef) -> bool:
+    for decorator in node.decorator_list:
+        if isinstance(decorator, ast.Name) and decorator.id == "dataclass":
+            return True
+        if (
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Name)
+            and decorator.func.id == "dataclass"
+        ):
+            return True
     return False
 
 

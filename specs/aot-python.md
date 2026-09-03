@@ -139,6 +139,47 @@ Python module is forbidden.
   the bootstrap closure.
 - AOT-V6: The complete lowered compiler closure renders to LLVM with concrete
   scalar operation types, and `llc` accepts that LLVM.
+- AOT-V7: Constructing a dataclass through its generated initializer invokes a
+  reachable zero-argument `__post_init__` exactly once after field
+  initialization; a class with an explicit `__init__` does not gain an
+  implicit post-init call.
+- AOT-V8: Replacing an element in a tuple-backed container preserves the
+  container element representation, including the runtime tag required by a
+  heterogeneous scalar/record union.
+- AOT-V9: `list(iterable)` returns a fresh tuple-backed container whose later
+  mutation cannot change the input, while preserving the input element layout.
+- AOT-V10: A value-producing `or` between `T | None` and `T` returns a `T`
+  value even when `T` is itself a multi-member union; it must not collapse to
+  `None` or lose the selected operand.
+- AOT-V11: Constructing a dataclass that extends an exception initializes its
+  declared fields from the generated initializer before it is raised, so a
+  caught payload and its custom `__str__` observe the supplied values.
+- AOT-V12: String slicing clamps explicit positive and negative bounds to the
+  source length before copying, matching Python without reading outside the
+  source allocation.
+- AOT-V13: The native no-callback preprocessor resolves dynamic predefined
+  macros at their expansion site, including inside function-like macro
+  arguments; their placeholder table entries are never emitted as source.
+- AOT-V14: Equality between a heterogeneous tuple slot represented by the
+  tagged-object ABI and a concrete scalar compares Python values, not the
+  tagged allocation address. This includes compiler type-operation tuples such
+  as `("arr", -1)` used to infer incomplete compound-literal array bounds.
+- AOT-V15: Integer shifts at or beyond the native word width never inherit the
+  target CPU's masked shift count. Their representable low word follows Python
+  arithmetic, while constant integer expressions retain enough width for their
+  exact value. This includes bounds checks and full-width mask expressions used
+  by the compiler's 64-bit bit-field updates.
+
+## Performance Contract
+
+- A claim of at least 1.3x native AOT throughput compares compilers built from
+  the same final source, changing only the declared native optimization mode.
+  It uses the same production translation unit and flags, at least one warm-up,
+  five alternating measured runs, and the median wall time.
+- Every compared object must be byte-identical. The optimized compiler must
+  also pass the complete native behavior matrix, Stage 0 → 1 → 2 → 3 strong
+  bootstrap, and an unmodified CPython `configure && make` integration build;
+  a faster compiler with changed output or behavior does not satisfy the gate.
 
 ## Implementation Boundaries
 
